@@ -49,7 +49,7 @@
     "expo-image-manipulator": "~11.4.0",
     "expo-image-picker": "~14.7.1",
     "expo-localization": "~14.8.4",
-    "expo-location": "~16.5.5",
+    "expo-location": "~19.0.7",
     "expo-notifications": "~0.27.8",
     "expo-sensors": "~12.9.1",
     "expo-sharing": "~11.8.0",
