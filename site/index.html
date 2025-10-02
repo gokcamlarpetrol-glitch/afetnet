@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AfetNet - Legal Documents</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>AfetNet</h1>
+        <p>Offline-First Disaster Response Network</p>
+    </header>
+
+    <main>
+        <section class="legal-docs">
+            <h2>Legal Documents</h2>
+            
+            <div class="language-selector">
+                <a href="#tr" class="lang-btn active" onclick="showLanguage('tr')">Türkçe</a>
+                <a href="#en" class="lang-btn" onclick="showLanguage('en')">English</a>
+            </div>
+
+            <div id="tr-content" class="lang-content">
+                <h3>Türkçe Belgeler</h3>
+                <ul>
+                    <li><a href="privacy.tr.html">Gizlilik Politikası</a></li>
+                    <li><a href="terms.tr.html">Kullanım Koşulları</a></li>
+                </ul>
+            </div>
+
+            <div id="en-content" class="lang-content" style="display: none;">
+                <h3>English Documents</h3>
+                <ul>
+                    <li><a href="privacy.en.html">Privacy Policy</a></li>
+                    <li><a href="terms.en.html">Terms of Use</a></li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="support">
+            <h2>Support</h2>
+            <p>For technical support or questions about AfetNet:</p>
+            <a href="support.html" class="support-link">Contact Support</a>
+        </section>
+
+        <section class="about">
+            <h2>About AfetNet</h2>
+            <p>AfetNet is an offline-first disaster response application that enables peer-to-peer communication during emergencies when traditional networks may be unavailable.</p>
+            
+            <h3>Key Features:</h3>
+            <ul>
+                <li><strong>Offline-First:</strong> Works without internet connection</li>
+                <li><strong>P2P Mesh Network:</strong> Device-to-device communication via Bluetooth</li>
+                <li><strong>Early Warning System:</strong> Experimental earthquake detection (not predictions)</li>
+                <li><strong>Help Requests:</strong> Send and receive emergency assistance requests</li>
+                <li><strong>Resource Sharing:</strong> Share available resources with the community</li>
+                <li><strong>Offline Maps:</strong> Navigate using cached map data</li>
+            </ul>
+
+            <h3>Data Handling:</h3>
+            <ul>
+                <li><strong>Local Storage:</strong> All data stored locally on your device</li>
+                <li><strong>30-Day Retention:</strong> Automatic data cleanup after 30 days</li>
+                <li><strong>Data Export:</strong> Export your data in CSV/GeoJSON format</li>
+                <li><strong>Data Deletion:</strong> Complete data deletion available in settings</li>
+                <li><strong>Opt-in Telemetry:</strong> Anonymous usage statistics only with consent</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2024 AfetNet. All rights reserved.</p>
+        <p>This is an experimental disaster response application. Always follow official emergency procedures.</p>
+    </footer>
+
+    <script>
+        function showLanguage(lang) {
+            // Hide all content
+            document.querySelectorAll('.lang-content').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            // Remove active class from all buttons
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected content and activate button
+            document.getElementById(lang + '-content').style.display = 'block';
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+-keep class com.nozbe.watermelondb.** { *; }
+-keep class com.polidea.** { *; }               # BLE
+-keep class org.bouncycastle.** { *; }
+-keep class com.github.multipeer.** { *; }
+-keep class com.google.android.gms.nearby.** { *; }
+-keepclassmembers class ** { @org.jetbrains.annotations.NotNull *; }
+-dontwarn com.nozbe.watermelondb.**, com.polidea.**, com.google.android.gms.nearby.**, org.bouncycastle.**

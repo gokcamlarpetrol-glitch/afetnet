@@ -1,0 +1,19 @@
+AfetNet is an offline-first emergency network app designed specifically for Istanbul. Communicate with other devices even when there's no internet connection.
+
+FEATURES:
+• Offline P2P Mesh Network: Communicate via Bluetooth with nearby devices
+• Early Warning System: Earthquake P-wave detection and alerts
+• Help Requests: Emergency assistance requests with location data
+• Resource Sharing: Share water, food, shelter and other resources
+• Family Communication: Secure communication with family members
+• Offline Maps: Istanbul maps for offline use
+• Damage Reports: Document damage with photos
+• Volunteer Verification: QR code volunteer identity verification
+
+SECURITY:
+• All data encrypted
+• Automatically deleted after 30 days
+• No personal information collected
+• Not shared with third parties
+
+AfetNet saves lives by providing critical communication during disasters. Download now and be prepared!

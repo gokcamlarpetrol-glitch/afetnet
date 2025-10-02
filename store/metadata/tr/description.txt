@@ -1,0 +1,19 @@
+AfetNet, İstanbul için özel olarak tasarlanmış offline-first acil durum ağı uygulamasıdır. İnternet bağlantısı olmasa bile diğer cihazlarla iletişim kurmanızı sağlar.
+
+ÖZELLİKLER:
+• Offline P2P Mesh Ağı: Bluetooth ile yakındaki cihazlarla iletişim
+• Erken Uyarı Sistemi: Deprem P-dalga tespiti ve uyarı
+• Yardım Talepleri: Konum bilgisi ile acil yardım istekleri
+• Kaynak Paylaşımı: Su, yiyecek, barınak gibi kaynakları paylaşın
+• Aile İletişimi: Aile üyelerinizle güvenli iletişim
+• Offline Haritalar: İstanbul haritaları offline kullanım için
+• Hasar Raporları: Fotoğraflarla hasar belgelendirme
+• Gönüllü Doğrulama: QR kod ile gönüllü kimlik doğrulama
+
+GÜVENLİK:
+• Tüm veriler şifrelenir
+• 30 gün sonra otomatik silinir
+• Kişisel bilgi toplanmaz
+• Üçüncü taraflarla paylaşılmaz
+
+AfetNet, afet sırasında kritik iletişim sağlayarak hayat kurtarır. Şimdi indirin ve hazır olun!

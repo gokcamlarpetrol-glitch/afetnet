@@ -1,0 +1,127 @@
+{
+  "privacy_types": [
+    {
+      "data_type": "Location",
+      "data_category": "Precise Location",
+      "data_usage": "App Functionality",
+      "linked_to_user": false,
+      "used_for_tracking": false,
+      "data_collection": "Data Not Linked to User",
+      "purpose": "Emergency response coordination and help request location sharing"
+    },
+    {
+      "data_type": "Contact Info",
+      "data_category": "Contacts",
+      "data_usage": "App Functionality",
+      "linked_to_user": false,
+      "used_for_tracking": false,
+      "data_collection": "Data Not Linked to User",
+      "purpose": "Family contact management and emergency contact import"
+    },
+    {
+      "data_type": "Identifiers",
+      "data_category": "Device ID",
+      "data_usage": "App Functionality",
+      "linked_to_user": false,
+      "used_for_tracking": false,
+      "data_collection": "Data Not Linked to User",
+      "purpose": "P2P mesh network communication and device identification"
+    },
+    {
+      "data_type": "Usage Data",
+      "data_category": "App Interactions",
+      "data_usage": "App Functionality",
+      "linked_to_user": false,
+      "used_for_tracking": false,
+      "data_collection": "Data Not Linked to User",
+      "purpose": "App functionality and emergency response coordination"
+    }
+  ],
+  "data_practices": {
+    "data_collection": {
+      "collects_data": true,
+      "data_not_linked_to_user": true,
+      "data_not_used_for_tracking": true
+    },
+    "data_sharing": {
+      "shares_with_third_parties": false,
+      "shares_with_data_brokers": false,
+      "shares_for_advertising": false,
+      "shares_for_analytics": false
+    },
+    "data_retention": {
+      "retention_period": "30 days",
+      "automatic_deletion": true,
+      "user_controlled_deletion": true
+    },
+    "data_security": {
+      "encrypted_in_transit": true,
+      "encrypted_at_rest": true,
+      "secure_data_handling": true
+    }
+  },
+  "privacy_summary": {
+    "tr": {
+      "title": "AfetNet Gizlilik Özeti",
+      "description": "AfetNet acil durum ağı uygulaması, afet sırasında internet olmasa bile diğer cihazlarla iletişim kurmanızı sağlar. Uygulama, acil durum yanıt koordinasyonu için gerekli minimum veriyi toplar ve 30 gün sonra otomatik olarak siler.",
+      "data_collection": "Konum, kişi bilgileri, cihaz kimliği ve uygulama etkileşimleri toplanır",
+      "data_usage": "Veriler sadece acil durum yanıt koordinasyonu için kullanılır",
+      "data_sharing": "Veriler üçüncü taraflarla paylaşılmaz",
+      "data_retention": "Veriler 30 gün sonra otomatik olarak silinir",
+      "user_rights": "Kullanıcılar verilerini istediği zaman silebilir"
+    },
+    "en": {
+      "title": "AfetNet Privacy Summary",
+      "description": "AfetNet emergency network app enables communication with other devices even when there's no internet during disasters. The app collects minimum data necessary for emergency response coordination and automatically deletes it after 30 days.",
+      "data_collection": "Location, contact info, device ID, and app interactions are collected",
+      "data_usage": "Data is used only for emergency response coordination",
+      "data_sharing": "Data is not shared with third parties",
+      "data_retention": "Data is automatically deleted after 30 days",
+      "user_rights": "Users can delete their data at any time"
+    }
+  },
+  "legal_basis": {
+    "tr": {
+      "basis": "Acil durum yanıt koordinasyonu için gerekli veri toplama",
+      "consent": "Kullanıcı onayı ile veri toplama",
+      "legitimate_interest": "Acil durum yanıt koordinasyonu için meşru menfaat"
+    },
+    "en": {
+      "basis": "Data collection necessary for emergency response coordination",
+      "consent": "Data collection with user consent",
+      "legitimate_interest": "Legitimate interest for emergency response coordination"
+    }
+  },
+  "user_rights": {
+    "tr": {
+      "access": "Verilerinize erişim hakkı",
+      "rectification": "Verilerinizi düzeltme hakkı",
+      "erasure": "Verilerinizi silme hakkı",
+      "portability": "Verilerinizi taşıma hakkı",
+      "objection": "Veri işlemeye itiraz etme hakkı"
+    },
+    "en": {
+      "access": "Right to access your data",
+      "rectification": "Right to rectify your data",
+      "erasure": "Right to erase your data",
+      "portability": "Right to data portability",
+      "objection": "Right to object to data processing"
+    }
+  },
+  "contact_info": {
+    "privacy_officer": "privacy@afetnet.org",
+    "support_email": "support@afetnet.org",
+    "privacy_policy_url": "https://afetnet.org/privacy",
+    "data_deletion_url": "https://afetnet.org/support"
+  },
+  "compliance_notes": {
+    "gdpr_compliant": true,
+    "ccpa_compliant": true,
+    "coppa_compliant": true,
+    "data_minimization": true,
+    "purpose_limitation": true,
+    "storage_limitation": true,
+    "transparency": true,
+    "user_control": true
+  }
+}

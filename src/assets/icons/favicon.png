@@ -1,0 +1,46 @@
+# Placeholder for favicon.png
+
+This is a placeholder for the web favicon: src/assets/icons/favicon.png
+
+## To add real favicon:
+
+1. **Create favicon with specifications**:
+   - **Size**: 32x32 PNG
+   - **Format**: PNG or ICO
+   - **Style**: Simple, recognizable symbol
+
+2. **Replace this placeholder** with the actual favicon file
+
+3. **Design guidelines**:
+   - Simple design that works at small sizes
+   - High contrast for visibility
+   - Consistent with app icon design
+   - Works on various background colors
+
+## Favicon requirements:
+
+- **Size**: 32x32 pixels (minimum)
+- **Format**: PNG or ICO
+- **Background**: Transparent or solid color
+- **Design**: Simplified version of app icon
+
+## Suggested design:
+
+- **Icon**: Simplified emergency/disaster symbol
+- **Background**: Transparent or solid color
+- **Colors**: High contrast colors
+- **Details**: Minimal details for small size
+
+## Tools for creating favicons:
+
+- **Favicon Generator**: https://favicon.io
+- **RealFaviconGenerator**: https://realfavicongenerator.net
+- **Figma**: https://figma.com
+- **Adobe Illustrator**: https://adobe.com/illustrator
+
+## Color recommendations:
+
+- **Primary**: #007AFF (App blue)
+- **Secondary**: #FF3B30 (Emergency red)
+- **Background**: Transparent or #FFFFFF
+- **Ensure**: High contrast for visibility

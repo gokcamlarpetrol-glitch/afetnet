@@ -1,0 +1,29 @@
+Version 1.0.0 - Initial Release
+
+NEW FEATURES:
+• Offline P2P mesh networking via Bluetooth
+• Early Warning System (EEW) for earthquake detection
+• Help request system with location sharing
+• Resource sharing and coordination
+• Family contact management
+• Offline maps for Istanbul
+• Damage reporting with photo upload
+• Volunteer QR verification
+• SMS fallback for critical messages
+• Data export and deletion functionality
+
+SECURITY & PRIVACY:
+• End-to-end encryption for all data
+• 30-day automatic data retention
+• GDPR compliant data handling
+• No personal information collection
+• User-controlled data deletion
+
+IMPROVEMENTS:
+• Optimized battery usage
+• Enhanced offline capabilities
+• Improved user interface
+• Better accessibility support
+• Comprehensive Turkish and English localization
+
+AfetNet is ready to help during emergencies. Stay safe!

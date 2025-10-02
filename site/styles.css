@@ -1,0 +1,363 @@
+/* AfetNet Legal Site Styles */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f8f9fa;
+}
+
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 2rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    font-weight: 700;
+}
+
+header p {
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+header nav {
+    margin-top: 1.5rem;
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+header nav a {
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 25px;
+    background: rgba(255,255,255,0.2);
+    transition: background-color 0.3s ease;
+}
+
+header nav a:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+main {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-top: -1rem;
+    border-radius: 10px 10px 0 0;
+    position: relative;
+    z-index: 1;
+}
+
+h1 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+    font-size: 2rem;
+}
+
+h2 {
+    color: #34495e;
+    margin: 2rem 0 1rem 0;
+    font-size: 1.5rem;
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 0.5rem;
+}
+
+h3 {
+    color: #34495e;
+    margin: 1.5rem 0 0.5rem 0;
+    font-size: 1.2rem;
+}
+
+section {
+    margin-bottom: 2rem;
+}
+
+p {
+    margin-bottom: 1rem;
+    text-align: justify;
+}
+
+ul, ol {
+    margin-left: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+li {
+    margin-bottom: 0.5rem;
+}
+
+a {
+    color: #3498db;
+    text-decoration: none;
+}
+
+a:hover {
+    color: #2980b9;
+    text-decoration: underline;
+}
+
+.legal-docs {
+    background: #f8f9fa;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #3498db;
+}
+
+.language-selector {
+    margin-bottom: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.lang-btn {
+    padding: 0.5rem 1rem;
+    background: #3498db;
+    color: white;
+    border-radius: 20px;
+    text-decoration: none;
+    transition: background-color 0.3s ease;
+}
+
+.lang-btn:hover {
+    background: #2980b9;
+    text-decoration: none;
+}
+
+.lang-btn.active {
+    background: #e74c3c;
+}
+
+.lang-content {
+    background: white;
+    padding: 1rem;
+    border-radius: 6px;
+}
+
+.lang-content ul {
+    list-style: none;
+    margin-left: 0;
+}
+
+.lang-content li {
+    margin-bottom: 0.75rem;
+}
+
+.lang-content a {
+    display: block;
+    padding: 0.75rem;
+    background: #ecf0f1;
+    border-radius: 6px;
+    color: #2c3e50;
+    text-decoration: none;
+    transition: background-color 0.3s ease;
+}
+
+.lang-content a:hover {
+    background: #d5dbdb;
+    text-decoration: none;
+}
+
+.support {
+    background: #e8f5e8;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #27ae60;
+    text-align: center;
+}
+
+.support-link {
+    display: inline-block;
+    padding: 1rem 2rem;
+    background: #27ae60;
+    color: white;
+    text-decoration: none;
+    border-radius: 25px;
+    font-weight: 600;
+    margin-top: 1rem;
+    transition: background-color 0.3s ease;
+}
+
+.support-link:hover {
+    background: #229954;
+    text-decoration: none;
+}
+
+.about {
+    background: #fff3cd;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #ffc107;
+}
+
+.about strong {
+    color: #856404;
+}
+
+.contact-info {
+    background: #e7f3ff;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #007bff;
+}
+
+.contact-method {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: white;
+    border-radius: 6px;
+}
+
+.email-link {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.faq {
+    background: #f8f9fa;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #6c757d;
+}
+
+.faq-item {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: white;
+    border-radius: 6px;
+    border-left: 3px solid #6c757d;
+}
+
+.report-bug, .feature-request {
+    background: #ffeaa7;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #fdcb6e;
+}
+
+.emergency {
+    background: #fab1a0;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border-left: 4px solid #e17055;
+}
+
+.emergency strong {
+    color: #d63031;
+    font-size: 1.1rem;
+}
+
+footer {
+    background: #2c3e50;
+    color: white;
+    text-align: center;
+    padding: 2rem 1rem;
+    margin-top: 2rem;
+}
+
+footer p {
+    margin-bottom: 0.5rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 2rem;
+    }
+    
+    header nav {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    main {
+        margin: 0 0.5rem;
+        padding: 1.5rem 1rem;
+        border-radius: 0;
+    }
+    
+    .language-selector {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    h1 {
+        font-size: 1.8rem;
+    }
+    
+    h2 {
+        font-size: 1.3rem;
+    }
+}
+
+@media (max-width: 480px) {
+    header {
+        padding: 1.5rem 0.5rem;
+    }
+    
+    header h1 {
+        font-size: 1.8rem;
+    }
+    
+    main {
+        margin: 0;
+        padding: 1rem 0.5rem;
+    }
+    
+    .legal-docs, .support, .about, .contact-info, .faq, .report-bug, .feature-request, .emergency {
+        padding: 1rem;
+    }
+    
+    .contact-method, .faq-item {
+        padding: 0.75rem;
+    }
+}
+
+/* Print Styles */
+@media print {
+    header {
+        background: #667eea !important;
+        -webkit-print-color-adjust: exact;
+        color-adjust: exact;
+    }
+    
+    main {
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+    }
+    
+    .support-link {
+        background: #27ae60 !important;
+        -webkit-print-color-adjust: exact;
+        color-adjust: exact;
+    }
+    
+    a[href^="mailto:"] {
+        text-decoration: underline;
+    }
+    
+    a[href^="http"]:after {
+        content: " (" attr(href) ")";
+        font-size: 0.8em;
+        color: #666;
+    }
+}

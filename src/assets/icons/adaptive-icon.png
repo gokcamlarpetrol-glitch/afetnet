@@ -1,0 +1,46 @@
+# Placeholder for adaptive-icon.png
+
+This is a placeholder for the Android adaptive icon: src/assets/icons/adaptive-icon.png
+
+## To add real adaptive icon:
+
+1. **Create adaptive icon with specifications**:
+   - **Size**: 1024x1024 PNG
+   - **Format**: PNG with transparency support
+   - **Style**: Simple, recognizable symbol
+
+2. **Replace this placeholder** with the actual adaptive icon file
+
+3. **Design guidelines**:
+   - Icon should work on various background shapes
+   - Ensure visibility on both light and dark themes
+   - Keep design simple and recognizable
+   - Follow Android adaptive icon guidelines
+
+## Android adaptive icon requirements:
+
+- **Foreground**: 1024x1024 PNG (icon content)
+- **Background**: Solid color or simple pattern
+- **Safe area**: Keep important elements in center 66% of icon
+- **Mask**: System applies various shapes (circle, square, etc.)
+
+## Suggested design:
+
+- **Foreground**: Emergency/disaster response symbol
+- **Background**: Solid color matching app theme
+- **Safe area**: Icon centered in 66% area
+- **Colors**: Use app's color palette
+
+## Tools for creating adaptive icons:
+
+- **Android Studio**: Built-in adaptive icon editor
+- **Figma**: https://figma.com (with adaptive icon templates)
+- **Sketch**: https://sketch.com
+- **Adobe Illustrator**: https://adobe.com/illustrator
+
+## Color recommendations:
+
+- **Primary**: #007AFF (App blue)
+- **Background**: #1a1a1a (Dark theme)
+- **Accent**: #FF3B30 (Emergency red)
+- **Safe area**: Ensure contrast with background

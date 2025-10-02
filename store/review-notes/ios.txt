@@ -1,0 +1,166 @@
+# iOS App Store Review Notes for AfetNet
+
+## App Overview
+AfetNet is an offline-first disaster response application designed for emergency situations in Istanbul. The app enables communication between devices even when cellular networks are unavailable through P2P mesh networking.
+
+## Key Features Requiring Review
+
+### 1. Background Location Access
+- **Purpose**: Required for Early Warning System (EEW) to detect earthquake P-waves
+- **Usage**: Continuous location monitoring to correlate seismic activity with geographic location
+- **Privacy**: Location data is encrypted and automatically deleted after 30 days
+- **User Control**: Users can disable location access in Settings at any time
+
+### 2. Background Bluetooth
+- **Purpose**: Enables P2P mesh communication when cellular networks fail
+- **Usage**: Continuous BLE advertising and scanning for emergency message relay
+- **Privacy**: No personal data transmitted, only encrypted emergency messages
+- **User Control**: Users can disable Bluetooth in device Settings
+
+### 3. Background Processing
+- **Purpose**: Processes incoming emergency messages and maintains mesh network
+- **Usage**: Handles message queuing, deduplication, and network maintenance
+- **Privacy**: No personal data processing, only emergency coordination
+- **User Control**: Users can force-close the app to stop background processing
+
+### 4. Critical Notifications
+- **Purpose**: Emergency alerts and Early Warning System notifications
+- **Usage**: Immediate notification of emergency situations and earthquake warnings
+- **Privacy**: No personal data in notifications, only emergency information
+- **User Control**: Users can disable notifications in Settings
+
+## Technical Implementation
+
+### Background Modes
+- `bluetooth-central`: For scanning nearby devices
+- `bluetooth-peripheral`: For advertising emergency messages
+- `processing`: For message processing and network maintenance
+- `background-fetch`: For periodic network status checks
+- `background-processing`: For data cleanup and maintenance
+
+### Permissions Justification
+- **Location**: Required for emergency response coordination and EEW
+- **Bluetooth**: Required for offline P2P communication
+- **Notifications**: Required for emergency alerts
+- **Camera**: Required for volunteer QR verification
+- **Contacts**: Required for family contact import
+- **Microphone**: Required for emergency calls
+
+## Privacy & Security
+
+### Data Collection
+- Location data (encrypted, 30-day retention)
+- Device ID (for P2P communication)
+- App usage data (for functionality)
+- No personal information collected
+
+### Data Protection
+- All data encrypted in transit and at rest
+- Automatic data deletion after 30 days
+- User can delete all data at any time
+- No data sharing with third parties
+
+### Compliance
+- GDPR compliant
+- CCPA compliant
+- COPPA compliant
+- Follows Apple's privacy guidelines
+
+## Testing Instructions
+
+### Basic Functionality
+1. Launch app and complete onboarding
+2. Grant all required permissions
+3. Test help request functionality
+4. Test map view and offline capabilities
+
+### P2P Communication
+1. Enable Bluetooth on two devices
+2. Launch app on both devices
+3. Send help request from one device
+4. Verify message appears on other device
+
+### Early Warning System
+1. Enable EEW in Settings
+2. Test alarm functionality
+3. Verify location access for EEW
+4. Test notification delivery
+
+### Background Functionality
+1. Send app to background
+2. Send help request from another device
+3. Verify notification appears
+4. Test background location access
+
+## Known Limitations
+
+### EEW System
+- Experimental feature, not a replacement for official earthquake warnings
+- May produce false positives
+- Requires multiple devices for accurate detection
+- Not suitable for sole reliance in emergency situations
+
+### P2P Network
+- Limited range (approximately 100 meters)
+- Requires other devices with app installed
+- Battery usage may be higher due to continuous scanning
+- Performance may vary based on device capabilities
+
+### Offline Maps
+- Requires initial download of map tiles
+- Map data may not be up-to-date
+- Limited to Istanbul area
+- Requires storage space for map tiles
+
+## Support Information
+
+### User Education
+- Comprehensive onboarding explains all features
+- In-app help and support documentation
+- Clear privacy policy and terms of use
+- Regular updates and improvements
+
+### Technical Support
+- Support email: support@afetnet.org
+- Privacy policy: https://afetnet.org/privacy
+- Terms of use: https://afetnet.org/terms
+- GitHub repository: https://github.com/afetnet/afetnet
+
+## Compliance Notes
+
+### App Store Guidelines
+- Follows all Apple Human Interface Guidelines
+- Implements proper permission requests
+- Provides clear user education
+- Maintains user privacy and security
+
+### Emergency Response
+- Designed for legitimate emergency use cases
+- Not intended for general communication
+- Focuses on disaster response coordination
+- Promotes public safety
+
+### Legal Compliance
+- Complies with Turkish telecommunications regulations
+- Follows international emergency response standards
+- Implements proper data protection measures
+- Maintains user consent and control
+
+## Review Recommendations
+
+1. **Test with multiple devices** to verify P2P functionality
+2. **Verify background permissions** work as intended
+3. **Check notification delivery** for emergency alerts
+4. **Test offline capabilities** with airplane mode
+5. **Verify data deletion** functionality works properly
+6. **Check privacy compliance** with all data handling
+
+## Contact Information
+
+For any questions or clarifications during review:
+- Developer: AfetNet Team
+- Email: support@afetnet.org
+- Website: https://afetnet.org
+- GitHub: https://github.com/afetnet/afetnet
+
+Thank you for reviewing AfetNet. We believe this app will significantly improve emergency response capabilities in Istanbul and hope to make it available to users as soon as possible.

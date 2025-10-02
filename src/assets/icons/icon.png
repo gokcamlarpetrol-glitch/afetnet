@@ -1,0 +1,45 @@
+# Placeholder for icon.png
+
+This is a placeholder for the app icon: src/assets/icons/icon.png
+
+## To add real icon:
+
+1. **Create icon with specifications**:
+   - **Size**: 1024x1024 PNG
+   - **Format**: PNG with transparency support
+   - **Style**: Simple, recognizable disaster response symbol
+
+2. **Replace this placeholder** with the actual icon file
+
+3. **Design guidelines**:
+   - Use simple, recognizable symbols
+   - Ensure good contrast for accessibility
+   - Test on both light and dark backgrounds
+   - Follow platform-specific icon guidelines
+
+## Suggested design elements:
+
+- Emergency cross or medical symbol
+- Network/communication icon
+- Istanbul skyline silhouette
+- Disaster response symbols (helmet, radio, etc.)
+
+## Platform requirements:
+
+- **iOS**: 1024x1024 PNG (App Store)
+- **Android**: 512x512 PNG (Play Store)
+- **Adaptive Icon**: 1024x1024 PNG (Android adaptive icon)
+
+## Tools for creating icons:
+
+- **Figma**: https://figma.com
+- **Sketch**: https://sketch.com
+- **Adobe Illustrator**: https://adobe.com/illustrator
+- **Canva**: https://canva.com
+
+## Color recommendations:
+
+- Primary: #007AFF (iOS blue)
+- Secondary: #FF3B30 (Emergency red)
+- Accent: #34C759 (Safety green)
+- Background: Transparent or solid color

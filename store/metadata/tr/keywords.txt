@@ -1,0 +1,1 @@
+afet,acil durum,deprem,erken uyarı,offline,mesh,bluetooth,konum,yardım

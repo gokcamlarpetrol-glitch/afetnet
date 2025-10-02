@@ -1,0 +1,141 @@
+{
+  "expo": {
+    "name": "AfetNet",
+    "slug": "afetnet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a1a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.afetnet.app",
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AfetNet acil durum ağı uygulaması, yardım taleplerinizin konumunu belirlemek için konum erişimi gerektirir. Bu bilgi sadece acil durumlarda kullanılır ve 30 gün sonra otomatik olarak silinir.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "AfetNet acil durum ağı uygulaması, yardım taleplerinizin konumunu belirlemek için konum erişimi gerektirir. Bu bilgi sadece acil durumlarda kullanılır ve 30 gün sonra otomatik olarak silinir.",
+        "NSLocationAlwaysUsageDescription": "AfetNet erken uyarı sistemi için arka planda konum takibi gerektirir. Bu bilgi sadece acil durumlarda kullanılır ve 30 gün sonra otomatik olarak silinir.",
+        "NSBluetoothAlwaysUsageDescription": "AfetNet acil durum sırasında yakındaki cihazlarla iletişim kurmak için Bluetooth erişimi gerektirir. Bu özellik internet olmadığında kritik iletişim sağlar.",
+        "NSBluetoothPeripheralUsageDescription": "AfetNet acil durum mesajlarını yakındaki cihazlara yayınlamak için Bluetooth erişimi gerektirir. Bu özellik internet olmadığında kritik iletişim sağlar.",
+        "NSCameraUsageDescription": "AfetNet gönüllü QR kod doğrulama için kamera erişimi gerektirir. Bu özellik gönüllü kimlik doğrulaması için kullanılır.",
+        "NSContactsUsageDescription": "AfetNet aile üyelerinizi hızlıca eklemek için kişi listesi erişimi gerektirir. Bu bilgi sadece acil durum iletişimi için kullanılır.",
+        "NSMicrophoneUsageDescription": "AfetNet acil durum aramaları için mikrofon erişimi gerektirir. Bu özellik acil durum iletişimi için kullanılır.",
+        "NSPhotoLibraryUsageDescription": "AfetNet hasar raporları için fotoğraf seçimi gerektirir. Bu özellik acil durum belgelendirmesi için kullanılır.",
+        "UIBackgroundModes": [
+          "bluetooth-central",
+          "bluetooth-peripheral",
+          "processing",
+          "background-fetch",
+          "background-processing"
+        ],
+        "CFBundleDisplayName": "AfetNet",
+        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "1.0.0",
+        "LSRequiresIPhoneOS": true,
+        "UILaunchStoryboardName": "LaunchScreen",
+        "UIRequiredDeviceCapabilities": [
+          "armv7",
+          "bluetooth-le",
+          "location-services"
+        ],
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent",
+        "UIViewControllerBasedStatusBarAppearance": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a1a"
+      },
+      "package": "org.afetnet.app",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_ADVERTISE",
+        "POST_NOTIFICATIONS",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_DATA_SYNC",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_CONTACTS",
+        "CALL_PHONE",
+        "RECORD_AUDIO",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "WAKE_LOCK",
+        "VIBRATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "android.intent.action.SEND",
+          "category": "android.intent.category.DEFAULT",
+          "type": "text/plain"
+        },
+        {
+          "action": "android.intent.action.VIEW",
+          "category": "android.intent.category.DEFAULT",
+          "category": "android.intent.category.BROWSABLE",
+          "data": {
+            "scheme": "afetnet"
+          }
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "AfetNet acil durum ağı uygulaması, yardım taleplerinizin konumunu belirlemek için konum erişimi gerektirir. Bu bilgi sadece acil durumlarda kullanılır ve 30 gün sonra otomatik olarak silinir.",
+          "locationAlwaysPermission": "AfetNet erken uyarı sistemi için arka planda konum takibi gerektirir. Bu bilgi sadece acil durumlarda kullanılır ve 30 gün sonra otomatik olarak silinir.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "AfetNet aile üyelerinizi hızlıca eklemek için kişi listesi erişimi gerektirir. Bu bilgi sadece acil durum iletişimi için kullanılır."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AfetNet gönüllü QR kod doğrulama için kamera erişimi gerektirir. Bu özellik gönüllü kimlik doğrulaması için kullanılır.",
+          "microphonePermission": "AfetNet acil durum aramaları için mikrofon erişimi gerektirir. Bu özellik acil durum iletişimi için kullanılır."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "AfetNet hasar raporları için fotoğraf seçimi gerektirir. Bu özellik acil durum belgelendirmesi için kullanılır."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff",
+          "defaultChannel": "emergency"
+        }
+      ]
+    ]
+  }
+}

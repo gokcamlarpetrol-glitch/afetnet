@@ -1,0 +1,13 @@
+{
+  "low": true,
+  "moderate": true,
+  "high": true,
+  "critical": true,
+  "report-type": "summary",
+  "output-format": "json",
+  "allowlist": [],
+  "skip-dev": false,
+  "audit-level": "moderate",
+  "retry-count": 3,
+  "timeout": 30000
+}

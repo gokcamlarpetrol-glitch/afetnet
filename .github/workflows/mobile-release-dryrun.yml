@@ -1,0 +1,290 @@
+name: Mobile Release Dry Run
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'app/**'
+      - 'core/**'
+      - 'package.json'
+      - 'app.json'
+      - 'eas.json'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'app/**'
+      - 'core/**'
+      - 'package.json'
+      - 'app.json'
+      - 'eas.json'
+
+jobs:
+  lint-and-typecheck:
+    name: Lint and Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript check
+        run: npm run typecheck
+
+      - name: Run Prettier check
+        run: npm run format:check
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test
+
+      - name: Run store readiness tests
+        run: npm run test:store-readiness
+
+      - name: Upload test coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: mobile
+          name: mobile-coverage
+
+  build-verification:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify app.json configuration
+        run: |
+          node -e "
+          const appConfig = require('./app.json');
+          const requiredFields = ['name', 'version', 'ios.bundleIdentifier', 'android.package'];
+          const missingFields = requiredFields.filter(field => {
+            const parts = field.split('.');
+            let obj = appConfig;
+            for (const part of parts) {
+              if (!obj[part]) return true;
+              obj = obj[part];
+            }
+            return false;
+          });
+          if (missingFields.length > 0) {
+            console.error('Missing required fields in app.json:', missingFields);
+            process.exit(1);
+          }
+          console.log('app.json configuration is valid');
+          "
+
+      - name: Verify EAS configuration
+        run: |
+          node -e "
+          const easConfig = require('./eas.json');
+          const requiredProfiles = ['ios:production', 'android:production'];
+          const missingProfiles = requiredProfiles.filter(profile => !easConfig.build[profile]);
+          if (missingProfiles.length > 0) {
+            console.error('Missing required EAS profiles:', missingProfiles);
+            process.exit(1);
+          }
+          console.log('EAS configuration is valid');
+          "
+
+      - name: Verify store assets
+        run: |
+          # Check if store assets exist
+          if [ ! -d "store/screenshots" ]; then
+            echo "Missing store/screenshots directory"
+            exit 1
+          fi
+          if [ ! -f "store/google-play/datasafety.json" ]; then
+            echo "Missing Google Play Data Safety JSON"
+            exit 1
+          fi
+          if [ ! -f "store/app-store/privacy-nutrition.json" ]; then
+            echo "Missing App Store privacy nutrition JSON"
+            exit 1
+          fi
+          echo "Store assets are present"
+
+  screenshots:
+    name: Generate Screenshots
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate mock screenshots
+        run: npm run screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v3
+        with:
+          name: store-screenshots
+          path: store/screenshots/
+          retention-days: 30
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security audit
+        run: npm audit --audit-level moderate
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Check for common secret patterns
+          if grep -r "password\|secret\|key\|token" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" src/ app/ core/ | grep -v "test\|mock\|example"; then
+            echo "Potential hardcoded secrets found"
+            exit 1
+          fi
+          echo "No hardcoded secrets found"
+
+  store-readiness-check:
+    name: Store Readiness Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify store metadata
+        run: |
+          # Check if store metadata files exist
+          for lang in tr en; do
+            for field in title subtitle keywords description; do
+              if [ ! -f "store/metadata/$lang/$field.txt" ]; then
+                echo "Missing store metadata: $lang/$field.txt"
+                exit 1
+              fi
+            done
+          done
+          echo "Store metadata is complete"
+
+      - name: Verify legal documents
+        run: |
+          # Check if legal documents exist
+          for lang in tr en; do
+            if [ ! -f "site/privacy.$lang.html" ]; then
+              echo "Missing privacy policy: $lang"
+              exit 1
+            fi
+            if [ ! -f "site/terms.$lang.html" ]; then
+              echo "Missing terms of use: $lang"
+              exit 1
+            fi
+          done
+          echo "Legal documents are complete"
+
+      - name: Verify app configuration
+        run: |
+          # Check if app.json has required fields
+          node -e "
+          const appConfig = require('./app.json');
+          const ios = appConfig.expo.ios;
+          const android = appConfig.expo.android;
+          
+          // Check iOS configuration
+          if (!ios.bundleIdentifier || !ios.bundleIdentifier.startsWith('org.afetnet.app')) {
+            console.error('Invalid iOS bundle identifier');
+            process.exit(1);
+          }
+          
+          // Check Android configuration
+          if (!android.package || !android.package.startsWith('org.afetnet.app')) {
+            console.error('Invalid Android package name');
+            process.exit(1);
+          }
+          
+          // Check permissions
+          const requiredPermissions = ['ACCESS_FINE_LOCATION', 'BLUETOOTH', 'POST_NOTIFICATIONS'];
+          const missingPermissions = requiredPermissions.filter(perm => !android.permissions.includes(perm));
+          if (missingPermissions.length > 0) {
+            console.error('Missing required permissions:', missingPermissions);
+            process.exit(1);
+          }
+          
+          console.log('App configuration is valid');
+          "
+
+  notification:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, test, build-verification, security-scan, store-readiness-check]
+    if: always()
+    steps:
+      - name: Notify success
+        if: needs.lint-and-typecheck.result == 'success' && needs.test.result == 'success' && needs.build-verification.result == 'success' && needs.security-scan.result == 'success' && needs.store-readiness-check.result == 'success'
+        run: |
+          echo "✅ All checks passed! Ready for store submission."
+          
+      - name: Notify failure
+        if: needs.lint-and-typecheck.result == 'failure' || needs.test.result == 'failure' || needs.build-verification.result == 'failure' || needs.security-scan.result == 'failure' || needs.store-readiness-check.result == 'failure'
+        run: |
+          echo "❌ Some checks failed. Please review the results before submitting to stores."
+          exit 1

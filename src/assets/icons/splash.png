@@ -1,0 +1,45 @@
+# Placeholder for splash.png
+
+This is a placeholder for the splash screen: src/assets/icons/splash.png
+
+## To add real splash screen:
+
+1. **Create splash screen with specifications**:
+   - **Size**: 1242x2436 PNG (iPhone X size)
+   - **Format**: PNG
+   - **Background**: Dark theme (#1a1a1a)
+
+2. **Replace this placeholder** with the actual splash screen file
+
+3. **Design guidelines**:
+   - Simple, clean design
+   - App logo centered
+   - Dark background for consistency
+   - No text or complex elements
+
+## Suggested design:
+
+- **Background**: Solid dark color (#1a1a1a)
+- **Logo**: Centered app icon
+- **Loading indicator**: Subtle spinner or progress bar
+- **Branding**: Minimal AfetNet text if needed
+
+## Platform requirements:
+
+- **iOS**: 1242x2436 PNG (iPhone X)
+- **Android**: 1080x1920 PNG (standard)
+- **Resize mode**: Contain (preserves aspect ratio)
+
+## Tools for creating splash screens:
+
+- **Figma**: https://figma.com
+- **Sketch**: https://sketch.com
+- **Adobe Photoshop**: https://adobe.com/photoshop
+- **Canva**: https://canva.com
+
+## Color scheme:
+
+- **Background**: #1a1a1a (Dark theme)
+- **Accent**: #007AFF (iOS blue)
+- **Text**: #FFFFFF (White)
+- **Secondary**: #EBEBF5 (Light gray)

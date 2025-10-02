@@ -1,0 +1,34 @@
+# Global code owners
+* @afetnet-security
+
+# Security-sensitive files
+/.github/workflows/ @afetnet-security
+/.github/security.md @afetnet-security
+/.github/dependabot.yml @afetnet-security
+/.github/workflows/security-audit.yml @afetnet-security
+/.github/workflows/codeql.yml @afetnet-security
+/.github/workflows/secret-scan.yml @afetnet-security
+/.github/workflows/dependency-review.yml @afetnet-security
+
+# Configuration files
+package.json @afetnet-security
+package-lock.json @afetnet-security
+.npmrc @afetnet-security
+audit-ci.json @afetnet-security
+
+# Build and deployment files
+app.json @afetnet-security
+app.config.js @afetnet-security
+eas.json @afetnet-security
+README-build.md @afetnet-security
+
+# Security-related source code
+/src/core/crypto/ @afetnet-security
+/src/core/p2p/ @afetnet-security
+/src/core/eew/ @afetnet-security
+/src/core/telemetry/ @afetnet-security
+
+# Legal and compliance
+/site/ @afetnet-security
+/legal/ @afetnet-security
+/store/ @afetnet-security

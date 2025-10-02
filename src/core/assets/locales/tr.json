@@ -1,0 +1,211 @@
+{
+  "navigation": {
+    "home": "Ana Sayfa",
+    "map": "Harita",
+    "community": "Topluluk",
+    "family": "Aile",
+    "guide": "Rehber"
+  },
+  "home": {
+    "title": "AfetNet",
+    "connected": "Bağlı",
+    "disconnected": "Bağlantısız",
+    "requestHelp": "Yardım İste",
+    "requestHelpSubtitle": "Acil yardım talebi gönder",
+    "imSafe": "Güvendeyim",
+    "imSafeSubtitle": "Aile ve arkadaşları bilgilendir",
+    "openMap": "Haritayı Aç",
+    "openMapSubtitle": "Acil durum haritasını görüntüle",
+    "locationUnknown": "Konum bilinmiyor",
+    "battery": "pil"
+  },
+  "help": {
+    "title": "Yardım İste",
+    "step1": {
+      "title": "Acil Durum Detayları"
+    },
+    "step2": {
+      "title": "Onayla ve Gönder"
+    },
+    "priority": {
+      "title": "Öncelik Seviyesi",
+      "critical": "Kritik",
+      "criticalSubtitle": "Hayati tehlike",
+      "high": "Yüksek",
+      "highSubtitle": "Acil yardım gerekli",
+      "normal": "Normal",
+      "normalSubtitle": "Genel yardım gerekli"
+    },
+    "conditions": {
+      "title": "Acil Durum Koşulları",
+      "underRubble": "Enkaz altında",
+      "underRubbleSubtitle": "Özgürce hareket edemiyor",
+      "injured": "Yaralı",
+      "injuredSubtitle": "Tıbbi müdahale gerekli"
+    },
+    "peopleCount": {
+      "title": "Kişi Sayısı"
+    },
+    "location": {
+      "title": "Konumunuz",
+      "loading": "Konum alınıyor..."
+    },
+    "note": {
+      "title": "Ek Notlar",
+      "placeholder": "Durumunuzu veya özel ihtiyaçlarınızı açıklayın..."
+    },
+    "summary": {
+      "title": "Talep Özeti"
+    },
+    "send": "Talep Gönder",
+    "sent": {
+      "title": "Talep Gönderildi",
+      "message": "Yardım talebiniz yakındaki müdahale ekiplerine ve acil servislere gönderildi."
+    }
+  },
+  "safe": {
+    "title": "Güvenlik Bildirimi Gönderildi",
+    "sent": "Güvenlik durumunuz yakındaki cihazlara yayınlandı.",
+    "defaultNote": "Güvendeyim"
+  },
+  "map": {
+    "filters": {
+      "all": "Tümü",
+      "critical": "Kritik",
+      "high": "Yüksek",
+      "normal": "Normal"
+    },
+    "heatmap": "Isı Haritası",
+    "nearestShelter": {
+      "title": "En Yakın Barınak",
+      "distance": "Mesafe"
+    },
+    "noShelters": {
+      "title": "Barınak Bulunamadı",
+      "message": "Bölgenizde acil durum barınağı bulunamadı."
+    }
+  },
+  "community": {
+    "title": "Topluluk",
+    "subtitle": "{{count}} aktif talep",
+    "timeAgo": {
+      "justNow": "Az önce",
+      "minutes": "{{count}} dk önce",
+      "hours": "{{count}} saat önce"
+    },
+    "people": "kişi",
+    "navigate": "Yol Tarifi",
+    "contact": "İletişim",
+    "empty": {
+      "title": "Aktif Talep Yok",
+      "subtitle": "Bölgenizde şu anda aktif yardım talebi bulunmuyor."
+    }
+  },
+  "family": {
+    "title": "Aile",
+    "subtitle": "{{count}} kişi",
+    "addContact": "Kişi Ekle",
+    "name": "İsim",
+    "namePlaceholder": "Kişi adını girin",
+    "phone": "Telefon",
+    "phonePlaceholder": "Telefon numarasını girin",
+    "sendSafePing": "Güvenlik Bildirimi Gönder",
+    "safePing": {
+      "message": "Güvenlik bildirimi mesajı",
+      "sent": {
+        "title": "Güvenlik Bildirimi Gönderildi",
+        "message": "Güvenlik durumunuz tüm kişilere gönderildi."
+      }
+    },
+    "safe": "Güvende",
+    "unknown": "Bilinmiyor",
+    "lastPing": "Son bildirim",
+    "never": "Hiçbir zaman",
+    "timeAgo": {
+      "justNow": "Az önce",
+      "minutes": "{{count}} dk önce",
+      "hours": "{{count}} saat önce",
+      "days": "{{count}} gün önce"
+    },
+    "delete": {
+      "title": "Kişiyi Sil",
+      "message": "Bu kişiyi silmek istediğinizden emin misiniz?"
+    },
+    "empty": {
+      "title": "Aile Kişisi Yok",
+      "subtitle": "Acil durumlar sırasında bağlantıda kalmak için aile üyeleri ve arkadaşlar ekleyin."
+    }
+  },
+  "guide": {
+    "title": "Acil Durum Rehberi",
+    "subtitle": "Çevrimdışı güvenlik bilgileri",
+    "search": "Rehber ara...",
+    "categories": {
+      "all": "Tümü",
+      "firstAid": "İlk Yardım",
+      "safety": "Güvenlik",
+      "survival": "Hayatta Kalma"
+    },
+    "firstAid": {
+      "basic": {
+        "title": "Temel İlk Yardım",
+        "content": "# Temel İlk Yardım\n\n## ABC Değerlendirmesi\n\n1. **Solunum Yolu**: Kişinin nefes alıp alamadığını kontrol edin\n2. **Nefes Alma**: Göğüs hareketini gözlemleyin\n3. **Dolaşım**: Nabız kontrolü yapın\n\n## Kanama Kontrolü\n\n- Yara üzerine doğrudan basınç uygulayın\n- Mümkünse yaralı bölgeyi yükseltin\n- Temiz bez veya bandaj kullanın\n\n## Şok Yönetimi\n\n- Kişiyi yatırın\n- Omurga yaralanması yoksa bacakları yükseltin\n- Sıcak ve rahat tutun\n- Nefes alma ve nabzı izleyin"
+      },
+      "cpr": {
+        "title": "CPR (Kalp Akciğer Canlandırması)",
+        "content": "# CPR Kılavuzu\n\n## CPR Adımları\n\n1. **Yanıt kontrolü**: Omuzlarına dokun ve seslen\n2. **Yardım çağır**: Acil servisleri ara\n3. **Pozisyon**: Kişiyi sert yüzeye yatır\n4. **Kompresyon**: Elleri göğüs ortasına yerleştir\n5. **Sıkı ve hızlı bas**: Dakikada 100-120 kompresyon\n6. **Nefes ver**: Başı eğ, burnu sık, 2 nefes ver\n\n## Kompresyon Derinliği\n\n- Yetişkinler: 5 cm derinlik\n- Çocuklar: 4 cm derinlik\n- Bebekler: 2.5 cm derinlik\n\n## Yardım gelene kadar veya kişi yaşam belirtisi gösterene kadar devam et"
+      }
+    },
+    "safety": {
+      "earthquake": {
+        "title": "Deprem Güvenliği",
+        "content": "# Deprem Güvenlik Kılavuzu\n\n## Deprem Sırasında\n\n1. **Çök, Kapan ve Tutun**\n   - Eller ve dizler üzerine çök\n   - Baş ve boynu koru\n   - Sağlam bir şeye tutun\n\n2. **İçeride Kal**\n   - Pencerelerden uzak dur\n   - Kapı eşiklerinden kaçın (daha güvenli değil)\n   - Ağır mobilya altında kal\n\n## Deprem Sonrası\n\n1. **Yaralanmaları kontrol et**\n2. **Gaz sızıntısını kontrol et**\n3. **Hasar varsa servisleri kapat**\n4. **Acil durum radyosunu dinle**\n5. **Artçı sarsıntılara hazır ol**\n\n## Acil Durum Çantası Malzemeleri\n\n- Su (kişi başına günde 4 litre)\n- Bozulmayan yiyecek\n- İlk yardım çantası\n- Yedek pil ile el feneri\n- Acil durum radyosu\n- İlaçlar\n- Önemli belgeler"
+      },
+      "fire": {
+        "title": "Yangın Güvenliği",
+        "content": "# Yangın Güvenlik Kılavuzu\n\n## Yangın Önleme\n\n1. **Duman dedektörleri tak**\n2. **Yangın söndürücüleri el altında bulundur**\n3. **Yemek pişirirken asla yalnız bırakma**\n4. **Yanıcı maddeleri ısıdan uzak tut**\n5. **Kaçış planın olsun**\n\n## Yangın Çıkarsa\n\n1. **Hemen çık**\n2. **Duman altında sürün**\n3. **Kapıları açmadan önce dokun**\n4. **Asansör değil, merdiven kullan**\n5. **Belirlenen yerde buluş**\n\n## Dur, Yat ve Yuvarlan\n\n- Hemen dur\n- Yere yat\n- Alevleri boğmak için yuvarlan\n- Yüzü ellerle koru\n\n## Yangın Söndürücü Kullanımı (PASS)\n\n- **P**imi çek\n- **A**levin dibine nişan al\n- **S**ıkma kolu sık\n- **S**ağa sola süpür"
+      }
+    },
+    "survival": {
+      "water": {
+        "title": "Su Hayatta Kalması",
+        "content": "# Su Hayatta Kalma Kılavuzu\n\n## Su Kaynakları Bulma\n\n1. **Doğal kaynaklar**\n   - Nehir ve dereler\n   - Göller ve havuzlar\n   - Yağmur suyu toplama\n   - Sabah çiği\n\n2. **Yeraltı kaynakları**\n   - Kuru dere yataklarında kaz\n   - Yeşil bitki örtüsü ara\n   - Kaya çatlaklarını kontrol et\n\n## Su Arıtma\n\n1. **Kaynatma**: 1 dakika kaynar kaynama\n2. **Kimyasal işlem**: İyot veya klor tabletleri\n3. **Filtrasyon**: Ticari veya geçici filtreler\n4. **Güneş dezenfeksiyonu**: UV işlemi\n\n## Su Tasarrufu\n\n- Sadece susadığında iç\n- Alkol ve kafeinden kaçın\n- Sıcak saatlerde gölgede kal\n- Fiziksel aktiviteyi azalt\n\n## Dehidrasyon Belirtileri\n\n- Susuzluk\n- Ağız kuruluğu\n- Koyu idrar\n- Yorgunluk\n- Baş dönmesi"
+      },
+      "food": {
+        "title": "Besin Hayatta Kalması",
+        "content": "# Besin Hayatta Kalma Kılavuzu\n\n## Acil Besin Kaynakları\n\n1. **Bozulmayan gıdalar**\n   - Konserve ürünler\n   - Kurutulmuş gıdalar\n   - Enerji barları\n   - Fındık ve tohumlar\n\n2. **Toplama güvenliği**\n   - Bilinmeyen bitkileri asla yeme\n   - Önce küçük miktarları test et\n   - Uzman değilsen mantarlardan kaçın\n   - Yaygın yenilebilir bitkileri ara\n\n## Besin Güvenliği\n\n1. **Yemeden önce kontrol et**\n2. **İyice pişir**\n3. **Bozuk gıdalardan kaçın**\n4. **Uygun şekilde sakla**\n\n## Enerji Tasarrufu\n\n- Küçük, sık öğünler ye\n- Yüksek enerjili gıdaları öncelikle\n- Susuz kalmamaya dikkat et\n- Mümkün olduğunda dinlen\n\n## Acil Durum Erzakları\n\n- Kişi başına 3 günlük yiyecek planla\n- Yüksek kalorili ürünleri dahil et\n- Diyet kısıtlamalarını düşün\n- Stoku düzenli olarak değiştir"
+      }
+    },
+    "empty": {
+      "title": "Rehber Bulunamadı",
+      "subtitle": "Arama teriminizi veya kategori filtrenizi değiştirmeyi deneyin."
+    }
+  },
+  "permissions": {
+    "location": {
+      "title": "Konum İzni Gerekli",
+      "message": "AfetNet'in afet sırasında acil müdahale ekiplerinin sizi bulmasına yardımcı olmak için konum erişimine ihtiyacı var."
+    },
+    "bluetooth": {
+      "title": "Bluetooth İzni Gerekli",
+      "message": "AfetNet, internet mevcut olmadığında yakındaki cihazlarla iletişim kurmak için Bluetooth kullanır."
+    },
+    "sms": {
+      "title": "SMS İzni Gerekli",
+      "message": "AfetNet, internet mevcut olmadığında yedek olarak SMS mesajları gönderebilir."
+    }
+  },
+  "error": {
+    "title": "Hata",
+    "locationRequired": "Bu özellik için konum erişimi gerekli.",
+    "sendFailed": "Mesaj gönderilemedi. Lütfen tekrar deneyin."
+  },
+  "common": {
+    "ok": "Tamam",
+    "cancel": "İptal",
+    "save": "Kaydet",
+    "delete": "Sil",
+    "next": "İleri",
+    "back": "Geri"
+  }
+}

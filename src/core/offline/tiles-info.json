@@ -1,0 +1,57 @@
+{
+  "name": "Istanbul Emergency Map",
+  "description": "Offline map tiles for Istanbul metropolitan area covering emergency response scenarios",
+  "version": "1.0.0",
+  "format": "pbf",
+  "bounds": [28.5, 40.8, 29.3, 41.2],
+  "center": [28.9784, 41.0082, 10],
+  "minZoom": 8,
+  "maxZoom": 16,
+  "attribution": "© OpenStreetMap contributors",
+  "type": "baselayer",
+  "created": "2024-01-01",
+  "size": "~150MB",
+  "tiles": {
+    "total": 45000,
+    "levels": {
+      "8": 64,
+      "9": 256,
+      "10": 1024,
+      "11": 4096,
+      "12": 16384,
+      "13": 65536,
+      "14": 262144,
+      "15": 1048576,
+      "16": 4194304
+    }
+  },
+  "coverage": {
+    "districts": [
+      "Adalar", "Arnavutköy", "Ataşehir", "Avcılar", "Bağcılar", "Bahçelievler",
+      "Bakırköy", "Başakşehir", "Bayrampaşa", "Beşiktaş", "Beykoz", "Beylikdüzü",
+      "Beyoğlu", "Büyükçekmece", "Çatalca", "Çekmeköy", "Esenler", "Esenyurt",
+      "Eyüpsultan", "Fatih", "Gaziosmanpaşa", "Güngören", "Kadıköy", "Kağıthane",
+      "Kartal", "Küçükçekmece", "Maltepe", "Pendik", "Sancaktepe", "Sarıyer",
+      "Silivri", "Sultanbeyli", "Sultangazi", "Şile", "Şişli", "Tuzla",
+      "Ümraniye", "Üsküdar", "Zeytinburnu"
+    ],
+    "emergency_points": {
+      "hospitals": 45,
+      "fire_stations": 78,
+      "police_stations": 156,
+      "emergency_shelters": 234,
+      "evacuation_points": 89
+    }
+  },
+  "style": {
+    "background": "#1a1a1a",
+    "roads": {
+      "primary": "#4a90e2",
+      "secondary": "#7bb3f0",
+      "tertiary": "#a8d0f0"
+    },
+    "buildings": "#666666",
+    "water": "#2c5aa0",
+    "parks": "#4a7c59"
+  }
+}

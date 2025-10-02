@@ -1,0 +1,97 @@
+{
+  "data_types": [
+    {
+      "data_type": "LOCATION",
+      "purpose": "APP_FUNCTIONALITY",
+      "optional": false,
+      "data_category": "APPROXIMATE_LOCATION",
+      "data_category_details": {
+        "approximate_location": {
+          "user_controlled": false,
+          "purpose": "APP_FUNCTIONALITY",
+          "collection_methods": ["AUTOMATICALLY_COLLECTED"],
+          "retention_period": "APPROXIMATELY_30_DAYS",
+          "is_personal_data": true,
+          "is_sensitive_data": false
+        }
+      }
+    },
+    {
+      "data_type": "APP_ACTIVITY",
+      "purpose": "APP_FUNCTIONALITY",
+      "optional": false,
+      "data_category": "APP_INTERACTIONS",
+      "data_category_details": {
+        "app_interactions": {
+          "user_controlled": false,
+          "purpose": "APP_FUNCTIONALITY",
+          "collection_methods": ["AUTOMATICALLY_COLLECTED"],
+          "retention_period": "APPROXIMATELY_30_DAYS",
+          "is_personal_data": false,
+          "is_sensitive_data": false
+        }
+      }
+    },
+    {
+      "data_type": "DEVICE_OR_OTHER_IDS",
+      "purpose": "APP_FUNCTIONALITY",
+      "optional": false,
+      "data_category": "DEVICE_OR_OTHER_ID",
+      "data_category_details": {
+        "device_or_other_id": {
+          "user_controlled": false,
+          "purpose": "APP_FUNCTIONALITY",
+          "collection_methods": ["AUTOMATICALLY_COLLECTED"],
+          "retention_period": "APPROXIMATELY_30_DAYS",
+          "is_personal_data": false,
+          "is_sensitive_data": false
+        }
+      }
+    }
+  ],
+  "data_security_practices": {
+    "data_encrypted_in_transit": true,
+    "data_encrypted_at_rest": true,
+    "users_can_request_data_deletion": true,
+    "follows_play_families_policy": false,
+    "follows_ads_policy": true
+  },
+  "data_usage": {
+    "data_sharing": false,
+    "data_collection": true,
+    "data_retention": "APPROXIMATELY_30_DAYS",
+    "data_deletion": "USER_CAN_REQUEST_DELETION"
+  },
+  "personal_info_collection": {
+    "collects_personal_info": false,
+    "collects_sensitive_info": false,
+    "collects_financial_info": false,
+    "collects_health_info": false,
+    "collects_location_info": true
+  },
+  "data_safety_summary": {
+    "tr": {
+      "summary": "AfetNet acil durum ağı uygulaması, konum bilgilerinizi sadece acil durumlarda yardım taleplerinizi iletmek için kullanır. Verileriniz şifrelenir ve 30 gün sonra otomatik olarak silinir. Kişisel bilgileriniz toplanmaz ve üçüncü taraflarla paylaşılmaz.",
+      "data_types": [
+        "Konum bilgisi (yaklaşık) - Acil durum yardım talepleri için gerekli",
+        "Uygulama etkileşimleri - Uygulama işlevselliği için",
+        "Cihaz kimliği - P2P ağ iletişimi için"
+      ],
+      "data_sharing": "Verileriniz üçüncü taraflarla paylaşılmaz",
+      "data_deletion": "Verilerinizi uygulama ayarlarından silebilirsiniz"
+    },
+    "en": {
+      "summary": "AfetNet emergency network app uses your location information only to relay help requests during emergencies. Your data is encrypted and automatically deleted after 30 days. No personal information is collected or shared with third parties.",
+      "data_types": [
+        "Location information (approximate) - Required for emergency help requests",
+        "App interactions - For app functionality",
+        "Device ID - For P2P network communication"
+      ],
+      "data_sharing": "Your data is not shared with third parties",
+      "data_deletion": "You can delete your data from app settings"
+    }
+  },
+  "privacy_policy_url": "https://afetnet.org/privacy",
+  "data_deletion_url": "https://afetnet.org/support",
+  "contact_email": "support@afetnet.org"
+}

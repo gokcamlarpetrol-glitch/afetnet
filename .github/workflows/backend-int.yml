@@ -1,0 +1,218 @@
+name: Backend Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-integration:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: afetnet_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install Python dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+        
+    - name: Setup Node.js for frontend tests
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'yarn'
+        
+    - name: Install Node dependencies
+      run: yarn install --frozen-lockfile
+      
+    - name: Run backend unit tests
+      run: |
+        cd backend
+        python -m pytest tests/unit/ -v --cov=app --cov-report=xml
+        
+    - name: Start backend services
+      run: |
+        cd backend
+        docker-compose -f docker-compose.test.yml up -d
+        sleep 30  # Wait for services to be ready
+        
+    - name: Run backend integration tests
+      run: |
+        cd backend
+        python -m pytest tests/integration/ -v --cov=app --cov-report=xml
+        
+    - name: Run API endpoint tests
+      run: |
+        cd backend
+        python -m pytest tests/api/ -v
+        
+    - name: Run database migration tests
+      run: |
+        cd backend
+        python -m pytest tests/migrations/ -v
+        
+    - name: Test data retention job
+      run: |
+        cd backend
+        python app/retention_job.py --cleanup --stats
+        
+    - name: Test telemetry collection
+      run: |
+        cd backend
+        python -c "
+        import requests
+        import json
+        
+        # Test telemetry collection
+        data = {
+            'device_id': 'test_device',
+            'session_id': 'test_session',
+            'timestamp': 1234567890,
+            'event_type': 'test_event',
+            'event_data': {'test': 'data'}
+        }
+        
+        response = requests.post('http://localhost:5003/api/telemetry/collect', json=data)
+        assert response.status_code == 200
+        
+        # Test stats submission
+        stats_data = {
+            'device_id': 'test_device',
+            'stats': {
+                'helpRequestsCreated': 1,
+                'resourcePostsCreated': 2,
+                'damageReportsCreated': 0
+            }
+        }
+        
+        response = requests.post('http://localhost:5003/api/telemetry/stats', json=stats_data)
+        assert response.status_code == 200
+        "
+        
+    - name: Test volunteer QR generation
+      run: |
+        cd backend
+        python -c "
+        import requests
+        import json
+        
+        # Test QR generation
+        qr_data = {
+            'volunteer_id': 'test_volunteer',
+            'name': 'Test Volunteer',
+            'organization': 'AFAD',
+            'role': 'Rescue Worker'
+        }
+        
+        response = requests.post('http://localhost:5000/api/volunteer/qr', json=qr_data)
+        assert response.status_code == 200
+        
+        # Test QR verification
+        qr_result = response.json()
+        verify_data = {'qr_data': qr_result['qr_data']}
+        
+        response = requests.post('http://localhost:5000/api/volunteer/verify', json=verify_data)
+        assert response.status_code == 200
+        assert response.json()['valid'] == True
+        "
+        
+    - name: Test damage report submission
+      run: |
+        cd backend
+        python -c "
+        import requests
+        import json
+        
+        # Test damage report submission
+        damage_data = {
+            'timestamp': 1234567890,
+            'latitude': 41.0082,
+            'longitude': 28.9784,
+            'damage_type': 'building',
+            'severity': 2,
+            'description': 'Test damage report'
+        }
+        
+        response = requests.post('http://localhost:5001/api/damage', json=damage_data)
+        assert response.status_code == 200
+        
+        # Test damage report retrieval
+        response = requests.get('http://localhost:5001/api/damage')
+        assert response.status_code == 200
+        assert len(response.json()['reports']) >= 1
+        "
+        
+    - name: Test data export
+      run: |
+        cd backend
+        python -c "
+        import requests
+        from requests.auth import HTTPBasicAuth
+        
+        # Test data export (admin required)
+        auth = HTTPBasicAuth('admin', 'afetnet2024')
+        
+        response = requests.get('http://localhost:5002/api/export/help-requests', 
+                               auth=auth, 
+                               params={'format': 'csv', 'time_range': 'all'})
+        assert response.status_code == 200
+        
+        response = requests.get('http://localhost:5002/api/export/stats', auth=auth)
+        assert response.status_code == 200
+        "
+        
+    - name: Run frontend-backend integration tests
+      run: |
+        yarn test:integration
+        
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+        name: backend-coverage
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: backend-test-results
+        path: |
+          backend/test-results/
+          backend/coverage.xml
+          
+    - name: Cleanup
+      if: always()
+      run: |
+        cd backend
+        docker-compose -f docker-compose.test.yml down -v
