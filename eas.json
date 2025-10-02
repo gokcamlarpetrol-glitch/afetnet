@@ -11,7 +11,8 @@
       },
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "gradleCommand": ":app:assembleDebug",
+        "credentialsSource": "remote"
       }
     },
     "preview": {
@@ -38,7 +39,7 @@
     "android:production": {
       "distribution": "store",
       "android": {
-        "buildType": "aab",
+        "buildType": "app-bundle",
         "autoIncrement": "versionCode"
       },
       "env": {
