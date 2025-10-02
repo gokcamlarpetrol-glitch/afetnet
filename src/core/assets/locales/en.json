@@ -1,211 +1,36 @@
 {
-  "navigation": {
-    "home": "Home",
-    "map": "Map",
-    "community": "Community",
-    "family": "Family",
-    "guide": "Guide"
-  },
   "home": {
-    "title": "AfetNet",
-    "connected": "Connected",
-    "disconnected": "Disconnected",
-    "requestHelp": "Request Help",
-    "requestHelpSubtitle": "Send emergency assistance request",
-    "imSafe": "I'm Safe",
-    "imSafeSubtitle": "Notify family and friends",
-    "openMap": "Open Map",
-    "openMapSubtitle": "View emergency map",
-    "locationUnknown": "Location unknown",
-    "battery": "battery"
-  },
-  "help": {
-    "title": "Request Help",
-    "step1": {
-      "title": "Emergency Details"
-    },
-    "step2": {
-      "title": "Confirm & Send"
-    },
-    "priority": {
-      "title": "Priority Level",
-      "critical": "Critical",
-      "criticalSubtitle": "Life-threatening emergency",
-      "high": "High",
-      "highSubtitle": "Urgent assistance needed",
-      "normal": "Normal",
-      "normalSubtitle": "General assistance needed"
-    },
-    "conditions": {
-      "title": "Emergency Conditions",
-      "underRubble": "Trapped under rubble",
-      "underRubbleSubtitle": "Unable to move freely",
-      "injured": "Injured",
-      "injuredSubtitle": "Requires medical attention"
-    },
-    "peopleCount": {
-      "title": "Number of People"
-    },
-    "location": {
-      "title": "Your Location",
-      "loading": "Getting location..."
-    },
-    "note": {
-      "title": "Additional Notes",
-      "placeholder": "Describe your situation or specific needs..."
-    },
-    "summary": {
-      "title": "Request Summary"
-    },
-    "send": "Send Request",
-    "sent": {
-      "title": "Request Sent",
-      "message": "Your help request has been sent to nearby responders and emergency services."
-    }
-  },
-  "safe": {
-    "title": "Safe Ping Sent",
-    "sent": "Your safe status has been broadcasted to nearby devices.",
-    "defaultNote": "I am safe"
+    "title": "Home",
+    "welcome": "Welcome to AfetNet",
+    "emergency_button": "Emergency",
+    "safe_button": "Report Safe",
+    "help_button": "Request Help"
   },
   "map": {
-    "filters": {
-      "all": "All",
-      "critical": "Critical",
-      "high": "High",
-      "normal": "Normal"
-    },
-    "heatmap": "Heatmap",
-    "nearestShelter": {
-      "title": "Nearest Shelter",
-      "distance": "Distance"
-    },
-    "noShelters": {
-      "title": "No Shelters Found",
-      "message": "No emergency shelters found in your area."
-    }
+    "title": "Map",
+    "loading": "Loading...",
+    "error": "Failed to load map"
   },
   "community": {
     "title": "Community",
-    "subtitle": "{{count}} active requests",
-    "timeAgo": {
-      "justNow": "Just now",
-      "minutes": "{{count}} min ago",
-      "hours": "{{count}}h ago"
-    },
-    "people": "people",
-    "navigate": "Navigate",
-    "contact": "Contact",
-    "empty": {
-      "title": "No Active Requests",
-      "subtitle": "No help requests are currently active in your area."
-    }
+    "help_requests": "Help Requests",
+    "resources": "Resources",
+    "damage_reports": "Damage Reports"
   },
   "family": {
     "title": "Family",
-    "subtitle": "{{count}} contacts",
-    "addContact": "Add Contact",
-    "name": "Name",
-    "namePlaceholder": "Enter contact name",
-    "phone": "Phone",
-    "phonePlaceholder": "Enter phone number",
-    "sendSafePing": "Send Safe Ping",
-    "safePing": {
-      "message": "Safe ping message",
-      "sent": {
-        "title": "Safe Ping Sent",
-        "message": "Your safe status has been sent to all contacts."
-      }
-    },
-    "safe": "Safe",
-    "unknown": "Unknown",
-    "lastPing": "Last ping",
-    "never": "Never",
-    "timeAgo": {
-      "justNow": "Just now",
-      "minutes": "{{count}} min ago",
-      "hours": "{{count}}h ago",
-      "days": "{{count}}d ago"
-    },
-    "delete": {
-      "title": "Delete Contact",
-      "message": "Are you sure you want to delete this contact?"
-    },
-    "empty": {
-      "title": "No Family Contacts",
-      "subtitle": "Add family members and friends to stay connected during emergencies."
-    }
+    "add_member": "Add Member",
+    "share_code": "Share Code"
   },
   "guide": {
-    "title": "Emergency Guide",
-    "subtitle": "Offline safety information",
-    "search": "Search guides...",
-    "categories": {
-      "all": "All",
-      "firstAid": "First Aid",
-      "safety": "Safety",
-      "survival": "Survival"
-    },
-    "firstAid": {
-      "basic": {
-        "title": "Basic First Aid",
-        "content": "# Basic First Aid\n\n## ABC Assessment\n\n1. **Airway**: Check if the person can breathe\n2. **Breathing**: Look for chest movement\n3. **Circulation**: Check for pulse\n\n## Bleeding Control\n\n- Apply direct pressure to wound\n- Elevate injured area if possible\n- Use clean cloth or bandage\n\n## Shock Management\n\n- Keep person lying down\n- Elevate legs if no spinal injury\n- Keep warm and comfortable\n- Monitor breathing and pulse"
-      },
-      "cpr": {
-        "title": "CPR (Cardiopulmonary Resuscitation)",
-        "content": "# CPR Guidelines\n\n## Steps for CPR\n\n1. **Check responsiveness**: Tap shoulders and shout\n2. **Call for help**: Dial emergency services\n3. **Position**: Place person on firm surface\n4. **Compressions**: Place hands on center of chest\n5. **Push hard and fast**: 100-120 compressions per minute\n6. **Give breaths**: Tilt head, pinch nose, give 2 breaths\n\n## Compression Depth\n\n- Adults: 2 inches deep\n- Children: 1.5 inches deep\n- Infants: 1 inch deep\n\n## Continue until help arrives or person shows signs of life"
-      }
-    },
-    "safety": {
-      "earthquake": {
-        "title": "Earthquake Safety",
-        "content": "# Earthquake Safety Guide\n\n## During an Earthquake\n\n1. **Drop, Cover, and Hold On**\n   - Drop to your hands and knees\n   - Cover your head and neck\n   - Hold on to something sturdy\n\n2. **Stay Indoors**\n   - Stay away from windows\n   - Avoid doorways (not safer)\n   - Stay under heavy furniture\n\n## After an Earthquake\n\n1. **Check for injuries**\n2. **Check for gas leaks**\n3. **Turn off utilities if damaged**\n4. **Listen to emergency radio**\n5. **Be prepared for aftershocks**\n\n## Emergency Kit Items\n\n- Water (1 gallon per person per day)\n- Non-perishable food\n- First aid kit\n- Flashlight with extra batteries\n- Emergency radio\n- Medications\n- Important documents"
-      },
-      "fire": {
-        "title": "Fire Safety",
-        "content": "# Fire Safety Guide\n\n## Fire Prevention\n\n1. **Install smoke detectors**\n2. **Keep fire extinguishers handy**\n3. **Never leave cooking unattended**\n4. **Keep flammable items away from heat**\n5. **Have an escape plan**\n\n## If Fire Breaks Out\n\n1. **Get out immediately**\n2. **Crawl low under smoke**\n3. **Feel doors before opening**\n4. **Use stairs, not elevators**\n5. **Meet at designated location**\n\n## Stop, Drop, and Roll\n\n- Stop immediately\n- Drop to the ground\n- Roll to smother flames\n- Cover face with hands\n\n## Fire Extinguisher Use (PASS)\n\n- **P**ull the pin\n- **A**im at base of fire\n- **S**queeze the lever\n- **S**weep side to side"
-      }
-    },
-    "survival": {
-      "water": {
-        "title": "Water Survival",
-        "content": "# Water Survival Guide\n\n## Finding Water Sources\n\n1. **Natural sources**\n   - Rivers and streams\n   - Lakes and ponds\n   - Rainwater collection\n   - Morning dew\n\n2. **Underground sources**\n   - Dig in dry riverbeds\n   - Look for green vegetation\n   - Check rock crevices\n\n## Water Purification\n\n1. **Boiling**: 1 minute rolling boil\n2. **Chemical treatment**: Iodine or chlorine tablets\n3. **Filtration**: Commercial or improvised filters\n4. **Solar disinfection**: UV treatment\n\n## Water Conservation\n\n- Drink only when thirsty\n- Avoid alcohol and caffeine\n- Stay in shade during hot hours\n- Reduce physical activity\n\n## Signs of Dehydration\n\n- Thirst\n- Dry mouth\n- Dark urine\n- Fatigue\n- Dizziness"
-      },
-      "food": {
-        "title": "Food Survival",
-        "content": "# Food Survival Guide\n\n## Emergency Food Sources\n\n1. **Non-perishable items**\n   - Canned goods\n   - Dried foods\n   - Energy bars\n   - Nuts and seeds\n\n2. **Foraging safety**\n   - Never eat unknown plants\n   - Test small amounts first\n   - Avoid mushrooms unless expert\n   - Look for common edible plants\n\n## Food Safety\n\n1. **Inspect before eating**\n2. **Cook thoroughly**\n3. **Avoid spoiled food**\n4. **Store properly**\n\n## Energy Conservation\n\n- Eat small, frequent meals\n- Prioritize high-energy foods\n- Stay hydrated\n- Rest when possible\n\n## Emergency Rations\n\n- Plan 3 days of food per person\n- Include high-calorie items\n- Consider dietary restrictions\n- Rotate stock regularly"
-      }
-    },
-    "empty": {
-      "title": "No Guides Found",
-      "subtitle": "Try adjusting your search or category filter."
-    }
+    "title": "Guide",
+    "first_aid": "First Aid",
+    "safety": "Safety"
   },
-  "permissions": {
-    "location": {
-      "title": "Location Permission Required",
-      "message": "AfetNet needs location access to help emergency responders locate you during disasters."
-    },
-    "bluetooth": {
-      "title": "Bluetooth Permission Required",
-      "message": "AfetNet uses Bluetooth to communicate with nearby devices when internet is unavailable."
-    },
-    "sms": {
-      "title": "SMS Permission Required",
-      "message": "AfetNet can send SMS messages as a fallback when internet is unavailable."
-    }
-  },
-  "error": {
-    "title": "Error",
-    "locationRequired": "Location access is required for this feature.",
-    "sendFailed": "Failed to send message. Please try again."
-  },
-  "common": {
-    "ok": "OK",
-    "cancel": "Cancel",
-    "save": "Save",
-    "delete": "Delete",
-    "next": "Next",
-    "back": "Back"
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "notifications": "Notifications",
+    "privacy": "Privacy"
   }
 }

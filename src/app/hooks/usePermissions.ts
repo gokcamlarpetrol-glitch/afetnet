@@ -1,161 +1,68 @@
-import { useState, useEffect } from 'react';
-import { Platform, Alert } from 'react-native';
-import { request, PERMISSIONS, RESULTS, Permission } from 'react-native-permissions';
-
-interface PermissionStatus {
-  location: boolean;
-  bluetooth: boolean;
-  notifications: boolean;
-}
+import { useState, useCallback } from 'react';
+import { Alert, Linking } from 'react-native';
+import * as Location from 'expo-location';
+import * as Contacts from 'expo-contacts';
 
 export const usePermissions = () => {
-  const [permissions, setPermissions] = useState<PermissionStatus>({
+  const [permissions, setPermissions] = useState({
     location: false,
     bluetooth: false,
-    notifications: false,
+    contacts: false,
+    camera: false,
   });
 
-  useEffect(() => {
-    checkAllPermissions();
+  const requestPermissions = useCallback(async () => {
+    try {
+      // Request location permission
+      const locationStatus = await Location.requestForegroundPermissionsAsync();
+      setPermissions(prev => ({ ...prev, location: locationStatus.status === 'granted' }));
+
+      // Request contacts permission
+      const contactsStatus = await Contacts.requestPermissionsAsync();
+      setPermissions(prev => ({ ...prev, contacts: contactsStatus.status === 'granted' }));
+
+      // Note: Bluetooth and camera permissions are handled by the platform
+      // when the respective features are used
+
+      return {
+        location: locationStatus.status === 'granted',
+        contacts: contactsStatus.status === 'granted',
+        bluetooth: true, // Will be checked when BLE is used
+        camera: true, // Will be checked when camera is used
+      };
+    } catch (error) {
+      console.error('Permission request failed:', error);
+      return permissions;
+    }
   }, []);
 
-  const checkAllPermissions = async () => {
-    const locationPermission = await checkLocationPermission();
-    const bluetoothPermission = await checkBluetoothPermission();
-    const notificationPermission = await checkNotificationPermission();
-
-    setPermissions({
-      location: locationPermission,
-      bluetooth: bluetoothPermission,
-      notifications: notificationPermission,
-    });
-  };
-
-  const checkLocationPermission = async (): Promise<boolean> => {
+  const checkPermissions = useCallback(async () => {
     try {
-      const permission = Platform.select({
-        ios: PERMISSIONS.IOS.LOCATION_WHEN_IN_USE,
-        android: PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+      const locationStatus = await Location.getForegroundPermissionsAsync();
+      const contactsStatus = await Contacts.getPermissionsAsync();
+
+      setPermissions({
+        location: locationStatus.status === 'granted',
+        contacts: contactsStatus.status === 'granted',
+        bluetooth: true,
+        camera: true,
       });
 
-      if (!permission) return false;
-
-      const result = await request(permission);
-      return result === RESULTS.GRANTED;
+      return permissions;
     } catch (error) {
-      console.error('Failed to check location permission:', error);
-      return false;
+      console.error('Permission check failed:', error);
+      return permissions;
     }
-  };
+  }, [permissions]);
 
-  const checkBluetoothPermission = async (): Promise<boolean> => {
-    try {
-      if (Platform.OS === 'ios') {
-        // iOS handles Bluetooth permissions differently
-        return true;
-      }
-
-      const permission = PERMISSIONS.ANDROID.BLUETOOTH_SCAN;
-      const result = await request(permission);
-      return result === RESULTS.GRANTED;
-    } catch (error) {
-      console.error('Failed to check bluetooth permission:', error);
-      return false;
-    }
-  };
-
-  const checkNotificationPermission = async (): Promise<boolean> => {
-    try {
-      const permission = Platform.select({
-        ios: PERMISSIONS.IOS.NOTIFICATIONS,
-        android: PERMISSIONS.ANDROID.POST_NOTIFICATIONS,
-      });
-
-      if (!permission) return false;
-
-      const result = await request(permission);
-      return result === RESULTS.GRANTED;
-    } catch (error) {
-      console.error('Failed to check notification permission:', error);
-      return false;
-    }
-  };
-
-  const requestPermissions = async (): Promise<PermissionStatus> => {
-    const locationPermission = await checkLocationPermission();
-    const bluetoothPermission = await checkBluetoothPermission();
-    const notificationPermission = await checkNotificationPermission();
-
-    const newPermissions = {
-      location: locationPermission,
-      bluetooth: bluetoothPermission,
-      notifications: notificationPermission,
-    };
-
-    setPermissions(newPermissions);
-    return newPermissions;
-  };
-
-  const requestLocationPermission = async (): Promise<boolean> => {
-    const granted = await checkLocationPermission();
-    setPermissions(prev => ({ ...prev, location: granted }));
-    
-    if (!granted) {
-      Alert.alert(
-        'Location Permission Required',
-        'This app needs location access to send help requests with your location.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Settings', onPress: () => {} },
-        ]
-      );
-    }
-    
-    return granted;
-  };
-
-  const requestBluetoothPermission = async (): Promise<boolean> => {
-    const granted = await checkBluetoothPermission();
-    setPermissions(prev => ({ ...prev, bluetooth: granted }));
-    
-    if (!granted) {
-      Alert.alert(
-        'Bluetooth Permission Required',
-        'This app needs Bluetooth access to communicate with nearby devices.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Settings', onPress: () => {} },
-        ]
-      );
-    }
-    
-    return granted;
-  };
-
-  const requestNotificationPermission = async (): Promise<boolean> => {
-    const granted = await checkNotificationPermission();
-    setPermissions(prev => ({ ...prev, notifications: granted }));
-    
-    if (!granted) {
-      Alert.alert(
-        'Notification Permission Required',
-        'This app needs notification access to alert you about important updates.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Settings', onPress: () => {} },
-        ]
-      );
-    }
-    
-    return granted;
-  };
+  const openSettings = useCallback(() => {
+    Linking.openSettings();
+  }, []);
 
   return {
     permissions,
     requestPermissions,
-    requestLocationPermission,
-    requestBluetoothPermission,
-    requestNotificationPermission,
-    checkAllPermissions,
+    checkPermissions,
+    openSettings,
   };
 };

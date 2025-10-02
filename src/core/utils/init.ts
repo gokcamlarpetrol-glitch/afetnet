@@ -1,37 +1,20 @@
-import { database } from '../data/db';
+import { Database } from '../database';
 import { MBTilesLoader } from '../offline/mbtiles';
-import { BLEMeshManager } from '../p2p/ble';
-import { MessageQueue } from '../p2p/queue';
-import '../app/i18n';
 
 export const initializeApp = async (): Promise<void> => {
   try {
     console.log('Initializing AfetNet app...');
 
     // Initialize database
-    await database.adapter.schema.migrations?.();
-    console.log('Database initialized');
+    await Database.getInstance().initialize();
 
-    // Initialize MBTiles
-    const mbtilesLoader = MBTilesLoader.getInstance();
-    await mbtilesLoader.initialize();
-    console.log('MBTiles initialized');
+    // Initialize MBTiles loader
+    await MBTilesLoader.getInstance().initialize();
 
-    // Initialize BLE Mesh Manager
-    const bleManager = BLEMeshManager.getInstance();
-    console.log('BLE Mesh Manager initialized');
-
-    // Initialize Message Queue
-    const messageQueue = MessageQueue.getInstance();
-    console.log('Message Queue initialized');
-
-    // Start queue processor
-    await messageQueue.startQueueProcessor(5000);
-    console.log('Queue processor started');
-
-    console.log('AfetNet app initialization completed');
+    // Initialize other services here
+    console.log('AfetNet app initialized successfully');
   } catch (error) {
-    console.error('App initialization failed:', error);
+    console.error('Failed to initialize AfetNet app:', error);
     throw error;
   }
 };

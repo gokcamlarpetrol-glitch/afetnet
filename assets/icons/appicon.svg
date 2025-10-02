@@ -1,0 +1,59 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a1a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#333;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#007AFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0056CC;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="200" ry="200" fill="url(#bg)"/>
+  
+  <!-- Main icon - Network/Connection symbol -->
+  <g transform="translate(512, 512)">
+    <!-- Central node -->
+    <circle cx="0" cy="0" r="80" fill="url(#accent)"/>
+    
+    <!-- Connection lines -->
+    <g stroke="url(#accent)" stroke-width="24" fill="none" opacity="0.8">
+      <!-- Top connections -->
+      <line x1="0" y1="-80" x2="0" y2="-200"/>
+      <line x1="-60" y1="-60" x2="-150" y2="-150"/>
+      <line x1="60" y1="-60" x2="150" y2="-150"/>
+      
+      <!-- Side connections -->
+      <line x1="80" y1="0" x2="200" y2="0"/>
+      <line x1="-80" y1="0" x2="-200" y2="0"/>
+      
+      <!-- Bottom connections -->
+      <line x1="0" y1="80" x2="0" y2="200"/>
+      <line x1="-60" y1="60" x2="-150" y2="150"/>
+      <line x1="60" y1="60" x2="150" y2="150"/>
+    </g>
+    
+    <!-- Peripheral nodes -->
+    <g fill="url(#accent)" opacity="0.6">
+      <circle cx="0" cy="-200" r="40"/>
+      <circle cx="-150" cy="-150" r="35"/>
+      <circle cx="150" cy="-150" r="35"/>
+      <circle cx="200" cy="0" r="40"/>
+      <circle cx="-200" cy="0" r="40"/>
+      <circle cx="0" cy="200" r="40"/>
+      <circle cx="-150" cy="150" r="35"/>
+      <circle cx="150" cy="150" r="35"/>
+    </g>
+    
+    <!-- Emergency cross in center -->
+    <g fill="white" opacity="0.9">
+      <rect x="-15" y="-60" width="30" height="120" rx="15"/>
+      <rect x="-60" y="-15" width="120" height="30" rx="15"/>
+    </g>
+  </g>
+  
+  <!-- App name -->
+  <text x="512" y="950" text-anchor="middle" font-family="Arial, sans-serif" font-size="120" font-weight="bold" fill="white" opacity="0.9">AFETNET</text>
+</svg>
