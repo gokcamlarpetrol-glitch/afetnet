@@ -32,7 +32,7 @@
     "@maplibre/maplibre-react-native": "^10.0.11",
     "@nozbe/watermelondb": "^0.24.0",
     "@nozbe/with-observables": "^1.6.0",
-    "@react-native-async-storage/async-storage": "1.21.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^6.5.11",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
