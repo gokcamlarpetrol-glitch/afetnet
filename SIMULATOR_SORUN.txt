@@ -1,0 +1,61 @@
+═══════════════════════════════════════════════════════════════
+  📱 SİMULATOR SORUNU - ÇÖZÜM ADIMLARI
+═══════════════════════════════════════════════════════════════
+
+SORUN:
+❌ Alt barda sadece 4 tab görünüyor
+❌ Mesaj ve Ayar tab'ları kayıp
+❌ Simulator cache sorunu
+
+ÇÖZÜM ADIMLARI:
+
+1. SİMULATOR'U KAPAT
+   iPhone Simulator → Quit (Cmd+Q)
+
+2. CACHE TEMİZLE ✅
+   → .expo klasörü silindi
+   → node_modules/.cache silindi
+
+3. EXPO YENİDEN BAŞLATILDI
+   npx expo start --clear
+
+4. SİMULATOR'U TEKRAR AÇ
+   → "i" tuşuna bas (iOS simulator için)
+   → VEYA QR kodu tara
+
+───────────────────────────────────────────────────────────────
+NEDEN OLUYOR?
+
+Simulator bazen şunları cache yapar:
+- Tab bar layout
+- Navigation yapısı
+- Asset'ler (iconlar)
+
+Hard reset gerekiyor!
+
+───────────────────────────────────────────────────────────────
+ALTERNATİF: GERÇEK CİHAZ KULLAN
+
+iPhone'unuzda Expo Go uygulamasını açın:
+1. QR kodu tara
+2. Uygulama yüklenecek
+3. Alt bar 6 tab ile görünecek
+
+Gerçek cihazda DAHA GÜVENILIR!
+
+═══════════════════════════════════════════════════════════════
+ 🚀 ŞİMDİ YAPMANIZ GEREKENLER:
+═══════════════════════════════════════════════════════════════
+
+1. Simulator'u KAPAT (Cmd+Q)
+2. Terminal'de "i" tuşuna BAS (yeni simulator açar)
+3. Expo Go yüklenecek
+4. Uygulama açılacak
+5. Alt barı KONTROL ET
+
+VEYA
+
+1. iPhone'unuzda Expo Go aç
+2. QR kodu tara
+3. Gerçek cihazda test et (ÖNERİLİR!)
+

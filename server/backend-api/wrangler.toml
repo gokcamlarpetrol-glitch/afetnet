@@ -1,0 +1,27 @@
+name = "afetnet-api"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+# Workers configuration
+workers_dev = true
+
+# KV Namespaces (optional - create in Cloudflare dashboard)
+# [[kv_namespaces]]
+# binding = "QUEUE_KV"
+# id = "YOUR_KV_ID_HERE"
+
+# [[kv_namespaces]]
+# binding = "FCM_TOKENS"
+# id = "YOUR_KV_ID_HERE"
+
+# Environment variables (secrets)
+# Set via: wrangler secret put API_SECRET
+# [vars]
+# API_SECRET = ""  # HMAC secret for signature verification
+
+# Routes (when deploying to custom domain)
+# routes = [
+#   { pattern = "api.afetnet.org/*", zone_name = "afetnet.org" }
+# ]
+
+

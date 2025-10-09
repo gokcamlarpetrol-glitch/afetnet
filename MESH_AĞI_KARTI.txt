@@ -1,0 +1,107 @@
+════════════════════════════════════════════════════════════
+  ✅ MESH AĞI DURUM KARTI EKLENDİ!
+════════════════════════════════════════════════════════════
+
+🎨 YENİ KART - MESH AĞI SİSTEMİ:
+
+📍 YER: 3 stat kartının (Mesaj, Kişi, Deprem) hemen altında
+
+┌─────────────────────────────────────────────────────────┐
+│ 🔴 Mesh Ağı Kapalı                      [OFFLINE] 🔴    │
+│    0 cihaz bağlı                                        │
+│ ─────────────────────────────────────────────────────── │
+│  📶 İnternet  │  📡 Sensör  │  👥 Kuyruk               │
+│    Bağlı      │   Kapalı    │     0                    │
+└─────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════
+
+✨ TASARIM ÖZELLİKLERİ:
+
+1. ✅ ÜST BÖLÜM:
+   - Sol: 40x40px yuvarlak icon (git-network)
+   - Ortа: Başlık + alt başlık
+     * "Mesh Ağı Kapalı" (15px, bold)
+     * "0 cihaz bağlı" (11px, gri)
+   - Sağ: Kırmızı "OFFLINE" rozeti
+
+2. ✅ ALT BÖLÜM (3 Sütun İstatistik):
+   - İnternet: 📶 wifi icon + "Bağlı"
+   - Sensör: 📡 radio icon + "Kapalı"
+   - Kuyruk: 👥 people icon + sayı (dinamik)
+
+3. ✅ GÖRSEL:
+   - Arkaplan: #1e293b (koyu slate)
+   - Border: 1px #334155
+   - Border radius: 14px
+   - Padding: 16px
+   - Icon container: Kırmızı şeffaf (rgba 15%)
+   - Üst/alt bölüm arası: İnce ayırıcı çizgi
+
+════════════════════════════════════════════════════════════
+
+🎨 RENK PALETİ:
+
+| Element | Renk | Hex |
+|---------|------|-----|
+| Arkaplan | Koyu slate | #1e293b |
+| Border | Slate | #334155 |
+| Icon bg | Kırmızı şeffaf | rgba(239, 68, 68, 0.15) |
+| Icon | Kırmızı | #ef4444 |
+| "OFFLINE" bg | Kırmızı şeffaf | rgba(239, 68, 68, 0.2) |
+| "OFFLINE" text | Kırmızı | #ef4444 |
+| Başlık | Beyaz | #ffffff |
+| Alt başlık | Gri | #94a3b8 |
+| İstatistik label | Koyu gri | #64748b |
+| İstatistik değer | Gri | #94a3b8 |
+
+════════════════════════════════════════════════════════════
+
+📊 DİNAMİK VERİ:
+
+✅ Kuyruk sayısı:
+   - queueItems.length (gerçek zamanlı)
+   
+✅ Gelecekte eklenebilir:
+   - Bağlı cihaz sayısı
+   - Mesh ağı durumu (aktif/kapalı)
+   - Sensör durumu
+   - Son bağlantı zamanı
+
+════════════════════════════════════════════════════════════
+
+🔮 GELECEK GELİŞTİRMELER:
+
+1. Mesh ağı aktif olunca:
+   - Icon: Yeşil olsun
+   - Rozet: "ONLINE" (yeşil)
+   - Cihaz sayısı: Gerçek veri
+
+2. Tıklanabilir yapılabilir:
+   - Diagnostics ekranına yönlendir
+   - Detaylı mesh bilgileri göster
+
+3. Animasyon:
+   - Online/offline geçişinde pulse efekti
+   - Icon rotate animasyonu
+
+════════════════════════════════════════════════════════════
+
+✅ SONUÇ:
+
+🎉 ANA EKRAN ÇOK DAHA BİLGİLENDİRİCİ!
+
+Kullanıcılar şimdi:
+✅ Mesh ağı durumunu görebilir
+✅ Bağlı cihaz sayısını takip edebilir
+✅ İnternet/sensör durumunu kontrol edebilir
+✅ Kuyruk sayısını görebilir
+✅ Sistemin genel durumunu anlayabilir
+
+════════════════════════════════════════════════════════════
+
+📱 Metro çalışıyor, hot reload aktif!
+Değişiklik otomatik yüklenecek.
+
+════════════════════════════════════════════════════════════
+

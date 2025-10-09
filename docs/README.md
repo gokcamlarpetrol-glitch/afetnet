@@ -51,3 +51,4 @@ Her değişiklikte "Son Güncelleme" tarihi güncellenir ve kullanıcılara bild
 - **Support:** support@afetnet.app
 - **Legal:** legal@afetnet.app
 
+

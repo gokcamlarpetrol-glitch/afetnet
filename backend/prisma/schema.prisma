@@ -1,0 +1,429 @@
+// AfetNet Backend Database Schema
+// CRITICAL: This schema handles life-saving data - every field matters
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER & AUTH ====================
+
+model User {
+  id            String   @id @default(uuid())
+  afnId         String   @unique // AFN-1A2B3C4D format - CRITICAL: Unique identifier
+  name          String   @db.VarChar(100)
+  email         String?  @unique @db.VarChar(255)
+  phone         String?  @unique @db.VarChar(20)
+  passwordHash  String?  @db.VarChar(255)
+  
+  // Profile - CRITICAL: Emergency medical information
+  avatar        String?  @db.VarChar(500)
+  bloodType     String?  @db.VarChar(10)
+  allergies     String?  @db.VarChar(500)
+  medications   String?  @db.VarChar(500)
+  emergencyContact String? @db.VarChar(20)
+  address       String?  @db.VarChar(500)
+  
+  // Premium - CRITICAL: Feature access control
+  isPremium     Boolean  @default(false)
+  premiumExpiry DateTime?
+  premiumPlan   String?  @db.VarChar(20) // monthly, yearly, lifetime
+  stripeCustomerId String? @unique @db.VarChar(100)
+  
+  // Security - CRITICAL: Account security
+  isActive      Boolean  @default(true)
+  isVerified    Boolean  @default(false)
+  verifiedAt    DateTime?
+  failedLoginAttempts Int @default(0)
+  lockedUntil   DateTime?
+  
+  // Push Notifications
+  fcmTokens     FcmToken[]
+  
+  // Relationships
+  familyMembers FamilyMember[] @relation("UserFamily")
+  sentMessages  Message[]      @relation("MessageSender")
+  receivedMessages Message[]   @relation("MessageReceiver")
+  sosAlerts     SosAlert[]
+  locations     LocationHistory[]
+  payments      Payment[]
+  analytics     Analytics[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastSeenAt    DateTime @default(now())
+  
+  @@index([afnId])
+  @@index([email])
+  @@index([phone])
+  @@index([isPremium])
+  @@index([isActive])
+  @@index([lastSeenAt])
+  @@map("users")
+}
+
+model FcmToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique @db.VarChar(500)
+  platform  String   @db.VarChar(20) // ios, android, web
+  deviceId  String?  @db.VarChar(100)
+  isActive  Boolean  @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsedAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([token])
+  @@index([isActive])
+  @@map("fcm_tokens")
+}
+
+// ==================== FAMILY ====================
+
+model FamilyMember {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation("UserFamily", fields: [userId], references: [id], onDelete: Cascade)
+  
+  memberAfnId     String   @db.VarChar(20) // AFN-ID of family member
+  name            String   @db.VarChar(100)
+  relation        String?  @db.VarChar(50) // anne, baba, kardeş, etc.
+  phone           String?  @db.VarChar(20)
+  
+  isVerified      Boolean  @default(false)
+  connectionMethod String  @db.VarChar(20) // qr, afn-id, manual
+  
+  // Emergency status - CRITICAL
+  lastKnownLat    Float?
+  lastKnownLon    Float?
+  lastLocationUpdate DateTime?
+  emergencyStatus String?  @db.VarChar(20) // safe, need_help, unknown
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([userId, memberAfnId])
+  @@index([userId])
+  @@index([memberAfnId])
+  @@index([emergencyStatus])
+  @@map("family_members")
+}
+
+// ==================== MESSAGES ====================
+
+model Message {
+  id          String   @id @default(uuid())
+  senderId    String
+  sender      User     @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  
+  content     String   @db.Text
+  type        String   @default("text") @db.VarChar(20) // text, sos, location, image
+  isEncrypted Boolean  @default(true)
+  
+  // Location (if type is location or sos) - CRITICAL
+  latitude    Float?
+  longitude   Float?
+  accuracy    Float?
+  
+  // BLE Mesh - CRITICAL: Offline message relay
+  ttl         Int      @default(5)
+  hopCount    Int      @default(0)
+  meshId      String?  @unique @db.VarChar(100) // Unique mesh message ID
+  
+  // Status - CRITICAL: Message delivery tracking
+  isSent      Boolean  @default(false)
+  isDelivered Boolean  @default(false)
+  isRead      Boolean  @default(false)
+  deliveredAt DateTime?
+  readAt      DateTime?
+  
+  // Priority - CRITICAL: SOS messages have higher priority
+  priority    String   @default("normal") @db.VarChar(20) // low, normal, high, critical
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime? // For temporary messages
+  
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([meshId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([priority])
+  @@index([isRead])
+  @@map("messages")
+}
+
+// ==================== SOS ALERTS ====================
+
+model SosAlert {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Location - CRITICAL: Exact location for rescue
+  latitude    Float
+  longitude   Float
+  accuracy    Float?
+  altitude    Float?
+  
+  message     String?  @db.VarChar(500)
+  tags        String[] // enkaz, acil, sos, yaralanma, etc.
+  
+  // Status - CRITICAL: Alert lifecycle
+  status      String   @default("active") @db.VarChar(20) // active, resolved, false_alarm, expired
+  priority    String   @default("critical") @db.VarChar(20) // low, medium, high, critical
+  
+  // Response - CRITICAL: Track who is helping
+  responders  String[] // AFN-IDs of responders
+  resolvedAt  DateTime?
+  resolvedBy  String?  @db.VarChar(20) // AFN-ID
+  resolutionNotes String? @db.Text
+  
+  // Metrics - CRITICAL: Response time tracking
+  responseTime Int?    // Seconds until first response
+  resolutionTime Int?  // Seconds until resolved
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([latitude, longitude]) // Geospatial queries
+  @@map("sos_alerts")
+}
+
+// ==================== LOCATION TRACKING ====================
+
+model LocationHistory {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Location - CRITICAL: Precise tracking
+  latitude    Float
+  longitude   Float
+  accuracy    Float?
+  altitude    Float?
+  speed       Float?
+  heading     Float?
+  
+  source      String   @default("gps") @db.VarChar(20) // gps, pdr, fused, network
+  
+  // Battery optimization
+  batteryLevel Float?
+  isBackgroundUpdate Boolean @default(false)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@index([source])
+  @@map("location_history")
+}
+
+// ==================== EARTHQUAKE DATA ====================
+
+model Earthquake {
+  id          String   @id @default(uuid())
+  externalId  String   @unique @db.VarChar(100) // ID from AFAD/USGS
+  
+  magnitude   Float
+  depth       Float?
+  latitude    Float
+  longitude   Float
+  place       String   @db.VarChar(255)
+  
+  source      String   @db.VarChar(20) // AFAD, USGS, KANDILLI
+  timestamp   DateTime
+  
+  // Notifications sent - CRITICAL: Track notification delivery
+  notificationsSent Int @default(0)
+  affectedUsers Int @default(0)
+  
+  // Additional data
+  felt        Boolean  @default(false)
+  tsunami     Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([externalId])
+  @@index([timestamp])
+  @@index([magnitude])
+  @@index([source])
+  @@index([latitude, longitude]) // Geospatial queries
+  @@map("earthquakes")
+}
+
+// ==================== PAYMENTS ====================
+
+model Payment {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  stripePaymentId   String   @unique @db.VarChar(100)
+  stripeCustomerId  String   @db.VarChar(100)
+  
+  amount            Int      // in cents - CRITICAL: Always use smallest currency unit
+  currency          String   @default("try") @db.VarChar(3)
+  
+  plan              String   @db.VarChar(20) // monthly, yearly, lifetime
+  status            String   @db.VarChar(20) // pending, completed, failed, refunded
+  
+  // Refund tracking
+  refundedAmount    Int?
+  refundedAt        DateTime?
+  refundReason      String?  @db.VarChar(500)
+  
+  metadata          Json?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([stripePaymentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+// ==================== MESH RELAY ====================
+
+model MeshMessage {
+  id          String   @id @default(uuid())
+  meshId      String   @unique @db.VarChar(100) // Unique mesh message ID
+  
+  fromAfnId   String   @db.VarChar(20)
+  toAfnId     String?  @db.VarChar(20) // null for broadcast
+  
+  type        String   @db.VarChar(20) // SOS, PING, ACK, MSG, LOCATION
+  payload     Json
+  
+  ttl         Int      @default(5)
+  hopCount    Int      @default(0)
+  
+  // Relay tracking - CRITICAL: Prevent loops
+  relayedBy   String[] // AFN-IDs of relayers
+  
+  // Timestamps - CRITICAL: Message lifecycle
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  lastRelayedAt DateTime @default(now())
+  
+  @@index([meshId])
+  @@index([fromAfnId])
+  @@index([toAfnId])
+  @@index([expiresAt])
+  @@index([type])
+  @@index([createdAt])
+  @@map("mesh_messages")
+}
+
+// ==================== ANALYTICS ====================
+
+model Analytics {
+  id          String   @id @default(uuid())
+  
+  eventType   String   @db.VarChar(50) // app_open, sos_sent, message_sent, etc.
+  userId      String?  @db.VarChar(50)
+  
+  // Event details
+  platform    String?  @db.VarChar(20) // ios, android, web
+  version     String?  @db.VarChar(20) // App version
+  
+  metadata    Json?
+  
+  // Performance tracking
+  duration    Int?     // milliseconds
+  success     Boolean  @default(true)
+  errorMessage String? @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([eventType])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([platform])
+  @@index([success])
+  @@map("analytics")
+}
+
+// ==================== AUDIT LOG ====================
+// CRITICAL: Track all sensitive operations for security
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  
+  userId      String?  @db.VarChar(50)
+  action      String   @db.VarChar(100) // login, logout, sos_created, payment_completed, etc.
+  resource    String?  @db.VarChar(50) // user, message, sos, payment
+  resourceId  String?  @db.VarChar(50)
+  
+  // Request details
+  ipAddress   String?  @db.VarChar(45) // IPv6 support
+  userAgent   String?  @db.VarChar(500)
+  
+  // Changes
+  oldValue    Json?
+  newValue    Json?
+  
+  // Result
+  success     Boolean  @default(true)
+  errorMessage String? @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([success])
+  @@map("audit_logs")
+}
+
+// ==================== NOTIFICATION QUEUE ====================
+// CRITICAL: Reliable notification delivery
+
+model NotificationQueue {
+  id          String   @id @default(uuid())
+  
+  userId      String   @db.VarChar(50)
+  type        String   @db.VarChar(50) // earthquake, sos, message, premium
+  
+  title       String   @db.VarChar(100)
+  body        String   @db.VarChar(500)
+  data        Json?
+  
+  // Delivery tracking
+  status      String   @default("pending") @db.VarChar(20) // pending, sent, failed
+  attempts    Int      @default(0)
+  lastAttemptAt DateTime?
+  sentAt      DateTime?
+  failureReason String? @db.Text
+  
+  // Priority - CRITICAL: SOS notifications have highest priority
+  priority    String   @default("normal") @db.VarChar(20) // low, normal, high, critical
+  
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // Don't send old notifications
+  
+  @@index([userId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@map("notification_queue")
+}

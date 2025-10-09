@@ -1,0 +1,79 @@
+<svg width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="backgroundGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#C62828;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#D32F2F;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#263238;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Subtle pattern overlay -->
+    <pattern id="subtlePattern" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
+      <circle cx="50" cy="50" r="1" fill="#FFFFFF" opacity="0.05"/>
+    </pattern>
+  </defs>
+  
+  <!-- Background gradient -->
+  <rect width="1080" height="1920" fill="url(#backgroundGradient)"/>
+  
+  <!-- Subtle pattern overlay -->
+  <rect width="1080" height="1920" fill="url(#subtlePattern)"/>
+  
+  <!-- Main content area -->
+  <g transform="translate(540, 960)">
+    
+    <!-- App icon (simplified version) -->
+    <g transform="translate(0, -120)">
+      <!-- Icon background circle -->
+      <circle cx="0" cy="0" r="80" fill="#FFFFFF" opacity="0.95"/>
+      
+      <!-- Heartbeat "A" -->
+      <g fill="none" stroke="#C62828" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Left stroke of A -->
+        <path d="M -40 50 L -10 -20 L -5 -20"/>
+        
+        <!-- Heartbeat pulse -->
+        <path d="M -5 -20 L 0 -35 L 5 -20 L 10 -35 L 15 -20 L 20 -35"/>
+        
+        <!-- Right stroke of A -->
+        <path d="M 20 -20 L 40 -20 L 50 50"/>
+        
+        <!-- Crossbar of A -->
+        <path d="M -10 10 L 40 10"/>
+      </g>
+    </g>
+    
+    <!-- Main title -->
+    <text x="0" y="60" text-anchor="middle" fill="#FFFFFF" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="48" font-weight="600" letter-spacing="-0.02em">
+      AfetNet
+    </text>
+    
+    <!-- Subtitle -->
+    <text x="0" y="120" text-anchor="middle" fill="#FFFFFF" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="20" font-weight="400" opacity="0.9" letter-spacing="0.01em">
+      Hayatta Kal. Yardım Et.
+    </text>
+    
+    <!-- Loading indicator -->
+    <g transform="translate(0, 200)">
+      <circle cx="0" cy="0" r="4" fill="#FFFFFF" opacity="0.6">
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="-20" cy="0" r="4" fill="#FFFFFF" opacity="0.6">
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" begin="0.3s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="20" cy="0" r="4" fill="#FFFFFF" opacity="0.6">
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" begin="0.6s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+    
+    <!-- Bottom accent -->
+    <g transform="translate(0, 800)">
+      <!-- Emergency services inspired line -->
+      <rect x="-100" y="0" width="200" height="2" fill="#FFCA28" opacity="0.8"/>
+      
+      <!-- Small text -->
+      <text x="0" y="40" text-anchor="middle" fill="#FFFFFF" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="14" font-weight="400" opacity="0.7">
+        Çevrimdışı İletişim Ağı
+      </text>
+    </g>
+  </g>
+</svg>

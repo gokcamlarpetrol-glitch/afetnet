@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: afetnet-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: afetnet
+      POSTGRES_PASSWORD: afetnet_password_change_this
+      POSTGRES_DB: afetnet
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afetnet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # AfetNet Backend API
+  backend:
+    build: .
+    container_name: afetnet-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://afetnet:afetnet_password_change_this@postgres:5432/afetnet?schema=public
+      JWT_SECRET: your-super-secret-jwt-key-change-this-in-production
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: "*"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./prisma:/app/prisma
+    command: sh -c "npx prisma migrate deploy && node dist/index.js"
+
+volumes:
+  postgres_data:
+

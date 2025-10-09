@@ -1,0 +1,20 @@
+name = "afetnet-quake-worker"
+main = "index.ts"
+compatibility_date = "2024-08-01"
+
+# KV namespace for storing tokens and provinces
+[[kv_namespaces]]
+binding = "KV"
+id = "afetnet-kv-storage"
+preview_id = "afetnet-kv-preview"
+
+# Environment variables (set via wrangler secret)
+# FCM_SERVER_KEY - Firebase server key
+# ORG_SECRET - Client authentication secret
+# PROVIDER - "AFAD" or "KANDILLI" (default: "AFAD")
+# POLL_MS - Polling interval in ms (default: 5000)
+# MAG_MIN - Minimum magnitude threshold (default: 3.5)
+
+# Cron trigger for automatic polling (every 30 seconds)
+[[triggers]]
+crons = ["*/30 * * * * *"]
