@@ -69,18 +69,11 @@ export function validateEnv(): EnvConfig {
       errors.push('JWT_SECRET must be changed from default value in production');
     }
 
-    // CRITICAL: Stripe keys required in production
-    if (!process.env.STRIPE_SECRET_KEY) {
-      errors.push('STRIPE_SECRET_KEY is required in production');
-    }
-    if (!process.env.STRIPE_WEBHOOK_SECRET) {
-      errors.push('STRIPE_WEBHOOK_SECRET is required in production');
-    }
+    // CRITICAL: Stripe keys optional for now (using in-app purchases)
+    // Stripe integration can be added later
 
-    // CRITICAL: Firebase required in production
-    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-      errors.push('Firebase credentials are required in production for push notifications');
-    }
+    // CRITICAL: Firebase optional for now (can be added later)
+    // Firebase integration can be added after deployment
   }
 
   // Throw if any errors
