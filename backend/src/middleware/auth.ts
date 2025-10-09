@@ -10,6 +10,10 @@ export interface AuthRequest extends Request {
     isPremium: boolean;
     isActive: boolean;
   };
+  params: any;
+  route: any;
+  path: string;
+  method: string;
 }
 
 export const authenticate = async (
