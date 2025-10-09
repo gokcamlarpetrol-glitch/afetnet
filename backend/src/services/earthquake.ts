@@ -30,22 +30,8 @@ const usgsBreaker = createCircuitBreaker(
 // Internal fetch function for AFAD
 const fetchAFADEarthquakesInternal = async (): Promise<EarthquakeData[]> => {
   try {
-    const response = await axios.post(
-      process.env.AFAD_API_URL || 'https://deprem.afad.gov.tr/EventService/GetEventsByFilter',
-      {
-        EventSearchFilterList: [
-          {
-            FilterType: 9,
-            FilterValue: 1, // Last 1 day
-          },
-        ],
-        Skip: 0,
-        Take: 100,
-        SortDescriptor: {
-          field: 'EventDate',
-          dir: 'desc',
-        },
-      },
+    const response = await axios.get(
+      process.env.AFAD_API_URL || 'https://deprem.afad.gov.tr/EventData/GetLast100Event',
       {
         headers: {
           'Content-Type': 'application/json',
@@ -68,8 +54,13 @@ const fetchAFADEarthquakesInternal = async (): Promise<EarthquakeData[]> => {
       timestamp: new Date(event.eventDate),
       source: 'AFAD',
     }));
-  } catch (error) {
-    console.error('AFAD fetch error:', error);
+  } catch (error: any) {
+    logger.error('AFAD fetch error:', {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      url: error.config?.url,
+    });
     return [];
   }
 };
