@@ -101,7 +101,7 @@ router.get(
             createdAt: { gte: startDate, lte: endDate },
           },
           _avg: {
-            success: true,
+            duration: true,
           },
         }),
       ]);
@@ -114,7 +114,7 @@ router.get(
         totalEvents,
         eventsByType,
         platformDistribution,
-        successRate: successRate._avg.success || 0,
+        averageDuration: successRate._avg.duration || 0,
       });
     } catch (error) {
       console.error('❌ Analytics stats error:', error);

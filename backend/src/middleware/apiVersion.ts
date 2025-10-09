@@ -8,6 +8,8 @@ import { NextFunction, Request, Response } from 'express';
 
 export interface VersionedRequest extends Request {
   apiVersion?: string;
+  headers: any;
+  path: string;
 }
 
 export const apiVersion = (req: VersionedRequest, res: Response, next: NextFunction) => {

@@ -25,8 +25,8 @@ export const auditLog = (action: string, resource?: string) => {
           action,
           resource,
           resourceId: req.params.id || null,
-          ipAddress: req.ip || req.socket.remoteAddress || null,
-          userAgent: req.headers['user-agent'] || null,
+          ipAddress: (req as any).ip || (req as any).socket?.remoteAddress || null,
+          userAgent: (req as any).headers?.['user-agent'] || null,
           success,
           errorMessage: success ? null : body?.error || null,
         },
@@ -73,8 +73,8 @@ export const auditAuth = (action: 'login' | 'register' | 'logout') => {
           userId: body?.user?.id || null,
           action: `auth_${action}`,
           resource: 'user',
-          ipAddress: req.ip || req.socket.remoteAddress || null,
-          userAgent: req.headers['user-agent'] || null,
+          ipAddress: (req as any).ip || (req as any).socket?.remoteAddress || null,
+          userAgent: (req as any).headers?.['user-agent'] || null,
           success,
           errorMessage: success ? null : body?.error || null,
         },
@@ -88,7 +88,7 @@ export const auditAuth = (action: 'login' | 'register' | 'logout') => {
           email: req.body?.email,
           phone: req.body?.phone,
           afnId: req.body?.afnId,
-          ip: req.ip,
+          ip: (req as any).ip,
         });
 
         // CRITICAL: Track failed login attempts

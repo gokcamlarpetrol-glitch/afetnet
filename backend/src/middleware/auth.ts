@@ -13,6 +13,10 @@ export interface AuthRequest extends Request {
   body: any;
   params: any;
   query: any;
+  path: string;
+  method: string;
+  ip: string;
+  headers: any;
 }
 
 export const authenticate = async (

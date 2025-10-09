@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export interface RequestWithId extends Request {
   id?: string;
+  headers: any;
 }
 
 export const requestId = (req: RequestWithId, res: Response, next: NextFunction) => {
