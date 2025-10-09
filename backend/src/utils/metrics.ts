@@ -1,6 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
 import client from 'prom-client';
-import { AuthRequest } from '../middleware/auth';
 
 /**
  * Prometheus Metrics
@@ -111,7 +110,7 @@ register.registerMetric(meshMessagesTotal);
  * Metrics middleware
  * CRITICAL: Tracks all HTTP requests
  */
-export const metricsMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const metricsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
 
   res.on('finish', () => {
