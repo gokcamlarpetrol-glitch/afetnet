@@ -340,6 +340,7 @@ model Analytics {
   
   eventType   String   @db.VarChar(50) // app_open, sos_sent, message_sent, etc.
   userId      String?  @db.VarChar(50)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   // Event details
   platform    String?  @db.VarChar(20) // ios, android, web
