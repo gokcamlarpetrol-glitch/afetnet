@@ -10,6 +10,9 @@ export interface AuthRequest extends Request {
     isPremium: boolean;
     isActive: boolean;
   };
+  body: any;
+  params: any;
+  query: any;
 }
 
 export const authenticate = async (
