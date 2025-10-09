@@ -7,9 +7,10 @@ import { sendMulticastNotification } from '../services/firebase';
 import { prisma } from '../utils/prisma';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+// Stripe only initialize if API key is provided
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2025-09-30.clover',
-});
+}) : null;
 
 // POST /api/payments/create-payment-intent - Create payment intent
 router.post(
@@ -49,6 +50,14 @@ router.post(
         return res.status(400).json({
           error: 'Already premium',
           message: `Your premium subscription is active until ${user.premiumExpiry.toISOString()}`,
+        });
+      }
+
+      // Check if Stripe is configured
+      if (!stripe) {
+        return res.status(503).json({
+          error: 'PAYMENT_SERVICE_UNAVAILABLE',
+          message: 'Payment service is not configured',
         });
       }
 
@@ -93,6 +102,12 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
     if (!webhookSecret) {
       console.error('❌ CRITICAL: STRIPE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook not configured' });
+    }
+
+    // Check if Stripe is configured
+    if (!stripe) {
+      console.error('❌ CRITICAL: Stripe not configured for webhook');
+      return res.status(503).json({ error: 'Payment service not configured' });
     }
 
     // Verify and construct event
