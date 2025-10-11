@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import { useCallback, useEffect, useState } from 'react';
 import { useSettings } from '../../store/settings';
@@ -58,7 +59,7 @@ export function useQuakes() {
         }));
       }
     } catch (error) {
-      console.warn('Failed to load quake cache:', error);
+      logger.warn('Failed to load quake cache:', error);
     }
   };
 
@@ -67,7 +68,7 @@ export function useQuakes() {
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(items));
       await AsyncStorage.setItem(LAST_FETCH_KEY, Date.now().toString());
     } catch (error) {
-      console.warn('Failed to save quake cache:', error);
+      logger.warn('Failed to save quake cache:', error);
     }
   };
 
@@ -76,7 +77,7 @@ export function useQuakes() {
       const items = await provider.fetchRecent();
       return items;
     } catch (error) {
-      console.warn(`Provider ${provider.name} failed:`, error);
+      logger.warn(`Provider ${provider.name} failed:`, error);
       throw error;
     }
   };
@@ -109,7 +110,7 @@ export function useQuakes() {
         items = await fetchWithProvider(provider);
         await saveCache(items);
       } catch (providerError) {
-        console.warn(`${quakeProvider} provider failed, trying fallback:`, providerError);
+        logger.warn(`${quakeProvider} provider failed, trying fallback:`, providerError);
         
         // Try cache first
         await loadCache();
@@ -125,7 +126,7 @@ export function useQuakes() {
             fallbackUsed = true;
             await saveCache(items);
           } catch (usgsError) {
-            console.warn('USGS fallback also failed:', usgsError);
+            logger.warn('USGS fallback also failed:', usgsError);
             throw new Error('Tüm sağlayıcılar başarısız');
           }
         }
@@ -142,7 +143,7 @@ export function useQuakes() {
       }));
 
     } catch (error) {
-      console.error('Quake fetch failed:', error);
+      logger.error('Quake fetch failed:', error);
       setState(prev => ({
         ...prev,
         loading: false,

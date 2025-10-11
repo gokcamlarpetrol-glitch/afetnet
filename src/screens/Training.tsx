@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { useTraining, TrainingScenario } from '../store/training';
 import { useIncidents } from '../store/incidents';
@@ -71,7 +72,7 @@ export default function Training() {
       );
 
     } catch (error) {
-      console.error('Failed to generate training data:', error);
+      logger.error('Failed to generate training data:', error);
       Alert.alert('Hata', 'Eğitim verisi oluşturulamadı');
     } finally {
       setIsGenerating(false);
@@ -200,7 +201,8 @@ export default function Training() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Senaryo Seçimi</Text>
         {(['single', 'multi', 'triangulate'] as TrainingScenario[]).map((scenarioOption) => (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             key={scenarioOption}
             onPress={() => setScenario(scenarioOption)}
             style={[
@@ -229,14 +231,16 @@ export default function Training() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Olay Sayısı: {count}</Text>
           <View style={styles.countControls}>
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={() => setCount(Math.max(1, count - 1))}
               style={styles.countButton}
             >
               <Text style={styles.countButtonText}>-</Text>
             </Pressable>
             <Text style={styles.countText}>{count}</Text>
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={() => setCount(Math.min(10, count + 1))}
               style={styles.countButton}
             >
@@ -260,7 +264,8 @@ export default function Training() {
       {/* Action Buttons */}
       <View style={styles.actionContainer}>
         {!enabled ? (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleStartTraining}
             disabled={isGenerating}
             style={[
@@ -273,7 +278,8 @@ export default function Training() {
             </Text>
           </Pressable>
         ) : (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleClearTraining}
             style={styles.clearButton}
           >

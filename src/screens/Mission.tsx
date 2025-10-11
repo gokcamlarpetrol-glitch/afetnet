@@ -182,7 +182,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
       <View style={styles.controlsContainer}>
         <Text style={styles.sectionTitle}>Grid Tarama</Text>
         <View style={styles.scanControls}>
-          <Pressable
+          <Pressable accessible={true}
             onPress={() => setIsScanning(!isScanning)}
             style={[styles.scanButton, isScanning && styles.scanButtonActive]}
           >
@@ -204,7 +204,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
         <Text style={styles.sectionTitle}>Durum İşaretleri</Text>
         <View style={styles.statusGrid}>
           {Object.entries(statusFlags).map(([key, value]) => (
-            <Pressable
+            <Pressable accessible={true}
               key={key}
               onPress={() => toggleStatusFlag(key as keyof typeof statusFlags)}
               style={[
@@ -224,7 +224,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
       </View>
 
       {/* Going Status */}
-      <Pressable
+      <Pressable accessible={true}
         onPress={sendGoingStatus}
         style={styles.goingButton}
       >

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { logger } from '../utils/productionLogger';
 
 let BackgroundTask: any = null;
 
@@ -14,7 +15,7 @@ export async function registerQuakeBackground() {
     BackgroundTask = taskManagerModule.default;
   } catch {
     // Fallback: Use a simple interval-based approach
-    console.log('Background task manager not available, using interval fallback');
+    logger.debug('Background task manager not available, using interval fallback');
     return;
   }
 
@@ -24,15 +25,15 @@ export async function registerQuakeBackground() {
       BackgroundTask.defineTask(TASK_NAME, async () => {
         try {
           // Background earthquake monitoring logic here
-          console.log('Background earthquake check running...');
+          logger.debug('Background earthquake check running...');
           return 'success';
         } catch (error) {
-          console.error('Background task error:', error);
+          logger.error('Background task error:', error);
           return 'error';
         }
       });
     }
   } catch (error) {
-    console.warn('Failed to register background task:', error);
+    logger.warn('Failed to register background task:', error);
   }
 }

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
@@ -63,7 +64,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
   constructor() {
     super();
     this.nodeId = `node_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    console.log('🌐 Emergency Mesh Manager initialized');
+    logger.debug('🌐 Emergency Mesh Manager initialized');
   }
 
   // CRITICAL: Start Emergency Mesh Network
@@ -71,7 +72,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🌐 Starting emergency mesh network...');
+      logger.debug('🌐 Starting emergency mesh network...');
 
       this.isActive = true;
 
@@ -91,12 +92,12 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       this.emit('meshStarted');
       emergencyLogger.logMesh('info', 'Emergency mesh network started', { nodeId: this.nodeId });
 
-      console.log('✅ Emergency mesh network started');
+      logger.debug('✅ Emergency mesh network started');
       return true;
 
     } catch (error) {
       emergencyLogger.logMesh('error', 'Failed to start emergency mesh', { error: String(error) });
-      console.error('❌ Failed to start emergency mesh:', error);
+      logger.error('❌ Failed to start emergency mesh:', error);
       return false;
     }
   }
@@ -106,7 +107,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
     try {
       if (!this.isActive) return;
 
-      console.log('🛑 Stopping emergency mesh network...');
+      logger.debug('🛑 Stopping emergency mesh network...');
 
       this.isActive = false;
 
@@ -126,18 +127,18 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       this.emit('meshStopped');
       emergencyLogger.logMesh('info', 'Emergency mesh network stopped');
 
-      console.log('✅ Emergency mesh network stopped');
+      logger.debug('✅ Emergency mesh network stopped');
 
     } catch (error) {
       emergencyLogger.logMesh('error', 'Error stopping emergency mesh', { error: String(error) });
-      console.error('❌ Error stopping emergency mesh:', error);
+      logger.error('❌ Error stopping emergency mesh:', error);
     }
   }
 
   // CRITICAL: Send Emergency SOS
   async sendEmergencySOS(sosData: SOSData): Promise<boolean> {
     try {
-      console.log('🚨 Sending emergency SOS...');
+      logger.debug('🚨 Sending emergency SOS...');
 
       // Validate SOS data
       if (!this.validateSOSData(sosData)) {
@@ -184,12 +185,12 @@ class EmergencyMeshManager extends SimpleEventEmitter {
         attempts: 3
       });
 
-      console.log(`🚨 Emergency SOS ${deliverySuccess ? 'sent successfully' : 'sent via backup methods'}`);
+      logger.debug(`🚨 Emergency SOS ${deliverySuccess ? 'sent successfully' : 'sent via backup methods'}`);
       return deliverySuccess;
 
     } catch (error) {
       emergencyLogger.logMesh('error', 'Failed to send emergency SOS', { error: String(error) });
-      console.error('❌ Failed to send emergency SOS:', error);
+      logger.error('❌ Failed to send emergency SOS:', error);
       return false;
     }
   }
@@ -197,7 +198,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
   // CRITICAL: Emergency Backup Delivery
   private async emergencyBackupDelivery(sosData: SOSData): Promise<void> {
     try {
-      console.log('🔄 Attempting emergency backup delivery...');
+      logger.debug('🔄 Attempting emergency backup delivery...');
 
       // Try WiFi Direct
       await this.tryWiFiDirectDelivery(sosData);
@@ -238,7 +239,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       const connectedNodes = Array.from(this.connectedNodes.values()).filter(node => node.isActive);
       
       if (connectedNodes.length === 0) {
-        console.log('⚠️ No connected nodes available for message delivery');
+        logger.debug('⚠️ No connected nodes available for message delivery');
         return false;
       }
 
@@ -272,7 +273,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
   private async sendToNode(node: MeshNode, message: MeshMessage): Promise<void> {
     try {
       // Simulate sending to node
-      console.log(`📤 Sending message to node: ${node.id}`);
+      logger.debug(`📤 Sending message to node: ${node.id}`);
       
       // In real implementation, this would use BLE/WiFi Direct
       // For now, we'll simulate success
@@ -373,7 +374,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
         this.emit('nodeDiscovered', newNode);
         emergencyLogger.logMesh('info', 'New node discovered', { nodeId: newNode.id });
         
-        console.log(`🔍 New node discovered: ${newNode.id}`);
+        logger.debug(`🔍 New node discovered: ${newNode.id}`);
       }
     } catch (error) {
       emergencyLogger.logMesh('error', 'Node discovery failed', { error: String(error) });
@@ -468,29 +469,29 @@ class EmergencyMeshManager extends SimpleEventEmitter {
         this.connectedNodes.set(nodeId, node);
         
         this.emit('nodeDisconnected', node);
-        console.log(`🔌 Node disconnected: ${nodeId}`);
+        logger.debug(`🔌 Node disconnected: ${nodeId}`);
       }
     }
   }
 
   // Backup delivery methods (placeholders)
   private async tryWiFiDirectDelivery(sosData: SOSData): Promise<void> {
-    console.log('📶 Attempting WiFi Direct delivery...');
+    logger.debug('📶 Attempting WiFi Direct delivery...');
     // Implementation would use WiFi Direct APIs
   }
 
   private async tryBluetoothClassicDelivery(sosData: SOSData): Promise<void> {
-    console.log('🔵 Attempting Bluetooth Classic delivery...');
+    logger.debug('🔵 Attempting Bluetooth Classic delivery...');
     // Implementation would use Bluetooth Classic APIs
   }
 
   private async tryAudioBeaconDelivery(sosData: SOSData): Promise<void> {
-    console.log('🔊 Attempting Audio Beacon delivery...');
+    logger.debug('🔊 Attempting Audio Beacon delivery...');
     // Implementation would use audio beacon technology
   }
 
   private async tryVisualSignalDelivery(sosData: SOSData): Promise<void> {
-    console.log('💡 Attempting Visual Signal delivery...');
+    logger.debug('💡 Attempting Visual Signal delivery...');
     // Implementation would use screen flash or LED patterns
   }
 

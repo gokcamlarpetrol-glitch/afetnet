@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import bcrypt from 'bcryptjs';
 import express, { Request, Response } from 'express';
 import { body } from 'express-validator';
@@ -111,7 +112,7 @@ router.post(
       token,
     });
   } catch (error) {
-      console.error('Register error:', error);
+      backendLogger.error('Register error:', error);
       res.status(500).json({ error: 'Registration failed' });
     }
   }
@@ -238,7 +239,7 @@ router.post(
       token,
     });
   } catch (error) {
-      console.error('Login error:', error);
+      backendLogger.error('Login error:', error);
       res.status(500).json({ error: 'Login failed' });
     }
   }
@@ -274,7 +275,7 @@ router.post(
 
     res.json({ success: true });
   } catch (error) {
-      console.error('FCM token error:', error);
+      backendLogger.error('FCM token error:', error);
       res.status(500).json({ error: 'Failed to register FCM token' });
     }
   }

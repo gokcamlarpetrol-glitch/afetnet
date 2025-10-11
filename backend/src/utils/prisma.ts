@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import { PrismaClient } from '@prisma/client';
 
 /**
@@ -28,9 +29,9 @@ if (process.env.NODE_ENV !== 'production') {
 export const disconnectPrisma = async () => {
   try {
     await prisma.$disconnect();
-    console.log('✅ Prisma disconnected gracefully');
+    backendLogger.debug('✅ Prisma disconnected gracefully');
   } catch (error) {
-    console.error('❌ Error disconnecting Prisma:', error);
+    backendLogger.error('❌ Error disconnecting Prisma:', error);
     throw error;
   }
 };
@@ -44,7 +45,7 @@ export const checkDatabaseHealth = async (): Promise<boolean> => {
     await prisma.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
-    console.error('❌ Database health check failed:', error);
+    backendLogger.error('❌ Database health check failed:', error);
     return false;
   }
 };

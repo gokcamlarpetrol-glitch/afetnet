@@ -1,10 +1,10 @@
+import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import * as Haptics from "expo-haptics";
-import { Audio } from "expo-av";
 import { gridKey, haversineLatLng } from "../geo/proximity";
+import { paramsFor } from "../profile/params";
 import { useAlerts } from "../state/alertsStore";
 import { useProfile } from "../state/profileStore";
-import { paramsFor } from "../profile/params";
 import { sayKey } from "../voice/voice";
 
 const DIR = "/tmp/";

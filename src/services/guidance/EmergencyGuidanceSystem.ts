@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
@@ -56,7 +57,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Emergency Scenarios
   private initializeEmergencyScenarios(): void {
-    console.log('🎯 Initializing emergency scenarios...');
+    logger.debug('🎯 Initializing emergency scenarios...');
 
     // Earthquake scenario
     this.addEmergencyScenario({
@@ -226,7 +227,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       }
     });
 
-    console.log('✅ Emergency scenarios initialized');
+    logger.debug('✅ Emergency scenarios initialized');
   }
 
   // CRITICAL: Start Guidance System
@@ -234,7 +235,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🎯 Starting emergency guidance system...');
+      logger.debug('🎯 Starting emergency guidance system...');
       this.isActive = true;
 
       // Start guidance monitoring
@@ -248,12 +249,12 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       this.emit('guidanceSystemStarted');
       emergencyLogger.logSystem('info', 'Emergency guidance system started');
 
-      console.log('✅ Emergency guidance system started');
+      logger.debug('✅ Emergency guidance system started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start guidance system', { error: String(error) });
-      console.error('❌ Failed to start guidance system:', error);
+      logger.error('❌ Failed to start guidance system:', error);
       return false;
     }
   }
@@ -263,7 +264,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
     try {
       this.emergencyScenarios.set(scenario.id, scenario);
       emergencyLogger.logSystem('info', 'Emergency scenario added', { scenarioId: scenario.id, name: scenario.name });
-      console.log(`📋 Emergency scenario added: ${scenario.name}`);
+      logger.debug(`📋 Emergency scenario added: ${scenario.name}`);
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to add emergency scenario', { error: String(error) });
     }
@@ -272,12 +273,12 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
   // CRITICAL: Trigger Emergency Guidance
   async triggerEmergencyGuidance(type: EmergencyGuidance['type'], location: { lat: number; lon: number }): Promise<string | null> {
     try {
-      console.log(`🎯 Triggering emergency guidance for: ${type}`);
+      logger.debug(`🎯 Triggering emergency guidance for: ${type}`);
 
       // Find matching scenario
       const scenario = this.findMatchingScenario(type);
       if (!scenario) {
-        console.warn(`⚠️ No guidance scenario found for type: ${type}`);
+        logger.warn(`⚠️ No guidance scenario found for type: ${type}`);
         return null;
       }
 
@@ -306,12 +307,12 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
         severity: guidance.severity
       });
 
-      console.log(`✅ Emergency guidance triggered: ${guidance.title}`);
+      logger.debug(`✅ Emergency guidance triggered: ${guidance.title}`);
       return guidance.id;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to trigger emergency guidance', { error: String(error) });
-      console.error('❌ Failed to trigger emergency guidance:', error);
+      logger.error('❌ Failed to trigger emergency guidance:', error);
       return null;
     }
   }
@@ -350,7 +351,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
         await this.completeGuidance(guidanceId);
       }
 
-      console.log(`✅ Guidance step completed: ${step.title}`);
+      logger.debug(`✅ Guidance step completed: ${step.title}`);
       return true;
 
     } catch (error) {
@@ -379,7 +380,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       this.emit('guidanceCompleted', guidance);
       emergencyLogger.logSystem('info', 'Emergency guidance completed', { guidanceId });
 
-      console.log(`🎉 Emergency guidance completed: ${guidance.title}`);
+      logger.debug(`🎉 Emergency guidance completed: ${guidance.title}`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to complete guidance', { error: String(error) });
@@ -416,7 +417,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
 
         // If guidance has been active longer than estimated duration
         if (timeElapsed > estimatedDuration) {
-          console.log(`⚠️ Guidance timeout: ${guidance.title}`);
+          logger.debug(`⚠️ Guidance timeout: ${guidance.title}`);
           
           // Send timeout notification
           this.emit('guidanceTimeout', guidance);
@@ -454,7 +455,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
     try {
       if (!this.isActive) return;
 
-      console.log('🛑 Stopping guidance system...');
+      logger.debug('🛑 Stopping guidance system...');
       this.isActive = false;
 
       if (this.guidanceInterval) {
@@ -465,11 +466,11 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       this.emit('guidanceSystemStopped');
       emergencyLogger.logSystem('info', 'Emergency guidance system stopped');
 
-      console.log('✅ Emergency guidance system stopped');
+      logger.debug('✅ Emergency guidance system stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping guidance system', { error: String(error) });
-      console.error('❌ Error stopping guidance system:', error);
+      logger.error('❌ Error stopping guidance system:', error);
     }
   }
 
@@ -492,6 +493,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const emergencyGuidanceSystem = new EmergencyGuidanceSystem();
 export default EmergencyGuidanceSystem;
+
 
 
 

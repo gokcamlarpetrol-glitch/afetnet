@@ -19,7 +19,7 @@ export async function createBackup(pass?: string) {
   // pack
   const base64 = await zip.generateAsync({ type: "base64", compression: "DEFLATE" });
   let out = `${doc}backup_${Date.now()}.zip`;
-  await FileSystem.writeAsStringAsync(out, base64, { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(out, base64, { encoding: "utf8" });
 
   if (pass && pass.length > 0) {
     // Hash-based envelope (placeholder, AES yoksa):

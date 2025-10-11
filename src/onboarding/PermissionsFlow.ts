@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { Alert, Platform } from 'react-native';
@@ -66,7 +67,7 @@ export class PermissionsManager {
       this.status.notifications = status === 'granted' ? 'granted' : 'denied';
       return this.status.notifications;
     } catch (error) {
-      console.error('Notification permission error:', error);
+      logger.error('Notification permission error:', error);
       this.status.notifications = 'denied';
       return 'denied';
     }
@@ -78,7 +79,7 @@ export class PermissionsManager {
       this.status.location = status === 'granted' ? 'granted' : 'denied';
       return this.status.location;
     } catch (error) {
-      console.error('Location permission error:', error);
+      logger.error('Location permission error:', error);
       this.status.location = 'denied';
       return 'denied';
     }
@@ -90,7 +91,7 @@ export class PermissionsManager {
       this.status.backgroundLocation = status === 'granted' ? 'granted' : 'denied';
       return this.status.backgroundLocation;
     } catch (error) {
-      console.error('Background location permission error:', error);
+      logger.error('Background location permission error:', error);
       this.status.backgroundLocation = 'denied';
       return 'denied';
     }
@@ -119,7 +120,7 @@ export class PermissionsManager {
         return 'denied';
       }
     } catch (error) {
-      console.error('Bluetooth permission error:', error);
+      logger.error('Bluetooth permission error:', error);
       this.status.bluetooth = 'denied';
       return 'denied';
     }
@@ -164,7 +165,7 @@ export class PermissionsManager {
 
       // Bluetooth permission status
       if (Platform.OS === 'android') {
-        const bluetoothStatus = await Bluetooth.getPermissionsAsync();
+        const bluetoothStatus = await (Bluetooth as any)?.getPermissionsAsync?.() || { granted: false };
         this.status.bluetooth = bluetoothStatus.granted ? 'granted' : 'denied';
       } else {
         this.status.bluetooth = 'granted'; // iOS handles this automatically
@@ -172,7 +173,7 @@ export class PermissionsManager {
 
       return this.status;
     } catch (error) {
-      console.error('Error getting permission status:', error);
+      logger.error('Error getting permission status:', error);
       return this.status;
     }
   }
@@ -181,7 +182,7 @@ export class PermissionsManager {
     try {
       await AsyncStorage.setItem('afn/permissions/v1', JSON.stringify(this.status));
     } catch (error) {
-      console.error('Error saving permission status:', error);
+      logger.error('Error saving permission status:', error);
     }
   }
 
@@ -193,7 +194,7 @@ export class PermissionsManager {
       }
       return this.status;
     } catch (error) {
-      console.error('Error loading permission status:', error);
+      logger.error('Error loading permission status:', error);
       return this.status;
     }
   }
@@ -251,7 +252,7 @@ export class PermissionsManager {
         permissions: this.status,
       }));
     } catch (error) {
-      console.error('Error marking onboarding complete:', error);
+      logger.error('Error marking onboarding complete:', error);
     }
   }
 
@@ -264,7 +265,7 @@ export class PermissionsManager {
       }
       return false;
     } catch (error) {
-      console.error('Error checking onboarding status:', error);
+      logger.error('Error checking onboarding status:', error);
       return false;
     }
   }
@@ -273,7 +274,7 @@ export class PermissionsManager {
     try {
       await AsyncStorage.removeItem('afn/onboarding/v1');
     } catch (error) {
-      console.error('Error resetting onboarding:', error);
+      logger.error('Error resetting onboarding:', error);
     }
   }
 }

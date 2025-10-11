@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/productionLogger';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scrypt } from 'scrypt-js';
@@ -62,7 +63,7 @@ export const useSafety = create<SafetyState>()(
             },
           });
         } catch (error) {
-          console.error('Failed to set PIN:', error);
+          logger.error('Failed to set PIN:', error);
           throw new Error('PIN ayarlanamadı');
         }
       },
@@ -93,7 +94,7 @@ export const useSafety = create<SafetyState>()(
           // Compare hashes
           return hash.every((byte, index) => byte === storedHash[index]);
         } catch (error) {
-          console.error('Failed to verify PIN:', error);
+          logger.error('Failed to verify PIN:', error);
           return false;
         }
       },
@@ -137,7 +138,7 @@ export async function requestPinIfNeeded(action: keyof SafetyState['requireFor']
   // This would typically show a PIN input modal
   // For now, we'll simulate the PIN verification
   // In a real implementation, this would be handled by a modal component
-  console.log(`PIN required for action: ${action}`);
+  logger.debug(`PIN required for action: ${action}`);
   
   // Return true for now - in real implementation, this would wait for user input
   return true;

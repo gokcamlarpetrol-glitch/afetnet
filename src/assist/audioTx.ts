@@ -85,9 +85,11 @@ async function makeWavBase64(){
   // write samples
   let k=o;
   for (let i=0;i<pcm.length;i++){
-    const s = Math.max(-1, Math.min(1, pcm[i]));
+    const pcmValue = pcm[i];
+    if (pcmValue === undefined) continue;
+    const s = Math.max(-1, Math.min(1, pcmValue));
     const q = s<0 ? s*0x8000 : s*0x7fff;
-    v.setInt16(k, q|0, true);
+    v.setInt16(k, Math.round(q), true);
     k+=2;
   }
   // to base64

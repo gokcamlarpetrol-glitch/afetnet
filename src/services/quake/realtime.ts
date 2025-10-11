@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import { AppState, AppStateStatus } from 'react-native';
 import { notifyQuake } from '../../alerts/notify';
@@ -49,7 +50,7 @@ class LiveFeedManager {
         };
       }
     } catch (error) {
-      console.warn('Failed to read current settings:', error);
+      logger.warn('Failed to read current settings:', error);
     }
     return this.initialSettings;
   }
@@ -66,7 +67,7 @@ class LiveFeedManager {
   private startBurstMode(): void {
     this.burstMode = true;
     this.burstEndTime = Date.now() + (2 * 60 * 1000); // 2 minutes
-    console.log('Live feed: Started burst mode for 2 minutes');
+    logger.debug('Live feed: Started burst mode for 2 minutes');
   }
 
   private getCurrentPollInterval(): number {
@@ -86,7 +87,7 @@ class LiveFeedManager {
       // Check network connectivity
       const netInfo = await NetInfo.fetch();
       if (!netInfo.isConnected) {
-        console.log('Live feed: No network, showing cache');
+        logger.debug('Live feed: No network, showing cache');
         await this.showCache();
         return;
       }
@@ -113,7 +114,7 @@ class LiveFeedManager {
       const newQuakes = this.findNewQuakes(filteredByRegion);
 
       if (newQuakes.length > 0) {
-        console.log(`Live feed: Found ${newQuakes.length} new quakes`);
+        logger.debug(`Live feed: Found ${newQuakes.length} new quakes`);
         
         // Update last event ID
         this.lastEventId = newQuakes[0].id;
@@ -140,7 +141,7 @@ class LiveFeedManager {
       }
 
     } catch (error) {
-      console.error('Live feed fetch error:', error);
+      logger.error('Live feed fetch error:', error);
       this.callbacks.onError?.(error instanceof Error ? error.message : 'Canlı deprem verisi alınamıyor');
       
       // Show cache on error
@@ -183,7 +184,7 @@ class LiveFeedManager {
         });
       }
     } catch (error) {
-      console.warn('Failed to show cache:', error);
+      logger.warn('Failed to show cache:', error);
     }
   }
 
@@ -191,20 +192,20 @@ class LiveFeedManager {
     try {
       await AsyncStorage.setItem('afn/quakes/cache/v1', JSON.stringify(quakes));
     } catch (error) {
-      console.warn('Failed to update cache:', error);
+      logger.warn('Failed to update cache:', error);
     }
   }
 
   public start(): void {
     if (this.isRunning) {
-      console.log('Live feed: Already running');
+      logger.debug('Live feed: Already running');
       return;
     }
 
     this.isRunning = true;
     this.startBurstMode(); // Start in burst mode
     
-    console.log(`Live feed: Started with ${this.settings.quakeProvider} provider`);
+    logger.debug(`Live feed: Started with ${this.settings.quakeProvider} provider`);
     
     // Initial fetch
     this.fetchAndProcessEvents();
@@ -226,7 +227,7 @@ class LiveFeedManager {
 
   public stop(): void {
     if (!this.isRunning) {
-      console.log('Live feed: Not running');
+      logger.debug('Live feed: Not running');
       return;
     }
 
@@ -242,12 +243,12 @@ class LiveFeedManager {
       this.appStateSubscription = null;
     }
     
-    console.log('Live feed: Stopped');
+    logger.debug('Live feed: Stopped');
   }
 
   public updateSettings(newSettings: EewSettings): void {
     this.settings = newSettings;
-    console.log('Live feed: Settings updated');
+    logger.debug('Live feed: Settings updated');
   }
 }
 

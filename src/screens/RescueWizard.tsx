@@ -19,6 +19,7 @@ export default function RescueWizard(){
 
   const H = (t:string)=><Text style={{color:"white", fontSize:20, fontWeight:"700", marginBottom:8}}>{t}</Text>;
   const IN = (p:keyof State)=><TextInput
+          accessibilityRole="text"
       placeholder={p}
       placeholderTextColor="#94a3b8"
       value={s[p]}

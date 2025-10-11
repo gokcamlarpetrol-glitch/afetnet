@@ -1,5 +1,6 @@
-import * as FileSystem from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
+import { logger } from '../utils/productionLogger';
+import * as FileSystem from 'expo-file-system';
 import { encodeBase64 } from 'tweetnacl-util';
 import { LogEvent } from '../store/devlog';
 
@@ -29,7 +30,7 @@ export async function encryptAndExportLogs(events: LogEvent[]): Promise<Encrypte
     const fileName = `afn_blackbox_${timestamp}.jsonl.gz.enc`;
     
     // Ensure directory exists
-    const blackboxDir = `${FileSystem.documentDirectory}afn_blackbox/`;
+    const blackboxDir = `${FileSystem.documentDirectory || ''}afn_blackbox/`;
     const dirInfo = await FileSystem.getInfoAsync(blackboxDir);
     if (!dirInfo.exists) {
       await FileSystem.makeDirectoryAsync(blackboxDir, { intermediates: true });
@@ -39,7 +40,7 @@ export async function encryptAndExportLogs(events: LogEvent[]): Promise<Encrypte
 
     // Write encrypted file
     await FileSystem.writeAsStringAsync(filePath, encryptedContent, {
-      encoding: FileSystem.EncodingType.UTF8
+      encoding: 'utf8'
     });
 
     return {
@@ -49,7 +50,7 @@ export async function encryptAndExportLogs(events: LogEvent[]): Promise<Encrypte
     };
 
   } catch (error) {
-    console.error('Failed to encrypt and export logs:', error);
+    logger.error('Failed to encrypt and export logs:', error);
     throw error;
   }
 }
@@ -63,13 +64,13 @@ export async function decryptLogs(encryptedContent: string, sessionKey: string):
       try {
         return JSON.parse(line) as LogEvent;
       } catch (error) {
-        console.warn('Failed to parse log line:', line);
+        logger.warn('Failed to parse log line:', line);
         return null;
       }
     }).filter((event): event is LogEvent => event !== null);
 
   } catch (error) {
-    console.error('Failed to decrypt logs:', error);
+    logger.error('Failed to decrypt logs:', error);
     throw error;
   }
 }
@@ -98,14 +99,14 @@ function xorDecrypt(encryptedB64: string, key: string): string {
     }
     return result;
   } catch (error) {
-    console.error('Decryption failed:', error);
+    logger.error('Decryption failed:', error);
     return '';
   }
 }
 
 export async function getExportableLogs(): Promise<LogEvent[]> {
   try {
-    const blackboxDir = `${FileSystem.documentDirectory}afn_blackbox/`;
+    const blackboxDir = `${FileSystem.documentDirectory || ''}afn_blackbox/`;
     const dirInfo = await FileSystem.getInfoAsync(blackboxDir);
     
     if (!dirInfo.exists) {
@@ -136,7 +137,7 @@ export async function getExportableLogs(): Promise<LogEvent[]> {
     return fileInfos as any;
 
   } catch (error) {
-    console.error('Failed to get exportable logs:', error);
+    logger.error('Failed to get exportable logs:', error);
     return [];
   }
 }

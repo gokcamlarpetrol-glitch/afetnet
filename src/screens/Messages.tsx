@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { logger } from '../utils/productionLogger';
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
@@ -14,7 +15,9 @@ import { useFamily } from '../store/family';
 import { Contact, useMessages } from '../store/messages';
 import { useQueue } from '../store/queue';
 
-export default function Messages({ navigation }: { navigation?: any }) {
+import { NavigationProp } from '../types/interfaces';
+
+export default function Messages({ navigation }: { navigation?: NavigationProp }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState<'all' | 'sos' | 'groups'>('all');
   const { items: queueItems } = useQueue();
@@ -90,7 +93,7 @@ export default function Messages({ navigation }: { navigation?: any }) {
         lon: 32.8597,
       });
 
-      console.log('Demo messages loaded');
+      logger.debug('Demo messages loaded');
     }
   }, []);
 
@@ -117,7 +120,7 @@ export default function Messages({ navigation }: { navigation?: any }) {
           });
         }
       } catch (error) {
-        console.error('Location update failed:', error);
+        logger.error('Location update failed:', error);
       }
     };
 
@@ -239,7 +242,7 @@ export default function Messages({ navigation }: { navigation?: any }) {
                       );
 
                       // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
-                      console.log('Message sent to store:', message.id);
+                      logger.debug('Message sent to store:', message.id);
 
                       Alert.alert('Başarılı', 'Mesaj gönderildi ve kaydedildi!');
                     }
@@ -264,7 +267,7 @@ export default function Messages({ navigation }: { navigation?: any }) {
               );
 
               // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
-              console.log('Location shared:', message.id);
+              logger.debug('Location shared:', message.id);
 
               Alert.alert('Başarılı', 'Konumunuz paylaşıldı ve kaydedildi!');
             } catch (error) {
@@ -363,7 +366,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
               {queueItems.length} bekleyen • BLE Mesh
             </Text>
           </View>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleNewMessage}
             style={{
               backgroundColor: '#3b82f6',
@@ -395,6 +399,7 @@ export default function Messages({ navigation }: { navigation?: any }) {
         }}>
           <Ionicons name="search" size={20} color="#64748b" />
           <TextInput
+          accessibilityRole="text"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Kişi veya mesaj ara..."
@@ -415,7 +420,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
 
         {/* Tabs */}
         <View style={{ flexDirection: 'row', marginTop: 16, gap: 8 }}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setSelectedTab('all')}
             style={{
               flex: 1,
@@ -434,7 +440,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
             </Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setSelectedTab('sos')}
             style={{
               flex: 1,
@@ -453,7 +460,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
             </Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setSelectedTab('groups')}
             style={{
               flex: 1,
@@ -490,7 +498,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 {nearbyContacts.map((contact) => (
-                  <Pressable
+                  <Pressable accessible={true}
+          accessibilityRole="button"
                     key={contact.id}
                     onPress={() => handleContactPress(contact)}
                     style={{
@@ -553,7 +562,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
                            conversation.type === 'group' ? 'people' : 'person';
 
             return (
-              <Pressable
+              <Pressable accessible={true}
+          accessibilityRole="button"
                 key={conversation.contactId}
                 onPress={() => handleConversationPress(conversation)}
                 style={{
@@ -647,7 +657,8 @@ export default function Messages({ navigation }: { navigation?: any }) {
                   : 'Yeni mesaj göndermek için + butonuna tıklayın'}
               </Text>
               {!searchQuery && (
-                <Pressable
+                <Pressable accessible={true}
+          accessibilityRole="button"
                   onPress={handleNewMessage}
                   style={{
                     backgroundColor: '#3b82f6',

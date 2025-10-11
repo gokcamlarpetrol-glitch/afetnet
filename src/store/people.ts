@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/productionLogger';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pubKeyToAfnId } from '../identity/afnId';
@@ -128,7 +129,7 @@ export const usePeople = create<PeopleState>()(
         
         // If meAfnId is empty, we'll set it when the keypair is loaded
         if (!state.meAfnId) {
-          console.log('People store: meAfnId not set, will be initialized on keypair load');
+          logger.debug('People store: meAfnId not set, will be initialized on keypair load');
         }
         
         return state;
@@ -148,6 +149,6 @@ export async function initializeMyAfnId(): Promise<void> {
     
     usePeople.getState().updateMyAfnId(afnId);
   } catch (error) {
-    console.error('Failed to initialize AFN-ID:', error);
+    logger.error('Failed to initialize AFN-ID:', error);
   }
 }

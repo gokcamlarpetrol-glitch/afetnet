@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import { meshRelay } from '../services/mesh/relay';
@@ -33,7 +34,7 @@ export default function VoicePing() {
         Alert.alert('İzin Gerekli', 'Ses kaydı için mikrofon izni gerekli');
       }
     } catch (error) {
-      console.error('Permission request failed:', error);
+      logger.error('Permission request failed:', error);
     }
   };
 
@@ -73,7 +74,7 @@ export default function VoicePing() {
       }, 2000);
 
     } catch (error) {
-      console.error('Recording failed:', error);
+      logger.error('Recording failed:', error);
       Alert.alert('Hata', 'Ses kaydı başlatılamadı');
     }
   };
@@ -86,7 +87,7 @@ export default function VoicePing() {
       await recording.stopAndUnloadAsync();
       await processRecording(recording);
     } catch (error) {
-      console.error('Stop recording failed:', error);
+      logger.error('Stop recording failed:', error);
     }
   };
 
@@ -126,7 +127,7 @@ export default function VoicePing() {
       );
 
     } catch (error) {
-      console.error('Processing failed:', error);
+      logger.error('Processing failed:', error);
       Alert.alert('Hata', 'Ses işleme başarısız');
     }
   };
@@ -150,7 +151,7 @@ export default function VoicePing() {
       });
 
     } catch (error) {
-      console.error('Playback failed:', error);
+      logger.error('Playback failed:', error);
       setIsPlaying(false);
     }
   };
@@ -175,7 +176,8 @@ export default function VoicePing() {
       </Text>
 
       <View style={styles.recordingContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={isRecording ? stopRecording : startRecording}
           disabled={isPlaying}
           style={[
@@ -204,7 +206,8 @@ export default function VoicePing() {
         <Text style={styles.infoText}>• Sadece 1 hop (yakın mesafe)</Text>
       </View>
 
-      <Pressable
+      <Pressable accessible={true}
+          accessibilityRole="button"
         onPress={playTestSound}
         disabled={isPlaying || isRecording}
         style={[

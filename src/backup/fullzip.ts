@@ -25,11 +25,11 @@ export async function buildEncryptedZip(password:string){
       const files = await FileSystem.readDirectoryAsync(full);
       for(const f of files){
         const fd = full + f;
-        const data = await FileSystem.readAsStringAsync(fd, { encoding: "base64" as any });
+        const data = await FileSystem.readAsStringAsync(fd, { encoding: "base64" });
         zip.file(p + f, data, { base64: true });
       }
     }else{
-      const data = await FileSystem.readAsStringAsync(full, { encoding: "base64" as any });
+      const data = await FileSystem.readAsStringAsync(full, { encoding: "base64" });
       zip.file(p, data, { base64: true });
     }
   }
@@ -54,6 +54,6 @@ export async function restoreEncryptedZip(fileUri:string, password:string){
     const base64 = await entry.async("base64");
     const dst = DIR + k;
     await FileSystem.makeDirectoryAsync(dst.split("/").slice(0,-1).join("/"), { intermediates:true }).catch(()=>{});
-    await FileSystem.writeAsStringAsync(dst, base64, { encoding: "base64" as any });
+    await FileSystem.writeAsStringAsync(dst, base64, { encoding: "base64" });
   }
 }

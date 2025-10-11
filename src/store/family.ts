@@ -117,7 +117,7 @@ export const useFamily = create<State>()(
 
           set((s) => ({ list: [newMember, ...s.list] }));
           return { success: true, member: newMember };
-        } catch (error: any) {
+        } catch (error: Error | unknown) {
           return { success: false, error: error.message };
         }
       },
@@ -130,7 +130,7 @@ export const useFamily = create<State>()(
             return { success: true, member: result.member };
           }
           return { success: false, error: result.error };
-        } catch (error: any) {
+        } catch (error: Error | unknown) {
           return { success: false, error: error.message };
         }
       },
@@ -237,7 +237,7 @@ export const useFamily = create<State>()(
 
           set((s) => ({ list: [newMember, ...s.list] }));
           return { success: true, member: newMember };
-        } catch (error: any) {
+        } catch (error: Error | unknown) {
           return { success: false, error: 'QR kodu okunamadı' };
         }
       },

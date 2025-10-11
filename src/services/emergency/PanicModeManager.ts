@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 
 export interface PanicModeConfig {
@@ -63,7 +64,7 @@ class PanicModeManager extends SimpleEventEmitter {
   }
 
   private initializePanicConfigs() {
-    console.log('🚨 Initializing Panic Mode Manager...');
+    logger.debug('🚨 Initializing Panic Mode Manager...');
 
     const panicConfigs: PanicModeConfig[] = [
       {
@@ -247,14 +248,14 @@ class PanicModeManager extends SimpleEventEmitter {
       this.panicConfigs.set(config.id, config);
     });
 
-    console.log('✅ Panic mode configurations initialized');
+    logger.debug('✅ Panic mode configurations initialized');
   }
 
   // CRITICAL: Activate Panic Mode
   async activatePanicMode(configId: string, trigger: string = 'manual'): Promise<boolean> {
     // Check cooldown
     if (Date.now() - this.panicButtonCooldown < 5000) {
-      console.log('⏰ Panic mode cooldown active');
+      logger.debug('⏰ Panic mode cooldown active');
       return false;
     }
 
@@ -262,7 +263,7 @@ class PanicModeManager extends SimpleEventEmitter {
     if (!config) return false;
 
     try {
-      console.log(`🚨 ACTIVATING PANIC MODE: ${config.name}`);
+      logger.debug(`🚨 ACTIVATING PANIC MODE: ${config.name}`);
 
       // Create panic session
       const session: PanicModeSession = {
@@ -288,12 +289,12 @@ class PanicModeManager extends SimpleEventEmitter {
       this.panicButtonCooldown = Date.now();
 
       this.emit('panicModeActivated', { session, config });
-      console.log(`✅ Panic mode activated: ${session.id}`);
+      logger.debug(`✅ Panic mode activated: ${session.id}`);
 
       return true;
 
     } catch (error) {
-      console.error('❌ Failed to activate panic mode:', error);
+      logger.error('❌ Failed to activate panic mode:', error);
       return false;
     }
   }
@@ -304,7 +305,7 @@ class PanicModeManager extends SimpleEventEmitter {
     if (!session || session.status !== 'active') return false;
 
     try {
-      console.log(`🛑 DEACTIVATING PANIC MODE: ${session.id}`);
+      logger.debug(`🛑 DEACTIVATING PANIC MODE: ${session.id}`);
 
       // Stop all action intervals
       this.actionIntervals.forEach((interval, actionId) => {
@@ -327,19 +328,19 @@ class PanicModeManager extends SimpleEventEmitter {
       await this.savePanicSession(session);
 
       this.emit('panicModeDeactivated', session);
-      console.log(`✅ Panic mode deactivated: ${session.id}`);
+      logger.debug(`✅ Panic mode deactivated: ${session.id}`);
 
       return true;
 
     } catch (error) {
-      console.error('❌ Failed to deactivate panic mode:', error);
+      logger.error('❌ Failed to deactivate panic mode:', error);
       return false;
     }
   }
 
   // CRITICAL: Execute Panic Actions
   private async executePanicActions(config: PanicModeConfig, session: PanicModeSession): Promise<void> {
-    console.log(`🚨 Executing ${config.actions.length} panic actions...`);
+    logger.debug(`🚨 Executing ${config.actions.length} panic actions...`);
 
     for (const action of config.actions) {
       try {
@@ -368,14 +369,14 @@ class PanicModeManager extends SimpleEventEmitter {
         }
 
       } catch (error) {
-        console.error(`❌ Error executing panic action ${action.id}:`, error);
+        logger.error(`❌ Error executing panic action ${action.id}:`, error);
       }
     }
   }
 
   // CRITICAL: Execute Individual Panic Action
   private async executePanicAction(action: PanicAction, session: PanicModeSession): Promise<void> {
-    console.log(`🚨 Executing panic action: ${action.type}`);
+    logger.debug(`🚨 Executing panic action: ${action.type}`);
 
     try {
       switch (action.type) {
@@ -404,11 +405,11 @@ class PanicModeManager extends SimpleEventEmitter {
           break;
 
         default:
-          console.warn(`Unknown panic action type: ${action.type}`);
+          logger.warn(`Unknown panic action type: ${action.type}`);
       }
 
     } catch (error) {
-      console.error(`❌ Error executing panic action ${action.id}:`, error);
+      logger.error(`❌ Error executing panic action ${action.id}:`, error);
     }
   }
 
@@ -436,7 +437,7 @@ class PanicModeManager extends SimpleEventEmitter {
       priority as any
     );
 
-    console.log(`🚨 SOS sent: ${message}`);
+    logger.debug(`🚨 SOS sent: ${message}`);
   }
 
   // CRITICAL: Send Location
@@ -451,7 +452,7 @@ class PanicModeManager extends SimpleEventEmitter {
       priority as any
     );
 
-    console.log(`📍 Location sent: ${session.location.lat}, ${session.location.lon}`);
+    logger.debug(`📍 Location sent: ${session.location.lat}, ${session.location.lon}`);
   }
 
   // CRITICAL: Send Message
@@ -467,13 +468,13 @@ class PanicModeManager extends SimpleEventEmitter {
       priority as any
     );
 
-    console.log(`📨 Message sent: ${message}`);
+    logger.debug(`📨 Message sent: ${message}`);
   }
 
   // CRITICAL: Make Emergency Call
   private async makeEmergencyCall(parameters: any, session: PanicModeSession): Promise<void> {
     // In a real implementation, this would make actual phone calls
-    console.log(`📞 Emergency call made to: ${parameters.phone || 'emergency services'}`);
+    logger.debug(`📞 Emergency call made to: ${parameters.phone || 'emergency services'}`);
   }
 
   // CRITICAL: Send Notification
@@ -487,7 +488,7 @@ class PanicModeManager extends SimpleEventEmitter {
     for (const contact of targetContacts) {
       if (contact.isActive) {
         // In a real implementation, this would send actual notifications
-        console.log(`📢 Notification sent to ${contact.name}: ${message}`);
+        logger.debug(`📢 Notification sent to ${contact.name}: ${message}`);
       }
     }
   }
@@ -514,7 +515,7 @@ class PanicModeManager extends SimpleEventEmitter {
         break;
 
       default:
-        console.warn(`Unknown system action: ${action}`);
+        logger.warn(`Unknown system action: ${action}`);
     }
   }
 
@@ -531,7 +532,7 @@ class PanicModeManager extends SimpleEventEmitter {
     await this.saveEmergencyContacts();
 
     this.emit('emergencyContactAdded', newContact);
-    console.log(`📞 Emergency contact added: ${newContact.name}`);
+    logger.debug(`📞 Emergency contact added: ${newContact.name}`);
 
     return contactId;
   }
@@ -596,22 +597,22 @@ class PanicModeManager extends SimpleEventEmitter {
   }
 
   private async playAudioSignal(frequency: number): Promise<void> {
-    console.log(`🔊 Playing audio signal at ${frequency}Hz`);
+    logger.debug(`🔊 Playing audio signal at ${frequency}Hz`);
     // In a real implementation, this would play actual audio
   }
 
   private async flashLight(duration: number): Promise<void> {
-    console.log(`💡 Flashing light for ${duration} seconds`);
+    logger.debug(`💡 Flashing light for ${duration} seconds`);
     // In a real implementation, this would control device flashlight
   }
 
   private async vibrateDevice(pattern: string): Promise<void> {
-    console.log(`📳 Vibrating device with pattern: ${pattern}`);
+    logger.debug(`📳 Vibrating device with pattern: ${pattern}`);
     // In a real implementation, this would control device vibration
   }
 
   private async setMaxVolume(): Promise<void> {
-    console.log(`🔊 Setting volume to maximum`);
+    logger.debug(`🔊 Setting volume to maximum`);
     // In a real implementation, this would set device volume to maximum
   }
 
@@ -622,7 +623,7 @@ class PanicModeManager extends SimpleEventEmitter {
         this.emergencyContacts = JSON.parse(stored);
       }
     } catch (error) {
-      console.error('Failed to load emergency contacts:', error);
+      logger.error('Failed to load emergency contacts:', error);
     }
   }
 
@@ -630,7 +631,7 @@ class PanicModeManager extends SimpleEventEmitter {
     try {
       await AsyncStorage.setItem('emergency_contacts', JSON.stringify(this.emergencyContacts));
     } catch (error) {
-      console.error('Failed to save emergency contacts:', error);
+      logger.error('Failed to save emergency contacts:', error);
     }
   }
 
@@ -648,7 +649,7 @@ class PanicModeManager extends SimpleEventEmitter {
       
       await AsyncStorage.setItem('panic_sessions', JSON.stringify(sessions));
     } catch (error) {
-      console.error('Failed to save panic session:', error);
+      logger.error('Failed to save panic session:', error);
     }
   }
 }

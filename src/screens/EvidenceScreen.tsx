@@ -83,6 +83,7 @@ export default function EvidenceScreen(){
 
       <View style={{ paddingHorizontal:14 }}>
         <TextInput
+          accessibilityRole="text"
           placeholder="Kısa metin notu"
           placeholderTextColor="#94a3b8"
           value={note} onChangeText={setNote}

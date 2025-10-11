@@ -1,4 +1,5 @@
 import * as AV from "expo-av";
+import { logger } from '../utils/productionLogger';
 import * as Location from "expo-location";
 import * as Battery from "expo-battery";
 import * as Device from "expo-device";
@@ -17,7 +18,7 @@ try {
   BleManager = blePlx.BleManager;
   BleState = blePlx.State;
 } catch (e) {
-  console.warn("react-native-ble-plx not available, using fallback");
+  logger.warn("react-native-ble-plx not available, using fallback");
 }
 
 function m(){ 
@@ -59,7 +60,7 @@ export async function getHealth(): Promise<Health>{
     isLowPower = Boolean(Battery.isLowPowerModeEnabledAsync && await Battery.isLowPowerModeEnabledAsync());
   } catch {}
   // MBTiles server flag (simple file sentinel)
-  const server = (globalThis as any).__afn_mbtiles_server__ === true;
+  const server = (globalThis as typeof globalThis).__afn_mbtiles_server__ === true;
   // P2P availability (adapters may set flags)
   const ios = Platform.OS === "ios";
   const android = Platform.OS === "android";

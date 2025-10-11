@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface OfflineMessage {
@@ -18,7 +19,7 @@ class OfflineMessageManager extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('💬 Offline Message Manager initialized');
+    logger.debug('💬 Offline Message Manager initialized');
   }
 
   // CRITICAL: Send Message

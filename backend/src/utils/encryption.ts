@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import CryptoJS from 'crypto-js';
 
 /**
@@ -19,7 +20,7 @@ export function encrypt(data: string): string {
     const encrypted = CryptoJS.AES.encrypt(data, ENCRYPTION_KEY).toString();
     return encrypted;
   } catch (error) {
-    console.error('❌ Encryption error:', error);
+    backendLogger.error('❌ Encryption error:', error);
     throw new Error('Encryption failed');
   }
 }
@@ -34,7 +35,7 @@ export function decrypt(encryptedData: string): string {
     const decrypted = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
     return decrypted.toString(CryptoJS.enc.Utf8);
   } catch (error) {
-    console.error('❌ Decryption error:', error);
+    backendLogger.error('❌ Decryption error:', error);
     throw new Error('Decryption failed');
   }
 }
@@ -81,7 +82,7 @@ export function decryptFields<T extends Record<string, any>>(
         decrypted[field] = decrypt(decrypted[field] as string) as any;
       } catch (error) {
         // If decryption fails, keep original value (might not be encrypted)
-        console.warn(`⚠️  Failed to decrypt field: ${String(field)}`);
+        backendLogger.warn(`⚠️  Failed to decrypt field: ${String(field)}`);
       }
     }
   }

@@ -1,5 +1,6 @@
 import CryptoJS from 'crypto-js';
-import { encode as base64Decode } from 'tweetnacl-util';
+import { logger } from '../utils/productionLogger';
+import { decodeBase64 } from 'tweetnacl-util';
 
 // Base32 alphabet for AFN-ID
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -48,7 +49,7 @@ function crc32(data: Uint8Array): number {
 export function pubKeyToAfnId(pubKeyB64: string): string {
   try {
     // Step 1: decode base64 → bytes
-    const pubKeyBytes = base64Decode(pubKeyB64);
+    const pubKeyBytes = decodeBase64(pubKeyB64);
     
     // Step 2: take sha256 → first 10 bytes payload
     const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(pubKeyBytes));
@@ -76,7 +77,7 @@ export function pubKeyToAfnId(pubKeyB64: string): string {
     
     return formatted;
   } catch (error) {
-    console.error('Failed to generate AFN-ID:', error);
+    logger.error('Failed to generate AFN-ID:', error);
     throw new Error('AFN-ID generation failed');
   }
 }
@@ -110,7 +111,7 @@ export function validateAfnId(id: string): { ok: boolean; payload?: Uint8Array }
     
     return { ok: true, payload };
   } catch (error) {
-    console.error('AFN-ID validation failed:', error);
+    logger.error('AFN-ID validation failed:', error);
     return { ok: false };
   }
 }

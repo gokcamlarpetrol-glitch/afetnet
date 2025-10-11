@@ -24,7 +24,7 @@ function make19kWavBase64(){
   v.setUint32(o,sr,true); o+=4; v.setUint32(o,byteRate,true); o+=4; v.setUint16(o,blockAlign,true); o+=2; v.setUint16(o,16,true); o+=2;
   W(o,"data"); o+=4; v.setUint32(o,dataLen,true); o+=4;
   let k=o;
-  for(let i=0;i<buf.length;i++){ const s = Math.max(-1,Math.min(1,buf[i])); const q = s<0 ? s*0x8000 : s*0x7fff; v.setInt16(k,q|0,true); k+=2; }
+  for(let i=0;i<buf.length;i++){ const bufValue = buf[i]; if (bufValue === undefined) continue; const s = Math.max(-1,Math.min(1,bufValue)); const q = s<0 ? s*0x8000 : s*0x7fff; v.setInt16(k,Math.round(q),true); k+=2; }
   const u8 = new Uint8Array(ab); let bin=""; const CH=0x8000;
   for (let i=0;i<u8.length;i+=CH){ bin += String.fromCharCode.apply(null, Array.from(u8.subarray(i,i+CH))); }
   // @ts-ignore

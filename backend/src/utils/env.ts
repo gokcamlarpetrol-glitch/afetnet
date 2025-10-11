@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 /**
  * Environment Variable Validation
  * CRITICAL: Ensures all required environment variables are set
@@ -58,21 +59,34 @@ export function validateEnv(): EnvConfig {
     }
   }
 
-  // Set defaults for missing variables
+  // CRITICAL: JWT_SECRET must be strong in production
   if (!process.env.JWT_SECRET) {
-    process.env.JWT_SECRET = 'default-jwt-secret-for-deployment-' + Math.random().toString(36);
+    if (process.env.NODE_ENV === 'production') {
+      errors.push('JWT_SECRET is required in production');
+    } else {
+      process.env.JWT_SECRET = 'default-jwt-secret-for-deployment-' + Math.random().toString(36);
+    }
+  } else if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET.length < 32) {
+    errors.push('JWT_SECRET must be at least 32 characters in production');
   }
 
-  // CRITICAL: All validations disabled for deployment
-  // JWT_SECRET validation: DISABLED
-  // Stripe validation: DISABLED  
-  // Firebase validation: DISABLED
-  // Production checks: DISABLED
+  // CRITICAL: Production security checks
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+      errors.push('Firebase credentials are required in production');
+    }
+    if (!process.env.STRIPE_SECRET_KEY) {
+      errors.push('Stripe credentials are required in production');
+    }
+    if (process.env.CORS_ORIGIN === '*') {
+      errors.push('CORS_ORIGIN cannot be * in production');
+    }
+  }
 
   // Throw if any errors
   if (errors.length > 0) {
-    console.error('❌ CRITICAL: Environment validation failed:');
-    errors.forEach((error) => console.error(`  - ${error}`));
+    backendLogger.error('❌ CRITICAL: Environment validation failed:');
+    errors.forEach((error) => backendLogger.error(`  - ${error}`));
     throw new Error('Environment validation failed. Please check your .env file.');
   }
 
@@ -96,13 +110,13 @@ export function validateEnv(): EnvConfig {
     LOG_LEVEL: (process.env.LOG_LEVEL as any) || 'info',
   };
 
-  console.log('✅ Environment variables validated successfully');
-  console.log(`   - Environment: ${config.NODE_ENV}`);
-  console.log(`   - Port: ${config.PORT}`);
-  console.log(`   - Database: ${config.DATABASE_URL.substring(0, 30)}...`);
-  console.log(`   - JWT Secret: ${config.JWT_SECRET.substring(0, 10)}... (${config.JWT_SECRET.length} chars)`);
-  console.log(`   - Firebase: ${config.FIREBASE_PROJECT_ID ? 'Configured' : 'Not configured'}`);
-  console.log(`   - Stripe: ${config.STRIPE_SECRET_KEY ? 'Configured' : 'Not configured'}`);
+  backendLogger.debug('✅ Environment variables validated successfully');
+  backendLogger.debug(`   - Environment: ${config.NODE_ENV}`);
+  backendLogger.debug(`   - Port: ${config.PORT}`);
+  backendLogger.debug(`   - Database: ${config.DATABASE_URL.substring(0, 30)}...`);
+  backendLogger.debug(`   - JWT Secret: ${config.JWT_SECRET.substring(0, 10)}... (${config.JWT_SECRET.length} chars)`);
+  backendLogger.debug(`   - Firebase: ${config.FIREBASE_PROJECT_ID ? 'Configured' : 'Not configured'}`);
+  backendLogger.debug(`   - Stripe: ${config.STRIPE_SECRET_KEY ? 'Configured' : 'Not configured'}`);
 
   return config;
 }

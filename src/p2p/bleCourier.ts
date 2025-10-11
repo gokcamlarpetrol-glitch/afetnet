@@ -1,4 +1,5 @@
 import * as Crypto from "expo-crypto";
+import { logger } from '../utils/productionLogger';
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import { P2P_SERVICE, P2P_CHAR_INBOX, P2P_CHAR_OUTBOX, P2PHello, CourierBundle, CourierPacket } from "./types";
@@ -36,7 +37,7 @@ try {
   BleManager = blePlx.BleManager;
   MANAGER = new BleManager();
 } catch (e) {
-  console.warn("react-native-ble-plx not available, using fallback");
+  logger.warn("react-native-ble-plx not available, using fallback");
 }
 let running = false;
 let dutyTimer: any = null;
@@ -45,14 +46,14 @@ let didShort = "unk";
 let convoy = [] as { id:string; lat:number; lng:number; ts:number }[];
 export function getConvoy(){ return convoy; }
 let sharedRoutes = [] as { id:string; coords:{lat:number;lng:number}[]; ts:number }[];
-let offers: any[] = [];
+let offers: unknown[] = [];
 let relayOn=false;
 export function getSharedRoutes(){ return sharedRoutes; }
 export function getOffers(){ return offers; }
 export function setRelay(on:boolean){ relayOn=on; }
 export function debugP2P(){ return { offers, convoy, sharedRoutes, rx: getRxStates(), relayOn }; }
 export function __presence_debug(){ return PRES_MEM; }
-(global as any).__AFN_BLE_RESTART__ = ()=>{ /* no-op placeholder; could reinit BLE manager here */ };
+(global as typeof globalThis).__AFN_BLE_RESTART__ = ()=>{ /* no-op placeholder; could reinit BLE manager here */ };
 
 function getDuty(){ const p = useProfile.getState().profile; return paramsFor(p); }
 
@@ -329,7 +330,7 @@ async function scanOnce(){
   const hello = await advertiseHello(); // not used directly, but keeps meta updated
   const duty = getDuty();
   return new Promise<void>((resolve)=>{
-    MANAGER.startDeviceScan([P2P_SERVICE], { allowDuplicates: false }, async (_error: any, device: any) => {
+    MANAGER.startDeviceScan([P2P_SERVICE], { allowDuplicates: false }, async (_error: Error | unknown, device: any) => {
       if(!running){ MANAGER.stopDeviceScan(); resolve(); return; }
       if(device){ handleDevice(device); }
     });

@@ -1,4 +1,5 @@
 // Safe Barcode Scanner wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 let BarcodeScanner: any = null;
 let isExpoGo = false;
 
@@ -15,10 +16,10 @@ if (!isExpoGo) {
   try {
     BarcodeScanner = require('expo-barcode-scanner');
   } catch (e) {
-    console.warn('expo-barcode-scanner not available');
+    logger.warn('expo-barcode-scanner not available');
   }
 } else {
-  console.warn('Expo Go detected - skipping barcode scanner import');
+  logger.warn('Expo Go detected - skipping barcode scanner import');
 }
 
 export const SafeBarcodeScanner = {
@@ -26,26 +27,26 @@ export const SafeBarcodeScanner = {
   
   requestPermissionsAsync: async () => {
     if (!BarcodeScanner) {
-      console.warn('Barcode scanner not available, returning denied permission');
+      logger.warn('Barcode scanner not available, returning denied permission');
       return { status: 'denied' };
     }
     try {
       return await BarcodeScanner.requestPermissionsAsync();
     } catch (e) {
-      console.warn('Barcode scanner permission request failed:', e);
+      logger.warn('Barcode scanner permission request failed:', e);
       return { status: 'denied' };
     }
   },
 
   getPermissionsAsync: async () => {
     if (!BarcodeScanner) {
-      console.warn('Barcode scanner not available, returning denied permission');
+      logger.warn('Barcode scanner not available, returning denied permission');
       return { status: 'denied' };
     }
     try {
       return await BarcodeScanner.getPermissionsAsync();
     } catch (e) {
-      console.warn('Barcode scanner permission check failed:', e);
+      logger.warn('Barcode scanner permission check failed:', e);
       return { status: 'denied' };
     }
   },

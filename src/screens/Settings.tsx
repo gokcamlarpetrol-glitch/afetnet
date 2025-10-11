@@ -995,7 +995,7 @@ export default function Settings() {
       <View style={styles.sectionNav}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sectionNavContent}>
           {sections.map((section) => (
-          <Pressable
+          <Pressable accessible={true}
               key={section.id}
               onPress={() => setActiveSection(section.id)}
             style={[
@@ -1008,7 +1008,7 @@ export default function Settings() {
                 { backgroundColor: activeSection === section.id ? section.color : 'transparent' }
               ]}>
             <Ionicons 
-                  name={section.icon as any} 
+                  name={section.icon} 
                   size={20} 
                   color={activeSection === section.id ? '#FFFFFF' : '#6B7280'} 
                 />
@@ -1029,6 +1029,8 @@ export default function Settings() {
 
       {/* Profile Modal */}
       <Modal
+          accessible={true}
+          accessibilityViewIsModal={true}
         visible={showProfileModal}
         animationType="slide"
         presentationStyle="pageSheet"
@@ -1048,6 +1050,7 @@ export default function Settings() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Ad Soyad</Text>
               <TextInput
+          accessibilityRole="text"
                 style={styles.input}
                 value={profileData.name}
                 onChangeText={(text) => setProfileData(prev => ({ ...prev, name: text }))}
@@ -1059,6 +1062,7 @@ export default function Settings() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>E-posta</Text>
               <TextInput
+          accessibilityRole="text"
                 style={styles.input}
                 value={profileData.email}
                 onChangeText={(text) => setProfileData(prev => ({ ...prev, email: text }))}
@@ -1071,6 +1075,7 @@ export default function Settings() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Telefon</Text>
               <TextInput
+          accessibilityRole="text"
                 style={styles.input}
                 value={profileData.phone}
                 onChangeText={(text) => setProfileData(prev => ({ ...prev, phone: text }))}
@@ -1083,6 +1088,7 @@ export default function Settings() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Adres</Text>
               <TextInput
+          accessibilityRole="text"
                 style={[styles.input, styles.textArea]}
                 value={profileData.address}
                 onChangeText={(text) => setProfileData(prev => ({ ...prev, address: text }))}

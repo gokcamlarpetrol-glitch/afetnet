@@ -1,6 +1,6 @@
-import { SafeBLE } from "./SafeBLE";
 import { PermissionsAndroid } from "react-native";
-import { encodeLoc, encodeTextChunk, encodeTextV2 as codecTextV2, encodeSOSWithStatus as codecSOSWithStatus, decode, SERVICE_UUID } from "./codec";
+import { encodeSOSWithStatus as codecSOSWithStatus, encodeTextV2 as codecTextV2, encodeLoc, encodeTextChunk } from "./codec";
+import { SafeBLE } from "./SafeBLE";
 
 async function perm(){
   const perms = [

@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface RescueMission {
@@ -20,7 +21,7 @@ class RescueGuidanceSystem extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🚁 Rescue Guidance System initialized');
+    logger.debug('🚁 Rescue Guidance System initialized');
   }
 
   // CRITICAL: Create Rescue Mission

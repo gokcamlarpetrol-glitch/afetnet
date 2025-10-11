@@ -76,7 +76,8 @@ export default function BeaconScreen(){
       <Text style={{color:"#94a3b8", fontSize:14, marginBottom:8, marginTop:4}}>Durumunu Belirt:</Text>
       <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:8}}>
         {statusOptions.map((status) => (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             key={status}
             onPress={() => toggleStatus(status)}
             style={{

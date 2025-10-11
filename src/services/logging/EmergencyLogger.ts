@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { Platform } from 'react-native';
 
 export interface LogEntry {
@@ -61,7 +62,7 @@ class EmergencyLogger {
 
   private async initializeLogger() {
     try {
-      console.log('📝 Initializing Emergency Logger...');
+      logger.debug('📝 Initializing Emergency Logger...');
       
       // Load device info
       this.deviceInfo = {
@@ -77,10 +78,10 @@ class EmergencyLogger {
       this.setupLogRotation();
       
       this.isInitialized = true;
-      console.log('✅ Emergency Logger initialized');
+      logger.debug('✅ Emergency Logger initialized');
       
     } catch (error) {
-      console.error('❌ Failed to initialize Emergency Logger:', error);
+      logger.error('❌ Failed to initialize Emergency Logger:', error);
     }
   }
 
@@ -173,7 +174,7 @@ class EmergencyLogger {
       this.rotateLogsIfNeeded();
 
     } catch (error) {
-      console.error('❌ Logging error:', error);
+      logger.error('❌ Logging error:', error);
     }
   }
 
@@ -221,16 +222,16 @@ class EmergencyLogger {
         console.debug(message, logEntry.details);
         break;
       case 'info':
-        console.info(message, logEntry.details);
+        logger.info(message, logEntry.details);
         break;
       case 'warn':
-        console.warn(message, logEntry.details);
+        logger.warn(message, logEntry.details);
         break;
       case 'error':
-        console.error(message, logEntry.details);
+        logger.error(message, logEntry.details);
         break;
       case 'critical':
-        console.error(`🚨 CRITICAL: ${message}`, logEntry.details);
+        logger.error(`🚨 CRITICAL: ${message}`, logEntry.details);
         break;
     }
   }
@@ -239,7 +240,7 @@ class EmergencyLogger {
     try {
       await AsyncStorage.setItem(`critical_log_${logEntry.id}`, JSON.stringify(logEntry));
     } catch (error) {
-      console.error('❌ Failed to store critical log:', error);
+      logger.error('❌ Failed to store critical log:', error);
     }
   }
 
@@ -265,7 +266,7 @@ class EmergencyLogger {
       await AsyncStorage.setItem('log_stats', JSON.stringify(stats));
       
     } catch (error) {
-      console.error('❌ Failed to store logs:', error);
+      logger.error('❌ Failed to store logs:', error);
     }
   }
 
@@ -277,7 +278,7 @@ class EmergencyLogger {
         this.logs = Array.isArray(parsedLogs) ? parsedLogs : [];
       }
     } catch (error) {
-      console.error('❌ Failed to load stored logs:', error);
+      logger.error('❌ Failed to load stored logs:', error);
     }
   }
 
@@ -319,12 +320,12 @@ class EmergencyLogger {
             }
           }
         } catch (error) {
-          console.error(`❌ Failed to cleanup log ${key}:`, error);
+          logger.error(`❌ Failed to cleanup log ${key}:`, error);
         }
       }
 
     } catch (error) {
-      console.error('❌ Failed to cleanup old logs:', error);
+      logger.error('❌ Failed to cleanup old logs:', error);
     }
   }
 
@@ -369,7 +370,7 @@ class EmergencyLogger {
       return filteredLogs;
 
     } catch (error) {
-      console.error('❌ Failed to query logs:', error);
+      logger.error('❌ Failed to query logs:', error);
       return [];
     }
   }
@@ -391,7 +392,7 @@ class EmergencyLogger {
       return JSON.stringify(exportData, null, 2);
 
     } catch (error) {
-      console.error('❌ Failed to export logs:', error);
+      logger.error('❌ Failed to export logs:', error);
       return JSON.stringify({ error: 'Export failed', message: String(error) });
     }
   }
@@ -454,7 +455,7 @@ class EmergencyLogger {
   private getStackTrace(): string {
     try {
       throw new Error();
-    } catch (error: any) {
+    } catch (error: Error | unknown) {
       return error.stack || 'No stack trace available';
     }
   }
@@ -484,7 +485,7 @@ class EmergencyLogger {
       this.logSystem('warn', 'All logs cleared');
       
     } catch (error) {
-      console.error('❌ Failed to clear logs:', error);
+      logger.error('❌ Failed to clear logs:', error);
     }
   }
 }

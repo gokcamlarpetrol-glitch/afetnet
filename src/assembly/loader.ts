@@ -1,17 +1,17 @@
-import * as FileSystem from 'expo-file-system';
-import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import { logger } from '../utils/productionLogger';
 import { AssemblyPoint } from './types';
 
 const STORAGE_KEY = 'afn/assembly/v1';
 
 export async function loadBundledAssembly(): Promise<AssemblyPoint[]> {
   try {
-    const bundledPath = `${FileSystem.bundleDirectory}assets/assembly/assembly_tr_sample.geojson`;
+    const bundledPath = `${FileSystem.bundleDirectory || ''}assets/assembly/assembly_tr_sample.geojson`;
     const fileInfo = await FileSystem.getInfoAsync(bundledPath);
     
     if (!fileInfo.exists) {
-      console.warn('Bundled assembly points not found');
+      logger.warn('Bundled assembly points not found');
       return [];
     }
 
@@ -20,7 +20,7 @@ export async function loadBundledAssembly(): Promise<AssemblyPoint[]> {
     
     return parseGeoJSON(geojson);
   } catch (error) {
-    console.error('Failed to load bundled assembly points:', error);
+    logger.error('Failed to load bundled assembly points:', error);
     return [];
   }
 }
@@ -56,7 +56,7 @@ export async function importAssemblyFromFile(uri: string): Promise<number> {
     
     return newPoints.length;
   } catch (error) {
-    console.error('Failed to import assembly points:', error);
+    logger.error('Failed to import assembly points:', error);
     throw error;
   }
 }
@@ -76,7 +76,7 @@ export async function listAssembly(): Promise<AssemblyPoint[]> {
     
     return JSON.parse(stored);
   } catch (error) {
-    console.error('Failed to list assembly points:', error);
+    logger.error('Failed to list assembly points:', error);
     return [];
   }
 }
@@ -116,7 +116,11 @@ function parseCSV(content: string): AssemblyPoint[] {
     throw new Error('CSV must have at least a header and one data row');
   }
 
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const firstLine = lines[0];
+  if (!firstLine) {
+    throw new Error('CSV file is empty');
+  }
+  const headers = firstLine.split(',').map(h => h.trim().toLowerCase());
   const requiredHeaders = ['lat', 'lon'];
   
   for (const req of requiredHeaders) {
@@ -128,7 +132,9 @@ function parseCSV(content: string): AssemblyPoint[] {
   const points: AssemblyPoint[] = [];
   
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map(v => v.trim());
+    const line = lines[i];
+    if (!line) continue;
+    const values = line.split(',').map(v => v.trim());
     const row: any = {};
     
     headers.forEach((header, index) => {
@@ -139,7 +145,7 @@ function parseCSV(content: string): AssemblyPoint[] {
     const lon = parseFloat(row.lon);
     
     if (isNaN(lat) || isNaN(lon)) {
-      console.warn(`Skipping invalid row ${i}: invalid coordinates`);
+      logger.warn(`Skipping invalid row ${i}: invalid coordinates`);
       continue;
     }
 
@@ -151,7 +157,7 @@ function parseCSV(content: string): AssemblyPoint[] {
       addr: row.address || row.addr,
       district: row.district,
       city: row.city,
-      capacity: row.capacity ? parseInt(row.capacity) : undefined,
+      capacity: row.capacity ? parseInt(row.capacity, 10) : 0,
       type: row.type,
       contact: row.contact,
       source: 'imported'

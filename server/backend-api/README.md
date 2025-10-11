@@ -190,3 +190,4 @@ Daha fazla → Workers Paid: $5/ay (10M istek)
 **Güncelleme**: 7 Ekim 2025
 
 
+

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { logger } from '../utils/productionLogger';
 
 export interface LocationData {
   lat: number;
@@ -24,7 +25,7 @@ export async function getCurrentPositionSafe(): Promise<LocationData | null> {
     
     const { status } = await requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      console.warn('Location permission not granted');
+      logger.warn('Location permission not granted');
       return null;
     }
 
@@ -36,7 +37,7 @@ export async function getCurrentPositionSafe(): Promise<LocationData | null> {
       acc: location.coords.accuracy || undefined,
     };
   } catch (error) {
-    console.warn('Failed to get location:', error);
+    logger.warn('Failed to get location:', error);
     return null;
   }
 }

@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { logger } from '../utils/productionLogger';
 import NetInfo from "@react-native-community/netinfo";
 import * as FileSystem from "expo-file-system";
 import { tilesForBBox } from "./tiles";
@@ -13,19 +14,19 @@ function bboxFromCenter(lat: number, lon: number, km: number) {
 export async function autoPrefetchSmallSatellite(): Promise<boolean> {
   try {
     if (!REMOTE_S2_TEMPLATE) {
-      console.log('Auto-prefetch disabled: REMOTE_S2_TEMPLATE not configured');
+      logger.debug('Auto-prefetch disabled: REMOTE_S2_TEMPLATE not configured');
       return false; // Disabled by default for legal safety
     }
     
     const net = await NetInfo.fetch();
     if (!net.isConnected) {
-      console.log('Auto-prefetch skipped: no network connection');
+      logger.debug('Auto-prefetch skipped: no network connection');
       return false;
     }
     
     const perm = await Location.requestForegroundPermissionsAsync();
     if (!perm.granted) {
-      console.log('Auto-prefetch skipped: no location permission');
+      logger.debug('Auto-prefetch skipped: no location permission');
       return false;
     }
     
@@ -43,7 +44,7 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
       totalTiles += tiles.length;
     }
     
-    console.log(`Auto-prefetch: downloading ${totalTiles} tiles for ${AUTO_PREFETCH_KM}km radius`);
+    logger.debug(`Auto-prefetch: downloading ${totalTiles} tiles for ${AUTO_PREFETCH_KM}km radius`);
     
     for (const zoom of AUTO_PREFETCH_ZOOMS) {
       const tiles = tilesForBBox(box, zoom, zoom);
@@ -65,12 +66,12 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
               await FileSystem.downloadAsync(url, dst);
               downloadedTiles++;
             } catch (downloadError) {
-              console.warn(`Failed to download tile ${url}:`, downloadError);
+              logger.warn(`Failed to download tile ${url}:`, downloadError);
               // Continue with other tiles
             }
           }
         } catch (error) {
-          console.warn(`Failed to process tile ${tile.z}/${tile.x}/${tile.y}:`, error);
+          logger.warn(`Failed to process tile ${tile.z}/${tile.x}/${tile.y}:`, error);
         }
         
         // Yield control every 10 tiles
@@ -82,14 +83,14 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
     
     if (downloadedTiles > 0) {
       await tileManager.registerFolderPack("sentinel-auto", dstRoot, "raster", AUTO_PREFETCH_ZOOMS);
-      console.log(`Auto-prefetch completed: ${downloadedTiles}/${totalTiles} tiles downloaded`);
+      logger.debug(`Auto-prefetch completed: ${downloadedTiles}/${totalTiles} tiles downloaded`);
       return true;
     } else {
-      console.log('Auto-prefetch failed: no tiles downloaded');
+      logger.debug('Auto-prefetch failed: no tiles downloaded');
       return false;
     }
   } catch (error) {
-    console.warn('Auto-prefetch failed:', error);
+    logger.warn('Auto-prefetch failed:', error);
     return false;
   }
 }

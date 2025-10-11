@@ -83,7 +83,8 @@ export default function Chat() {
   };
 
   const renderContact = ({ item }: { item: any }) => (
-    <Pressable
+    <Pressable accessible={true}
+          accessibilityRole="button"
       onPress={() => {
         setSelectedContact(item.id);
         setSelectedGroup(null);
@@ -99,7 +100,8 @@ export default function Chat() {
   );
 
   const renderGroup = ({ item }: { item: any }) => (
-    <Pressable
+    <Pressable accessible={true}
+          accessibilityRole="button"
       onPress={() => {
         setSelectedGroup(item.id);
         setSelectedContact(null);
@@ -151,7 +153,8 @@ export default function Chat() {
     <View style={styles.container}>
       {/* Tabs */}
       <View style={styles.tabContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setActiveTab('contacts')}
           style={[styles.tab, activeTab === 'contacts' && styles.tabActive]}
         >
@@ -159,7 +162,8 @@ export default function Chat() {
             Kişi
           </Text>
         </Pressable>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setActiveTab('groups')}
           style={[styles.tab, activeTab === 'groups' && styles.tabActive]}
         >
@@ -205,6 +209,7 @@ export default function Chat() {
 
               <View style={styles.inputContainer}>
                 <TextInput
+          accessibilityRole="text"
                   value={messageText}
                   onChangeText={setMessageText}
                   placeholder="Mesaj yazın (max 120 karakter)"
@@ -213,7 +218,8 @@ export default function Chat() {
                   maxLength={120}
                   multiline
                 />
-                <Pressable
+                <Pressable accessible={true}
+          accessibilityRole="button"
                   onPress={sendMessage}
                   disabled={!messageText.trim()}
                   style={[

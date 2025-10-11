@@ -1,11 +1,11 @@
 import * as FileSystem from "expo-file-system";
-import QRCode from "react-native-qrcode-svg";
-import { secretboxEncrypt, secretboxDecrypt } from "../crypto/backup";
+// import QRCode from "react-native-qrcode-svg"; // Not used in current implementation
+import { secretboxDecrypt, secretboxEncrypt } from "../crypto/backup";
 
 const DIR = "/tmp/";
-const FILES = [
-  "afn:e2ee/identity", // conceptual — below we actually read concrete app files
-];
+// const FILES = [
+//   "afn:e2ee/identity", // conceptual — below we actually read concrete app files
+// ];
 
 type Chunk = { v:1; i:number; n:number; data:string };
 

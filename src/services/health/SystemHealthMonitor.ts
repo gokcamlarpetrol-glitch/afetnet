@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
 import { Vibration } from 'react-native';
@@ -58,7 +59,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
   }
 
   private initializeHealthChecks() {
-    console.log('🏥 Initializing System Health Checks...');
+    logger.debug('🏥 Initializing System Health Checks...');
 
     // Critical System Health Checks
     this.healthChecks.set('mesh_network', () => this.checkMeshNetwork());
@@ -72,7 +73,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     this.healthChecks.set('sensor_monitoring', () => this.checkSensorMonitoring());
     this.healthChecks.set('encryption_keys', () => this.checkEncryptionKeys());
 
-    console.log(`✅ ${this.healthChecks.size} health checks initialized`);
+    logger.debug(`✅ ${this.healthChecks.size} health checks initialized`);
   }
 
   // CRITICAL: Start Health Monitoring
@@ -80,7 +81,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     if (this.isMonitoring) return;
 
     try {
-      console.log('🏥 Starting System Health Monitoring...');
+      logger.debug('🏥 Starting System Health Monitoring...');
       
       this.isMonitoring = true;
       
@@ -98,10 +99,10 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       }, 10000);
 
       this.emit('healthMonitoringStarted');
-      console.log('✅ System Health Monitoring started');
+      logger.debug('✅ System Health Monitoring started');
 
     } catch (error) {
-      console.error('❌ Failed to start health monitoring:', error);
+      logger.error('❌ Failed to start health monitoring:', error);
       this.emit('healthMonitoringError', error);
     }
   }
@@ -111,7 +112,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     if (!this.isMonitoring) return;
 
     try {
-      console.log('🛑 Stopping System Health Monitoring...');
+      logger.debug('🛑 Stopping System Health Monitoring...');
       
       this.isMonitoring = false;
       
@@ -121,10 +122,10 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       }
 
       this.emit('healthMonitoringStopped');
-      console.log('✅ System Health Monitoring stopped');
+      logger.debug('✅ System Health Monitoring stopped');
 
     } catch (error) {
-      console.error('❌ Error stopping health monitoring:', error);
+      logger.error('❌ Error stopping health monitoring:', error);
     }
   }
 
@@ -136,7 +137,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     let autoFixedIssues = 0;
 
     try {
-      console.log('🏥 Running comprehensive health checks...');
+      logger.debug('🏥 Running comprehensive health checks...');
 
       // Run all health checks in parallel
       const checkPromises = Array.from(this.healthChecks.entries()).map(
@@ -145,7 +146,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
             const check = await checkFunction();
             return { id, check };
           } catch (error) {
-            console.error(`❌ Health check ${id} failed:`, error);
+            logger.error(`❌ Health check ${id} failed:`, error);
             return {
               id,
               check: {
@@ -205,12 +206,12 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       // Save health history
       await this.saveHealthHistory();
 
-      console.log(`🏥 Health check completed: ${overall} (${criticalIssues} critical, ${warningIssues} warnings)`);
+      logger.debug(`🏥 Health check completed: ${overall} (${criticalIssues} critical, ${warningIssues} warnings)`);
 
       return systemHealth;
 
     } catch (error) {
-      console.error('❌ Critical error in health monitoring:', error);
+      logger.error('❌ Critical error in health monitoring:', error);
       this.emit('healthMonitoringError', error);
       
       // Return emergency health status
@@ -242,11 +243,11 @@ class SystemHealthMonitor extends SimpleEventEmitter {
         try {
           const check = await checkFunction();
           if (check.status === 'critical') {
-            console.error(`🚨 CRITICAL: ${check.name} - ${check.message}`);
+            logger.error(`🚨 CRITICAL: ${check.name} - ${check.message}`);
             this.emit('criticalHealthIssue', check);
           }
         } catch (error) {
-          console.error(`❌ Critical health check ${checkId} failed:`, error);
+          logger.error(`❌ Critical health check ${checkId} failed:`, error);
         }
       }
     }
@@ -690,7 +691,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
   // Auto-fix attempts
   private async attemptAutoFix(check: HealthCheck): Promise<boolean> {
     try {
-      console.log(`🔧 Attempting auto-fix for ${check.name}...`);
+      logger.debug(`🔧 Attempting auto-fix for ${check.name}...`);
 
       switch (check.id) {
         case 'mesh_network':
@@ -709,12 +710,12 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
         case 'battery_level':
           // Enable power saving mode
-          console.log('🔋 Enabling power saving mode');
+          logger.debug('🔋 Enabling power saving mode');
           break;
 
         case 'storage_space':
           // Clear old logs and cache
-          console.log('🧹 Clearing old data');
+          logger.debug('🧹 Clearing old data');
           break;
 
         case 'voice_commands':
@@ -729,25 +730,25 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
         case 'encryption_keys':
           // Re-initialize encryption keys
-          console.log('🔐 Re-initializing encryption keys');
+          logger.debug('🔐 Re-initializing encryption keys');
           break;
 
         default:
           return false;
       }
 
-      console.log(`✅ Auto-fix successful for ${check.name}`);
+      logger.debug(`✅ Auto-fix successful for ${check.name}`);
       return true;
 
     } catch (error) {
-      console.error(`❌ Auto-fix failed for ${check.name}:`, error);
+      logger.error(`❌ Auto-fix failed for ${check.name}:`, error);
       return false;
     }
   }
 
   // Handle critical health issues
   private async handleCriticalHealthIssues(health: SystemHealth): Promise<void> {
-    console.error('🚨 CRITICAL HEALTH ISSUES DETECTED!');
+    logger.error('🚨 CRITICAL HEALTH ISSUES DETECTED!');
     
     // Vibrate device to alert user
     Vibration.vibrate([0, 1000, 500, 1000, 500, 1000]);
@@ -758,7 +759,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     // Log critical issues
     const criticalChecks = health.checks.filter(check => check.status === 'critical');
     for (const check of criticalChecks) {
-      console.error(`🚨 CRITICAL: ${check.name} - ${check.message}`);
+      logger.error(`🚨 CRITICAL: ${check.name} - ${check.message}`);
     }
   }
 
@@ -782,7 +783,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       
       await AsyncStorage.setItem('health_history', JSON.stringify(this.healthHistory));
     } catch (error) {
-      console.error('Failed to save health history:', error);
+      logger.error('Failed to save health history:', error);
     }
   }
 
@@ -793,7 +794,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
         this.healthHistory = JSON.parse(stored);
       }
     } catch (error) {
-      console.error('Failed to load health history:', error);
+      logger.error('Failed to load health history:', error);
     }
   }
 

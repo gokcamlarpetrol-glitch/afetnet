@@ -1,6 +1,15 @@
-import { Accelerometer, Motion } from 'expo-sensors';
+import { Accelerometer } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
 import { notifyPWaveAlert } from '../alerts/notify';
+import { logger } from '../utils/productionLogger';
+
+// Import Motion with fallback
+let Motion: any = null;
+try {
+  Motion = require('expo-sensors').Motion;
+} catch {
+  // Motion not available
+}
 
 interface PWaveConfig {
   enabled: boolean;
@@ -51,6 +60,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
 
     const checkMotion = async () => {
       try {
+        if (!Motion) return;
         const motion = await Motion.getMotionDataAsync();
         const acceleration = Math.sqrt(
           motion.acceleration.x ** 2 + 
@@ -64,11 +74,11 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
         
         // If device is moving, disable P-wave detection
         if (!isStationary && state.isListening) {
-          console.log('P-wave: Device in motion, disabling detection');
+          logger.debug('P-wave: Device in motion, disabling detection');
           stopListening();
         }
       } catch (error) {
-        console.warn('P-wave: Failed to check motion:', error);
+        logger.warn('P-wave: Failed to check motion:', error);
       }
     };
 
@@ -125,7 +135,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
     const detected = energyExceeded && zeroCrossingExceeded;
 
     if (detected) {
-      console.log(`P-wave: Detection - Energy: ${energy.toFixed(3)}, Zero-crossing: ${zeroCrossingRate.toFixed(3)}`);
+      logger.debug(`P-wave: Detection - Energy: ${energy.toFixed(3)}, Zero-crossing: ${zeroCrossingRate.toFixed(3)}`);
     }
 
     return detected;
@@ -181,12 +191,12 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
 
             // Send local notification
             notifyPWaveAlert().catch(error => {
-              console.error('P-wave: Failed to send alert:', error);
+              logger.error('P-wave: Failed to send alert:', error);
             });
 
-            console.log('P-wave: Experimental alert triggered');
+            logger.debug('P-wave: Experimental alert triggered');
           } else {
-            console.log('P-wave: Detection suppressed (cooldown)');
+            logger.debug('P-wave: Detection suppressed (cooldown)');
           }
         }
       });
@@ -197,10 +207,10 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
         error: null 
       }));
 
-      console.log('P-wave: Started listening');
+      logger.debug('P-wave: Started listening');
 
     } catch (error) {
-      console.error('P-wave: Failed to start:', error);
+      logger.error('P-wave: Failed to start:', error);
       setState(prev => ({ 
         ...prev, 
         error: error instanceof Error ? error.message : 'P-dalgası algısı başlatılamadı' 
@@ -221,7 +231,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
       isListening: false 
     }));
 
-    console.log('P-wave: Stopped listening');
+    logger.debug('P-wave: Stopped listening');
   };
 
   // Auto-start/stop based on enabled state and motion

@@ -1,6 +1,7 @@
-import { Platform } from "react-native";
-import Constants from "expo-constants";
-import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID } from "./constants";
+// import { Platform } from "react-native"; // Not used
+import { logger } from '../utils/productionLogger';
+// import Constants from "expo-constants"; // Not used
+// import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID } from "./constants"; // Not used
 
 // Mock BLE Manager for Expo Go compatibility
 class MockBleManager {
@@ -23,7 +24,8 @@ class MockBleManager {
 
 // Check if we're in Expo Go (no native modules available)
 const isExpoGo = () => {
-  return Constants.executionEnvironment === "storeClient";
+  // Simplified check without Constants
+  return typeof globalThis !== 'undefined' && (globalThis as any).location?.hostname === 'localhost';
 };
 
 class AfetBle {
@@ -32,7 +34,7 @@ class AfetBle {
   
   private constructor() {
     if (isExpoGo()) {
-      console.log('🔧 BLE Mock Mode: Expo Go detected');
+      logger.debug('🔧 BLE Mock Mode: Expo Go detected');
       this.manager = new MockBleManager();
     } else {
       try {
@@ -42,9 +44,9 @@ class AfetBle {
           restoreStateIdentifier: "afetnet-ble",
           restoreStateFunction: () => {},
         });
-        console.log('🔧 BLE Native Mode: Development build detected');
+        logger.debug('🔧 BLE Native Mode: Development build detected');
       } catch (error) {
-        console.log('🔧 BLE Mock Mode: Native module not available', error);
+        logger.debug('🔧 BLE Mock Mode: Native module not available', error);
         this.manager = new MockBleManager();
       }
     }

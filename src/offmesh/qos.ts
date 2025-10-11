@@ -1,4 +1,5 @@
 import * as Battery from 'expo-battery';
+import { logger } from '../utils/productionLogger';
 import * as Device from 'expo-device';
 import { MsgType } from './types';
 
@@ -54,7 +55,7 @@ class QoSManager {
         // Check for high temperature (simulated)
         this.checkTemperature();
       } catch (error) {
-        console.warn('Battery monitoring failed:', error);
+        logger.warn('Battery monitoring failed:', error);
       }
     }, 30000);
   }
@@ -67,10 +68,10 @@ class QoSManager {
       this.isHighTemp = isHighTemp;
       
       if (isHighTemp) {
-        console.warn('High temperature detected, reducing mesh activity');
+        logger.warn('High temperature detected, reducing mesh activity');
       }
     } catch (error) {
-      console.warn('Temperature check failed:', error);
+      logger.warn('Temperature check failed:', error);
     }
   }
 
@@ -119,13 +120,13 @@ class QoSManager {
   shouldActivateMesh(): boolean {
     // Check battery level
     if (this.lastBatteryLevel <= this.batteryThreshold) {
-      console.warn(`Battery low (${this.lastBatteryLevel}%), mesh discovery only`);
+      logger.warn(`Battery low (${this.lastBatteryLevel}%), mesh discovery only`);
       return false;
     }
 
     // Check temperature
     if (this.isHighTemp) {
-      console.warn('High temperature, mesh discovery only');
+      logger.warn('High temperature, mesh discovery only');
       return false;
     }
 

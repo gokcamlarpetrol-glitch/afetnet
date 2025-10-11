@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { deriveSharedKey } from '../lib/cryptoGroup';
@@ -54,7 +55,7 @@ export const usePairing = create<PairingState & PairingActions>()(
       addContact: (contact) => {
         const { mySecretKey } = get();
         if (!mySecretKey) {
-          console.warn('Cannot add contact: no secret key available');
+          logger.warn('Cannot add contact: no secret key available');
           return;
         }
 

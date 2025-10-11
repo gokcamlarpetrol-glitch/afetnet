@@ -136,7 +136,8 @@ export default function PremiumScreen() {
     const isCurrentPlan = currentPlan === plan.id;
 
     return (
-      <Pressable
+      <Pressable accessible={true}
+          accessibilityRole="button"
         key={plan.id}
         onPress={() => handleSelectPlan(plan.id)}
         disabled={isCurrentPlan || isProcessingPayment}
@@ -249,6 +250,8 @@ export default function PremiumScreen() {
 
   const renderPaymentModal = () => (
     <Modal
+          accessible={true}
+          accessibilityViewIsModal={true}
       visible={showPaymentModal}
       animationType="slide"
       presentationStyle="pageSheet"
@@ -256,7 +259,8 @@ export default function PremiumScreen() {
     >
       <SafeAreaView style={styles.modalContainer}>
         <View style={styles.modalHeader}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setShowPaymentModal(false)}
             style={styles.modalCloseButton}
           >
@@ -301,7 +305,8 @@ export default function PremiumScreen() {
             <Text style={styles.sectionTitle}>Ödeme Yöntemi</Text>
             
             {PAYMENT_METHODS.map((method) => (
-              <Pressable
+              <Pressable accessible={true}
+          accessibilityRole="button"
                 key={method.id}
                 onPress={() => setSelectedPaymentMethod(method.id as any)}
                 style={[
@@ -311,7 +316,7 @@ export default function PremiumScreen() {
               >
                 <View style={styles.paymentMethodIcon}>
                   <Ionicons 
-                    name={method.icon as any} 
+                    name={config.icon} 
                     size={24} 
                     color={selectedPaymentMethod === method.id ? "#3B82F6" : "#6B7280"} 
                   />
@@ -344,7 +349,8 @@ export default function PremiumScreen() {
           </View>
 
           {/* Purchase Button */}
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => selectedPlan && handlePurchase(selectedPlan)}
             disabled={!selectedPlan || isProcessingPayment}
             style={[

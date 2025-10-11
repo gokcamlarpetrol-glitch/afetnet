@@ -1,4 +1,5 @@
 import { useIce } from '../store/ice';
+import { logger } from '../utils/productionLogger';
 import { usePDRFuse } from '../hooks/usePDRFuse';
 
 export function integrateSOSWithICE() {
@@ -9,7 +10,7 @@ export function integrateSOSWithICE() {
   const primaryTemplate = templates.find(t => t.id === 'short_sos') || templates[0];
   
   if (!primaryTemplate || contacts.length === 0) {
-    console.warn('No ICE template or contacts available for SOS integration');
+    logger.warn('No ICE template or contacts available for SOS integration');
     return;
   }
 
@@ -31,7 +32,7 @@ export function integrateSOSWithICE() {
     enqueue(contact.phone, smsBody);
   }
 
-  console.log(`SOS integration: ${sortedContacts.length} ICE contacts queued for SMS`);
+  logger.debug(`SOS integration: ${sortedContacts.length} ICE contacts queued for SMS`);
 }
 
 export function updateSOSStatus(statuses: string[]) {
@@ -66,5 +67,5 @@ export function updateSOSStatus(statuses: string[]) {
     enqueue(contact.phone, smsBody);
   }
 
-  console.log(`SOS status update: ${sortedContacts.length} ICE contacts queued for SMS`);
+  logger.debug(`SOS status update: ${sortedContacts.length} ICE contacts queued for SMS`);
 }

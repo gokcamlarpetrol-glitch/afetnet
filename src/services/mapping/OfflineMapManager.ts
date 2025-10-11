@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface MapLocation {
@@ -21,7 +22,7 @@ class OfflineMapManager extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🗺️ Offline Map Manager initialized');
+    logger.debug('🗺️ Offline Map Manager initialized');
   }
 
   // CRITICAL: Add Map Location
@@ -56,7 +57,7 @@ class OfflineMapManager extends SimpleEventEmitter {
   // CRITICAL: Set Offline Mode
   setOfflineMode(isOffline: boolean): void {
     try {
-      console.log(`🗺️ Setting offline mode: ${isOffline}`);
+      logger.debug(`🗺️ Setting offline mode: ${isOffline}`);
       
       this.emit('offlineModeChanged', { isOffline });
       emergencyLogger.logSystem('info', 'Offline mode changed', { isOffline });

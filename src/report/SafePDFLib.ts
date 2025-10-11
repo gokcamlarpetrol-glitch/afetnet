@@ -1,4 +1,5 @@
 // Safe PDF Lib wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 let PDFLib: any = null;
 let PDFDocument: any = null;
 let Page: any = null;
@@ -11,7 +12,7 @@ try {
   Page = pdfLibModule.Page;
   rgb = pdfLibModule.rgb;
 } catch (e) {
-  console.warn('react-native-pdf-lib not available');
+  logger.warn('react-native-pdf-lib not available');
 }
 
 export const SafePDFLib = {
@@ -23,7 +24,7 @@ export const SafePDFLib = {
   
   createDocument: () => {
     if (!PDFDocument) {
-      console.warn('PDFDocument not available, returning mock');
+      logger.warn('PDFDocument not available, returning mock');
       return {
         addPage: () => {},
         write: async () => ({ uri: '/tmp/mock.pdf' }),

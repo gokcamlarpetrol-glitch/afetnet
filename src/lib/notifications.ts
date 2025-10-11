@@ -1,4 +1,6 @@
 import * as Notifications from "expo-notifications";
+import { logger } from '../utils/productionLogger';
+import { getFCMToken } from "./firebase";
 
 /**
  * Push notification token alımı
@@ -13,16 +15,29 @@ export async function getPushToken(): Promise<string|null> {
       final = req.status;
     }
     if (final !== "granted") {
-      console.warn("AfetNet: Bildirim izni reddedildi");
+      logger.warn("AfetNet: Bildirim izni reddedildi");
       return null;
     }
+    
+    // Try Firebase FCM first, fallback to Expo
+    try {
+      const fcmToken = await getFCMToken();
+      if (fcmToken) {
+        logger.debug("AfetNet: FCM token alındı:", fcmToken.slice(0, 20) + "...");
+        return fcmToken;
+      }
+    } catch (error) {
+      logger.warn("FCM token alınamadı, Expo'ya geçiliyor:", error);
+    }
+    
+    // Fallback to Expo Push Token
     const token = await Notifications.getExpoPushTokenAsync({
       projectId: process.env.EXPO_PUBLIC_PROJECT_ID || '072f1217-172a-40ce-af23-3fc0ad3f7f09'
     });
-    console.log("AfetNet: Push token alındı:", token.data.slice(0, 20) + "...");
+    logger.debug("AfetNet: Expo Push token alındı:", token.data.slice(0, 20) + "...");
     return token.data;
   } catch (error) {
-    console.error("AfetNet: Push token alınamadı:", error);
+    logger.error("AfetNet: Push token alınamadı:", error);
     return null;
   }
 }
@@ -37,6 +52,8 @@ export function configureHandlers() {
       shouldShowAlert: true,
       shouldPlaySound: true, // Acil durum için ses aktif
       shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
     }),
   });
 }
@@ -58,6 +75,6 @@ export async function sendLocalEmergencyNotification(title: string, body: string
       trigger: null, // Anında gönder
     });
   } catch (error) {
-    console.error("AfetNet: Local bildirim gönderilemedi:", error);
+    logger.error("AfetNet: Local bildirim gönderilemedi:", error);
   }
 }

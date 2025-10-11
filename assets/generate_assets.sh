@@ -72,3 +72,4 @@ echo "   2. Figma.com → AfetNet logo tasarımı"
 echo "   3. Fiverr.com → Profesyonel tasarımcı (5-10$)"
 
 
+

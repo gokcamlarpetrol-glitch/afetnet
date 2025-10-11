@@ -56,7 +56,7 @@ export async function exportZip(hours=2, tag="op"){
 
   const blob = await zip.generateAsync({ type: "base64", compression: "DEFLATE" });
   const out = "/tmp/" + `afetnet_${tag}_${Date.now()}.zip`;
-  await FileSystem.writeAsStringAsync(out, blob, { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(out, blob, { encoding: "utf8" });
   if (await Sharing.isAvailableAsync()) {await Sharing.shareAsync(out, { mimeType: "application/zip", dialogTitle: "AfetNet Arşiv" });}
   return out;
 }

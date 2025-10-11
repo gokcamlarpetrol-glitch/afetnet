@@ -1,10 +1,55 @@
+/**
+ * Cryptography utilities using NaCl (Curve25519, Salsa20, Poly1305)
+ * Elite Security Standards - Production-grade encryption
+ */
+
 import * as nacl from 'tweetnacl';
 import { decodeBase64, decodeUTF8, encodeBase64 } from 'tweetnacl-util';
 
+/**
+ * Generate a new Curve25519 key pair for asymmetric encryption
+ * 
+ * @returns {Object} Key pair with publicKey and secretKey (32 bytes each)
+ * 
+ * @example
+ * ```typescript
+ * const keyPair = genKeyPair();
+ * // keyPair.publicKey - share with others
+ * // keyPair.secretKey - keep private, never share
+ * ```
+ * 
+ * @security Store secretKey in SecureStore, never in plain storage
+ * @since 1.0.0
+ * @category Encryption
+ */
 export function genKeyPair() {
   return nacl.box.keyPair(); // publicKey/secretKey Uint8Array
 }
 
+/**
+ * Encrypt a message using public key cryptography (NaCl box)
+ * 
+ * @param {string} message - Plain text message to encrypt
+ * @param {string} theirPublicKeyBase64 - Recipient's public key (base64)
+ * @param {Uint8Array} mySecretKey - Sender's secret key (32 bytes)
+ * 
+ * @returns {{cipher: string, nonce: string}} Encrypted message and nonce (both base64)
+ * 
+ * @example
+ * ```typescript
+ * const encrypted = boxEncrypt(
+ *   "Secret message",
+ *   recipientPublicKeyB64,
+ *   mySecretKey
+ * );
+ * // encrypted.cipher - send to recipient
+ * // encrypted.nonce - send with cipher
+ * ```
+ * 
+ * @security Uses Curve25519-Salsa20-Poly1305 authenticated encryption
+ * @since 1.0.0
+ * @category Encryption
+ */
 export function boxEncrypt(message: string, theirPublicKeyBase64: string, mySecretKey: Uint8Array) {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   const msg = decodeUTF8(message);
@@ -19,7 +64,7 @@ export function boxDecrypt(cipherBase64: string, nonceBase64: string, theirPubli
   const theirPublic = decodeBase64(theirPublicKeyBase64);
   const decrypted = nacl.box.open(cipher, nonce, theirPublic, mySecretKey);
   if (!decrypted) return null;
-  return decodeUTF8(decrypted);
+  return decodeUTF8(new Uint8Array(decrypted));
 }
 
 // Generate shared secret for group encryption

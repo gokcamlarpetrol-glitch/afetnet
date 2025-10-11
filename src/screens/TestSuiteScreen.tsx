@@ -1,9 +1,9 @@
-import React, { useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, ScrollView, Text } from "react-native";
 import * as Beacon from "../ble/bridge";
+import { saveCap } from "../cap/serialize";
 import * as PDR from "../pdr/pdr";
 import { log } from "../tests/logger";
-import { saveCap } from "../cap/serialize";
 
 export default function TestSuiteScreen(){
   const [out, setOut] = useState<string>("");

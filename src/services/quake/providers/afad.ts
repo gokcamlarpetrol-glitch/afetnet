@@ -1,4 +1,5 @@
 import { QuakeItem, QuakeProvider } from '../types';
+import { logger } from '../../../utils/productionLogger';
 
 export class AFADProvider implements QuakeProvider {
   name = 'AFAD';
@@ -41,13 +42,13 @@ export class AFADProvider implements QuakeProvider {
 
       return this.parseAFADData(data.eventList);
     } catch (error) {
-      console.warn('AFAD fetch failed:', error);
+      logger.warn('AFAD fetch failed:', error);
       // Return mock data for development/testing
       return this.getMockData();
     }
   }
 
-  private parseAFADData(eventList: any[]): QuakeItem[] {
+  private parseAFADData(eventList: unknown[]): QuakeItem[] {
     try {
       const quakes: QuakeItem[] = [];
 
@@ -75,7 +76,7 @@ export class AFADProvider implements QuakeProvider {
             });
           }
         } catch (parseError) {
-          console.warn('Failed to parse AFAD event:', parseError);
+          logger.warn('Failed to parse AFAD event:', parseError);
           // Skip malformed entries
         }
       }
@@ -85,7 +86,7 @@ export class AFADProvider implements QuakeProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      console.warn('AFAD parsing failed:', error);
+      logger.warn('AFAD parsing failed:', error);
       return this.getMockData();
     }
   }

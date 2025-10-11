@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { generateKeyPair } from 'tweetnacl';
-import { encode as base64Encode } from 'tweetnacl-util';
+import { logger } from '../utils/productionLogger';
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
 
 const STORAGE_KEY = 'afn/keys/v1';
 
@@ -25,15 +26,15 @@ export async function getOrCreateKeyPair(): Promise<KeyPair> {
       return keyPair;
     }
   } catch (error) {
-    console.warn('Failed to load existing keypair:', error);
+    logger.warn('Failed to load existing keypair:', error);
   }
 
   // Generate new keypair
   try {
-    const naclKeyPair = generateKeyPair();
+    const naclKeyPair = nacl.box.keyPair();
     const keyPair: KeyPair = {
-      pubKeyB64: base64Encode(naclKeyPair.publicKey),
-      secKeyB64: base64Encode(naclKeyPair.secretKey)
+      pubKeyB64: encodeBase64(naclKeyPair.publicKey),
+      secKeyB64: encodeBase64(naclKeyPair.secretKey)
     };
 
     // Store the new keypair
@@ -42,7 +43,7 @@ export async function getOrCreateKeyPair(): Promise<KeyPair> {
     
     return keyPair;
   } catch (error) {
-    console.error('Failed to generate keypair:', error);
+    logger.error('Failed to generate keypair:', error);
     throw new Error('Keypair generation failed');
   }
 }
@@ -62,7 +63,7 @@ export async function clearKeyPair(): Promise<void> {
     await AsyncStorage.removeItem(STORAGE_KEY);
     cachedKeyPair = null;
   } catch (error) {
-    console.error('Failed to clear keypair:', error);
+    logger.error('Failed to clear keypair:', error);
   }
 }
 

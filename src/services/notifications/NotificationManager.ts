@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface NotificationData {
@@ -28,7 +29,7 @@ class NotificationManager extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🔔 Notification Manager initialized');
+    logger.debug('🔔 Notification Manager initialized');
   }
 
   // CRITICAL: Start Notification System
@@ -36,18 +37,18 @@ class NotificationManager extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🔔 Starting notification system...');
+      logger.debug('🔔 Starting notification system...');
       this.isActive = true;
 
       this.emit('notificationSystemStarted');
       emergencyLogger.logSystem('info', 'Notification system started');
 
-      console.log('✅ Notification system started');
+      logger.debug('✅ Notification system started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start notification system', { error: String(error) });
-      console.error('❌ Failed to start notification system:', error);
+      logger.error('❌ Failed to start notification system:', error);
       return false;
     }
   }
@@ -82,7 +83,7 @@ class NotificationManager extends SimpleEventEmitter {
         priority: notification.priority
       });
 
-      console.log(`🔔 Notification shown: ${notification.title}`);
+      logger.debug(`🔔 Notification shown: ${notification.title}`);
       return notificationId;
 
     } catch (error) {
@@ -220,6 +221,7 @@ class NotificationManager extends SimpleEventEmitter {
 // Export singleton instance
 export const notificationManager = new NotificationManager();
 export default NotificationManager;
+
 
 
 

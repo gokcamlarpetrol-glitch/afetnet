@@ -1,7 +1,8 @@
-import { Platform, Alert } from 'react-native';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
+import { Alert, Platform } from 'react-native';
 import { logEvent } from '../store/devlog';
+import { logger } from '../utils/productionLogger';
 
 const BACKGROUND_TASK_NAME = 'afetnet-mesh-sync';
 const FOREGROUND_SERVICE_TASK = 'afetnet-foreground-service';
@@ -45,7 +46,7 @@ class BackgroundHardeningManager {
         timestamp: Date.now(),
       });
     } catch (error) {
-      console.error('Background hardening initialization error:', error);
+      logger.error('Background hardening initialization error', error, { component: 'BackgroundHardening' });
       logEvent('BACKGROUND_HARDENING_INIT_ERROR', {
         error: String(error),
         platform: Platform.OS,
@@ -85,7 +86,7 @@ class BackgroundHardeningManager {
         taskName: FOREGROUND_SERVICE_TASK,
       });
     } catch (error) {
-      console.error('Android foreground service setup error:', error);
+      logger.error('Android foreground service setup error', error, { component: 'BackgroundHardening' });
       logEvent('ANDROID_FOREGROUND_SERVICE_ERROR', {
         error: String(error),
       });
@@ -124,7 +125,7 @@ class BackgroundHardeningManager {
         taskName: BACKGROUND_TASK_NAME,
       });
     } catch (error) {
-      console.error('iOS background tasks setup error:', error);
+      logger.error('iOS background tasks setup error', error, { component: 'BackgroundHardening' });
       logEvent('IOS_BACKGROUND_TASKS_ERROR', {
         error: String(error),
       });
@@ -160,7 +161,7 @@ class BackgroundHardeningManager {
         platform: Platform.OS,
       });
     } catch (error) {
-      console.error('Background fetch setup error:', error);
+      logger.error('Background fetch setup error', error, { component: 'BackgroundHardening' });
       logEvent('BACKGROUND_FETCH_SETUP_ERROR', {
         error: String(error),
       });
@@ -182,7 +183,7 @@ class BackgroundHardeningManager {
         timestamp: Date.now(),
       });
     } catch (error) {
-      console.error('Background tasks error:', error);
+      logger.error('Background tasks error', error, { component: 'BackgroundHardening' });
       logEvent('BACKGROUND_TASKS_ERROR', {
         error: String(error),
       });
@@ -193,18 +194,18 @@ class BackgroundHardeningManager {
   private async syncMeshData(): Promise<void> {
     // This would sync mesh data and handle pending messages
     // Implementation depends on the mesh system
-    console.log('Syncing mesh data...');
+    logger.debug('Syncing mesh data', null, { component: 'BackgroundHardening' });
   }
 
   private async updateRemoteConfig(): Promise<void> {
     // This would update remote configuration
     // Implementation depends on the remote config system
-    console.log('Updating remote config...');
+    logger.debug('Updating remote config', null, { component: 'BackgroundHardening' });
   }
 
   private async cleanupOldData(): Promise<void> {
     // This would clean up old logs and cached data
-    console.log('Cleaning up old data...');
+    logger.debug('Cleaning up old data', null, { component: 'BackgroundHardening' });
   }
 
   showBatteryOptimizationWarning(): void {
@@ -220,7 +221,7 @@ class BackgroundHardeningManager {
           { text: 'Tamam' },
           { text: 'Ayarlara Git', onPress: () => {
             // This would open device settings
-            console.log('Opening battery optimization settings...');
+            logger.debug('Opening battery optimization settings', null, { component: 'BackgroundHardening' });
           }},
         ]
       );
@@ -249,7 +250,7 @@ class BackgroundHardeningManager {
         platform: Platform.OS,
       });
     } catch (error) {
-      console.error('Error stopping background tasks:', error);
+      logger.error('Error stopping background tasks', error, { component: 'BackgroundHardening' });
       logEvent('BACKGROUND_TASKS_STOP_ERROR', {
         error: String(error),
       });

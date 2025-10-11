@@ -22,7 +22,7 @@ const pages: OnboardingPage[] = [
     id: 'offline',
     title: 'Çevrimdışı İletişim',
     subtitle: 'Şebeke olmadan da güvenli iletişim',
-    icon: 'wifi-off',
+    icon: 'wifi' as any,
     description: 'AfetNet, Bluetooth mesh teknolojisi ile şebeke olmadan da güvenli iletişim sağlar.',
     tips: [
       'Yakındaki diğer AfetNet kullanıcıları ile otomatik bağlantı',
@@ -34,7 +34,7 @@ const pages: OnboardingPage[] = [
     id: 'satellite',
     title: 'Uydu + Harita',
     subtitle: 'GPS ve uydu görüntüleri ile konum',
-    icon: 'satellite',
+    icon: 'planet' as any,
     description: 'Uydu görüntüleri ve GPS ile kesin konum belirleme ve harita üzerinde görselleştirme.',
     tips: [
       'Yüksek çözünürlüklü uydu görüntüleri',
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: palette.border.primary,
+    backgroundColor: (palette.border as any).primary || '#E0E0E0',
   },
   paginationDotActive: {
     backgroundColor: palette.primary,
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
   footer: {
     padding: spacing.lg,
     borderTopWidth: 1,
-    borderTopColor: palette.border.primary,
+    borderTopColor: (palette.border as any).primary || '#E0E0E0',
   },
   buttonContainer: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
 import { Platform, PermissionsAndroid } from "react-native";
+import { logger } from '../utils/productionLogger';
 import { NEARBY_SERVICE_UUID } from "./constants";
 
 // Safe BLE manager to prevent crashes when native modules are not available
@@ -10,7 +11,7 @@ try {
   BleManager = blePlx.BleManager;
   // Don't create manager immediately, create it when needed
 } catch (e) {
-  console.warn("react-native-ble-plx not available, using fallback");
+  logger.warn("react-native-ble-plx not available, using fallback");
 }
 
 export async function ensureBlePermissions() {
@@ -42,7 +43,7 @@ export function rssiToBucket(rssi?: number | null): NearbyEntry["proximity"] {
 
 export function scan(callback:(d:NearbyEntry)=>void) {
   if (!BleManager) {
-    console.warn("BLE Manager not available, cannot start scan");
+    logger.warn("BLE Manager not available, cannot start scan");
     return () => {};
   }
   
@@ -51,14 +52,14 @@ export function scan(callback:(d:NearbyEntry)=>void) {
     try {
       manager = new BleManager();
     } catch (e) {
-      console.warn("Failed to create BLE manager:", e);
+      logger.warn("Failed to create BLE manager:", e);
       return () => {};
     }
   }
   
   try {
     const { ScanMode } = require("react-native-ble-plx");
-    manager.startDeviceScan([NEARBY_SERVICE_UUID], { scanMode: ScanMode.LowLatency }, (error: any, device: any) => {
+    manager.startDeviceScan([NEARBY_SERVICE_UUID], { scanMode: ScanMode.LowLatency }, (error: Error | unknown, device: any) => {
       if (error) {return;}
       if (!device) {return;}
       const entry: NearbyEntry = {
@@ -73,11 +74,11 @@ export function scan(callback:(d:NearbyEntry)=>void) {
       try {
         manager.stopDeviceScan();
       } catch (e) {
-        console.warn("Failed to stop BLE scan:", e);
+        logger.warn("Failed to stop BLE scan:", e);
       }
     };
   } catch (e) {
-    console.warn("Failed to start BLE scan:", e);
+    logger.warn("Failed to start BLE scan:", e);
     return () => {};
   }
 }

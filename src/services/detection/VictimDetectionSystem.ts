@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 
 export interface VictimSignal {
@@ -65,7 +66,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
   }
 
   private initializeAcousticPatterns() {
-    console.log('🌡️ Initializing Victim Detection System...');
+    logger.debug('🌡️ Initializing Victim Detection System...');
 
     const patterns: AcousticPattern[] = [
       {
@@ -116,7 +117,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.acousticPatterns.set(pattern.pattern, pattern);
     });
 
-    console.log('✅ Victim detection patterns initialized');
+    logger.debug('✅ Victim detection patterns initialized');
   }
 
   // CRITICAL: Start Victim Detection Monitoring
@@ -124,7 +125,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
     if (this.isMonitoring) return true;
 
     try {
-      console.log('🌡️ Starting victim detection monitoring...');
+      logger.debug('🌡️ Starting victim detection monitoring...');
 
       // Start acoustic monitoring
       await this.startAcousticMonitoring();
@@ -141,11 +142,11 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.isMonitoring = true;
       this.emit('victimDetectionStarted');
       
-      console.log('✅ Victim detection monitoring started');
+      logger.debug('✅ Victim detection monitoring started');
       return true;
 
     } catch (error) {
-      console.error('❌ Failed to start victim detection:', error);
+      logger.error('❌ Failed to start victim detection:', error);
       return false;
     }
   }
@@ -155,7 +156,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
     if (!this.isMonitoring) return;
 
     try {
-      console.log('🛑 Stopping victim detection monitoring...');
+      logger.debug('🛑 Stopping victim detection monitoring...');
 
       if (this.monitoringInterval) {
         clearInterval(this.monitoringInterval);
@@ -170,17 +171,17 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.isMonitoring = false;
       this.emit('victimDetectionStopped');
       
-      console.log('✅ Victim detection monitoring stopped');
+      logger.debug('✅ Victim detection monitoring stopped');
 
     } catch (error) {
-      console.error('❌ Error stopping victim detection:', error);
+      logger.error('❌ Error stopping victim detection:', error);
     }
   }
 
   // CRITICAL: Start Acoustic Monitoring
   private async startAcousticMonitoring(): Promise<void> {
     try {
-      console.log('🔊 Starting acoustic monitoring...');
+      logger.debug('🔊 Starting acoustic monitoring...');
 
       // Simulate acoustic monitoring
       this.monitoringInterval = setInterval(async () => {
@@ -188,33 +189,33 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       }, 2000); // Scan every 2 seconds
 
     } catch (error) {
-      console.warn('⚠️ Acoustic monitoring not available:', error);
+      logger.warn('⚠️ Acoustic monitoring not available:', error);
     }
   }
 
   // CRITICAL: Start Thermal Monitoring
   private async startThermalMonitoring(): Promise<void> {
     try {
-      console.log('🌡️ Starting thermal monitoring...');
+      logger.debug('🌡️ Starting thermal monitoring...');
 
       // In a real implementation, this would use thermal sensors
       // For now, we'll simulate thermal detection
 
     } catch (error) {
-      console.warn('⚠️ Thermal monitoring not available:', error);
+      logger.warn('⚠️ Thermal monitoring not available:', error);
     }
   }
 
   // CRITICAL: Start Vibration Monitoring
   private async startVibrationMonitoring(): Promise<void> {
     try {
-      console.log('📳 Starting vibration monitoring...');
+      logger.debug('📳 Starting vibration monitoring...');
 
       // In a real implementation, this would use accelerometer for vibration detection
       // For now, we'll simulate vibration detection
 
     } catch (error) {
-      console.warn('⚠️ Vibration monitoring not available:', error);
+      logger.warn('⚠️ Vibration monitoring not available:', error);
     }
   }
 
@@ -234,7 +235,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       }
 
     } catch (error) {
-      console.error('❌ Error scanning for acoustic signals:', error);
+      logger.error('❌ Error scanning for acoustic signals:', error);
     }
   }
 
@@ -261,7 +262,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
     // Check if this signal indicates a new victim
     await this.analyzeSignalForVictim(signal);
 
-    console.log(`🔊 Acoustic signal detected: ${pattern.description} (${signal.confidence}% confidence)`);
+    logger.debug(`🔊 Acoustic signal detected: ${pattern.description} (${signal.confidence}% confidence)`);
   }
 
   // CRITICAL: Analyze Signal for Victim Detection
@@ -294,7 +295,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
         this.activeDetections.set(matchedVictim.id, matchedVictim);
         
         this.emit('victimSignalUpdated', matchedVictim);
-        console.log(`👤 Victim signal updated: ${matchedVictim.id}`);
+        logger.debug(`👤 Victim signal updated: ${matchedVictim.id}`);
 
       } else {
         // Create new victim detection
@@ -315,7 +316,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
         this.activeDetections.set(detection.id, detection);
         
         this.emit('victimDetected', detection);
-        console.log(`👤 New victim detected: ${detection.id}`);
+        logger.debug(`👤 New victim detected: ${detection.id}`);
 
         // Auto-trigger rescue operation for critical victims
         if (detection.priority === 'critical') {
@@ -324,14 +325,14 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       }
 
     } catch (error) {
-      console.error('❌ Error analyzing signal for victim:', error);
+      logger.error('❌ Error analyzing signal for victim:', error);
     }
   }
 
   // CRITICAL: Trigger Rescue Operation
   private async triggerRescueOperation(detection: VictimDetection): Promise<void> {
     try {
-      console.log(`🚁 Triggering rescue operation for victim: ${detection.id}`);
+      logger.debug(`🚁 Triggering rescue operation for victim: ${detection.id}`);
 
       // Dynamic imports temporarily disabled for Expo Go compatibility
       // const { rescueGuidanceSystem } = await import('../rescue/RescueGuidanceSystem');
@@ -349,7 +350,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       };
 
       // Send emergency message (simplified for Expo Go)
-      console.log(`CRITICAL: Victim detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`);
+      logger.debug(`CRITICAL: Victim detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`);
 
       detection.rescueStatus = 'in_progress';
       detection.rescueTeamAssigned.push(mission.id);
@@ -357,10 +358,10 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.activeDetections.set(detection.id, detection);
 
       this.emit('rescueOperationTriggered', { detection, mission });
-      console.log(`✅ Rescue operation triggered: ${mission.id}`);
+      logger.debug(`✅ Rescue operation triggered: ${mission.id}`);
 
     } catch (error) {
-      console.error('❌ Error triggering rescue operation:', error);
+      logger.error('❌ Error triggering rescue operation:', error);
     }
   }
 
@@ -385,7 +386,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.cleanupOldSignals();
 
     } catch (error) {
-      console.error('❌ Error processing pending signals:', error);
+      logger.error('❌ Error processing pending signals:', error);
     }
   }
 
@@ -401,7 +402,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       this.activeDetections.set(detection.id, detection);
       
       this.emit('victimLost', detection);
-      console.log(`⚠️ Victim lost: ${detection.id}`);
+      logger.debug(`⚠️ Victim lost: ${detection.id}`);
     }
     // If we have recent strong signals, confirm victim
     else if (detection.signals.some(s => s.confidence > 70 && (Date.now() - s.timestamp) < 60000)) {
@@ -411,7 +412,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
         this.activeDetections.set(detection.id, detection);
         
         this.emit('victimConfirmed', detection);
-        console.log(`✅ Victim confirmed: ${detection.id}`);
+        logger.debug(`✅ Victim confirmed: ${detection.id}`);
       }
     }
   }
@@ -460,7 +461,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
     this.activeDetections.set(id, detection);
     
     this.emit('victimDetectionUpdated', detection);
-    console.log(`📝 Victim detection updated: ${id}`);
+    logger.debug(`📝 Victim detection updated: ${id}`);
 
     return true;
   }
@@ -480,7 +481,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
     this.activeDetections.set(id, detection);
     
     this.emit('victimRescued', detection);
-    console.log(`✅ Victim rescued: ${id}`);
+    logger.debug(`✅ Victim rescued: ${id}`);
 
     return true;
   }
@@ -493,7 +494,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
   // CRITICAL: Add Custom Acoustic Pattern
   async addAcousticPattern(pattern: AcousticPattern): Promise<void> {
     this.acousticPatterns.set(pattern.pattern, pattern);
-    console.log(`🔊 Custom acoustic pattern added: ${pattern.pattern}`);
+    logger.debug(`🔊 Custom acoustic pattern added: ${pattern.pattern}`);
   }
 
   // Private helper methods

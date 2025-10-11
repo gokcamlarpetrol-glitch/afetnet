@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import jwt from 'jsonwebtoken';
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../utils/prisma';
@@ -39,7 +40,7 @@ export const setupSocketHandlers = (io: Server) => {
   });
 
   io.on('connection', (socket: AuthenticatedSocket) => {
-    console.log(`✅ User connected: ${socket.afnId} (${socket.id})`);
+    backendLogger.debug(`✅ User connected: ${socket.afnId} (${socket.id})`);
 
     // Join user's personal room
     socket.join(`user:${socket.userId}`);
@@ -88,7 +89,7 @@ export const setupSocketHandlers = (io: Server) => {
           });
         });
       } catch (error) {
-        console.error('Location update error:', error);
+        backendLogger.error('Location update error:', error);
       }
     });
 
@@ -150,7 +151,7 @@ export const setupSocketHandlers = (io: Server) => {
           data: { isDelivered: true },
         });
       } catch (error) {
-        console.error('Message send error:', error);
+        backendLogger.error('Message send error:', error);
         socket.emit('message:error', { error: 'Failed to send message' });
       }
     });
@@ -216,9 +217,9 @@ export const setupSocketHandlers = (io: Server) => {
           });
         }
 
-        console.log(`🚨 SOS Alert from ${socket.afnId}`);
+        backendLogger.debug(`🚨 SOS Alert from ${socket.afnId}`);
       } catch (error) {
-        console.error('SOS send error:', error);
+        backendLogger.error('SOS send error:', error);
         socket.emit('sos:error', { error: 'Failed to send SOS' });
       }
     });
@@ -258,7 +259,7 @@ export const setupSocketHandlers = (io: Server) => {
           socket.broadcast.emit('mesh:message', data);
         }
       } catch (error) {
-        console.error('Mesh relay error:', error);
+        backendLogger.error('Mesh relay error:', error);
       }
     });
 
@@ -281,7 +282,7 @@ export const setupSocketHandlers = (io: Server) => {
     // ==================== DISCONNECT ====================
     
     socket.on('disconnect', () => {
-      console.log(`❌ User disconnected: ${socket.afnId} (${socket.id})`);
+      backendLogger.debug(`❌ User disconnected: ${socket.afnId} (${socket.id})`);
       
       // Update last seen
       prisma.user.update({
@@ -291,5 +292,5 @@ export const setupSocketHandlers = (io: Server) => {
     });
   });
 
-  console.log('✅ Socket.IO handlers configured');
+  backendLogger.debug('✅ Socket.IO handlers configured');
 };

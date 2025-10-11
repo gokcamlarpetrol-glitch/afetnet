@@ -1,4 +1,5 @@
 import { QuakeItem, QuakeProvider } from '../types';
+import { logger } from '../../../utils/productionLogger';
 
 export class KandilliProvider implements QuakeProvider {
   name = 'Kandilli';
@@ -29,7 +30,7 @@ export class KandilliProvider implements QuakeProvider {
             }
           }
         } catch (endpointError) {
-          console.warn(`Kandilli endpoint ${endpoint} failed:`, endpointError);
+          logger.warn(`Kandilli endpoint ${endpoint} failed:`, endpointError);
           // Try next endpoint
         }
       }
@@ -37,7 +38,7 @@ export class KandilliProvider implements QuakeProvider {
       // All endpoints failed, return mock data
       return this.getMockData();
     } catch (error) {
-      console.warn('Kandilli fetch failed:', error);
+      logger.warn('Kandilli fetch failed:', error);
       return this.getMockData();
     }
   }
@@ -68,7 +69,7 @@ export class KandilliProvider implements QuakeProvider {
           const quake = this.parseKandilliCSV(line);
           if (quake) quakes.push(quake);
         } catch (parseError) {
-          console.warn('Failed to parse Kandilli line:', parseError);
+          logger.warn('Failed to parse Kandilli line:', parseError);
           // Skip malformed entries
         }
       }
@@ -78,7 +79,7 @@ export class KandilliProvider implements QuakeProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      console.warn('Kandilli parsing failed:', error);
+      logger.warn('Kandilli parsing failed:', error);
       return this.getMockData();
     }
   }
@@ -106,7 +107,7 @@ export class KandilliProvider implements QuakeProvider {
         };
       }
     } catch (error) {
-      console.warn('Failed to parse Kandilli JSON item:', error);
+      logger.warn('Failed to parse Kandilli JSON item:', error);
     }
     return null;
   }
@@ -142,7 +143,7 @@ export class KandilliProvider implements QuakeProvider {
         };
       }
     } catch (error) {
-      console.warn('Failed to parse Kandilli CSV line:', error);
+      logger.warn('Failed to parse Kandilli CSV line:', error);
     }
     return null;
   }

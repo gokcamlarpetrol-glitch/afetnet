@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { logger } from '../utils/productionLogger';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { deriveGroupKey } from '../identity/groupId';
@@ -62,14 +63,14 @@ export function gOpen(
     const plaintext = nacl.secretbox.open(box, nonce, sharedKey);
     return plaintext;
   } catch (error) {
-    console.error('Failed to decrypt group message:', error);
+    logger.error('Failed to decrypt group message:', error);
     return null;
   }
 }
 
-export function generateVerificationPhrase(sharedKeyB64: string): string {
+export async function generateVerificationPhrase(sharedKeyB64: string): Promise<string> {
   // Generate a deterministic 5-word phrase from shared key
-  const keyHash = Crypto.digestString(
+  const keyHash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     sharedKeyB64,
     { encoding: Crypto.CryptoEncoding.BASE64 }

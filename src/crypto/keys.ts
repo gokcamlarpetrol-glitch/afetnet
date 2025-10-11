@@ -1,8 +1,9 @@
 // Safe import for react-native-get-random-values
+import { logger } from '../utils/productionLogger';
 try {
   require("react-native-get-random-values");
 } catch (e) {
-  console.warn("react-native-get-random-values not available");
+  logger.warn("react-native-get-random-values not available");
 }
 import * as SecureStore from "expo-secure-store";
 import nacl from "tweetnacl";

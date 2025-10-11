@@ -17,7 +17,7 @@ export default function OTAConfigScreen(){
 
   React.useEffect(()=>{ getConfig().then(setCfg); },[]);
 
-  async function onScan({data}: any){
+  async function onScan({data}: {data: string}){
     try{
       const obj = JSON.parse(String(data));
       if (!validate(obj)) {throw new Error("invalid");}

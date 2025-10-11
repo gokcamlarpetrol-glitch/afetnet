@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
@@ -108,7 +109,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
   }
 
   private initializeCommunicationChannels() {
-    console.log('📡 Initializing Advanced Communication Manager...');
+    logger.debug('📡 Initializing Advanced Communication Manager...');
 
     // Mesh Network Channel
     const meshChannel: CommunicationChannel = {
@@ -202,13 +203,13 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
     this.network.channels.set(visualChannel.id, visualChannel);
     this.network.channels.set(satelliteChannel.id, satelliteChannel);
 
-    console.log(`✅ ${this.network.channels.size} communication channels initialized`);
+    logger.debug(`✅ ${this.network.channels.size} communication channels initialized`);
   }
 
   // CRITICAL: Start Communication Manager
   async startCommunication(): Promise<boolean> {
     try {
-      console.log('📡 Starting Advanced Communication Manager...');
+      logger.debug('📡 Starting Advanced Communication Manager...');
 
       this.isActive = true;
 
@@ -227,12 +228,12 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       this.emit('communicationStarted');
       emergencyLogger.logSystem('info', 'Advanced communication manager started');
 
-      console.log('✅ Advanced Communication Manager started');
+      logger.debug('✅ Advanced Communication Manager started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start communication manager', { error: String(error) });
-      console.error('❌ Failed to start communication manager:', error);
+      logger.error('❌ Failed to start communication manager:', error);
       return false;
     }
   }
@@ -401,37 +402,37 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
   // Channel-specific sending methods
   private async sendViaMesh(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for mesh network
-    console.log(`📡 Sending via mesh network: ${message.id}`);
+    logger.debug(`📡 Sending via mesh network: ${message.id}`);
     return true; // Placeholder
   }
 
   private async sendViaBluetooth(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for Bluetooth LE
-    console.log(`📶 Sending via Bluetooth LE: ${message.id}`);
+    logger.debug(`📶 Sending via Bluetooth LE: ${message.id}`);
     return true; // Placeholder
   }
 
   private async sendViaWiFiDirect(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for WiFi Direct
-    console.log(`📡 Sending via WiFi Direct: ${message.id}`);
+    logger.debug(`📡 Sending via WiFi Direct: ${message.id}`);
     return true; // Placeholder
   }
 
   private async sendViaAudio(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for audio beacon
-    console.log(`🔊 Sending via audio beacon: ${message.id}`);
+    logger.debug(`🔊 Sending via audio beacon: ${message.id}`);
     return true; // Placeholder
   }
 
   private async sendViaVisual(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for visual signals
-    console.log(`💡 Sending via visual signal: ${message.id}`);
+    logger.debug(`💡 Sending via visual signal: ${message.id}`);
     return true; // Placeholder
   }
 
   private async sendViaSatellite(message: Message, channel: CommunicationChannel): Promise<boolean> {
     // Implementation for satellite link
-    console.log(`🛰️ Sending via satellite: ${message.id}`);
+    logger.debug(`🛰️ Sending via satellite: ${message.id}`);
     return true; // Placeholder
   }
 
@@ -566,7 +567,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
   private optimizeRoutes(): void {
     // Implement route optimization algorithm
     // This would use graph algorithms to find optimal paths
-    console.log('🔄 Optimizing communication routes...');
+    logger.debug('🔄 Optimizing communication routes...');
   }
 
   private getCurrentLocation(): Promise<{ lat: number; lon: number; accuracy: number }> {
@@ -596,14 +597,14 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       .filter(channel => channel.status === 'available');
   }
 
-  getConnectedNodes(): any[] {
+  getConnectedNodes(): unknown[] {
     return Array.from(this.network.nodes.values());
   }
 
   // CRITICAL: Stop Communication Manager
   async stopCommunication(): Promise<void> {
     try {
-      console.log('🛑 Stopping Advanced Communication Manager...');
+      logger.debug('🛑 Stopping Advanced Communication Manager...');
       
       this.isActive = false;
       
@@ -613,7 +614,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       this.emit('communicationStopped');
       emergencyLogger.logSystem('info', 'Advanced communication manager stopped');
 
-      console.log('✅ Advanced Communication Manager stopped');
+      logger.debug('✅ Advanced Communication Manager stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping communication manager', { error: String(error) });

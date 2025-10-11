@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
 import { body, query } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -23,7 +24,7 @@ router.get(
 
       res.json(members);
     } catch (error) {
-      console.error('❌ Family fetch error:', error);
+      backendLogger.error('❌ Family fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch family members' });
     }
   }
@@ -114,11 +115,11 @@ router.post(
         },
       });
 
-      console.log(`👨‍👩‍👧‍👦 Family member added: ${req.user!.afnId} → ${memberAfnId}`);
+      backendLogger.debug(`👨‍👩‍👧‍👦 Family member added: ${req.user!.afnId} → ${memberAfnId}`);
 
       res.status(201).json(member);
     } catch (error) {
-      console.error('❌ Family add error:', error);
+      backendLogger.error('❌ Family add error:', error);
       res.status(500).json({ error: 'Failed to add family member' });
     }
   }
@@ -162,7 +163,7 @@ router.put(
 
       res.json(member);
     } catch (error) {
-      console.error('❌ Family update error:', error);
+      backendLogger.error('❌ Family update error:', error);
       res.status(500).json({ error: 'Failed to update family member' });
     }
   }
@@ -192,11 +193,11 @@ router.delete(
         where: { id: req.params.id },
       });
 
-      console.log(`🗑️  Family member removed: ${req.user!.afnId} removed ${existing.memberAfnId}`);
+      backendLogger.debug(`🗑️  Family member removed: ${req.user!.afnId} removed ${existing.memberAfnId}`);
 
       res.json({ success: true });
     } catch (error) {
-      console.error('❌ Family delete error:', error);
+      backendLogger.error('❌ Family delete error:', error);
       res.status(500).json({ error: 'Failed to remove family member' });
     }
   }
@@ -225,11 +226,11 @@ router.put(
         data: { isVerified: true },
       });
 
-      console.log(`✅ Family member verified: ${existing.memberAfnId}`);
+      backendLogger.debug(`✅ Family member verified: ${existing.memberAfnId}`);
 
       res.json(member);
     } catch (error) {
-      console.error('❌ Family verify error:', error);
+      backendLogger.error('❌ Family verify error:', error);
       res.status(500).json({ error: 'Failed to verify family member' });
     }
   }

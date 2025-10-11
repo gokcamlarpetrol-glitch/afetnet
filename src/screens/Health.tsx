@@ -1,4 +1,5 @@
 import * as Application from 'expo-application';
+import { logger } from '../utils/productionLogger';
 import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -80,7 +81,7 @@ export default function HealthScreen() {
         uptime,
         configVersion: remoteConfig.version,
         killSwitchActive: remoteConfigManager.isKillSwitchActive(),
-        backgroundStatus: { ...backgroundStatus, enabled: backgroundStatus.isEnabled } as any,
+        backgroundStatus,
         storage: {
           totalEvents: events.length,
           groupsCount: groups.length,
@@ -91,7 +92,7 @@ export default function HealthScreen() {
 
       setHealthData(data);
     } catch (error) {
-      console.error('Error loading health data:', error);
+      logger.error('Error loading health data:', error);
     }
   };
 
@@ -178,7 +179,7 @@ export default function HealthScreen() {
       
       Alert.alert('Başarılı', 'Sağlık raporu oluşturuldu ve paylaşıldı');
     } catch (error) {
-      console.error('Error generating health report:', error);
+      logger.error('Error generating health report:', error);
       Alert.alert('Hata', 'Sağlık raporu oluşturulamadı');
     } finally {
       setIsGeneratingReport(false);

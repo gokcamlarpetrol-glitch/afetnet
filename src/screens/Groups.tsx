@@ -1,4 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
+import { logger } from '../utils/productionLogger';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -35,7 +36,7 @@ const GroupsListScene = () => {
                   label="Sohbet"
                   onPress={() => {
                     // Navigate to GroupChat
-                    console.log('Navigate to GroupChat for:', group.name);
+                    logger.debug('Navigate to GroupChat for:', group.name);
                   }}
                   variant="primary"
                   style={styles.actionButton}
@@ -44,7 +45,7 @@ const GroupsListScene = () => {
                   label="QR"
                   onPress={() => {
                     // Show QR for group
-                    console.log('Show QR for group:', group.gid);
+                    logger.debug('Show QR for group:', group.gid);
                   }}
                   variant="ghost"
                   style={styles.actionButton}
@@ -83,7 +84,7 @@ const CreateGroupScene = () => {
         title: 'Grup Daveti',
       });
     } catch (error) {
-      console.error('Share error:', error);
+      logger.error('Share error:', error);
     }
   };
 
@@ -98,6 +99,7 @@ const CreateGroupScene = () => {
     <ScrollView style={styles.scene}>
       <Card title="Yeni Grup Oluştur">
         <TextInput
+          accessibilityRole="text"
           style={styles.input}
           placeholder="Grup adı"
           value={groupName}
@@ -180,6 +182,7 @@ const JoinGroupScene = () => {
     <ScrollView style={styles.scene}>
       <Card title="Gruba Katıl">
         <TextInput
+          accessibilityRole="text"
           style={styles.input}
           placeholder="AFN-GID (AFN-GID-XXXX-XXXX)"
           value={gidInput}
@@ -187,6 +190,7 @@ const JoinGroupScene = () => {
           autoCapitalize="characters"
         />
         <TextInput
+          accessibilityRole="text"
           style={styles.input}
           placeholder="Grup adı (isteğe bağlı)"
           value={groupName}
@@ -205,7 +209,7 @@ const JoinGroupScene = () => {
             label="QR Tara"
             onPress={() => {
               // Navigate to QR scanner
-              console.log('Navigate to QR scanner');
+              logger.debug('Navigate to QR scanner');
             }}
             variant="ghost"
             style={styles.actionButton}

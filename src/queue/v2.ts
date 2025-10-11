@@ -77,7 +77,7 @@ export async function list(limit=100, includeSent=false): Promise<QueueRecordV2[
 async function withCoarseGeo(payload:any){
   try{
     // You may have a getLastLocation() helper; if not available, keep payload untouched.
-    const loc = await (globalThis as any).getLastLocation?.();
+    const loc = await (globalThis as typeof globalThis).getLastLocation?.();
     if(loc && typeof loc.latitude==="number" && typeof loc.longitude==="number"){
       const q = quantizeLatLng(loc.latitude, loc.longitude);
       return { ...payload, qlat: q.lat, qlng: q.lng };
@@ -98,7 +98,7 @@ export async function append(kind: QueueKind, payload: any, fromLegacy=false): P
   const line = toJsonl(rec);
   const tmpHas = await FileSystem.getInfoAsync(WAL);
   const current = tmpHas.exists ? await FileSystem.readAsStringAsync(WAL) : "";
-  await FileSystem.writeAsStringAsync(WAL_TMP, current + line, { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(WAL_TMP, current + line, { encoding: "utf8" });
   await FileSystem.moveAsync({ from: WAL_TMP, to: WAL });
   return rec;
 }
@@ -120,7 +120,7 @@ export async function markSent(ids: string[]): Promise<void>{
     }
   }
   const joined = updated.join("\n") + "\n";
-  await FileSystem.writeAsStringAsync(WAL_TMP, joined, { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(WAL_TMP, joined, { encoding: "utf8" });
   await FileSystem.moveAsync({ from: WAL_TMP, to: WAL });
 }
 

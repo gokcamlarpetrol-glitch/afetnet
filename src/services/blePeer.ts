@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import { Platform } from 'react-native';
 
 // Safe BLE imports with fallbacks for Expo Go
@@ -15,7 +16,7 @@ try {
   Characteristic = blePlx.Characteristic;
   State = blePlx.State;
 } catch (e) {
-  console.warn('react-native-ble-plx not available, using fallback');
+  logger.warn('react-native-ble-plx not available, using fallback');
   isExpoGo = true;
 }
 
@@ -67,19 +68,19 @@ class BlePeerService {
   constructor() {
     // NEVER create BleManager in Expo Go - it causes NativeEventEmitter crash
     if (isExpoGo) {
-      console.warn('Expo Go detected - using mock BLE mode');
+      logger.warn('Expo Go detected - using mock BLE mode');
       this.manager = null;
     } else if (BleManager && typeof BleManager === 'function') {
       try {
         this.manager = new BleManager();
-        console.log('BLE Peer Manager created successfully');
+        logger.debug('BLE Peer Manager created successfully');
       } catch (e) {
-        console.warn('Failed to create BleManager:', e);
+        logger.warn('Failed to create BleManager:', e);
         this.manager = null;
         isExpoGo = true; // Fall back to mock mode
       }
     } else {
-      console.warn('BleManager not available - using mock mode');
+      logger.warn('BleManager not available - using mock mode');
       this.manager = null;
       isExpoGo = true;
     }
@@ -103,7 +104,7 @@ class BlePeerService {
         this.seenMessageIds = new Set(JSON.parse(stored));
       }
     } catch (error) {
-      console.warn('Failed to load seen message IDs:', error);
+      logger.warn('Failed to load seen message IDs:', error);
     }
   }
 
@@ -111,7 +112,7 @@ class BlePeerService {
     try {
       await AsyncStorage.setItem('ble_seen_message_ids', JSON.stringify([...this.seenMessageIds]));
     } catch (error) {
-      console.warn('Failed to save seen message IDs:', error);
+      logger.warn('Failed to save seen message IDs:', error);
     }
   }
 
@@ -122,7 +123,7 @@ class BlePeerService {
         this.messageQueue = JSON.parse(stored);
       }
     } catch (error) {
-      console.warn('Failed to load message queue:', error);
+      logger.warn('Failed to load message queue:', error);
     }
   }
 
@@ -130,7 +131,7 @@ class BlePeerService {
     try {
       await AsyncStorage.setItem('ble_message_queue', JSON.stringify(this.messageQueue));
     } catch (error) {
-      console.warn('Failed to save message queue:', error);
+      logger.warn('Failed to save message queue:', error);
     }
   }
 
@@ -145,7 +146,7 @@ class BlePeerService {
         this.deviceName = deviceName;
       }
     } catch (error) {
-      console.warn('Failed to load identity:', error);
+      logger.warn('Failed to load identity:', error);
     }
   }
 
@@ -158,7 +159,7 @@ class BlePeerService {
         await AsyncStorage.setItem('ble_device_name', this.deviceName);
       }
     } catch (error) {
-      console.warn('Failed to save identity:', error);
+      logger.warn('Failed to save identity:', error);
     }
   }
 
@@ -174,7 +175,7 @@ class BlePeerService {
     if (this.isAdvertising) return;
     
     if (!this.manager) {
-      console.warn('BLE Manager not available - cannot start advertising');
+      logger.warn('BLE Manager not available - cannot start advertising');
       return;
     }
 
@@ -187,7 +188,7 @@ class BlePeerService {
 
       // iOS background advertising limitations
       if (Platform.OS === 'ios') {
-        console.warn('iOS background advertising is limited. Consider foreground-only mode for production.');
+        logger.warn('iOS background advertising is limited. Consider foreground-only mode for production.');
       }
 
       // Create minimal advertisement payload (just presence + short ID)
@@ -203,10 +204,10 @@ class BlePeerService {
       await this.manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: true });
       this.isAdvertising = true;
 
-      console.log('Started BLE advertising');
+      logger.debug('Started BLE advertising');
 
     } catch (error) {
-      console.error('Failed to start advertising:', error);
+      logger.error('Failed to start advertising:', error);
       throw error;
     }
   }
@@ -216,16 +217,16 @@ class BlePeerService {
     if (!this.isAdvertising) return;
 
     if (!this.manager) {
-      console.warn('BLE Manager not available - cannot stop advertising');
+      logger.warn('BLE Manager not available - cannot stop advertising');
       return;
     }
 
     try {
       // Note: This should stop advertising, not scanning - implementation depends on BLE library
       this.isAdvertising = false;
-      console.log('Stopped BLE advertising');
+      logger.debug('Stopped BLE advertising');
     } catch (error) {
-      console.error('Failed to stop advertising:', error);
+      logger.error('Failed to stop advertising:', error);
     }
   }
 
@@ -234,7 +235,7 @@ class BlePeerService {
     if (this.isScanning) return;
     
     if (!this.manager) {
-      console.warn('BLE Manager not available - cannot start scanning');
+      logger.warn('BLE Manager not available - cannot start scanning');
       return;
     }
 
@@ -246,7 +247,7 @@ class BlePeerService {
 
       this.manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: true }, (error, device) => {
         if (error) {
-          console.error('BLE scan error:', error);
+          logger.error('BLE scan error:', error);
           return;
         }
 
@@ -257,10 +258,10 @@ class BlePeerService {
       });
 
       this.isScanning = true;
-      console.log('Started BLE scanning');
+      logger.debug('Started BLE scanning');
 
     } catch (error) {
-      console.error('Failed to start scanning:', error);
+      logger.error('Failed to start scanning:', error);
       throw error;
     }
   }
@@ -270,16 +271,16 @@ class BlePeerService {
     if (!this.isScanning) return;
 
     if (!this.manager) {
-      console.warn('BLE Manager not available - cannot stop scanning');
+      logger.warn('BLE Manager not available - cannot stop scanning');
       return;
     }
 
     try {
       this.manager.stopDeviceScan();
       this.isScanning = false;
-      console.log('Stopped BLE scanning');
+      logger.debug('Stopped BLE scanning');
     } catch (error) {
-      console.error('Failed to stop scanning:', error);
+      logger.error('Failed to stop scanning:', error);
     }
   }
 
@@ -300,7 +301,7 @@ class BlePeerService {
       if (characteristic?.[0]) {
         characteristic[0].monitor((error, char) => {
           if (error) {
-            console.error('Characteristic monitor error:', error);
+            logger.error('Characteristic monitor error:', error);
             return;
           }
           
@@ -311,7 +312,7 @@ class BlePeerService {
       }
 
     } catch (error) {
-      console.error('Failed to handle device:', error);
+      logger.error('Failed to handle device:', error);
     }
   }
 
@@ -357,7 +358,7 @@ class BlePeerService {
         await characteristic[0].writeWithResponse(base64Data);
       }
     } catch (error) {
-      console.error('Failed to send direct message:', error);
+      logger.error('Failed to send direct message:', error);
     }
   }
 
@@ -376,7 +377,7 @@ class BlePeerService {
       
       // Validate message signature (placeholder - implement with tweetnacl)
       if (!this.validateMessage(message)) {
-        console.warn('Invalid message signature');
+        logger.warn('Invalid message signature');
         return;
       }
 
@@ -400,7 +401,7 @@ class BlePeerService {
       }
 
     } catch (error) {
-      console.error('Failed to handle received message:', error);
+      logger.error('Failed to handle received message:', error);
     }
   }
 
@@ -413,7 +414,7 @@ class BlePeerService {
 
   // Process received message
   private processMessage(message: BleMessage): void {
-    console.log('Received message:', message.type, message.id);
+    logger.debug('Received message:', message.type, message.id);
     
     // Emit event or callback for UI handling
     // TODO: Implement event system or callback
@@ -439,7 +440,7 @@ class BlePeerService {
         try {
           await this.sendDirectMessage(message, deviceId);
         } catch (error) {
-          console.error('Failed to relay message:', error);
+          logger.error('Failed to relay message:', error);
         }
       }
     }
@@ -462,7 +463,7 @@ class BlePeerService {
       try {
         await device.cancelConnection();
       } catch (error) {
-        console.error('Failed to disconnect device:', error);
+        logger.error('Failed to disconnect device:', error);
       }
     }
     

@@ -6,7 +6,7 @@ const FILE = "/tmp/fac.occ.json";
 let mem: Record<string,{occ:number; ts:number}> = {};
 
 export async function loadOcc(){ try{ mem = JSON.parse(await FileSystem.readAsStringAsync(FILE)); }catch{ mem={}; }
-  (global as any).__AFN_OCC_CACHE__ = Object.fromEntries(Object.entries(mem).map(([k,v])=>[k,(v as any).occ])); return mem;
+  (global as typeof globalThis).__AFN_OCC_CACHE__ = Object.fromEntries(Object.entries(mem).map(([k,v])=>[k,(v as any).occ])); return mem;
 }
 export async function saveOcc(){ await FileSystem.writeAsStringAsync(FILE, JSON.stringify(mem)); }
 

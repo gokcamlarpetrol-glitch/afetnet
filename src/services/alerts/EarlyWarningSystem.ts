@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 
 export interface EarthquakeWarning {
   id: string;
@@ -85,7 +86,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
   }
 
   private async initializeSafetyZones() {
-    console.log('🚨 Initializing Early Warning System...');
+    logger.debug('🚨 Initializing Early Warning System...');
 
     // Pre-defined safety zones for Istanbul
     const zones: SafetyZone[] = [
@@ -134,7 +135,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       this.safetyZones.set(zone.id, zone);
     });
 
-    console.log('✅ Early Warning System initialized');
+    logger.debug('✅ Early Warning System initialized');
   }
 
   // CRITICAL: Start Early Warning Monitoring
@@ -142,7 +143,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     if (this.isMonitoring) return true;
 
     try {
-      console.log('🚨 Starting early warning monitoring...');
+      logger.debug('🚨 Starting early warning monitoring...');
 
       // Get user location
       this.userLocation = await this.getCurrentLocation();
@@ -160,11 +161,11 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       this.isMonitoring = true;
       this.emit('earlyWarningStarted');
       
-      console.log('✅ Early warning monitoring started');
+      logger.debug('✅ Early warning monitoring started');
       return true;
 
     } catch (error) {
-      console.error('❌ Failed to start early warning monitoring:', error);
+      logger.error('❌ Failed to start early warning monitoring:', error);
       return false;
     }
   }
@@ -174,7 +175,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     if (!this.isMonitoring) return;
 
     try {
-      console.log('🛑 Stopping early warning monitoring...');
+      logger.debug('🛑 Stopping early warning monitoring...');
 
       if (this.monitoringInterval) {
         clearInterval(this.monitoringInterval);
@@ -189,10 +190,10 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       this.isMonitoring = false;
       this.emit('earlyWarningStopped');
       
-      console.log('✅ Early warning monitoring stopped');
+      logger.debug('✅ Early warning monitoring stopped');
 
     } catch (error) {
-      console.error('❌ Error stopping early warning monitoring:', error);
+      logger.error('❌ Error stopping early warning monitoring:', error);
     }
   }
 
@@ -209,7 +210,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       }
 
     } catch (error) {
-      console.error('❌ Error checking for earthquake warnings:', error);
+      logger.error('❌ Error checking for earthquake warnings:', error);
     }
   }
 
@@ -249,12 +250,12 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     }
 
     this.emit('earthquakeWarningReceived', warning);
-    console.log(`🌍 Earthquake warning received: ${warning.severity} (${magnitude} magnitude)`);
+    logger.debug(`🌍 Earthquake warning received: ${warning.severity} (${magnitude} magnitude)`);
   }
 
   // CRITICAL: Process Earthquake Warning
   private async processEarthquakeWarning(warning: EarthquakeWarning): Promise<void> {
-    console.log(`🚨 PROCESSING EARTHQUAKE WARNING: ${warning.severity} severity`);
+    logger.debug(`🚨 PROCESSING EARTHQUAKE WARNING: ${warning.severity} severity`);
 
     // Generate emergency actions based on warning
     const actions = this.generateEmergencyActions(warning);
@@ -299,7 +300,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     }
 
     this.emit('emergencyAlertCreated', alert);
-    console.log(`🚨 Emergency alert created: ${alert.title}`);
+    logger.debug(`🚨 Emergency alert created: ${alert.title}`);
   }
 
   // CRITICAL: Check for Emergency Alerts
@@ -323,7 +324,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       }
 
     } catch (error) {
-      console.error('❌ Error checking for emergency alerts:', error);
+      logger.error('❌ Error checking for emergency alerts:', error);
     }
   }
 
@@ -384,35 +385,35 @@ class EarlyWarningSystem extends SimpleEventEmitter {
   // CRITICAL: Send Emergency Notifications
   private async sendEmergencyNotifications(alert: EmergencyAlert): Promise<void> {
     try {
-      console.log(`📢 Sending emergency notifications: ${alert.title}`);
+      logger.debug(`📢 Sending emergency notifications: ${alert.title}`);
 
       // Send via offline message manager (simplified for Expo Go)
-      console.log(`EMERGENCY ALERT: ${alert.message}`);
+      logger.debug(`EMERGENCY ALERT: ${alert.message}`);
       
       // Send location-based alert (simplified)
-      console.log(`Location alert: ${alert.location.lat}, ${alert.location.lon}`);
+      logger.debug(`Location alert: ${alert.location.lat}, ${alert.location.lon}`);
 
       // Send to emergency contacts (simplified for Expo Go)
-      console.log(`📢 Alert would be sent to emergency contacts: ${alert.message}`);
+      logger.debug(`📢 Alert would be sent to emergency contacts: ${alert.message}`);
 
     } catch (error) {
-      console.error('❌ Error sending emergency notifications:', error);
+      logger.error('❌ Error sending emergency notifications:', error);
     }
   }
 
   // CRITICAL: Trigger Emergency Panic Mode
   private async triggerEmergencyPanicMode(warning: EarthquakeWarning): Promise<void> {
     try {
-      console.log('🚨 Triggering emergency panic mode for extreme earthquake warning');
+      logger.debug('🚨 Triggering emergency panic mode for extreme earthquake warning');
 
       // Panic mode activation (simplified for Expo Go)
-      console.log('🚨 Triggering emergency panic mode for extreme earthquake warning');
+      logger.debug('🚨 Triggering emergency panic mode for extreme earthquake warning');
       
       // Send immediate SOS (simplified)
-      console.log(`EXTREME EARTHQUAKE WARNING: ${warning.magnitude} magnitude earthquake approaching! Immediate evacuation required!`);
+      logger.debug(`EXTREME EARTHQUAKE WARNING: ${warning.magnitude} magnitude earthquake approaching! Immediate evacuation required!`);
 
     } catch (error) {
-      console.error('❌ Error triggering emergency panic mode:', error);
+      logger.error('❌ Error triggering emergency panic mode:', error);
     }
   }
 
@@ -455,7 +456,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     this.activeAlerts.set(alertId, alert);
 
     this.emit('alertAcknowledged', alert);
-    console.log(`✅ Alert acknowledged: ${alert.title}`);
+    logger.debug(`✅ Alert acknowledged: ${alert.title}`);
 
     return true;
   }
@@ -478,7 +479,7 @@ class EarlyWarningSystem extends SimpleEventEmitter {
     await this.sendEmergencyNotifications(newAlert);
 
     this.emit('customEmergencyAlertCreated', newAlert);
-    console.log(`🚨 Custom emergency alert created: ${newAlert.title}`);
+    logger.debug(`🚨 Custom emergency alert created: ${newAlert.title}`);
 
     return alertId;
   }

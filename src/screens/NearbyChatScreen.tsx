@@ -63,6 +63,7 @@ export default function NearbyChatScreen(){
 
       <View style={{flexDirection:"row", gap:8, marginBottom:8}}>
         <TextInput
+          accessibilityRole="text"
           placeholder="Mesaj yazın…"
           placeholderTextColor="#64748b"
           value={draft}

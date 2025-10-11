@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import admin from 'firebase-admin';
 
 let firebaseInitialized = false;
@@ -13,7 +14,7 @@ export const initializeFirebase = async () => {
     const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
     if (!projectId || !clientEmail || !privateKey) {
-      console.warn('⚠️  Firebase credentials not configured. Push notifications will be disabled.');
+      backendLogger.warn('⚠️  Firebase credentials not configured. Push notifications will be disabled.');
       return;
     }
 
@@ -26,9 +27,9 @@ export const initializeFirebase = async () => {
     });
 
     firebaseInitialized = true;
-    console.log('✅ Firebase Admin SDK initialized');
+    backendLogger.debug('✅ Firebase Admin SDK initialized');
   } catch (error) {
-    console.error('❌ Firebase initialization failed:', error);
+    backendLogger.error('❌ Firebase initialization failed:', error);
   }
 };
 
@@ -41,7 +42,7 @@ export const sendPushNotification = async (
   }
 ) => {
   if (!firebaseInitialized) {
-    console.warn('Firebase not initialized. Skipping push notification.');
+    backendLogger.warn('Firebase not initialized. Skipping push notification.');
     return null;
   }
 
@@ -56,10 +57,10 @@ export const sendPushNotification = async (
     };
 
     const response = await admin.messaging().send(message);
-    console.log('Push notification sent:', response);
+    backendLogger.debug('Push notification sent:', response);
     return response;
   } catch (error) {
-    console.error('Push notification error:', error);
+    backendLogger.error('Push notification error:', error);
     throw error;
   }
 };
@@ -87,10 +88,10 @@ export const sendMulticastNotification = async (
     };
 
     const response = await admin.messaging().sendEachForMulticast(message);
-    console.log(`Multicast sent: ${response.successCount}/${tokens.length} successful`);
+    backendLogger.debug(`Multicast sent: ${response.successCount}/${tokens.length} successful`);
     return response;
   } catch (error) {
-    console.error('Multicast notification error:', error);
+    backendLogger.error('Multicast notification error:', error);
     throw error;
   }
 };

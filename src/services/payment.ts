@@ -1,4 +1,5 @@
 import { PremiumPlan } from '../store/premium';
+import { logger } from '../utils/productionLogger';
 
 // Stripe configuration
 const STRIPE_PUBLISHABLE_KEY = 'pk_test_51234567890abcdef'; // Replace with your actual Stripe key
@@ -19,10 +20,10 @@ export class PaymentService {
   async initializeStripe(): Promise<boolean> {
     try {
       // In a real app, you would initialize Stripe here
-      console.log('Stripe initialized successfully');
+      logger.debug('Stripe initialized successfully');
       return true;
     } catch (error) {
-      console.error('Stripe initialization failed:', error);
+      logger.error('Stripe initialization failed:', error);
       return false;
     }
   }
@@ -60,7 +61,7 @@ export class PaymentService {
     try {
       // In a real app, you would use Stripe's confirmPayment method
       // For demo purposes, we'll simulate the payment
-      console.log('Processing Stripe payment...');
+      logger.debug('Processing Stripe payment...');
       
       // Simulate network delay
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -95,7 +96,7 @@ export class PaymentService {
     transactionId?: string;
   }> {
     try {
-      console.log('Processing Apple Pay payment...');
+      logger.debug('Processing Apple Pay payment...');
       
       // Simulate Apple Pay processing
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -129,7 +130,7 @@ export class PaymentService {
     transactionId?: string;
   }> {
     try {
-      console.log('Processing Google Pay payment...');
+      logger.debug('Processing Google Pay payment...');
       
       // Simulate Google Pay processing
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -258,14 +259,14 @@ export class PaymentService {
     }
 
     try {
-      console.log(`Cancelling ${planId} subscription...`);
+      logger.debug(`Cancelling ${planId} subscription...`);
       
       // Simulate cancellation process
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       return true;
     } catch (error) {
-      console.error('Cancellation error:', error);
+      logger.error('Cancellation error:', error);
       return false;
     }
   }
@@ -277,7 +278,7 @@ export class PaymentService {
     error?: string;
   }> {
     try {
-      console.log('Restoring purchases...');
+      logger.debug('Restoring purchases...');
       
       // Simulate restore process
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -314,7 +315,7 @@ export class PaymentService {
         autoRenew: false
       };
     } catch (error) {
-      console.error('Status check error:', error);
+      logger.error('Status check error:', error);
       return {
         isActive: false
       };

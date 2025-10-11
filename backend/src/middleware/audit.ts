@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import { NextFunction, Request, Response } from 'express';
 import { logSecurity } from '../utils/logger';
 import { prisma } from '../utils/prisma';
@@ -31,7 +32,7 @@ export const auditLog = (action: string, resource?: string) => {
           errorMessage: success ? null : body?.error || null,
         },
       }).catch((err: Error) => {
-        console.error('❌ Audit log failed:', err);
+        backendLogger.error('❌ Audit log failed:', err);
       });
 
       // Log security events
@@ -79,7 +80,7 @@ export const auditAuth = (action: 'login' | 'register' | 'logout') => {
           errorMessage: success ? null : body?.error || null,
         },
       }).catch((err: Error) => {
-        console.error('❌ Auth audit log failed:', err);
+        backendLogger.error('❌ Auth audit log failed:', err);
       });
 
       // Log failed attempts

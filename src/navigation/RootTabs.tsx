@@ -22,7 +22,6 @@ export default function RootTabs() {
   return (
     <NavigationContainer>
       <Tab.Navigator
-        id="MainTabs"
         screenOptions={{
           headerShown: false,
           tabBarActiveTintColor: '#3b82f6',

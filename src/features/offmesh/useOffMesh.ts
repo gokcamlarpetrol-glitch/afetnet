@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { logger } from '../../utils/productionLogger';
 import { offMeshRouter } from '../../offmesh/router';
 import { meshStore } from '../../offmesh/store';
 import { qosManager } from '../../offmesh/qos';
@@ -44,7 +45,7 @@ export function useOffMesh() {
       setIsRunning(true);
       updateStats();
     } catch (error) {
-      console.error('Failed to start mesh:', error);
+      logger.error('Failed to start mesh:', error);
       throw error;
     }
   }, [updateStats]);
@@ -55,7 +56,7 @@ export function useOffMesh() {
       setIsRunning(false);
       updateStats();
     } catch (error) {
-      console.error('Failed to stop mesh:', error);
+      logger.error('Failed to stop mesh:', error);
       throw error;
     }
   }, [updateStats]);
@@ -65,7 +66,7 @@ export function useOffMesh() {
       await offMeshRouter.send(envelope);
       updateStats();
     } catch (error) {
-      console.error('Failed to send message:', error);
+      logger.error('Failed to send message:', error);
       throw error;
     }
   }, [updateStats]);
@@ -82,7 +83,7 @@ export function useOffMesh() {
     try {
       return await meshStore.exportJournal();
     } catch (error) {
-      console.error('Failed to export journal:', error);
+      logger.error('Failed to export journal:', error);
       throw error;
     }
   }, []);
@@ -92,7 +93,7 @@ export function useOffMesh() {
       await meshStore.clear();
       updateStats();
     } catch (error) {
-      console.error('Failed to clear data:', error);
+      logger.error('Failed to clear data:', error);
       throw error;
     }
   }, [updateStats]);

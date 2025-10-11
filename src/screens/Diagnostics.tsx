@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as Location from 'expo-location';
@@ -90,7 +91,7 @@ export default function Diagnostics() {
         Alert.alert('Test Başarısız', 'Worker tick başarısız');
       }
     } catch (error) {
-      console.error('Test tick error:', error);
+      logger.error('Test tick error:', error);
       Alert.alert('Test Hatası', 'Worker tick sırasında hata oluştu');
     }
   };
@@ -1022,7 +1023,7 @@ export default function Diagnostics() {
 
   const runAll = async () => {
     setBusy(true);
-    const out: any[] = [];
+    const out: unknown[] = [];
     for (const t of tests) {
       try {
         const r = await t.run();
@@ -1064,8 +1065,8 @@ export default function Diagnostics() {
           label="Şimdi Yenile"
           onPress={() => {
             // Trigger quake refresh
-            if (typeof window !== 'undefined' && (window as any).useQuakes?.refresh) {
-              (window as any).useQuakes.refresh();
+            if (typeof window !== 'undefined' && (window as Window & typeof globalThis).useQuakes?.refresh) {
+              (window as Window & typeof globalThis).useQuakes.refresh();
             }
           }}
           variant="ghost"
@@ -1105,7 +1106,7 @@ export default function Diagnostics() {
                     }
                   },
                   onError: (error) => {
-                    console.warn('Live feed error:', error);
+                    logger.warn('Live feed error:', error);
                   }
                 }
               );

@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system";
+import { logger } from '../utils/productionLogger';
 import * as Sharing from "expo-sharing";
 import { collect } from "../opslog/collector";
 import { readHealth } from "../mesh/health";
@@ -19,7 +20,7 @@ export async function buildReport(){
   const hz = await listHazards();
 
   if (!SafePDFLib.isAvailable()) {
-    console.warn("PDF generation not available, creating text report instead");
+    logger.warn("PDF generation not available, creating text report instead");
     const textReport = `AFETNET — Operasyon Raporu
 Tarih: ${new Date().toLocaleString()}
 Mesh Health: Peers: ${mh.totals.peers_seen}  Tx:${mh.totals.msgs_tx}  Rx:${mh.totals.msgs_rx}  Success:${(mh.totals.success_rate*100).toFixed(0)}%

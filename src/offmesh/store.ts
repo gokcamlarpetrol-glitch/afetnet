@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import { Envelope, JournalEvent, MsgType } from './types';
 
 const QUEUE_KEY = 'afetnet:mesh:queue';
@@ -55,7 +56,7 @@ class MeshStore {
           .forEach(entry => this.dedupMap.set(entry.id, entry));
       }
     } catch (error) {
-      console.warn('Failed to load mesh store:', error);
+      logger.warn('Failed to load mesh store:', error);
     }
   }
 
@@ -67,7 +68,7 @@ class MeshStore {
         AsyncStorage.setItem(DEDUP_KEY, JSON.stringify(Array.from(this.dedupMap.values()))),
       ]);
     } catch (error) {
-      console.warn('Failed to save mesh store:', error);
+      logger.warn('Failed to save mesh store:', error);
     }
   }
 
@@ -264,7 +265,7 @@ class MeshStore {
       
       return JSON.stringify(exportData, null, 2);
     } catch (error) {
-      console.warn('Failed to export journal:', error);
+      logger.warn('Failed to export journal:', error);
       return '{}';
     }
   }
@@ -282,7 +283,7 @@ class MeshStore {
         AsyncStorage.removeItem(DEDUP_KEY),
       ]);
     } catch (error) {
-      console.warn('Failed to clear mesh store:', error);
+      logger.warn('Failed to clear mesh store:', error);
     }
   }
 }

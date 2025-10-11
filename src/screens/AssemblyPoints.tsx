@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { logger } from '../utils/productionLogger';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { importAssemblyFromFile, listAssembly, loadBundledAssembly } from '../assembly/loader';
@@ -51,7 +52,7 @@ export default function AssemblyPoints() {
         bearing: 0
       })));
     } catch (error) {
-      console.error('Failed to load assembly points:', error);
+      logger.error('Failed to load assembly points:', error);
       Alert.alert('Hata', 'Toplanma noktaları yüklenemedi');
     } finally {
       setLoading(false);
@@ -94,7 +95,7 @@ export default function AssemblyPoints() {
       
       await loadAssemblyPoints();
     } catch (error) {
-      console.error('Import failed:', error);
+      logger.error('Import failed:', error);
       Alert.alert('Hata', 'Dosya içe aktarılamadı');
     }
   };
@@ -123,7 +124,8 @@ export default function AssemblyPoints() {
   };
 
   const renderAssemblyPoint = ({ item }: { item: AssemblyWithDistance }) => (
-    <Pressable
+    <Pressable accessible={true}
+          accessibilityRole="button"
       onPress={() => {
         // This would open the map centered on this point
         Alert.alert(
@@ -135,7 +137,7 @@ export default function AssemblyPoints() {
               text: 'Yön', 
               onPress: () => {
                 // This would open GoToTarget screen
-                console.log('Navigate to:', item);
+                logger.debug('Navigate to:', item);
               }
             }
           ]
@@ -192,7 +194,8 @@ export default function AssemblyPoints() {
           <Text style={styles.permissionText}>
             Konum izni gerekli
           </Text>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleRequestLocationPermission}
             style={styles.permissionButton}
           >
@@ -218,7 +221,8 @@ export default function AssemblyPoints() {
       </View>
 
       <View style={styles.actionsContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setShowOnMap(!showOnMap)}
           style={[styles.actionButton, showOnMap && styles.actionButtonActive]}
         >
@@ -227,7 +231,8 @@ export default function AssemblyPoints() {
           </Text>
         </Pressable>
 
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleImportData}
           style={styles.actionButton}
         >

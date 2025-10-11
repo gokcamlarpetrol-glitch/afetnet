@@ -14,7 +14,7 @@ type State = {
   flush(): Promise<{ sent: number }>;
 };
 
-async function postJSON(url: string, data: any) {
+async function postJSON(url: string, data: unknown) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
   if (!r.ok) {
     throw new Error("net");

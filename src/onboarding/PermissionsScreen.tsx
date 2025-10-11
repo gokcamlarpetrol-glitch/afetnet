@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { logger } from '../utils/productionLogger';
 import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -68,7 +69,7 @@ export default function PermissionsScreen() {
         handleNext();
       }
     } catch (error) {
-      console.error('Permission request error:', error);
+      logger.error('Permission request error:', error);
       Alert.alert('Hata', 'İzin isteği başarısız oldu');
     } finally {
       setIsLoading(false);
@@ -102,7 +103,7 @@ export default function PermissionsScreen() {
       await permissionsManager.markOnboardingComplete();
       navigation.navigate('Home' as never);
     } catch (error) {
-      console.error('Error completing onboarding:', error);
+      logger.error('Error completing onboarding:', error);
       Alert.alert('Hata', 'Onboarding tamamlanamadı');
     }
   };
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 4,
-    backgroundColor: palette.border.primary,
+    backgroundColor: (palette.border as any).primary || '#E0E0E0',
     borderRadius: 2,
   },
   progressFill: {
@@ -320,7 +321,7 @@ const styles = StyleSheet.create({
   },
   requiredText: {
     fontSize: 12,
-    color: palette.text.onWarning,
+    color: (palette.text as any).onWarning || '#212121',
     fontWeight: '600',
   },
   permissionsOverview: {
