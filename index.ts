@@ -13,8 +13,8 @@ import { registerQuakeBackground } from './src/background/quakeTask';
 
 function AppWrapper() {
   useEffect(() => {
-    registerQuakeBackground().catch((error: any) => {
-      console.error('Failed to register quake background task:', error);
+    registerQuakeBackground().catch((_error: any) => {
+      // Silent fail - background tasks are optional
     });
   }, []);
 

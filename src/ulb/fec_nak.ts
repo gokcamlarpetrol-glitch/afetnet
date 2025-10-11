@@ -16,7 +16,7 @@ export function initNAK(){
         const arr:number[]=[]; for(let i=0;i<a.total;i++){ if(!a.parts.has(i)) {arr.push(i);} }
         if(arr.length>0 && a.hasParity && (Date.now()-a.ts>500)){
           // call back to broadcaster (local optimization) — for remote, receiver would broadcast a nak ulb payload
-          const fn = (global as any).__AFN_ULB_NAK__; if(typeof fn==="function") {fn(obj.gid, arr);}
+          const fn = (global as typeof globalThis).__AFN_ULB_NAK__; if(typeof fn==="function") {fn(obj.gid, arr);}
         }
       }, 600);
     }catch{}

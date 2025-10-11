@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import { View, Text, StyleSheet, FlatList, Pressable, Alert } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { useDevLog } from '../store/devlog';
@@ -50,7 +51,7 @@ export default function BlackBox() {
       }
 
     } catch (error) {
-      console.error('Export failed:', error);
+      logger.error('Export failed:', error);
       Alert.alert('Hata', 'Dışa aktarım başarısız');
     } finally {
       setIsExporting(false);
@@ -108,7 +109,8 @@ export default function BlackBox() {
       {/* Filter Buttons */}
       <View style={styles.filterContainer}>
         {getFilterButtons().map((button) => (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             key={button.key}
             onPress={() => setFilter(button.key)}
             style={[
@@ -143,7 +145,8 @@ export default function BlackBox() {
 
       {/* Action Buttons */}
       <View style={styles.actionContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleExport}
           disabled={isExporting || events.length === 0}
           style={[
@@ -156,7 +159,8 @@ export default function BlackBox() {
           </Text>
         </Pressable>
 
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => Alert.alert('Yakında', 'QR ile paylaşım özelliği yakında eklenecek')}
           style={styles.qrButton}
         >

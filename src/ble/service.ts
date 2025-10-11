@@ -1,4 +1,5 @@
 import { Buffer } from "buffer";
+import { logger } from '../utils/productionLogger';
 import { ble } from "./manager";
 import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID, SCAN_SECONDS, CONNECT_TIMEOUT_MS } from "./constants";
 import { Platform } from "react-native";
@@ -18,7 +19,7 @@ export async function scanNearby(onHit: (d: NearbyHit) => void) {
       if (state === "PoweredOn") {
         ble.startDeviceScan([AFETNET_SERVICE_UUID], {}, (err, device) => {
           if (err) {
-            console.warn("BLE scan error", err);
+            logger.warn("BLE scan error", err);
             return;
           }
           if (device?.serviceUUIDs?.includes(AFETNET_SERVICE_UUID)) {
@@ -37,7 +38,7 @@ export async function scanNearby(onHit: (d: NearbyHit) => void) {
 
 export async function sendTinyMessage(deviceId: string, payload: object) {
   if (isSimulator) {
-    console.log("MOCK sendTinyMessage →", deviceId, payload);
+    logger.debug("MOCK sendTinyMessage →", deviceId, payload);
     return true;
   }
   const json = JSON.stringify(payload);

@@ -1,10 +1,11 @@
 // Safe TCP Socket wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 let net: any = null;
 
 try {
   net = require('react-native-tcp-socket');
 } catch (e) {
-  console.warn('react-native-tcp-socket not available');
+  logger.warn('react-native-tcp-socket not available');
 }
 
 export const SafeTCP = {
@@ -12,20 +13,20 @@ export const SafeTCP = {
   
   createServer: (callback: any) => {
     if (!net) {
-      console.warn('TCP Socket not available, returning mock server');
+      logger.warn('TCP Socket not available, returning mock server');
       return {
-        listen: (options: any, callback?: any) => {
-          console.warn('Mock TCP server listening on port', options.port);
+        listen: (options: Record<string, unknown>, callback?: any) => {
+          logger.warn('Mock TCP server listening on port', options.port);
           if (callback) {callback();}
           return {
             close: (callback?: any) => {
-              console.warn('Mock TCP server closed');
+              logger.warn('Mock TCP server closed');
               if (callback) {callback();}
             }
           };
         },
         close: (callback?: any) => {
-          console.warn('Mock TCP server closed');
+          logger.warn('Mock TCP server closed');
           if (callback) {callback();}
         }
       };
@@ -33,9 +34,9 @@ export const SafeTCP = {
     try {
       return net.createServer(callback);
     } catch (e) {
-      console.warn('Failed to create TCP server:', e);
+      logger.warn('Failed to create TCP server:', e);
       return {
-        listen: (options: any, callback?: any) => {
+        listen: (options: Record<string, unknown>, callback?: any) => {
           if (callback) {callback();}
           return { close: (callback?: any) => { if (callback) {callback();} } };
         },
@@ -44,20 +45,20 @@ export const SafeTCP = {
     }
   },
 
-  createConnection: (options: any, callback?: any) => {
+  createConnection: (options: Record<string, unknown>, callback?: any) => {
     if (!net) {
-      console.warn('TCP Socket not available, returning mock connection');
+      logger.warn('TCP Socket not available, returning mock connection');
       const mockSocket = {
-        write: (data: any, callback?: any) => {
-          console.warn('Mock TCP write:', data);
+        write: (data: unknown, callback?: any) => {
+          logger.warn('Mock TCP write:', data);
           if (callback) {callback();}
         },
         end: (callback?: any) => {
-          console.warn('Mock TCP connection ended');
+          logger.warn('Mock TCP connection ended');
           if (callback) {callback();}
         },
         on: (event: string, callback: any) => {
-          console.warn('Mock TCP event listener:', event);
+          logger.warn('Mock TCP event listener:', event);
         }
       };
       if (callback) {callback();}
@@ -66,9 +67,9 @@ export const SafeTCP = {
     try {
       return net.createConnection(options, callback);
     } catch (e) {
-      console.warn('Failed to create TCP connection:', e);
+      logger.warn('Failed to create TCP connection:', e);
       const mockSocket = {
-        write: (data: any, callback?: any) => { if (callback) {callback();} },
+        write: (data: unknown, callback?: any) => { if (callback) {callback();} },
         end: (callback?: any) => { if (callback) {callback();} },
         on: (event: string, callback: any) => {}
       };

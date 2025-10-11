@@ -1,4 +1,5 @@
 import * as Contacts from 'expo-contacts';
+import { logger } from '../utils/productionLogger';
 
 export interface ContactInfo {
   name: string;
@@ -10,7 +11,7 @@ export async function requestContactsPermission(): Promise<boolean> {
     const { status } = await Contacts.requestPermissionsAsync();
     return status === 'granted';
   } catch (error) {
-    console.error('Failed to request contacts permission:', error);
+    logger.error('Failed to request contacts permission:', error);
     return false;
   }
 }
@@ -51,7 +52,7 @@ export async function pickContacts(): Promise<ContactInfo[]> {
 
     return uniqueContacts;
   } catch (error) {
-    console.error('Failed to pick contacts:', error);
+    logger.error('Failed to pick contacts:', error);
     throw error;
   }
 }

@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface MedicalEmergency {
@@ -26,7 +27,7 @@ class EmergencyMedicalSystem extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🏥 Emergency Medical System initialized');
+    logger.debug('🏥 Emergency Medical System initialized');
   }
 
   // CRITICAL: Create Medical Emergency
@@ -62,7 +63,7 @@ class EmergencyMedicalSystem extends SimpleEventEmitter {
   // CRITICAL: Start Medical Monitoring
   async startMedicalMonitoring(): Promise<boolean> {
     try {
-      console.log('🏥 Starting medical monitoring...');
+      logger.debug('🏥 Starting medical monitoring...');
       
       this.emit('medicalMonitoringStarted');
       emergencyLogger.logSystem('info', 'Medical monitoring started');
@@ -77,7 +78,7 @@ class EmergencyMedicalSystem extends SimpleEventEmitter {
   // CRITICAL: Stop Medical Monitoring
   async stopMedicalMonitoring(): Promise<boolean> {
     try {
-      console.log('🏥 Stopping medical monitoring...');
+      logger.debug('🏥 Stopping medical monitoring...');
       
       this.emit('medicalMonitoringStopped');
       emergencyLogger.logSystem('info', 'Medical monitoring stopped');

@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { logger } from '../utils/productionLogger';
 import { useEffect, useState } from 'react';
 
 interface Position {
@@ -52,7 +53,7 @@ export function usePDRFuse() {
 
         setIsTracking(true);
       } catch (err) {
-        console.error('Location tracking error:', err);
+        logger.error('Location tracking error:', err);
         setError('Konum takibi başlatılamadı');
       }
     };
@@ -83,7 +84,7 @@ export function usePDRFuse() {
         };
       }
     } catch (err) {
-      console.error('Failed to get last known position:', err);
+      logger.error('Failed to get last known position:', err);
     }
     return null;
   };
@@ -92,7 +93,7 @@ export function usePDRFuse() {
     try {
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
-        maximumAge: 30000, // 30 seconds
+        timeInterval: 30000, // 30 seconds
       });
 
       return {
@@ -102,7 +103,7 @@ export function usePDRFuse() {
         timestamp: location.timestamp,
       };
     } catch (err) {
-      console.error('Failed to get current position:', err);
+      logger.error('Failed to get current position:', err);
       return null;
     }
   };

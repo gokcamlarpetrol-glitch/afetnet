@@ -13,7 +13,9 @@ import {
 } from 'react-native';
 import { FamilyMember, useFamily } from '../store/family';
 
-export default function FamilyScreen({ navigation }: { navigation?: any }) {
+import { NavigationProp } from '../types/interfaces';
+
+export default function FamilyScreen({ navigation }: { navigation?: NavigationProp }) {
   const {
     list,
     myAfnId,
@@ -217,7 +219,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
           </View>
           
           {/* QR Button */}
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleAddByQR}
             style={{
               backgroundColor: '#8b5cf6',
@@ -237,7 +240,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
           </Pressable>
           
           {/* Add Button */}
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleAddMember}
             style={{
               backgroundColor: '#3b82f6',
@@ -257,7 +261,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
         </View>
 
         {/* My AFN-ID Card */}
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleShareMyId}
           style={{
             backgroundColor: '#1e293b',
@@ -310,6 +315,7 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
         }}>
           <Ionicons name="search" size={20} color="#64748b" />
           <TextInput
+          accessibilityRole="text"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Kişi ara..."
@@ -360,7 +366,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
           </Text>
 
           {filteredMembers.map((member) => (
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               key={member.id}
               onPress={() => handleMemberPress(member)}
               style={{
@@ -418,7 +425,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
 
                   {/* Quick Actions */}
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <Pressable
+                    <Pressable accessible={true}
+          accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'ok')}
                       style={{
                         flex: 1,
@@ -431,7 +439,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                       <Text style={{ color: '#10b981', fontSize: 12, fontWeight: '700' }}>İyi</Text>
                     </Pressable>
 
-                    <Pressable
+                    <Pressable accessible={true}
+          accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'unknown')}
                       style={{
                         flex: 1,
@@ -444,7 +453,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                       <Text style={{ color: '#f59e0b', fontSize: 12, fontWeight: '700' }}>Belirsiz</Text>
                     </Pressable>
 
-                    <Pressable
+                    <Pressable accessible={true}
+          accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'need')}
                       style={{
                         flex: 1,
@@ -479,7 +489,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                   : 'Aile ve yakınlarınızı eklemek için + butonuna tıklayın'}
               </Text>
               {!searchQuery && (
-                <Pressable
+                <Pressable accessible={true}
+          accessibilityRole="button"
                   onPress={handleAddMember}
                   style={{
                     backgroundColor: '#3b82f6',
@@ -500,6 +511,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
 
       {/* Add Member Modal */}
       <Modal
+          accessible={true}
+          accessibilityViewIsModal={true}
         visible={addModalVisible}
         transparent
         animationType="slide"
@@ -522,7 +535,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
             </View>
 
             {/* Add Options */}
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={handleAddByAfnId}
               style={{
                 backgroundColor: '#334155',
@@ -555,7 +569,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
               </View>
             </Pressable>
 
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={handleAddByQR}
               style={{
                 backgroundColor: '#334155',
@@ -588,7 +603,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
               </View>
             </Pressable>
 
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={handleAddManual}
               style={{
                 backgroundColor: '#334155',
@@ -626,6 +642,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
 
       {/* Member Detail Modal */}
       <Modal
+          accessible={true}
+          accessibilityViewIsModal={true}
         visible={detailModalVisible}
         transparent
         animationType="slide"
@@ -692,7 +710,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                 {/* Actions */}
                 <View style={{ marginTop: 24, gap: 12 }}>
                   {selectedMember.afnId && (
-                    <Pressable
+                    <Pressable accessible={true}
+          accessibilityRole="button"
                       onPress={async () => {
                         await Clipboard.setStringAsync(selectedMember.afnId!);
                         Alert.alert(
@@ -717,7 +736,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                     </Pressable>
                   )}
 
-                  <Pressable
+                  <Pressable accessible={true}
+          accessibilityRole="button"
                     onPress={() => {
                       setDetailModalVisible(false);
                       Alert.alert('Mesaj', `${selectedMember.name} ile mesajlaşma özelliği yakında eklenecek`);
@@ -734,7 +754,8 @@ export default function FamilyScreen({ navigation }: { navigation?: any }) {
                     </Text>
                   </Pressable>
 
-                  <Pressable
+                  <Pressable accessible={true}
+          accessibilityRole="button"
                     onPress={() => {
                       Alert.alert(
                         'Sil',

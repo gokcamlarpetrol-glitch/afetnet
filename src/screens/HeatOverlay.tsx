@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
-import { makeGrid, addHit, decay, normalize } from "../map/heat";
+import { addHit, decay, makeGrid, normalize } from "../map/heat";
 
 type Pt = { x:number; y:number; v:number };
 
@@ -26,6 +26,18 @@ export default function HeatOverlay({ width, height, samples }:{width:number;hei
     const t = setTimeout(()=>setPts([...out]), 2000);
     return ()=>clearTimeout(t);
   },[samples,width,height]);
+
+  // CRITICAL: Cleanup on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Clear any pending timeouts
+      const timeouts = (window as Window & typeof globalThis).__heatOverlayTimeouts;
+      if (timeouts) {
+        timeouts.forEach((timeout: any) => clearTimeout(timeout));
+        (window as Window & typeof globalThis).__heatOverlayTimeouts = [];
+      }
+    };
+  }, []);
 
   return (
     <View pointerEvents="none" style={{position:"absolute", left:0, top:0, width, height}}>

@@ -1,4 +1,5 @@
 import crc32 from 'crc-32';
+import { logger } from '../utils/productionLogger';
 import CryptoJS from 'crypto-js';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 
@@ -115,7 +116,7 @@ export function validateGid(gid: string): { ok: boolean; payload?: Uint8Array } 
     }
     return { ok: false };
   } catch (e) {
-    console.error('GID validation error:', e);
+    logger.error('GID validation error:', e);
     return { ok: false };
   }
 }

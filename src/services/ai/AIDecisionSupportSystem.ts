@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface DecisionContext {
@@ -189,7 +190,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Decision Models
   private initializeDecisionModels(): void {
-    console.log('🧠 Initializing AI decision support models...');
+    logger.debug('🧠 Initializing AI decision support models...');
 
     // Emergency Response Model
     this.decisionModels.set('emergency_response', {
@@ -229,7 +230,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
       algorithms: ['dijkstra', 'a_star', 'flow_network']
     });
 
-    console.log('✅ AI decision models initialized');
+    logger.debug('✅ AI decision models initialized');
   }
 
   // CRITICAL: Start AI Decision System
@@ -237,18 +238,18 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🧠 Starting AI decision support system...');
+      logger.debug('🧠 Starting AI decision support system...');
       this.isActive = true;
 
       this.emit('aiDecisionSystemStarted');
       emergencyLogger.logSystem('info', 'AI decision support system started');
 
-      console.log('✅ AI decision support system started');
+      logger.debug('✅ AI decision support system started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start AI decision system', { error: String(error) });
-      console.error('❌ Failed to start AI decision system:', error);
+      logger.error('❌ Failed to start AI decision system:', error);
       return false;
     }
   }
@@ -261,7 +262,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
       }
 
       this.isProcessing = true;
-      console.log('🧠 Generating AI decision...');
+      logger.debug('🧠 Generating AI decision...');
 
       // Analyze context
       const analysis = await this.analyzeContext(context);
@@ -299,7 +300,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         priority: decision.priority
       });
 
-      console.log(`🧠 AI decision generated: ${decision.decision} (${decision.confidence}% confidence)`);
+      logger.debug(`🧠 AI decision generated: ${decision.decision} (${decision.confidence}% confidence)`);
       this.isProcessing = false;
       return decision;
 
@@ -773,6 +774,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const aiDecisionSupportSystem = new AIDecisionSupportSystem();
 export default AIDecisionSupportSystem;
+
 
 
 

@@ -182,3 +182,4 @@ Firebase kurulumu tamamlandıktan sonra:
 **Güncelleme**: 7 Ekim 2025
 
 
+

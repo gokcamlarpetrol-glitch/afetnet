@@ -1,8 +1,9 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Request, Response } from 'express';
 import { body } from 'express-validator';
 import Stripe from 'stripe';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { validate } from '../middleware/validation';
+import { validate, sanitizeInput, validators } from '../middleware/validation';
 import { sendMulticastNotification } from '../services/firebase';
 import { prisma } from '../utils/prisma';
 
@@ -73,7 +74,7 @@ router.post(
         description: `AfetNet Premium - ${plan} plan`,
       });
 
-      console.log(`💳 Payment intent created: ${paymentIntent.id} for ${req.user!.afnId}`);
+      backendLogger.debug(`💳 Payment intent created: ${paymentIntent.id} for ${req.user!.afnId}`);
 
       res.json({
         clientSecret: paymentIntent.client_secret,
@@ -81,7 +82,7 @@ router.post(
         currency: 'try',
       });
     } catch (error) {
-      console.error('❌ Payment intent creation error:', error);
+      backendLogger.error('❌ Payment intent creation error:', error);
       res.status(500).json({ error: 'Failed to create payment intent' });
     }
   }
@@ -94,19 +95,19 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
 
     // CRITICAL: Verify webhook signature
     if (!sig) {
-      console.error('❌ CRITICAL: Webhook signature missing');
+      backendLogger.error('❌ CRITICAL: Webhook signature missing');
       return res.status(400).json({ error: 'Missing signature' });
     }
 
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret) {
-      console.error('❌ CRITICAL: STRIPE_WEBHOOK_SECRET not configured');
+      backendLogger.error('❌ CRITICAL: STRIPE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook not configured' });
     }
 
     // Check if Stripe is configured
     if (!stripe) {
-      console.error('❌ CRITICAL: Stripe not configured for webhook');
+      backendLogger.error('❌ CRITICAL: Stripe not configured for webhook');
       return res.status(503).json({ error: 'Payment service not configured' });
     }
 
@@ -115,11 +116,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
     } catch (err: any) {
-      console.error(`❌ CRITICAL: Webhook signature verification failed: ${err.message}`);
+      backendLogger.error(`❌ CRITICAL: Webhook signature verification failed: ${err.message}`);
       return res.status(400).json({ error: `Webhook Error: ${err.message}` });
     }
 
-    console.log(`📨 Webhook received: ${event.type}`);
+    backendLogger.debug(`📨 Webhook received: ${event.type}`);
 
     // Handle different event types
     switch (event.type) {
@@ -128,7 +129,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
         const { userId, plan } = paymentIntent.metadata;
 
         if (!userId || !plan) {
-          console.error('❌ CRITICAL: Missing metadata in payment intent');
+          backendLogger.error('❌ CRITICAL: Missing metadata in payment intent');
           break;
         }
 
@@ -141,7 +142,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
         } else if (plan === 'lifetime') {
           premiumExpiry = new Date('2099-12-31');
         } else {
-          console.error(`❌ CRITICAL: Invalid plan: ${plan}`);
+          backendLogger.error(`❌ CRITICAL: Invalid plan: ${plan}`);
           break;
         }
 
@@ -184,11 +185,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
               expiresAt: premiumExpiry.toISOString(),
             },
           }).catch((err) => {
-            console.error('⚠️  Premium notification error (non-blocking):', err);
+            backendLogger.error('⚠️  Premium notification error (non-blocking):', err);
           });
         }
 
-        console.log(`✅ CRITICAL: Premium activated for user ${userId} (${plan})`);
+        backendLogger.debug(`✅ CRITICAL: Premium activated for user ${userId} (${plan})`);
         break;
       }
 
@@ -211,7 +212,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
             },
           });
 
-          console.log(`❌ Payment failed for user ${userId}`);
+          backendLogger.debug(`❌ Payment failed for user ${userId}`);
         }
         break;
       }
@@ -234,18 +235,18 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
             },
           });
 
-          console.log(`🔴 Premium cancelled for user ${user.afnId}`);
+          backendLogger.debug(`🔴 Premium cancelled for user ${user.afnId}`);
         }
         break;
       }
 
       default:
-        console.log(`ℹ️  Unhandled webhook event: ${event.type}`);
+        backendLogger.debug(`ℹ️  Unhandled webhook event: ${event.type}`);
     }
 
     res.json({ received: true });
   } catch (error) {
-    console.error('❌ CRITICAL: Webhook processing error:', error);
+    backendLogger.error('❌ CRITICAL: Webhook processing error:', error);
     res.status(400).json({ error: 'Webhook error' });
   }
 });
@@ -261,7 +262,7 @@ router.get('/history', authenticate, async (req: AuthRequest, res: Response) => 
 
     res.json(payments);
   } catch (error) {
-    console.error('❌ Payment history error:', error);
+    backendLogger.error('❌ Payment history error:', error);
     res.status(500).json({ error: 'Failed to fetch payment history' });
   }
 });
@@ -306,7 +307,7 @@ router.get('/status', authenticate, async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('❌ Premium status error:', error);
+    backendLogger.error('❌ Premium status error:', error);
     res.status(500).json({ error: 'Failed to fetch premium status' });
   }
 });

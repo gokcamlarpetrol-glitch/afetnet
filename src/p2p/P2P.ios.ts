@@ -1,6 +1,6 @@
 // @ts-ignore
 import { Multipeer } from "react-native-multipeer";
-import type { P2P, P2PPeer, P2PEvents } from "./P2P";
+import type { P2P, P2PEvents, P2PPeer } from "./P2P";
 
 const svcType = "afetnet";
 

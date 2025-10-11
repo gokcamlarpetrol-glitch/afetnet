@@ -1,21 +1,22 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 
 // Safe BLE imports with fallbacks for Expo Go
 let BleManager: any = null;
-let Device: any = null;
-let State: any = null;
-let Characteristic: any = null;
-let Service: any = null;
+// let Device: any = null; // Not used
+// let State: any = null; // Not used
+// let Characteristic: any = null; // Not used
+// let Service: any = null; // Not used
 
 try {
   const blePlx = require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
-  Device = blePlx.Device;
-  State = blePlx.State;
-  Characteristic = blePlx.Characteristic;
-  Service = blePlx.Service;
+  // Device = blePlx.Device; // Not used
+  // State = blePlx.State; // Not used
+  // Characteristic = blePlx.Characteristic; // Not used
+  // Service = blePlx.Service; // Not used
 } catch (e) {
-  console.warn('react-native-ble-plx not available, using fallback');
+  logger.warn('react-native-ble-plx not available, using fallback');
 }
 
 export interface MeshMessage {
@@ -30,10 +31,10 @@ export interface MeshMessage {
 export interface MeshDevice {
   id: string;
   name: string;
-  device: Device;
+  device: any;
   lastSeen: number;
   rssi: number;
-  services?: Service[];
+  services?: unknown[];
 }
 
 export interface MeshConfig {
@@ -75,7 +76,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       this.manager = new BleManager();
       this.setupEventListeners();
     } else {
-      console.warn('BLE Mesh Manager: Using mock mode (Expo Go)');
+      logger.warn('BLE Mesh Manager: Using mock mode (Expo Go)');
     }
   }
 
@@ -83,7 +84,7 @@ export class BleMeshManager extends SimpleEventEmitter {
     if (!this.manager) return;
     
     this.manager.onStateChange((state: any) => {
-      console.log('BLE State changed:', state);
+      logger.debug('BLE State changed:', state);
       this.emit('stateChanged', state);
       
       if (state === 'PoweredOn') {
@@ -96,48 +97,48 @@ export class BleMeshManager extends SimpleEventEmitter {
 
   async initialize(): Promise<boolean> {
     if (!this.manager) {
-      console.warn('BLE Mesh Manager: Not available in Expo Go');
+      logger.warn('BLE Mesh Manager: Not available in Expo Go');
       return false;
     }
     
     try {
       const state = await this.manager.state();
-      console.log('Initial BLE state:', state);
+      logger.debug('Initial BLE state:', state);
       
       if (state !== 'PoweredOn') {
-        console.warn('Bluetooth is not powered on. Current state:', state);
+        logger.warn('Bluetooth is not powered on. Current state:', state);
         return false;
       }
 
       await this.startScanning();
       return true;
     } catch (error) {
-      console.error('Failed to initialize BLE mesh:', error);
+      logger.error('Failed to initialize BLE mesh:', error);
       return false;
     }
   }
 
   async startScanning(): Promise<void> {
     if (!this.manager) {
-      console.warn('BLE Mesh Manager: Not available in Expo Go');
+      logger.warn('BLE Mesh Manager: Not available in Expo Go');
       return;
     }
     
     if (this.isScanning) {
-      console.log('Already scanning');
+      logger.debug('Already scanning');
       return;
     }
 
     try {
       this.isScanning = true;
-      console.log('Starting BLE scan...');
+      logger.debug('Starting BLE scan...');
 
       this.manager.startDeviceScan(
         [this.config.serviceUUID],
         { allowDuplicates: true },
-        (error, device) => {
+        (error: any, device: any) => {
           if (error) {
-            console.error('Scan error:', error);
+            logger.error('Scan error:', error);
             this.isScanning = false;
             return;
           }
@@ -156,7 +157,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       }, this.config.scanTimeout);
 
     } catch (error) {
-      console.error('Failed to start scanning:', error);
+      logger.error('Failed to start scanning:', error);
       this.isScanning = false;
     }
   }
@@ -168,13 +169,13 @@ export class BleMeshManager extends SimpleEventEmitter {
     try {
       this.manager.stopDeviceScan();
       this.isScanning = false;
-      console.log('BLE scan stopped');
+      logger.debug('BLE scan stopped');
     } catch (error) {
-      console.error('Failed to stop scanning:', error);
+      logger.error('Failed to stop scanning:', error);
     }
   }
 
-  private async handleDeviceFound(device: Device): Promise<void> {
+  private async handleDeviceFound(device: any): Promise<void> {
     try {
       const meshDevice: MeshDevice = {
         id: device.id,
@@ -184,7 +185,7 @@ export class BleMeshManager extends SimpleEventEmitter {
         rssi: device.rssi || -100,
       };
 
-      console.log(`Found device: ${meshDevice.name} (${device.id}) RSSI: ${device.rssi}`);
+      logger.debug(`Found device: ${meshDevice.name} (${device.id}) RSSI: ${device.rssi}`);
 
       // Check if we should connect to this device
       if (this.shouldConnectToDevice(meshDevice)) {
@@ -194,7 +195,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       this.emit('deviceFound', meshDevice);
 
     } catch (error) {
-      console.error('Error handling found device:', error);
+      logger.error('Error handling found device:', error);
     }
   }
 
@@ -205,14 +206,14 @@ export class BleMeshManager extends SimpleEventEmitter {
 
   private async connectToDevice(meshDevice: MeshDevice): Promise<void> {
     try {
-      console.log(`Connecting to device: ${meshDevice.name}`);
+      logger.debug(`Connecting to device: ${meshDevice.name}`);
       
       const connectedDevice = await meshDevice.device.connect();
-      console.log(`Connected to: ${meshDevice.name}`);
+      logger.debug(`Connected to: ${meshDevice.name}`);
 
       // Discover services
       const services = await connectedDevice.discoverAllServicesAndCharacteristics();
-      console.log(`Discovered ${services.length} services for ${meshDevice.name}`);
+      logger.debug(`Discovered ${services.length} services for ${meshDevice.name}`);
 
       meshDevice.device = connectedDevice;
       meshDevice.services = services;
@@ -225,21 +226,21 @@ export class BleMeshManager extends SimpleEventEmitter {
       this.setupMessageListener(meshDevice);
 
     } catch (error) {
-      console.error(`Failed to connect to ${meshDevice.name}:`, error);
+      logger.error(`Failed to connect to ${meshDevice.name}:`, error);
     }
   }
 
   private async setupMessageListener(meshDevice: MeshDevice): Promise<void> {
     try {
-      const service = meshDevice.services?.find(s => s.uuid === this.config.serviceUUID);
+      const service = meshDevice.services?.find((s: any) => s.uuid === this.config.serviceUUID);
       if (!service) {
-        console.warn(`Service ${this.config.serviceUUID} not found on ${meshDevice.name}`);
+        logger.warn(`Service ${this.config.serviceUUID} not found on ${meshDevice.name}`);
         return;
       }
 
-      const characteristic = service.characteristics.find(c => c.uuid === this.config.characteristicUUID);
+      const characteristic = (service as any).characteristics.find((c: any) => c.uuid === this.config.characteristicUUID);
       if (!characteristic) {
-        console.warn(`Characteristic ${this.config.characteristicUUID} not found on ${meshDevice.name}`);
+        logger.warn(`Characteristic ${this.config.characteristicUUID} not found on ${meshDevice.name}`);
         return;
       }
 
@@ -247,9 +248,9 @@ export class BleMeshManager extends SimpleEventEmitter {
       meshDevice.device.monitorCharacteristicForService(
         this.config.serviceUUID,
         this.config.characteristicUUID,
-        (error, characteristic) => {
+        (error: any, characteristic: any) => {
           if (error) {
-            console.error(`Monitor error for ${meshDevice.name}:`, error);
+            logger.error(`Monitor error for ${meshDevice.name}:`, error);
             return;
           }
 
@@ -260,7 +261,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       );
 
     } catch (error) {
-      console.error(`Failed to setup message listener for ${meshDevice.name}:`, error);
+      logger.error(`Failed to setup message listener for ${meshDevice.name}:`, error);
     }
   }
 
@@ -279,14 +280,14 @@ export class BleMeshManager extends SimpleEventEmitter {
       // Clean old message history
       this.cleanMessageHistory();
 
-      console.log(`Received message from ${fromDevice.name}:`, message);
+      logger.debug(`Received message from ${fromDevice.name}:`, message);
 
       // Decrement TTL and hop count
       message.ttl--;
       message.hopCount++;
 
       // Emit the message for the app to handle
-      this.emit('messageReceived', message, fromDevice);
+      this.emit('messageReceived', message);
 
       // Forward message to other connected devices if TTL > 0
       if (message.ttl > 0) {
@@ -294,7 +295,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       }
 
     } catch (error) {
-      console.error('Failed to parse incoming message:', error);
+      logger.error('Failed to parse incoming message:', error);
     }
   }
 
@@ -313,7 +314,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       timestamp: Date.now(),
     };
 
-    console.log('Sending message:', fullMessage);
+    logger.debug('Sending message:', fullMessage);
 
     // Add to queue for reliability
     this.messageQueue.push(fullMessage);
@@ -325,9 +326,9 @@ export class BleMeshManager extends SimpleEventEmitter {
     const results = await Promise.allSettled(sendPromises);
     const successCount = results.filter(r => r.status === 'fulfilled').length;
 
-    console.log(`Message sent to ${successCount}/${this.connectedDevices.size} devices`);
+    logger.debug(`Message sent to ${successCount}/${this.connectedDevices.size} devices`);
 
-    this.emit('messageSent', fullMessage, successCount);
+    this.emit('messageSent', fullMessage);
 
     return successCount > 0;
   }
@@ -337,7 +338,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       const data = JSON.stringify(message);
       
       if (data.length > this.config.maxPayloadSize) {
-        console.warn(`Message too large (${data.length} > ${this.config.maxPayloadSize}):`, message);
+        logger.warn(`Message too large (${data.length} > ${this.config.maxPayloadSize}):`, message);
         return false;
       }
 
@@ -347,11 +348,11 @@ export class BleMeshManager extends SimpleEventEmitter {
         Buffer.from(data).toString('base64')
       );
 
-      console.log(`Message sent to ${device.name}`);
+      logger.debug(`Message sent to ${device.name}`);
       return true;
 
     } catch (error) {
-      console.error(`Failed to send message to ${device.name}:`, error);
+      logger.error(`Failed to send message to ${device.name}:`, error);
       return false;
     }
   }
@@ -363,14 +364,14 @@ export class BleMeshManager extends SimpleEventEmitter {
       this.sendHeartbeat();
     }, this.config.heartbeatInterval);
 
-    console.log('Heartbeat started');
+    logger.debug('Heartbeat started');
   }
 
   private stopHeartbeat(): void {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = undefined;
-      console.log('Heartbeat stopped');
+      this.heartbeatInterval = undefined as any;
+      logger.debug('Heartbeat stopped');
     }
   }
 
@@ -428,7 +429,7 @@ export class BleMeshManager extends SimpleEventEmitter {
     this.connectedDevices.clear();
     this.isConnected = false;
 
-    console.log('BLE mesh disconnected');
+    logger.debug('BLE mesh disconnected');
   }
 
   async destroy(): Promise<void> {

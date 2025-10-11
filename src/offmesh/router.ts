@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { logger } from '../utils/productionLogger';
 import { Envelope, PeerInfo, MeshStats, MeshConfig, MsgType } from './types';
 import { meshStore } from './store';
 import { qosManager } from './qos';
@@ -57,7 +58,7 @@ class OffMeshRouter {
 
   async startMesh(topic: string): Promise<void> {
     if (this.isRunning) {
-      console.log('Mesh already running');
+      logger.debug('Mesh already running');
       return;
     }
 
@@ -79,9 +80,9 @@ class OffMeshRouter {
           
           this.unsubscribeFunctions.push(unsubscribe);
           
-          console.log(`Transport ${name} started`);
+          logger.debug(`Transport ${name} started`);
         } catch (error) {
-          console.warn(`Failed to start transport ${name}:`, error);
+          logger.warn(`Failed to start transport ${name}:`, error);
         }
       }
     }
@@ -89,7 +90,7 @@ class OffMeshRouter {
     // Start message processing loop
     this.startMessageProcessing();
 
-    console.log('OffMesh router started for topic:', topic);
+    logger.debug('OffMesh router started for topic:', topic);
   }
 
   async stopMesh(): Promise<void> {
@@ -103,9 +104,9 @@ class OffMeshRouter {
     for (const [name, transport] of this.transports.entries()) {
       try {
         await transport.stop();
-        console.log(`Transport ${name} stopped`);
+        logger.debug(`Transport ${name} stopped`);
       } catch (error) {
-        console.warn(`Failed to stop transport ${name}:`, error);
+        logger.warn(`Failed to stop transport ${name}:`, error);
       }
     }
 
@@ -118,7 +119,7 @@ class OffMeshRouter {
     this.messageHandlers.clear();
     this.peerHandlers.clear();
 
-    console.log('OffMesh router stopped');
+    logger.debug('OffMesh router stopped');
   }
 
   async send(envelope: Envelope): Promise<void> {
@@ -166,7 +167,7 @@ class OffMeshRouter {
       hop: envelope.hop,
     });
 
-    console.log(`Message queued: ${envelope.type} (${envelope.id})`);
+    logger.debug(`Message queued: ${envelope.type} (${envelope.id})`);
   }
 
   subscribe(callback: (envelope: Envelope) => void): () => void {
@@ -187,7 +188,7 @@ class OffMeshRouter {
 
   setKey(key: string): void {
     // TODO: Implement key setting for crypto
-    console.log('Key set for mesh encryption');
+    logger.debug('Key set for mesh encryption');
   }
 
   getStats(): MeshStats {
@@ -211,20 +212,20 @@ class OffMeshRouter {
     try {
       // Check if duplicate
       if (meshStore.isDuplicate(envelope)) {
-        console.log(`Duplicate message ignored: ${envelope.id}`);
+        logger.debug(`Duplicate message ignored: ${envelope.id}`);
         return;
       }
 
       // Verify signature
       const isValid = await verifyEnvelope(envelope);
       if (!isValid) {
-        console.warn(`Invalid signature for message: ${envelope.id}`);
+        logger.warn(`Invalid signature for message: ${envelope.id}`);
         return;
       }
 
       // Check if expired
       if (meshStore.isExpired(envelope)) {
-        console.log(`Expired message ignored: ${envelope.id}`);
+        logger.debug(`Expired message ignored: ${envelope.id}`);
         return;
       }
 
@@ -253,12 +254,12 @@ class OffMeshRouter {
         try {
           handler(envelope);
         } catch (error) {
-          console.warn('Message handler error:', error);
+          logger.warn('Message handler error:', error);
         }
       });
 
     } catch (error) {
-      console.warn('Error handling incoming message:', error);
+      logger.warn('Error handling incoming message:', error);
       
       meshStore.logEvent({
         id: envelope.id,
@@ -283,7 +284,7 @@ class OffMeshRouter {
           const bytesEstimate = JSON.stringify(envelope).length;
           await transport.broadcast(envelope, bytesEstimate);
         } catch (error) {
-          console.warn(`Failed to forward via ${name}:`, error);
+          logger.warn(`Failed to forward via ${name}:`, error);
         }
       }
     }
@@ -302,7 +303,7 @@ class OffMeshRouter {
           meshStore.markSent(nextMessage);
         }
       } catch (error) {
-        console.warn('Message processing error:', error);
+        logger.warn('Message processing error:', error);
       }
 
       // Schedule next processing

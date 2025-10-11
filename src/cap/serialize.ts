@@ -9,7 +9,7 @@ export async function saveCap(cap: CapLite){
   const dir = "/tmp/docs/cap/";
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(()=>{});
   const path = dir + cap.identifier + ".json";
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(env, null, 2), { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(path, JSON.stringify(env, null, 2), { encoding: "utf8" });
   return path;
 }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import {
   View,
   Text,
@@ -56,7 +57,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         lon: location.coords.longitude
       });
     } catch (error) {
-      console.error('Failed to get location:', error);
+      logger.error('Failed to get location:', error);
       Alert.alert(
         'Hata',
         'Konum alınamadı',
@@ -79,7 +80,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
       const size = await tileManager.estimatePrefetchSize(bbox, { min: minZoom, max: maxZoom });
       setEstimatedSize(size);
     } catch (error) {
-      console.error('Failed to estimate size:', error);
+      logger.error('Failed to estimate size:', error);
     }
   };
 
@@ -88,7 +89,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
       const storage = await tileManager.getAvailableStorage();
       setAvailableStorage(storage);
     } catch (error) {
-      console.error('Failed to check storage:', error);
+      logger.error('Failed to check storage:', error);
     }
   };
 
@@ -151,7 +152,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         ]
       );
     } catch (error) {
-      console.error('Download failed:', error);
+      logger.error('Download failed:', error);
       Alert.alert(
         'İndirme Hatası',
         error instanceof Error ? error.message : 'İndirme başarısız',
@@ -214,25 +215,25 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
               <Text style={styles.rangeLabel}>10 km</Text>
             </View>
             <View style={styles.sliderContainer}>
-              <Pressable
+              <Pressable accessible={true}
                 style={[styles.sliderButton, radiusKm === 1 && styles.sliderButtonActive]}
                 onPress={() => setRadiusKm(1)}
               >
                 <Text style={styles.sliderButtonText}>1</Text>
               </Pressable>
-              <Pressable
+              <Pressable accessible={true}
                 style={[styles.sliderButton, radiusKm === 2 && styles.sliderButtonActive]}
                 onPress={() => setRadiusKm(2)}
               >
                 <Text style={styles.sliderButtonText}>2</Text>
               </Pressable>
-              <Pressable
+              <Pressable accessible={true}
                 style={[styles.sliderButton, radiusKm === 5 && styles.sliderButtonActive]}
                 onPress={() => setRadiusKm(5)}
               >
                 <Text style={styles.sliderButtonText}>5</Text>
               </Pressable>
-              <Pressable
+              <Pressable accessible={true}
                 style={[styles.sliderButton, radiusKm === 10 && styles.sliderButtonActive]}
                 onPress={() => setRadiusKm(10)}
               >
@@ -248,7 +249,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
                 <Text style={styles.zoomLabel}>Min Zoom:</Text>
                 <View style={styles.zoomButtons}>
                   {[10, 11, 12, 13, 14, 15].map(zoom => (
-                    <Pressable
+                    <Pressable accessible={true}
                       key={zoom}
                       style={[styles.zoomButton, minZoom === zoom && styles.zoomButtonActive]}
                       onPress={() => setMinZoom(zoom)}
@@ -262,7 +263,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
                 <Text style={styles.zoomLabel}>Max Zoom:</Text>
                 <View style={styles.zoomButtons}>
                   {[15, 16, 17, 18, 19, 20].map(zoom => (
-                    <Pressable
+                    <Pressable accessible={true}
                       key={zoom}
                       style={[styles.zoomButton, maxZoom === zoom && styles.zoomButtonActive]}
                       onPress={() => setMaxZoom(zoom)}

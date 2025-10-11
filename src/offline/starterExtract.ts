@@ -1,6 +1,7 @@
-import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { STARTER_SAT_ASSET, BOOT_KEY } from "../config/mapBootstrap";
+import { logger } from '../utils/productionLogger';
+import * as FileSystem from "expo-file-system";
+import { BOOT_KEY } from "../config/mapBootstrap";
 import { tileManager } from "./tileManager";
 
 export async function tryInstallStarterSatellite(): Promise<boolean> {
@@ -11,7 +12,7 @@ export async function tryInstallStarterSatellite(): Promise<boolean> {
     const dst = await tileManager.ensurePackDir("sentinel-starter");
     
     // Check if bundled asset exists
-    const assetFolder = FileSystem.bundleDirectory + "assets/tiles/sentinel-starter/";
+    const assetFolder = (FileSystem.bundleDirectory || '') + "assets/tiles/sentinel-starter/";
     const assetInfo = await FileSystem.getInfoAsync(assetFolder).catch(() => ({ exists: false }));
     
     if (!assetInfo.exists) {
@@ -26,10 +27,10 @@ export async function tryInstallStarterSatellite(): Promise<boolean> {
     
     // Mark as done
     await AsyncStorage.setItem(BOOT_KEY, "done");
-    console.log('Starter satellite pack installed successfully');
+    logger.debug('Starter satellite pack installed successfully');
     return true;
   } catch (error) {
-    console.warn('Failed to install starter satellite pack:', error);
+    logger.warn('Failed to install starter satellite pack:', error);
     return false;
   }
 }
@@ -52,12 +53,12 @@ async function copyTree(src: string, dstRoot: string): Promise<void> {
           await FileSystem.copyAsync({ from: srcPath, to: dstPath });
         }
       } catch (copyError) {
-        console.warn(`Failed to copy ${srcPath}:`, copyError);
+        logger.warn(`Failed to copy ${srcPath}:`, copyError);
         // Continue with other files
       }
     }
   } catch (error) {
-    console.warn('Failed to copy tree:', error);
+    logger.warn('Failed to copy tree:', error);
     throw error;
   }
 }

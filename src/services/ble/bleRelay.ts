@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { Platform } from 'react-native';
 
 // Safe BLE imports with fallbacks for Expo Go
@@ -13,7 +14,7 @@ try {
   Device = blePlx.Device;
   State = blePlx.State;
 } catch (e) {
-  console.warn('react-native-ble-plx not available, using fallback');
+  logger.warn('react-native-ble-plx not available, using fallback');
   isExpoGo = true;
 }
 
@@ -88,19 +89,19 @@ export class BLERelay {
   constructor() {
     // NEVER create BleManager in Expo Go - it causes NativeEventEmitter crash
     if (isExpoGo) {
-      console.warn('Expo Go detected - using mock BLE mode');
+      logger.warn('Expo Go detected - using mock BLE mode');
       this.manager = null;
     } else if (BleManager && typeof BleManager === 'function') {
       try {
         this.manager = new BleManager();
-        console.log('BLE Manager created successfully');
+        logger.debug('BLE Manager created successfully');
       } catch (e) {
-        console.warn('Failed to create BleManager:', e);
+        logger.warn('Failed to create BleManager:', e);
         this.manager = null;
         isExpoGo = true; // Fall back to mock mode
       }
     } else {
-      console.warn('BleManager not available - using mock mode');
+      logger.warn('BleManager not available - using mock mode');
       this.manager = null;
       isExpoGo = true;
     }
@@ -114,7 +115,7 @@ export class BLERelay {
         this.seenIds = new Set(JSON.parse(stored));
       }
     } catch (error) {
-      console.warn('Failed to load seen IDs:', error);
+      logger.warn('Failed to load seen IDs:', error);
     }
   }
 
@@ -122,7 +123,7 @@ export class BLERelay {
     try {
       await AsyncStorage.setItem('ble_relay_seen_ids', JSON.stringify([...this.seenIds]));
     } catch (error) {
-      console.warn('Failed to save seen IDs:', error);
+      logger.warn('Failed to save seen IDs:', error);
     }
   }
 
@@ -132,14 +133,14 @@ export class BLERelay {
       this.adaptiveMode = adaptiveMode;
       
       if (this.isSimulator || isExpoGo) {
-        console.log('Using simulator driver for BLE relay (Expo Go mode)');
+        logger.debug('Using simulator driver for BLE relay (Expo Go mode)');
         this.isActive = true;
         this.simDriver.subscribe((msg) => this.handleReceivedMessage(msg));
         return;
       }
 
       if (!this.manager) {
-        console.warn('BLE manager not available - using mock mode');
+        logger.warn('BLE manager not available - using mock mode');
         this.isActive = true;
         return;
       }
@@ -147,7 +148,7 @@ export class BLERelay {
       try {
         const state = await this.manager.state();
         if (state !== State.PoweredOn) {
-          console.warn('BLE not powered on - using mock mode');
+          logger.warn('BLE not powered on - using mock mode');
           this.isActive = true;
           return;
         }
@@ -156,13 +157,13 @@ export class BLERelay {
         this.startAdaptiveScanning();
 
         this.isActive = true;
-        console.log('BLE relay started', adaptiveMode ? '(adaptive mode)' : '');
+        logger.debug('BLE relay started', adaptiveMode ? '(adaptive mode)' : '');
       } catch (error) {
-        console.warn('BLE relay start failed, continuing with mock mode:', error);
+        logger.warn('BLE relay start failed, continuing with mock mode:', error);
         this.isActive = true;
       }
     } catch (error) {
-      console.error('Critical error in startRelay:', error);
+      logger.error('Critical error in startRelay:', error);
       // Always set active to prevent app crashes
       this.isActive = true;
     }
@@ -181,9 +182,9 @@ export class BLERelay {
       }
       this.isActive = false;
       this.adaptiveMode = false;
-      console.log('BLE relay stopped');
+      logger.debug('BLE relay stopped');
     } catch (error) {
-      console.error('Failed to stop BLE relay:', error);
+      logger.error('Failed to stop BLE relay:', error);
     }
   }
 
@@ -198,7 +199,7 @@ export class BLERelay {
         if (characteristics.length > 0) {
           characteristics[0].monitor((error, char) => {
             if (error) {
-              console.warn('BLE characteristic monitor error:', error);
+              logger.warn('BLE characteristic monitor error:', error);
               return;
             }
             if (char?.value) {
@@ -207,14 +208,14 @@ export class BLERelay {
                 const message: RelayMessage = JSON.parse(messageData);
                 this.handleReceivedMessage(message);
               } catch (parseError) {
-                console.warn('Failed to parse BLE message:', parseError);
+                logger.warn('Failed to parse BLE message:', parseError);
               }
             }
           });
         }
       }
     } catch (error) {
-      console.warn('Failed to handle device (non-critical):', error);
+      logger.warn('Failed to handle device (non-critical):', error);
       // Non-critical error - continue operation
     }
   }
@@ -228,7 +229,7 @@ export class BLERelay {
 
       // Add to seen messages
       this.seenIds.add(message.id);
-      this.saveSeenIds().catch(err => console.warn('Failed to save seen IDs:', err));
+      this.saveSeenIds().catch(err => logger.warn('Failed to save seen IDs:', err));
 
       // Cache message
       this.messageCache.set(message.id, message);
@@ -238,7 +239,7 @@ export class BLERelay {
         try {
           cb(message);
         } catch (cbError) {
-          console.warn('Subscriber callback error:', cbError);
+          logger.warn('Subscriber callback error:', cbError);
         }
       });
 
@@ -252,14 +253,14 @@ export class BLERelay {
           try {
             this.broadcastMessage(relayMessage);
           } catch (broadcastError) {
-            console.warn('Broadcast error:', broadcastError);
+            logger.warn('Broadcast error:', broadcastError);
           }
         }, jitter);
       }
 
-      console.log('Relayed message:', message.id, 'TTL:', message.ttl);
+      logger.debug('Relayed message:', message.id, 'TTL:', message.ttl);
     } catch (error) {
-      console.error('Critical error in handleReceivedMessage:', error);
+      logger.error('Critical error in handleReceivedMessage:', error);
       // Continue operation despite error
     }
   }
@@ -270,7 +271,7 @@ export class BLERelay {
     } else {
       // In real implementation, this would advertise the message
       // For now, we'll use the message bus approach
-      console.log('Broadcasting message:', message.id);
+      logger.debug('Broadcasting message:', message.id);
     }
   }
 
@@ -287,9 +288,9 @@ export class BLERelay {
       // Add to seen messages to prevent loops
       this.seenIds.add(message.id);
       await this.saveSeenIds();
-      console.log('Message sent successfully:', message.id);
+      logger.debug('Message sent successfully:', message.id);
     } catch (error) {
-      console.error('Failed to send direct message:', error);
+      logger.error('Failed to send direct message:', error);
       // Re-throw to let caller handle
       throw new Error(`Message send failed: ${error}`);
     }
@@ -330,24 +331,24 @@ export class BLERelay {
       if (!this.isActive) return;
 
       try {
-        console.log(`Starting BLE scan for ${scanDuration}ms`);
+        logger.debug(`Starting BLE scan for ${scanDuration}ms`);
         
         this.manager.startDeviceScan(null, { allowDuplicates: true }, (error, device) => {
           if (error) {
-            console.warn('BLE scan error (non-critical):', error);
+            logger.warn('BLE scan error (non-critical):', error);
             return;
           }
 
           if (device?.name?.startsWith('AfetNet')) {
             this.handleDiscoveredDevice(device).catch(err => 
-              console.warn('Device handling error:', err)
+              logger.warn('Device handling error:', err)
             );
             
             // Record RSSI sample
             try {
               this.recordRSSISample(device);
             } catch (rssiError) {
-              console.warn('RSSI recording error:', rssiError);
+              logger.warn('RSSI recording error:', rssiError);
             }
           }
         });
@@ -357,14 +358,14 @@ export class BLERelay {
           if (this.isActive) {
             try {
               this.manager.stopDeviceScan();
-              console.log('BLE scan stopped');
+              logger.debug('BLE scan stopped');
             } catch (stopError) {
-              console.warn('Error stopping scan:', stopError);
+              logger.warn('Error stopping scan:', stopError);
             }
           }
         }, scanDuration);
       } catch (scanError) {
-        console.error('Critical scan error:', scanError);
+        logger.error('Critical scan error:', scanError);
         // Continue operation despite error
       }
     };

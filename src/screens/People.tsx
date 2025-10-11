@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Clipboard } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Sharing from 'expo-sharing';
@@ -47,7 +48,7 @@ export default function People() {
       };
       setQrData(JSON.stringify(qrPayload));
     } catch (error) {
-      console.error('Failed to initialize identity:', error);
+      logger.error('Failed to initialize identity:', error);
     }
   };
 
@@ -98,7 +99,7 @@ export default function People() {
         { text: 'İptal', style: 'cancel' }
       ]);
     } catch (error) {
-      console.error('Failed to pick contacts:', error);
+      logger.error('Failed to pick contacts:', error);
       Alert.alert('Hata', 'Rehber erişimi başarısız');
     }
   };
@@ -123,7 +124,7 @@ export default function People() {
         ]
       );
     } catch (error) {
-      console.error('Failed to add contact:', error);
+      logger.error('Failed to add contact:', error);
       Alert.alert('Hata', 'Kişi eklenemedi');
     }
   };
@@ -133,7 +134,7 @@ export default function People() {
       await composeInvite(phoneE164, myAfnId);
       Alert.alert('Davet Gönderildi', 'SMS davet gönderildi');
     } catch (error) {
-      console.error('Failed to send invite:', error);
+      logger.error('Failed to send invite:', error);
       Alert.alert('Hata', 'Davet gönderilemedi');
     }
   };
@@ -188,7 +189,7 @@ export default function People() {
         ]
       );
     } catch (error) {
-      console.error('Failed to initiate pairing:', error);
+      logger.error('Failed to initiate pairing:', error);
       Alert.alert('Hata', 'Eşleşme başlatılamadı');
     }
   };
@@ -235,14 +236,16 @@ export default function People() {
         </View>
 
         <View style={styles.identityActions}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleCopyAfnId}
             style={styles.actionButton}
           >
             <Text style={styles.actionButtonText}>AFN-ID Kopyala</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleShareAfnId}
             style={styles.actionButton}
           >
@@ -258,7 +261,8 @@ export default function People() {
       <View style={styles.addCard}>
         <Text style={styles.addTitle}>Kişi Ekle</Text>
 
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleAddFromPhonebook}
           style={styles.addButton}
         >
@@ -268,6 +272,7 @@ export default function People() {
         <View style={styles.manualAddContainer}>
           <Text style={styles.manualAddLabel}>AFN-ID ile Ekle:</Text>
           <TextInput
+          accessibilityRole="text"
             style={styles.afnIdInput}
             placeholder="AFN-XXXX-XXXX-XXXX"
             value={manualAfnId}
@@ -275,7 +280,8 @@ export default function People() {
             autoCapitalize="characters"
             placeholderTextColor="#94a3b8"
           />
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleAddByAfnId}
             style={[styles.addButton, styles.addButtonSecondary]}
           >
@@ -339,7 +345,8 @@ export default function People() {
 
               <View style={styles.contactActions}>
                 {!person.paired && person.afnId && (
-                  <Pressable
+                  <Pressable accessible={true}
+          accessibilityRole="button"
                     onPress={() => initiatePairing(person.id, person.afnId!)}
                     style={[styles.contactActionButton, styles.primaryButton]}
                   >
@@ -350,7 +357,8 @@ export default function People() {
                 )}
 
                 {person.phoneE164 && (
-                  <Pressable
+                  <Pressable accessible={true}
+          accessibilityRole="button"
                     onPress={() => sendInviteToPerson(person.id, person.phoneE164!)}
                     style={styles.contactActionButton}
                   >
@@ -360,7 +368,8 @@ export default function People() {
                   </Pressable>
                 )}
 
-                <Pressable
+                <Pressable accessible={true}
+          accessibilityRole="button"
                   onPress={() => handleRemovePerson(person.id, person.displayName)}
                   style={[styles.contactActionButton, styles.dangerButton]}
                 >
@@ -381,7 +390,8 @@ export default function People() {
       <Text style={styles.title}>Kişiler</Text>
 
       <View style={styles.tabContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setActiveTab('identity')}
           style={[styles.tab, activeTab === 'identity' && styles.activeTab]}
         >
@@ -389,7 +399,8 @@ export default function People() {
             Benim Kimliğim
           </Text>
         </Pressable>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setActiveTab('add')}
           style={[styles.tab, activeTab === 'add' && styles.activeTab]}
         >
@@ -397,7 +408,8 @@ export default function People() {
             Kişi Ekle
           </Text>
         </Pressable>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => setActiveTab('contacts')}
           style={[styles.tab, activeTab === 'contacts' && styles.activeTab]}
         >

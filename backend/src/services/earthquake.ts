@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import axios from 'axios';
 import { createCircuitBreaker, withFallback } from '../utils/circuitBreaker';
 import { logger } from '../utils/logger';
@@ -96,7 +97,7 @@ const fetchUSGSEarthquakesInternal = async (): Promise<EarthquakeData[]> => {
       source: 'USGS',
     }));
   } catch (error) {
-    console.error('USGS fetch error:', error);
+    backendLogger.error('USGS fetch error:', error);
     return [];
   }
 };
@@ -109,7 +110,7 @@ export const fetchUSGSEarthquakes = withFallback(usgsBreaker, async (): Promise<
 
 export const startEarthquakeMonitoring = async () => {
   try {
-    console.log('🌍 Fetching earthquake data...');
+    backendLogger.debug('🌍 Fetching earthquake data...');
 
     // Fetch from both sources with circuit breakers
     const [afadData, usgsData] = await Promise.all([
@@ -118,7 +119,7 @@ export const startEarthquakeMonitoring = async () => {
     ]);
 
     const allEarthquakes: EarthquakeData[] = [...afadData, ...usgsData];
-    console.log(`Found ${allEarthquakes.length} earthquakes`);
+    backendLogger.debug(`Found ${allEarthquakes.length} earthquakes`);
 
     // Process each earthquake
     for (const quake of allEarthquakes) {
@@ -146,7 +147,7 @@ export const startEarthquakeMonitoring = async () => {
           },
         });
 
-        console.log(`✅ New earthquake: ${quake.magnitude} - ${quake.place}`);
+        backendLogger.debug(`✅ New earthquake: ${quake.magnitude} - ${quake.place}`);
 
         // Send notifications for significant earthquakes (magnitude >= 4.0)
         if (quake.magnitude >= 4.0) {
@@ -159,13 +160,13 @@ export const startEarthquakeMonitoring = async () => {
           earthquakeAlertsTotal.inc({ magnitude_range: magnitudeRange, source: quake.source });
         }
       } catch (error) {
-        console.error(`Error processing earthquake ${quake.id}:`, error);
+        backendLogger.error(`Error processing earthquake ${quake.id}:`, error);
       }
     }
 
-    console.log('✅ Earthquake monitoring complete');
+    backendLogger.debug('✅ Earthquake monitoring complete');
   } catch (error) {
-    console.error('Earthquake monitoring error:', error);
+    backendLogger.error('Earthquake monitoring error:', error);
   }
 };
 
@@ -201,8 +202,8 @@ const sendEarthquakeNotifications = async (earthquake: any) => {
       data: { notificationsSent: tokenList.length },
     });
 
-    console.log(`📱 Sent ${tokenList.length} earthquake notifications`);
+    backendLogger.debug(`📱 Sent ${tokenList.length} earthquake notifications`);
   } catch (error) {
-    console.error('Error sending earthquake notifications:', error);
+    backendLogger.error('Error sending earthquake notifications:', error);
   }
 };

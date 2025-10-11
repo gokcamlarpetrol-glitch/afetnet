@@ -1,4 +1,5 @@
 // Safe MBTiles wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 import * as FileSystem from "expo-file-system";
 
 let SQLite: any = null;
@@ -11,19 +12,19 @@ try {
     SQLite.enablePromise(true);
   }
 } catch (e) {
-  console.warn('react-native-sqlite-storage not available');
+  logger.warn('react-native-sqlite-storage not available');
 }
 
 try {
   TcpSocket = require('react-native-tcp-socket');
 } catch (e) {
-  console.warn('react-native-tcp-socket not available');
+  logger.warn('react-native-tcp-socket not available');
 }
 
 try {
   mime = require('mime');
 } catch (e) {
-  console.warn('mime not available');
+  logger.warn('mime not available');
 }
 
 type ServerHandle = { close: () => void };
@@ -43,7 +44,7 @@ export const SafeMBTiles = {
 
   openDbFromUri: async (uri: string) => {
     if (!SQLite) {
-      console.warn('SQLite not available, database not opened');
+      logger.warn('SQLite not available, database not opened');
       return;
     }
     
@@ -60,7 +61,7 @@ export const SafeMBTiles = {
       const rf = await db.executeSql("SELECT value FROM metadata WHERE name='format'");
       fmt = (rf[0].rows.length ? rf[0].rows.item(0).value : "png");
     } catch (e) {
-      console.warn('Failed to open MBTiles database:', e);
+      logger.warn('Failed to open MBTiles database:', e);
     }
   },
 
@@ -78,7 +79,7 @@ export const SafeMBTiles = {
       const base64 = res[0].rows.item(0).tile_data as string;
       return Buffer.from(base64, "base64");
     } catch (e) {
-      console.warn('Failed to read tile:', e);
+      logger.warn('Failed to read tile:', e);
       return null;
     }
   },
@@ -92,7 +93,7 @@ export const SafeMBTiles = {
 
   startMbtilesServer: async (): Promise<ServerHandle> => {
     if (!TcpSocket || !mime) {
-      console.warn('TCP Socket or MIME not available, server not started');
+      logger.warn('TCP Socket or MIME not available, server not started');
       return { close: () => {} };
     }
 
@@ -127,7 +128,7 @@ export const SafeMBTiles = {
       
       return { close: () => { try { server.close(); } catch {} server = null; } };
     } catch (e) {
-      console.warn('Failed to start MBTiles server:', e);
+      logger.warn('Failed to start MBTiles server:', e);
       return { close: () => {} };
     }
   },

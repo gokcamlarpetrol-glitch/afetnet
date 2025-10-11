@@ -1,4 +1,5 @@
 import { getPublicKey } from '../identity/keypair';
+import { logger } from '../utils/productionLogger';
 import { pubKeyToAfnId, validateAfnId } from '../identity/afnId';
 import { usePeople } from '../store/people';
 
@@ -74,7 +75,7 @@ class IdHandshakeManager {
 
       return requestId;
     } catch (error) {
-      console.error('Failed to initiate pairing:', error);
+      logger.error('Failed to initiate pairing:', error);
       throw error;
     }
   }
@@ -116,7 +117,7 @@ class IdHandshakeManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to handle pair request:', error);
+      logger.error('Failed to handle pair request:', error);
       return false;
     }
   }
@@ -150,7 +151,7 @@ class IdHandshakeManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to accept pairing:', error);
+      logger.error('Failed to accept pairing:', error);
       return false;
     }
   }
@@ -196,10 +197,10 @@ class IdHandshakeManager {
       handshake.status = 'completed';
       this.pendingRequests.set(pairAck.ref, handshake);
 
-      console.log(`Pairing completed with AFN-ID: ${handshake.fromAfn}`);
+      logger.debug(`Pairing completed with AFN-ID: ${handshake.fromAfn}`);
       return true;
     } catch (error) {
-      console.error('Failed to handle pair ACK:', error);
+      logger.error('Failed to handle pair ACK:', error);
       return false;
     }
   }
@@ -207,7 +208,7 @@ class IdHandshakeManager {
   private async sendPairRequest(pairRequest: PairRequest): Promise<void> {
     // This would integrate with the existing mesh relay system
     // For now, we'll just log it
-    console.log('Sending PAIR_REQ:', pairRequest);
+    logger.debug('Sending PAIR_REQ:', pairRequest);
     
     // TODO: Integrate with mesh relay
     // await meshRelay.sendMessage(pairRequest, { ttl: 5, priority: 'NORMAL' });
@@ -215,7 +216,7 @@ class IdHandshakeManager {
 
   private async sendPairAck(pairAck: PairAck): Promise<void> {
     // This would integrate with the existing mesh relay system
-    console.log('Sending PAIR_ACK:', pairAck);
+    logger.debug('Sending PAIR_ACK:', pairAck);
     
     // TODO: Integrate with mesh relay
     // await meshRelay.sendMessage(pairAck, { ttl: 5, priority: 'NORMAL' });
@@ -224,7 +225,7 @@ class IdHandshakeManager {
   private async showPairingRequest(pairRequest: PairRequest): Promise<void> {
     // This would show a UI dialog to the user
     // For now, we'll just log it
-    console.log(`Pairing request from AFN-ID: ${pairRequest.fromAfn}`);
+    logger.debug(`Pairing request from AFN-ID: ${pairRequest.fromAfn}`);
     
     // TODO: Show UI dialog
     // Alert.alert(

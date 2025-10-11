@@ -17,19 +17,19 @@ export function getRing(){ return ring.slice(); }
 export async function flush(){
   await FileSystem.makeDirectoryAsync(PATH, { intermediates:true }).catch(()=>{});
   const p = PATH + `auto_${Date.now()}.txt`;
-  await FileSystem.writeAsStringAsync(p, ring.join("\n"), { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(p, ring.join("\n"), { encoding: "utf8" });
   return p;
 }
 
 // Hooks
 export function installGlobal(){
-  const prevHandler = (globalThis as any).onerror;
-  (globalThis as any).onerror = (msg: any, src?: any, line?: any, col?: any, err?: any)=>{
+  const prevHandler = (globalThis as typeof globalThis).onerror;
+  (globalThis as typeof globalThis).onerror = (msg: any, src?: any, line?: any, col?: any, err?: any)=>{
     push("ERR " + String(msg||err));
     if (prevHandler) {try{ prevHandler(msg,src,line,col,err); }catch{}}
   };
-  const prevRej = (globalThis as any).onunhandledrejection;
-  (globalThis as any).onunhandledrejection = (ev:any)=>{
+  const prevRej = (globalThis as typeof globalThis).onunhandledrejection;
+  (globalThis as typeof globalThis).onunhandledrejection = (ev:any)=>{
     push("PRJ " + String(ev?.reason || ev));
     if (prevRej) {try{ prevRej(ev); }catch{}}
   };

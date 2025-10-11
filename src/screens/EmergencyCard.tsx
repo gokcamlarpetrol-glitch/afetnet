@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ScrollView } from 'react-native';
 import * as FileSystem from 'expo-file-system';
+import { logger } from '../utils/productionLogger';
 import * as Sharing from 'expo-sharing';
+import { useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { useIce } from '../store/ice';
 import { usePDRFuse } from '../hooks/usePDRFuse';
+import { useIce } from '../store/ice';
 
 export default function EmergencyCard() {
   const [generating, setGenerating] = useState(false);
@@ -67,7 +68,7 @@ export default function EmergencyCard() {
         ]
       );
     } catch (error) {
-      console.error('Failed to save card:', error);
+      logger.error('Failed to save card:', error);
       Alert.alert('Hata', 'Kart kaydedilemedi');
     } finally {
       setGenerating(false);
@@ -96,7 +97,7 @@ export default function EmergencyCard() {
         Alert.alert('Hata', 'Paylaşım bu cihazda desteklenmiyor');
       }
     } catch (error) {
-      console.error('Failed to share card:', error);
+      logger.error('Failed to share card:', error);
       Alert.alert('Hata', 'Kart paylaşılamadı');
     }
   };
@@ -208,7 +209,8 @@ export default function EmergencyCard() {
       </View>
 
       <View style={styles.actionsContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleSavePNG}
           style={[styles.actionButton, styles.saveButton]}
           disabled={generating}
@@ -218,7 +220,8 @@ export default function EmergencyCard() {
           </Text>
         </Pressable>
 
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={() => handleShare()}
           style={styles.actionButton}
         >

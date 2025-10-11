@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { genKeyPair, generateSharedSecret } from '../lib/crypto';
@@ -24,11 +25,11 @@ if (!isExpoGo) {
     const barcodeScanner = require('expo-barcode-scanner');
     BarCodeScanner = barcodeScanner.BarCodeScanner;
   } catch (e) {
-    console.warn('expo-barcode-scanner not available, using fallback');
+    logger.warn('expo-barcode-scanner not available, using fallback');
     isExpoGo = true;
   }
 } else {
-  console.warn('Expo Go detected - skipping barcode scanner import');
+  logger.warn('Expo Go detected - skipping barcode scanner import');
 }
 
 interface PairingData {
@@ -55,7 +56,7 @@ export default function PairingQR() {
         const { status } = await BarCodeScanner.requestPermissionsAsync();
         setHasPermission(status === 'granted');
       } else {
-        console.warn('BarCodeScanner not available - using mock mode');
+        logger.warn('BarCodeScanner not available - using mock mode');
         setHasPermission(false); // Mock mode
       }
 
@@ -90,7 +91,7 @@ export default function PairingQR() {
       }
 
     } catch (error) {
-      console.error('Failed to initialize pairing:', error);
+      logger.error('Failed to initialize pairing:', error);
       Alert.alert('Hata', 'Eşleştirme başlatılamadı');
     }
   };
@@ -138,7 +139,7 @@ export default function PairingQR() {
       );
 
     } catch (error) {
-      console.error('QR scan error:', error);
+      logger.error('QR scan error:', error);
       Alert.alert('Hata', 'QR kod okunamadı');
       setScanned(false);
     }

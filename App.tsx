@@ -7,8 +7,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { configureHandlers, getPushToken } from './src/lib/notifications';
 import RootTabs from './src/navigation/RootTabs';
 
-// Stripe publishable key - PRODUCTION için gerçek key kullanılmalı
-const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_KEY || 'pk_test_51QFakeKeyForDevelopment';
+// Stripe publishable key - ENV'den al, yoksa payment disabled
+const STRIPE_PUBLISHABLE_KEY = process.env['EXPO_PUBLIC_STRIPE_KEY'] || '';
 
 export default function App() {
   useEffect(() => {

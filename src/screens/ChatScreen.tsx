@@ -1,14 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
-import { quantizeLatLng } from "../geo/coarse";
-import { Msg } from "../msg/types";
-import { appendOutbox, listInbox, isAcked } from "../msg/store";
-import { wrapEncrypt, openDecrypt, EncEnvelope } from "../msg/e2eeEnvelope";
-import { getSession } from "../crypto/e2ee/session";
-import E2EESetupShow from "./E2EESetupShow";
-import E2EESetupScan from "./E2EESetupScan";
 import * as Location from "expo-location";
-import * as Crypto from "expo-crypto";
+import { useEffect, useRef, useState } from "react";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { getSession } from "../crypto/e2ee/session";
+import { quantizeLatLng } from "../geo/coarse";
+import { wrapEncrypt } from "../msg/e2eeEnvelope";
+import { appendOutbox, listInbox } from "../msg/store";
+import { Msg } from "../msg/types";
 import { sayKey } from "../voice/voice";
 
 function makeId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -106,6 +103,7 @@ export default function ChatScreen({ route, navigation }:any){
           <Text style={{ color:"white", fontWeight:"800" }}>🆘</Text>
         </Pressable>
         <TextInput
+          accessibilityRole="text"
           placeholder="Mesaj yaz (160)"
           placeholderTextColor="#94a3b8"
           value={text} onChangeText={setText} maxLength={160}

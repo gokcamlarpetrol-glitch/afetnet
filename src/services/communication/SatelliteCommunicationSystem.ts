@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface SatelliteMessage {
@@ -60,7 +61,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Satellite Connections
   private initializeSatelliteConnections(): void {
-    console.log('🛰️ Initializing satellite communication system...');
+    logger.debug('🛰️ Initializing satellite communication system...');
 
     // Starlink LEO satellites (Low Earth Orbit - fastest)
     this.addSatelliteConnection({
@@ -104,7 +105,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       lastContact: Date.now()
     });
 
-    console.log('✅ Satellite connections initialized');
+    logger.debug('✅ Satellite connections initialized');
   }
 
   // CRITICAL: Start Satellite Communication
@@ -112,7 +113,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🛰️ Starting satellite communication system...');
+      logger.debug('🛰️ Starting satellite communication system...');
       this.isActive = true;
 
       // Start satellite monitoring
@@ -128,12 +129,12 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       this.emit('satelliteCommunicationStarted');
       emergencyLogger.logSystem('info', 'Satellite communication system started');
 
-      console.log('✅ Satellite communication system started');
+      logger.debug('✅ Satellite communication system started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start satellite communication', { error: String(error) });
-      console.error('❌ Failed to start satellite communication:', error);
+      logger.error('❌ Failed to start satellite communication:', error);
       return false;
     }
   }
@@ -141,7 +142,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
   // CRITICAL: Send Emergency Message via Satellite
   async sendEmergencySatelliteMessage(message: Omit<SatelliteMessage, 'id' | 'timestamp' | 'deliveryStatus' | 'retryCount'>): Promise<string> {
     try {
-      console.log('🛰️ Sending emergency message via satellite...');
+      logger.debug('🛰️ Sending emergency message via satellite...');
 
       const satelliteMessage: SatelliteMessage = {
         ...message,
@@ -165,12 +166,12 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         priority: message.priority
       });
 
-      console.log(`🛰️ Emergency message sent via satellite: ${satelliteMessage.id}`);
+      logger.debug(`🛰️ Emergency message sent via satellite: ${satelliteMessage.id}`);
       return satelliteMessage.id;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to send satellite message', { error: String(error) });
-      console.error('❌ Failed to send satellite message:', error);
+      logger.error('❌ Failed to send satellite message:', error);
       throw error;
     }
   }
@@ -195,7 +196,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         setTimeout(() => {
           message.deliveryStatus = 'delivered';
           this.emit('satelliteMessageDelivered', message);
-          console.log(`✅ Satellite message delivered: ${message.id}`);
+          logger.debug(`✅ Satellite message delivered: ${message.id}`);
         }, bestSatellite.latency);
 
       } else {
@@ -208,7 +209,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         } else {
           message.deliveryStatus = 'failed';
           this.emit('satelliteMessageFailed', message);
-          console.log(`❌ Satellite message failed: ${message.id}`);
+          logger.debug(`❌ Satellite message failed: ${message.id}`);
         }
       }
 
@@ -242,7 +243,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         name: connection.name,
         type: connection.type
       });
-      console.log(`🛰️ Satellite connection added: ${connection.name}`);
+      logger.debug(`🛰️ Satellite connection added: ${connection.name}`);
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to add satellite connection', { error: String(error) });
     }
@@ -268,7 +269,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         location: beacon.location
       });
 
-      console.log(`📍 Emergency beacon registered: ${beaconId}`);
+      logger.debug(`📍 Emergency beacon registered: ${beaconId}`);
       return beaconId;
 
     } catch (error) {
@@ -400,7 +401,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
     try {
       if (!this.isActive) return;
 
-      console.log('🛑 Stopping satellite communication system...');
+      logger.debug('🛑 Stopping satellite communication system...');
       this.isActive = false;
 
       if (this.satelliteInterval) {
@@ -416,11 +417,11 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       this.emit('satelliteCommunicationStopped');
       emergencyLogger.logSystem('info', 'Satellite communication system stopped');
 
-      console.log('✅ Satellite communication system stopped');
+      logger.debug('✅ Satellite communication system stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping satellite communication', { error: String(error) });
-      console.error('❌ Error stopping satellite communication:', error);
+      logger.error('❌ Error stopping satellite communication:', error);
     }
   }
 }

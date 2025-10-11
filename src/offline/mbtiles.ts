@@ -54,7 +54,7 @@ export async function extractTiles(uri: string, rootDir?: string){
       const path = `${dir}${y}.${fmt}`;
       // Write tile
       const base64 = Buffer.from(rows.item(i).d, "base64").toString("base64");
-      await FileSystem.writeAsStringAsync(path, base64, { encoding: "base64" as any });
+      await FileSystem.writeAsStringAsync(path, base64, { encoding: "base64" });
     }
     offset += rows.length;
     if (rows.length === 0) {break;}

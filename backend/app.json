@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.gokhancamci1.backend"
+  },
+  "ios": {
+    "bundleIdentifier": "com.gokhancamci1.backend"
+  }
+}

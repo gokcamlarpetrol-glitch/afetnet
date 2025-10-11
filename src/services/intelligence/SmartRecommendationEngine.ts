@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface SmartRecommendation {
@@ -36,7 +37,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🧠 Smart Recommendation Engine initialized');
+    logger.debug('🧠 Smart Recommendation Engine initialized');
   }
 
   // CRITICAL: Start Recommendation Engine
@@ -44,7 +45,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🧠 Starting smart recommendation engine...');
+      logger.debug('🧠 Starting smart recommendation engine...');
       this.isActive = true;
 
       // Start continuous analysis
@@ -55,12 +56,12 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
       this.emit('recommendationEngineStarted');
       emergencyLogger.logSystem('info', 'Smart recommendation engine started');
 
-      console.log('✅ Smart recommendation engine started');
+      logger.debug('✅ Smart recommendation engine started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start recommendation engine', { error: String(error) });
-      console.error('❌ Failed to start recommendation engine:', error);
+      logger.error('❌ Failed to start recommendation engine:', error);
       return false;
     }
   }
@@ -215,7 +216,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         confidence: recommendation.confidence
       });
 
-      console.log(`🧠 Smart recommendation: ${recommendation.title}`);
+      logger.debug(`🧠 Smart recommendation: ${recommendation.title}`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to add recommendation', { error: String(error) });
@@ -291,7 +292,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         action: recommendation.action
       });
 
-      console.log(`✅ Recommendation executed: ${recommendation.title}`);
+      logger.debug(`✅ Recommendation executed: ${recommendation.title}`);
       return true;
 
     } catch (error) {
@@ -306,31 +307,31 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
       switch (action) {
         case 'enable_power_saving_mode':
           // Implementation would enable power saving mode
-          console.log('🔋 Power saving mode enabled');
+          logger.debug('🔋 Power saving mode enabled');
           break;
         
         case 'use_offline_features':
           // Implementation would activate offline features
-          console.log('📡 Offline features activated');
+          logger.debug('📡 Offline features activated');
           break;
         
         case 'activate_emergency_mode':
           // Implementation would activate emergency mode
-          console.log('🚨 Emergency mode activated');
+          logger.debug('🚨 Emergency mode activated');
           break;
         
         case 'find_safe_location':
           // Implementation would help find safe location
-          console.log('🛡️ Safe location guidance activated');
+          logger.debug('🛡️ Safe location guidance activated');
           break;
         
         case 'enable_night_mode':
           // Implementation would enable night mode
-          console.log('🌙 Night mode enabled');
+          logger.debug('🌙 Night mode enabled');
           break;
         
         default:
-          console.log(`🎯 Action performed: ${action}`);
+          logger.debug(`🎯 Action performed: ${action}`);
       }
     } catch (error) {
       emergencyLogger.logSystem('error', 'Action execution failed', { action, error: String(error) });
@@ -358,6 +359,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
 // Export singleton instance
 export const smartRecommendationEngine = new SmartRecommendationEngine();
 export default SmartRecommendationEngine;
+
 
 
 

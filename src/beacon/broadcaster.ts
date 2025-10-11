@@ -1,10 +1,10 @@
-import { listBeacons, upsertBeacon } from "./store";
-import { Beacon } from "./model";
-import { p2pLocalSend } from "../p2p/send"; // Phase 37's local P2P enqueue
-import { quantizeLatLng } from "../geo/coarse";
 import * as FileSystem from "expo-file-system";
-import { useProfile } from "../state/profileStore";
+import { quantizeLatLng } from "../geo/coarse";
+import { p2pLocalSend } from "../p2p/send"; // Phase 37's local P2P enqueue
 import { paramsFor } from "../profile/params";
+import { useProfile } from "../state/profileStore";
+import { Beacon } from "./model";
+import { listBeacons, upsertBeacon } from "./store";
 
 let timer: any = null;
 

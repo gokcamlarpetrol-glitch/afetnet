@@ -32,10 +32,14 @@ services:
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
+      - key: CORS_ORIGIN
+        value: https://afetnet.app,https://www.afetnet.app
       - key: AFAD_API_URL
         value: https://deprem.afad.gov.tr/EventData/GetLast100Event
       - key: USGS_API_URL
         value: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
+      - key: LOG_LEVEL
+        value: info
 
 databases:
   - name: afetnet-db

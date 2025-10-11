@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface VoiceCommand {
@@ -17,7 +18,7 @@ class VoiceCommandManager extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🎤 Voice Command Manager initialized');
+    logger.debug('🎤 Voice Command Manager initialized');
   }
 
   // CRITICAL: Start Voice Recognition
@@ -25,19 +26,19 @@ class VoiceCommandManager extends SimpleEventEmitter {
     try {
       if (this.isListening) return true;
 
-      console.log('🎤 Starting voice recognition...');
+      logger.debug('🎤 Starting voice recognition...');
 
       this.isListening = true;
 
       this.emit('voiceRecognitionStarted');
       emergencyLogger.logSystem('info', 'Voice recognition started');
 
-      console.log('✅ Voice recognition started');
+      logger.debug('✅ Voice recognition started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start voice recognition', { error: String(error) });
-      console.error('❌ Failed to start voice recognition:', error);
+      logger.error('❌ Failed to start voice recognition:', error);
       return false;
     }
   }
@@ -47,18 +48,18 @@ class VoiceCommandManager extends SimpleEventEmitter {
     try {
       if (!this.isListening) return;
 
-      console.log('🛑 Stopping voice recognition...');
+      logger.debug('🛑 Stopping voice recognition...');
 
       this.isListening = false;
 
       this.emit('voiceRecognitionStopped');
       emergencyLogger.logSystem('info', 'Voice recognition stopped');
 
-      console.log('✅ Voice recognition stopped');
+      logger.debug('✅ Voice recognition stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping voice recognition', { error: String(error) });
-      console.error('❌ Error stopping voice recognition:', error);
+      logger.error('❌ Error stopping voice recognition:', error);
     }
   }
 

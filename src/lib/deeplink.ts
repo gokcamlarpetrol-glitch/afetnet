@@ -1,4 +1,5 @@
 import { Linking } from 'react-native';
+import { logger } from '../utils/productionLogger';
 import { saveActivation, Activation } from '../store/activation';
 
 export function parseActivationUrl(url: string): { serverUrl: string; secret?: string } | null {
@@ -14,7 +15,7 @@ export function parseActivationUrl(url: string): { serverUrl: string; secret?: s
     
     return { serverUrl: decodeURIComponent(serverUrl), secret };
   } catch (e) {
-    console.warn('Failed to parse activation URL:', e);
+    logger.warn('Failed to parse activation URL:', e);
     return null;
   }
 }

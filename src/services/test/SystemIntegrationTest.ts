@@ -1,4 +1,5 @@
 import { aiDecisionSupportSystem } from '../ai/AIDecisionSupportSystem';
+import { logger } from '../../utils/productionLogger';
 import { smartSituationAnalyzer } from '../ai/SmartSituationAnalyzer';
 import { satelliteCommunicationSystem } from '../communication/SatelliteCommunicationSystem';
 import { droneCoordinationSystem } from '../drones/DroneCoordinationSystem';
@@ -17,7 +18,7 @@ class SystemIntegrationTest {
 
   // CRITICAL: Run All System Tests
   async runAllTests(): Promise<SystemTestResult[]> {
-    console.log('🧪 Starting comprehensive system integration tests...');
+    logger.debug('🧪 Starting comprehensive system integration tests...');
     this.testResults = [];
 
     try {
@@ -39,7 +40,7 @@ class SystemIntegrationTest {
       // Test System Integration
       await this.testSystemIntegration();
 
-      console.log('✅ All system integration tests completed');
+      logger.debug('✅ All system integration tests completed');
       emergencyLogger.logSystem('info', 'System integration tests completed', {
         totalTests: this.testResults.length,
         passed: this.testResults.filter(r => r.status === 'passed').length,
@@ -51,7 +52,7 @@ class SystemIntegrationTest {
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'System integration tests failed', { error: String(error) });
-      console.error('❌ System integration tests failed:', error);
+      logger.error('❌ System integration tests failed:', error);
       return this.testResults;
     }
   }
@@ -59,7 +60,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test Satellite Communication System
   private async testSatelliteSystem(): Promise<void> {
     try {
-      console.log('🛰️ Testing satellite communication system...');
+      logger.debug('🛰️ Testing satellite communication system...');
       
       // Test system startup
       const satelliteStarted = await satelliteCommunicationSystem.startSatelliteCommunication();
@@ -134,7 +135,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test Drone Coordination System
   private async testDroneSystem(): Promise<void> {
     try {
-      console.log('🚁 Testing drone coordination system...');
+      logger.debug('🚁 Testing drone coordination system...');
       
       // Test system startup
       const droneStarted = await droneCoordinationSystem.startDroneCoordination();
@@ -199,7 +200,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test AI Decision Support System
   private async testAIDecisionSystem(): Promise<void> {
     try {
-      console.log('🧠 Testing AI decision support system...');
+      logger.debug('🧠 Testing AI decision support system...');
       
       // Test system startup
       const aiStarted = await aiDecisionSupportSystem.startAIDecisionSystem();
@@ -301,7 +302,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test Smart Situation Analyzer
   private async testSituationAnalyzer(): Promise<void> {
     try {
-      console.log('🧠 Testing smart situation analyzer...');
+      logger.debug('🧠 Testing smart situation analyzer...');
       
       // Test system startup
       const analyzerStarted = await smartSituationAnalyzer.startSituationAnalysis();
@@ -338,7 +339,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test Emergency Simulation System
   private async testSimulationSystem(): Promise<void> {
     try {
-      console.log('🎮 Testing emergency simulation system...');
+      logger.debug('🎮 Testing emergency simulation system...');
       
       // Test simulation scenarios
       const scenarios = emergencySimulationSystem.getSimulationScenarios();
@@ -382,7 +383,7 @@ class SystemIntegrationTest {
   // CRITICAL: Test System Integration
   private async testSystemIntegration(): Promise<void> {
     try {
-      console.log('🔗 Testing system integration...');
+      logger.debug('🔗 Testing system integration...');
       
       // Test all systems are active
       const satelliteStatus = satelliteCommunicationSystem.getSatelliteStatus();
@@ -455,7 +456,7 @@ class SystemIntegrationTest {
     this.testResults.push(result);
     
     const emoji = status === 'passed' ? '✅' : status === 'failed' ? '❌' : '⚠️';
-    console.log(`${emoji} ${systemName}: ${message}`);
+    logger.debug(`${emoji} ${systemName}: ${message}`);
   }
 
   // CRITICAL: Get Test Summary

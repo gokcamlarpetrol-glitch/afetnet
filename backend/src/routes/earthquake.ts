@@ -1,6 +1,7 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Request, Response } from 'express';
 import { query } from 'express-validator';
-import { validate } from '../middleware/validation';
+import { validate, sanitizeInput, validators } from '../middleware/validation';
 import { prisma } from '../utils/prisma';
 
 const router = express.Router();
@@ -62,7 +63,7 @@ router.get(
 
       res.json(earthquakes);
     } catch (error) {
-      console.error('❌ Earthquake fetch error:', error);
+      backendLogger.error('❌ Earthquake fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch earthquakes' });
     }
   }
@@ -81,7 +82,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     res.json(earthquake);
   } catch (error) {
-    console.error('❌ Earthquake detail fetch error:', error);
+    backendLogger.error('❌ Earthquake detail fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch earthquake' });
   }
 });
@@ -131,7 +132,7 @@ router.get(
 
       res.json(nearby);
     } catch (error) {
-      console.error('❌ Nearby earthquakes error:', error);
+      backendLogger.error('❌ Nearby earthquakes error:', error);
       res.status(500).json({ error: 'Failed to fetch nearby earthquakes' });
     }
   }
@@ -163,7 +164,7 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('❌ Earthquake stats error:', error);
+    backendLogger.error('❌ Earthquake stats error:', error);
     res.status(500).json({ error: 'Failed to fetch earthquake statistics' });
   }
 });

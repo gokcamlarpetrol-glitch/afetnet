@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import * as FileSystem from 'expo-file-system';
 import { tilesForBBox } from './tiles';
 
@@ -8,6 +9,7 @@ export interface TilePack {
   sizeBytes: number;
   zooms: number[];
   kind: 'raster' | 'vector';
+  type?: 'mbtiles' | 'directory';
   name?: string;
   description?: string;
 }
@@ -49,7 +51,7 @@ class TileManager {
       // Load existing tile packs
       await this.scanForTilePacks();
     } catch (error) {
-      console.warn('Failed to initialize tiles directory:', error);
+      logger.warn('Failed to initialize tiles directory:', error);
     }
   }
 
@@ -86,7 +88,7 @@ class TileManager {
         } else if (item.endsWith('.mbtiles')) {
           // Check for MBTiles file
           const zooms = await this.getMbtilesZooms(itemPath);
-          const sizeBytes = itemInfo.size || 0;
+          const sizeBytes = (itemInfo as any).size || 0;
           
           this.tilePacks.set(item, {
             id: item,
@@ -100,7 +102,7 @@ class TileManager {
         }
       }
     } catch (error) {
-      console.warn('Failed to scan for tile packs:', error);
+      logger.warn('Failed to scan for tile packs:', error);
     }
   }
 
@@ -184,7 +186,7 @@ class TileManager {
         });
       }
     } catch (error) {
-      console.warn('Failed to load tile packs from storage:', error);
+      logger.warn('Failed to load tile packs from storage:', error);
     }
   }
 
@@ -193,7 +195,7 @@ class TileManager {
       const packs = Array.from(this.tilePacks.values());
       await AsyncStorage.setItem('afn/tilePacks/v1', JSON.stringify(packs));
     } catch (error) {
-      console.warn('Failed to save tile packs to storage:', error);
+      logger.warn('Failed to save tile packs to storage:', error);
     }
   }
 
@@ -219,16 +221,16 @@ class TileManager {
       this.tilePacks.set(packId, {
         id: packId,
         path: targetPath,
-        sizeBytes: fileInfo.size || 0,
+        sizeBytes: (fileInfo as any).size || 0,
         zooms,
         type: 'mbtiles',
         name: packId,
         description: `MBTiles database (${zooms.length} zoom levels)`
       });
       
-      console.log(`Opened MBTiles pack: ${packId}`);
+      logger.debug(`Opened MBTiles pack: ${packId}`);
     } catch (error) {
-      console.error('Failed to open MBTiles:', error);
+      logger.error('Failed to open MBTiles:', error);
       throw error;
     }
   }
@@ -249,7 +251,7 @@ class TileManager {
       // Estimate 50KB per tile (typical satellite tile size)
       return tiles.length * 50 * 1024;
     } catch (error) {
-      console.error('Failed to estimate prefetch size:', error);
+      logger.error('Failed to estimate prefetch size:', error);
       return 0;
     }
   }
@@ -267,9 +269,9 @@ class TileManager {
       // Remove from registry
       this.tilePacks.delete(id);
       
-      console.log(`Removed tile pack: ${id}`);
+      logger.debug(`Removed tile pack: ${id}`);
     } catch (error) {
-      console.error('Failed to remove tile pack:', error);
+      logger.error('Failed to remove tile pack:', error);
       throw error;
     }
   }
@@ -320,7 +322,7 @@ class TileManager {
             });
           }
         } catch (tileError) {
-          console.warn(`Failed to download tile ${tile.z}/${tile.x}/${tile.y}:`, tileError);
+          logger.warn(`Failed to download tile ${tile.z}/${tile.x}/${tile.y}:`, tileError);
           // Continue with other tiles
         }
       }
@@ -339,9 +341,9 @@ class TileManager {
         description: `Downloaded ${tiles.length} tiles`
       });
       
-      console.log(`Prefetch completed: ${packIdFinal}`);
+      logger.debug(`Prefetch completed: ${packIdFinal}`);
     } catch (error) {
-      console.error('Prefetch failed:', error);
+      logger.error('Prefetch failed:', error);
       throw error;
     }
   }
@@ -359,7 +361,7 @@ class TileManager {
       const freeDiskStorage = await FileSystem.getFreeDiskStorageAsync();
       return freeDiskStorage;
     } catch (error) {
-      console.warn('Failed to get available storage:', error);
+      logger.warn('Failed to get available storage:', error);
       return 0;
     }
   }
@@ -380,9 +382,9 @@ class TileManager {
       
       this.tilePacks.set(id, pack);
       await this.saveToStorage();
-      console.log(`Registered folder pack: ${id}`);
+      logger.debug(`Registered folder pack: ${id}`);
     } catch (error) {
-      console.error('Failed to register folder pack:', error);
+      logger.error('Failed to register folder pack:', error);
       throw error;
     }
   }
@@ -413,7 +415,7 @@ class TileManager {
       await calculateSize(folderPath);
       return totalSize;
     } catch (error) {
-      console.warn('Failed to calculate folder size:', error);
+      logger.warn('Failed to calculate folder size:', error);
       return 0;
     }
   }
@@ -429,7 +431,7 @@ class TileManager {
       
       return packPath;
     } catch (error) {
-      console.error('Failed to ensure pack directory:', error);
+      logger.error('Failed to ensure pack directory:', error);
       throw error;
     }
   }
@@ -453,7 +455,7 @@ class TileManager {
       // Estimate 20KB per tile
       return totalTiles * 20 * 1024;
     } catch (error) {
-      console.error('Failed to estimate prefetch size:', error);
+      logger.error('Failed to estimate prefetch size:', error);
       return 0;
     }
   }

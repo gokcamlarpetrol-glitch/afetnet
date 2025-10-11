@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { logger } from '../utils/productionLogger';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -104,7 +105,7 @@ export default function MapOffline() {
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
-        console.warn('Location permission not granted');
+        logger.warn('Location permission not granted');
         Alert.alert('Konum İzni', 'Konum izni gerekli. Lütfen ayarlardan izin verin.');
         return;
       }
@@ -120,9 +121,9 @@ export default function MapOffline() {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       });
-      console.log('Location acquired:', currentLocation.coords.latitude, currentLocation.coords.longitude);
+      logger.debug('Location acquired:', currentLocation.coords.latitude, currentLocation.coords.longitude);
     } catch (error) {
-      console.error('Location error:', error);
+      logger.error('Location error:', error);
       Alert.alert('Konum Hatası', 'Konum alınamadı. GPS aktif olduğundan emin olun.');
     }
   };
@@ -133,7 +134,7 @@ export default function MapOffline() {
       const availableStorage = await tileManager.getAvailableStorage();
       useOfflineMapStore.setState({ availableStorage });
     } catch (error) {
-      console.error('Cache size error:', error);
+      logger.error('Cache size error:', error);
     }
   };
 
@@ -142,7 +143,7 @@ export default function MapOffline() {
       const points = await listAssembly();
       setAssemblyPoints(points);
     } catch (error) {
-      console.error('Failed to load assembly points:', error);
+      logger.error('Failed to load assembly points:', error);
     }
   };
 
@@ -153,12 +154,12 @@ export default function MapOffline() {
 
       await bleRelay.startRelay(publicKey);
       setIsBleActive(true);
-      console.log('BLE relay initialized successfully');
+      logger.debug('BLE relay initialized successfully');
 
       bleRelay.onMessage((message) => {
         try {
           if (message.type === 'SOS') {
-            console.log('SOS message received:', message.id);
+            logger.debug('SOS message received:', message.id);
             setSosMessages(prev => [message, ...prev.slice(0, 9)]);
             
             // Auto-center on SOS if satellite available
@@ -191,11 +192,11 @@ export default function MapOffline() {
             );
           }
         } catch (msgError) {
-          console.error('Error handling BLE message:', msgError);
+          logger.error('Error handling BLE message:', msgError);
         }
       });
     } catch (error) {
-      console.error('BLE relay initialization failed:', error);
+      logger.error('BLE relay initialization failed:', error);
       // Continue without BLE - app should still work
       setIsBleActive(false);
     }
@@ -222,7 +223,7 @@ export default function MapOffline() {
         setSatelliteTemplate(template);
         setMapLayer('satellite_local');
         setBootstrapStatus(`Uydu (${pack.id})`);
-        console.log(`Auto-Ready: Using existing satellite pack (${pack.id})`);
+        logger.debug(`Auto-Ready: Using existing satellite pack (${pack.id})`);
         return;
       }
       
@@ -240,7 +241,7 @@ export default function MapOffline() {
           setSatelliteTemplate(template);
           setMapLayer('satellite_local');
           setBootstrapStatus('Uydu (starter)');
-          console.log('Auto-Ready: Installed and using starter satellite pack');
+          logger.debug('Auto-Ready: Installed and using starter satellite pack');
           return;
         }
       }
@@ -271,18 +272,18 @@ export default function MapOffline() {
                   longitudeDelta: 0.005,
                 });
               }
-              console.log('Auto-Ready: Background prefetch completed, switched to satellite');
+              logger.debug('Auto-Ready: Background prefetch completed, switched to satellite');
             }
           });
         } else {
           setBootstrapStatus('Vektör (çevrimdışı)');
-          console.log('Auto-Ready: Started with vector, no satellite available');
+          logger.debug('Auto-Ready: Started with vector, no satellite available');
         }
       });
       
-      console.log('Auto-Ready: Started with vector, background prefetch in progress');
+      logger.debug('Auto-Ready: Started with vector, background prefetch in progress');
     } catch (error) {
-      console.error('Auto-Ready Map initialization failed:', error);
+      logger.error('Auto-Ready Map initialization failed:', error);
       setMapLayer('vector'); // Fallback to vector
       setBootstrapStatus('Vektör (hata)');
     }
@@ -348,9 +349,9 @@ export default function MapOffline() {
           `Yardım sinyali gönderildi!\n\nKonum: ${position.lat.toFixed(6)}, ${position.lon.toFixed(6)}\nDoğruluk: ${accuracyEstimate}m\n\nMesaj BLE Mesh ağı üzerinden iletiliyor...`,
           [{ text: 'Tamam' }]
         );
-        console.log('SOS sent successfully:', sosMessage.id);
+        logger.debug('SOS sent successfully:', sosMessage.id);
       } catch (bleError) {
-        console.error('BLE send failed:', bleError);
+        logger.error('BLE send failed:', bleError);
         // Fallback: Still mark as active and show success
         setSosActive(true);
         Alert.alert(
@@ -360,7 +361,7 @@ export default function MapOffline() {
         );
       }
     } catch (error) {
-      console.error('SOS send failed:', error);
+      logger.error('SOS send failed:', error);
       Alert.alert('❌ Hata', `SOS sinyali gönderilemedi: ${error}\n\nLütfen tekrar deneyin.`);
     }
   };
@@ -486,7 +487,7 @@ export default function MapOffline() {
       await bleRelay.sendDirect(ackMessage);
       Alert.alert('Yanıt Gönderildi', 'Yardıma gidiyorum mesajı gönderildi');
     } catch (error) {
-      console.error('Helper response failed:', error);
+      logger.error('Helper response failed:', error);
       Alert.alert('Hata', 'Yanıt gönderilemedi');
     }
   };
@@ -752,7 +753,8 @@ export default function MapOffline() {
 
         {/* ACİL DURUM BUTONLARI - ÖNCELİKLİ */}
         <View style={styles.emergencyRow}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleSendSOS}
             disabled={sosActive}
             style={[styles.sosButton, sosActive && styles.sosButtonActive]}
@@ -762,7 +764,8 @@ export default function MapOffline() {
             {sosActive && <Text style={styles.sosSubtext}>Konum paylaşılıyor</Text>}
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setShowAssemblyPoints(!showAssemblyPoints)}
             style={styles.assemblyButton}
           >
@@ -773,7 +776,8 @@ export default function MapOffline() {
         </View>
 
         {/* ENKAZ ALGILAMA - HAYAT KURTARICI */}
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleSurvivorDetection}
           style={[styles.survivorButton, survivorDetection && styles.survivorButtonActive]}
         >
@@ -791,7 +795,8 @@ export default function MapOffline() {
 
         {/* NAVİGASYON VE TAKİP BUTONLARI */}
         <View style={styles.buttonRow}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={pdrRunning ? stopPDR as any : (startPDR as any)}
             style={[styles.actionButton, pdrRunning && styles.actionButtonActive]}
           >
@@ -800,7 +805,8 @@ export default function MapOffline() {
             <Text style={styles.actionSubtext}>{trail.length} nokta izlendi</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={handleShowCompass}
             disabled={sosMessages.length === 0}
             style={[styles.actionButton, sosMessages.length === 0 && styles.actionButtonDisabled]}
@@ -810,7 +816,8 @@ export default function MapOffline() {
             <Text style={styles.actionSubtext}>{sosMessages.length} SOS var</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={clearTrail}
             style={styles.actionButton}
           >
@@ -822,7 +829,8 @@ export default function MapOffline() {
 
         {/* EK ÖZELLİKLER */}
         <View style={styles.buttonRow}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => setShowPairing(!showPairing)}
             style={styles.featureButton}
           >
@@ -830,7 +838,8 @@ export default function MapOffline() {
             <Text style={styles.featureText}>Eşleştir</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => {
               Alert.alert(
                 '🛡️ Güvenli Bölgeler',
@@ -862,7 +871,8 @@ export default function MapOffline() {
             <Text style={styles.featureText}>Güvenli Bölge</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => {
               Alert.alert(
                 '💾 Offline Harita',
@@ -879,7 +889,8 @@ export default function MapOffline() {
             <Text style={styles.featureText}>Offline</Text>
           </Pressable>
 
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => {
               mapRef.current?.animateToRegion({
                 ...region,

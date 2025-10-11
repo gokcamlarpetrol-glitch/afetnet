@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';
 import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
 import { palette, spacing } from '../ui/theme';
 import Card from '../ui/Card';
@@ -37,7 +38,7 @@ export default function ConsentScreen() {
         setConsentData(JSON.parse(stored));
       }
     } catch (error) {
-      console.error('Error loading consent data:', error);
+      logger.error('Error loading consent data:', error);
     } finally {
       setIsLoading(false);
     }
@@ -48,7 +49,7 @@ export default function ConsentScreen() {
       await AsyncStorage.setItem('afn/consent/v1', JSON.stringify(data));
       setConsentData(data);
     } catch (error) {
-      console.error('Error saving consent data:', error);
+      logger.error('Error saving consent data:', error);
       Alert.alert('Hata', 'Onam bilgileri kaydedilemedi');
     }
   };

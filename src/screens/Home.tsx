@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { logger } from '../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import React, { useEffect, useState } from 'react';
 import {
@@ -137,9 +138,9 @@ export default function Home() {
       // Get initial status
       updateStatus();
       
-      console.log('🚨 Emergency systems initialized');
+      logger.debug('🚨 Emergency systems initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize emergency systems:', error);
+      logger.error('❌ Failed to initialize emergency systems:', error);
     }
   };
 
@@ -147,43 +148,43 @@ export default function Home() {
     // Mesh network events
     emergencyMeshManager.on('meshStarted', () => {
       setMeshActive(true);
-      console.log('✅ Mesh network started');
+      logger.debug('✅ Mesh network started');
     });
 
     emergencyMeshManager.on('meshStopped', () => {
       setMeshActive(false);
-      console.log('🛑 Mesh network stopped');
+      logger.debug('🛑 Mesh network stopped');
     });
 
     emergencyMeshManager.on('nodeConnected', (node: any) => {
-      console.log('🔗 Node connected:', node.name);
+      logger.debug('🔗 Node connected:', node.name);
       updateStatus();
     });
 
     emergencyMeshManager.on('nodeDisconnected', (nodeId: string) => {
-      console.log('🔌 Node disconnected:', nodeId);
+      logger.debug('🔌 Node disconnected:', nodeId);
       updateStatus();
     });
 
     // Rescue coordination events
     rescueCoordinator.on('rescueOperationCreated', (operation: any) => {
-      console.log('🚁 New rescue operation:', operation.id);
+      logger.debug('🚁 New rescue operation:', operation.id);
       updateStatus();
     });
 
     rescueCoordinator.on('victimRegistered', (victim: any) => {
-      console.log('👥 New victim registered:', victim.name);
+      logger.debug('👥 New victim registered:', victim.name);
       updateStatus();
     });
 
     // Message queue events
     offlineMessageManager.on('messageQueued', (message: any) => {
-      console.log('📨 Message queued:', message.id);
+      logger.debug('📨 Message queued:', message.id);
       updateStatus();
     });
 
     offlineMessageManager.on('sosMessageQueued', (message: any) => {
-      console.log('🚨 SOS message queued:', message.id);
+      logger.debug('🚨 SOS message queued:', message.id);
       Alert.alert(
         'SOS Gönderildi', 
         'Yardım talebiniz mesh ağına gönderildi. En yakın kurtarma ekibi bilgilendirildi.',
@@ -193,7 +194,7 @@ export default function Home() {
 
     // Sensor events
     emergencySensorManager.on('earthquakeDetected', (detection: any) => {
-      console.log('🌍 Earthquake detected:', detection.intensity);
+      logger.debug('🌍 Earthquake detected:', detection.intensity);
       setEarthquakeDetections(prev => [detection, ...prev.slice(0, 9)]); // Keep last 10
       Alert.alert(
         'DEPREM ALGILANDI',
@@ -203,7 +204,7 @@ export default function Home() {
     });
 
     emergencySensorManager.on('emergencyEventDetected', (event: any) => {
-      console.log('🚨 Emergency event:', event.type, event.severity);
+      logger.debug('🚨 Emergency event:', event.type, event.severity);
       if (event.severity === 'critical') {
         Alert.alert(
           'ACİL DURUM ALGILANDI',
@@ -215,19 +216,19 @@ export default function Home() {
 
     // Map manager events
     offlineMapManager.on('debrisLocationAdded', (location: any) => {
-      console.log('🏢 Debris location added:', location.id);
+      logger.debug('🏢 Debris location added:', location.id);
       setDebrisLocations(prev => [location, ...prev]);
     });
 
     // Rescue guidance events
     rescueGuidanceSystem.on('rescueMissionCreated', (mission: any) => {
-      console.log('🚁 Rescue mission created:', mission.id);
+      logger.debug('🚁 Rescue mission created:', mission.id);
       setRescueMissions(prev => [mission, ...prev.slice(0, 9)]); // Keep last 10
     });
 
     // Victim detection events
     victimDetectionSystem.on('victimDetected', (detection: any) => {
-      console.log('👤 Victim detected:', detection.id);
+      logger.debug('👤 Victim detected:', detection.id);
       setVictimDetections(prev => [detection, ...prev.slice(0, 9)]); // Keep last 10
       Alert.alert(
         'KURBAN TESPİT EDİLDİ',
@@ -237,18 +238,18 @@ export default function Home() {
     });
 
     victimDetectionSystem.on('victimConfirmed', (detection: any) => {
-      console.log('✅ Victim confirmed:', detection.id);
+      logger.debug('✅ Victim confirmed:', detection.id);
       setVictimDetections(prev => prev.map(d => d.id === detection.id ? detection : d));
     });
 
     // Early warning events
     earlyWarningSystem.on('earthquakeWarningReceived', (warning: any) => {
-      console.log('🌍 Earthquake warning received:', warning.severity);
+      logger.debug('🌍 Earthquake warning received:', warning.severity);
       setEarthquakeWarnings(prev => [warning, ...prev.slice(0, 9)]); // Keep last 10
     });
 
     earlyWarningSystem.on('emergencyAlertCreated', (alert: any) => {
-      console.log('🚨 Emergency alert created:', alert.title);
+      logger.debug('🚨 Emergency alert created:', alert.title);
       Alert.alert(
         alert.title,
         alert.message,
@@ -267,7 +268,7 @@ export default function Home() {
 
     // Medical emergency events
     emergencyMedicalSystem.on('medicalEmergencyCreated', (emergency: any) => {
-      console.log('💊 Medical emergency created:', emergency.type);
+      logger.debug('💊 Medical emergency created:', emergency.type);
       setMedicalEmergencies(prev => [emergency, ...prev.slice(0, 9)]); // Keep last 10
       Alert.alert(
         'TIBBİ ACİL DURUM',
@@ -339,11 +340,11 @@ export default function Home() {
       setMedicalEmergencies(emergencies.slice(0, 5)); // Show last 5
 
     } catch (error) {
-      console.error('❌ Error updating status:', error);
+      logger.error('❌ Error updating status:', error);
     }
   };
 
-  const handleSOSSubmit = async (data: any) => {
+  const handleSOSSubmit = async (data: unknown) => {
     try {
       // Get current location (simplified)
       const location = {
@@ -360,13 +361,13 @@ export default function Home() {
         undefined // broadcast to all
       );
 
-      console.log('🚨 SOS message sent:', messageId);
+      logger.debug('🚨 SOS message sent:', messageId);
       
       // Close modal
       setSosModalVisible(false);
       
     } catch (error) {
-      console.error('❌ Failed to send SOS:', error);
+      logger.error('❌ Failed to send SOS:', error);
       Alert.alert('Hata', 'SOS mesajı gönderilemedi. Lütfen tekrar deneyin.');
     }
   };
@@ -396,7 +397,7 @@ export default function Home() {
       );
       
     } catch (error) {
-      console.error('❌ Failed to send queue:', error);
+      logger.error('❌ Failed to send queue:', error);
       Alert.alert('Hata', 'Mesajlar gönderilemedi. Lütfen tekrar deneyin.');
     }
   };
@@ -407,7 +408,7 @@ export default function Home() {
       Alert.alert('Başarılı', 'Başarısız mesajlar yeniden gönderildi.');
       updateStatus();
     } catch (error) {
-      console.error('❌ Failed to retry messages:', error);
+      logger.error('❌ Failed to retry messages:', error);
       Alert.alert('Hata', 'Mesajlar yeniden gönderilemedi.');
     }
   };
@@ -952,7 +953,7 @@ export default function Home() {
                     borderWidth: 1,
                     borderColor: '#1b2746',
                   }}>
-                    <Ionicons name={item.icon as any} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
+                    <Ionicons name={config.icon} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
                     <Text style={{ color: '#cdd7ff', fontSize: 12, fontWeight: '500' }}>
                       {item.label}
                     </Text>
@@ -975,7 +976,7 @@ export default function Home() {
                     borderWidth: 1,
                     borderColor: '#1b2746',
                   }}>
-                    <Ionicons name={item.icon as any} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
+                    <Ionicons name={config.icon} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
                     <Text style={{ color: '#cdd7ff', fontSize: 12, fontWeight: '500' }}>
                       {item.label}
                     </Text>

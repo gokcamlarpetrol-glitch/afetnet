@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface Drone {
@@ -102,7 +103,7 @@ export interface MissionResult {
     lon: number;
     accuracy: number;
   };
-  data: any;
+  data: unknown;
   confidence: number;
   timestamp: number;
 }
@@ -121,7 +122,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Drone Fleet
   private initializeDroneFleet(): void {
-    console.log('🚁 Initializing drone coordination system...');
+    logger.debug('🚁 Initializing drone coordination system...');
 
     // Search & Rescue Drone
     this.addDrone({
@@ -215,7 +216,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       lastUpdate: Date.now()
     });
 
-    console.log('✅ Drone fleet initialized');
+    logger.debug('✅ Drone fleet initialized');
   }
 
   // CRITICAL: Start Drone Coordination
@@ -223,7 +224,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🚁 Starting drone coordination system...');
+      logger.debug('🚁 Starting drone coordination system...');
       this.isActive = true;
 
       // Start drone monitoring
@@ -239,12 +240,12 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       this.emit('droneCoordinationStarted');
       emergencyLogger.logSystem('info', 'Drone coordination system started');
 
-      console.log('✅ Drone coordination system started');
+      logger.debug('✅ Drone coordination system started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start drone coordination', { error: String(error) });
-      console.error('❌ Failed to start drone coordination:', error);
+      logger.error('❌ Failed to start drone coordination:', error);
       return false;
     }
   }
@@ -252,7 +253,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
   // CRITICAL: Create Emergency Mission
   async createEmergencyMission(mission: Omit<DroneMission, 'id' | 'startTime' | 'status' | 'assignedDrones'>): Promise<string> {
     try {
-      console.log('🚁 Creating emergency drone mission...');
+      logger.debug('🚁 Creating emergency drone mission...');
 
       const missionId = `mission_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       
@@ -289,12 +290,12 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         assignedDrones: assignedDrones.length
       });
 
-      console.log(`🚁 Emergency mission created: ${missionId} (${assignedDrones.length} drones assigned)`);
+      logger.debug(`🚁 Emergency mission created: ${missionId} (${assignedDrones.length} drones assigned)`);
       return missionId;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to create emergency mission', { error: String(error) });
-      console.error('❌ Failed to create emergency mission:', error);
+      logger.error('❌ Failed to create emergency mission:', error);
       throw error;
     }
   }
@@ -364,7 +365,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         name: drone.name,
         type: drone.type
       });
-      console.log(`🚁 Drone added: ${drone.name}`);
+      logger.debug(`🚁 Drone added: ${drone.name}`);
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to add drone', { error: String(error) });
     }
@@ -506,7 +507,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         results: mission.results?.length || 0
       });
 
-      console.log(`✅ Mission completed: ${mission.id}`);
+      logger.debug(`✅ Mission completed: ${mission.id}`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to complete mission', { error: String(error) });
@@ -540,7 +541,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
   // CRITICAL: Handle Low Battery
   private async handleLowBattery(drone: Drone): Promise<void> {
     try {
-      console.log(`⚠️ Low battery warning: ${drone.name} (${drone.batteryLevel}%)`);
+      logger.debug(`⚠️ Low battery warning: ${drone.name} (${drone.batteryLevel}%)`);
       
       // Return to base if deployed
       if (drone.status === 'deployed') {
@@ -556,7 +557,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
   // CRITICAL: Handle Flight Time Warning
   private async handleFlightTimeWarning(drone: Drone): Promise<void> {
     try {
-      console.log(`⚠️ Flight time warning: ${drone.name} (${drone.flightTime}/${drone.maxFlightTime} minutes)`);
+      logger.debug(`⚠️ Flight time warning: ${drone.name} (${drone.flightTime}/${drone.maxFlightTime} minutes)`);
       
       // Return to base if deployed
       if (drone.status === 'deployed') {
@@ -621,6 +622,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const droneCoordinationSystem = new DroneCoordinationSystem();
 export default DroneCoordinationSystem;
+
 
 
 

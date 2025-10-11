@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
 import { body } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -44,7 +45,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
 
     res.json(user);
   } catch (error) {
-    console.error('❌ User fetch error:', error);
+    backendLogger.error('❌ User fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
@@ -111,11 +112,11 @@ router.put(
         data: updates,
       });
 
-      console.log(`📝 Profile updated: ${req.user!.afnId}`);
+      backendLogger.debug(`📝 Profile updated: ${req.user!.afnId}`);
 
       res.json(user);
     } catch (error) {
-      console.error('❌ User update error:', error);
+      backendLogger.error('❌ User update error:', error);
       res.status(500).json({ error: 'Failed to update user' });
     }
   }
@@ -179,7 +180,7 @@ router.get(
 
       res.json(user);
     } catch (error) {
-      console.error('❌ User profile fetch error:', error);
+      backendLogger.error('❌ User profile fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch user profile' });
     }
   }
@@ -202,11 +203,11 @@ router.delete(
         where: { id: req.user!.id },
       });
 
-      console.log(`🗑️  CRITICAL: Account deleted: ${req.user!.afnId}`);
+      backendLogger.debug(`🗑️  CRITICAL: Account deleted: ${req.user!.afnId}`);
 
       res.json({ success: true, message: 'Account deleted successfully' });
     } catch (error) {
-      console.error('❌ Account deletion error:', error);
+      backendLogger.error('❌ Account deletion error:', error);
       res.status(500).json({ error: 'Failed to delete account' });
     }
   }

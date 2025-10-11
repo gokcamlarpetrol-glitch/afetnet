@@ -25,9 +25,13 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
   }
 
   if (samples.length === 1) {
+    const sample = samples[0];
+    if (!sample) {
+      throw new Error('Invalid sample data');
+    }
     return {
-      lat: samples[0].lat,
-      lon: samples[0].lon,
+      lat: sample.lat,
+      lon: sample.lon,
       confidence: 0.1,
       samplesUsed: 1
     };
@@ -54,9 +58,12 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
   let weightedLon = 0;
 
   for (let i = 0; i < samples.length; i++) {
-    const weight = weights[i] / totalWeight;
-    weightedLat += samples[i].lat * weight;
-    weightedLon += samples[i].lon * weight;
+    const weight = weights[i]! / totalWeight;
+    const sample = samples[i];
+    if (sample) {
+      weightedLat += sample.lat * weight;
+      weightedLon += sample.lon * weight;
+    }
   }
 
   // Calculate bounding box for confidence estimation
@@ -103,19 +110,28 @@ export function combineEstimates(estimates: LocationEstimate[], alpha: number = 
   }
 
   if (estimates.length === 1) {
-    return estimates[0];
+    const estimate = estimates[0];
+    if (!estimate) {
+      return { lat: 0, lon: 0, confidence: 0, samplesUsed: 0 };
+    }
+    return estimate;
   }
 
   // EWMA (Exponentially Weighted Moving Average) combination
-  let combinedLat = estimates[0].lat;
-  let combinedLon = estimates[0].lon;
-  let totalSamples = estimates[0].samplesUsed;
-  let maxConfidence = estimates[0].confidence;
+  const firstEstimate = estimates[0];
+  if (!firstEstimate) {
+    return { lat: 0, lon: 0, confidence: 0, samplesUsed: 0 };
+  }
+  let combinedLat = firstEstimate.lat;
+  let combinedLon = firstEstimate.lon;
+  let totalSamples = firstEstimate.samplesUsed;
+  let maxConfidence = firstEstimate.confidence;
 
   for (let i = 1; i < estimates.length; i++) {
     const estimate = estimates[i];
+    if (!estimate) continue;
     
-    // Weight by confidence
+    // Weight by confidence (used for maxConfidence calculation)
     const weight = estimate.confidence;
     
     // EWMA update
@@ -123,7 +139,7 @@ export function combineEstimates(estimates: LocationEstimate[], alpha: number = 
     combinedLon = alpha * combinedLon + (1 - alpha) * estimate.lon;
     
     totalSamples += estimate.samplesUsed;
-    maxConfidence = Math.max(maxConfidence, estimate.confidence);
+    maxConfidence = Math.max(maxConfidence, weight);
   }
 
   // Combined confidence is the maximum of individual confidences

@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { logger } from '../utils/productionLogger';
 import { QuakeItem } from '../services/quake/types';
 
 // Debounce tracking to prevent spam notifications
@@ -13,7 +14,7 @@ export async function notifyQuake(quake: QuakeItem, tag: 'live' | 'bg'): Promise
     // Check debounce
     const lastTime = lastNotificationTime.get(quakeId) || 0;
     if (now - lastTime < notificationDebounceMs) {
-      console.log(`Skipping notification for ${quakeId} (debounced)`);
+      logger.debug(`Skipping notification for ${quakeId} (debounced)`);
       return;
     }
     
@@ -56,10 +57,10 @@ export async function notifyQuake(quake: QuakeItem, tag: 'live' | 'bg'): Promise
       trigger: null, // Send immediately
     });
     
-    console.log(`Notification sent for quake ${quakeId} (${tag})`);
+    logger.debug(`Notification sent for quake ${quakeId} (${tag})`);
     
   } catch (error) {
-    console.error('Failed to send quake notification:', error);
+    logger.error('Failed to send quake notification:', error);
   }
 }
 
@@ -83,10 +84,10 @@ async function ensureQuakeChannel(): Promise<void> {
         enableLights: true,
         showBadge: true,
       });
-      console.log('Created quakes notification channel');
+      logger.debug('Created quakes notification channel');
     }
   } catch (error) {
-    console.warn('Failed to create notification channel:', error);
+    logger.warn('Failed to create notification channel:', error);
   }
 }
 
@@ -112,9 +113,9 @@ export async function notifyPWaveAlert(): Promise<void> {
       trigger: null,
     });
     
-    console.log('P-wave experimental alert sent');
+    logger.debug('P-wave experimental alert sent');
   } catch (error) {
-    console.error('Failed to send P-wave alert:', error);
+    logger.error('Failed to send P-wave alert:', error);
   }
 }
 
@@ -139,8 +140,8 @@ export async function notifyTestAlert(): Promise<void> {
       trigger: null,
     });
     
-    console.log('Test notification sent');
+    logger.debug('Test notification sent');
   } catch (error) {
-    console.error('Failed to send test notification:', error);
+    logger.error('Failed to send test notification:', error);
   }
 }

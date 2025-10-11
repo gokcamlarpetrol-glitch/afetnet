@@ -58,7 +58,7 @@ export default function SyncScreen(){
 
   const Scanner = useMemo(()=>SafeBarcodeScanner.isAvailable() ? require('expo-barcode-scanner').BarCodeScanner : null,[]);
 
-  function onBarCodeScanned({ data }: any){
+  function onBarCodeScanned({data}: {data: string}){
     try{
       const raw = String(data).replace(/^AN1:/,"");
       const json = typeof atob !== 'undefined' ? atob(raw) : raw;

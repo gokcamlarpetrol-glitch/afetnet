@@ -1,7 +1,7 @@
 // @ts-ignore
+import { PermissionsAndroid } from "react-native";
 import WifiP2p from "react-native-wifi-p2p-reborn";
-import { PermissionsAndroid, Platform } from "react-native";
-import type { P2P, P2PPeer, P2PEvents } from "./P2P";
+import type { P2P, P2PEvents, P2PPeer } from "./P2P";
 
 /**
  * NOTE: Wi-Fi Direct kütüphanesi peer discovery + group connection sağlar.

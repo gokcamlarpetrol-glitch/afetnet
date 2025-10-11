@@ -1,5 +1,6 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
-import { body, query } from 'express-validator';
+import { body, param, query } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sanitizeInput, validate } from '../middleware/validation';
 import { prisma } from '../utils/prisma';
@@ -51,7 +52,7 @@ router.get(
 
       res.json(messages);
     } catch (error) {
-      console.error('❌ Message fetch error:', error);
+      backendLogger.error('❌ Message fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch messages' });
     }
   }
@@ -61,6 +62,13 @@ router.get(
 router.get(
   '/conversation/:afnId',
   authenticate,
+  [
+    param('afnId')
+      .trim()
+      .matches(/^AFN-[0-9A-Z]{8}$/).withMessage('Invalid AFN-ID format'),
+    query('limit').optional().isInt({ min: 1, max: 200 }).withMessage('Limit must be 1-200'),
+  ],
+  validate,
   async (req: AuthRequest, res: Response) => {
     try {
       const otherUser = await prisma.user.findUnique({
@@ -96,7 +104,7 @@ router.get(
 
       res.json(messages);
     } catch (error) {
-      console.error('❌ Conversation fetch error:', error);
+      backendLogger.error('❌ Conversation fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch conversation' });
     }
   }
@@ -186,15 +194,15 @@ router.post(
             senderAfnId: message.sender.afnId,
           },
         }).catch((err: Error) => {
-          console.error('⚠️  Message notification error (non-blocking):', err);
+          backendLogger.error('⚠️  Message notification error (non-blocking):', err);
         });
       }
 
-      console.log(`📨 Message sent: ${req.user!.afnId} → ${receiverAfnId}`);
+      backendLogger.debug(`📨 Message sent: ${req.user!.afnId} → ${receiverAfnId}`);
 
       res.status(201).json(message);
     } catch (error) {
-      console.error('❌ Message send error:', error);
+      backendLogger.error('❌ Message send error:', error);
       res.status(500).json({ error: 'Failed to send message' });
     }
   }
@@ -226,7 +234,7 @@ router.put(
 
       res.json(updated);
     } catch (error) {
-      console.error('❌ Message read error:', error);
+      backendLogger.error('❌ Message read error:', error);
       res.status(500).json({ error: 'Failed to mark message as read' });
     }
   }
@@ -257,7 +265,7 @@ router.delete(
 
       res.json({ success: true });
     } catch (error) {
-      console.error('❌ Message delete error:', error);
+      backendLogger.error('❌ Message delete error:', error);
       res.status(500).json({ error: 'Failed to delete message' });
     }
   }

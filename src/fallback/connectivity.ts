@@ -2,6 +2,7 @@ import NetInfo from '@react-native-community/netinfo';
 import * as SMS from 'expo-sms';
 import { Alert } from 'react-native';
 import { useIce } from '../store/ice';
+import { logger } from '../utils/productionLogger';
 
 class ConnectivityWatcher {
   private unsubscribe: (() => void) | null = null;
@@ -13,12 +14,12 @@ class ConnectivityWatcher {
     if (this.isWatching) return;
 
     this.isWatching = true;
-    this.unsubscribe = NetInfo.addEventListener(state => {
+    this.unsubscribe = NetInfo.addEventListener((state: any) => {
       this.checkSMSAvailability(state);
     });
 
     // Initial check
-    NetInfo.fetch().then(state => {
+    NetInfo.fetch().then((state: any) => {
       this.checkSMSAvailability(state);
     });
   }
@@ -31,7 +32,7 @@ class ConnectivityWatcher {
     this.isWatching = false;
   }
 
-  private async checkSMSAvailability(netInfo: any) {
+  private async checkSMSAvailability(netInfo: {isConnected: boolean, isInternetReachable: boolean}) {
     const { queue, getNextQueued, markSent } = useIce.getState();
     
     // Check if we have queued messages
@@ -39,7 +40,7 @@ class ConnectivityWatcher {
     if (!nextQueued) return;
 
     // Check connectivity
-    const hasCellular = netInfo.type === 'cellular' && netInfo.isConnected;
+    const hasCellular = (netInfo as any).type === 'cellular' && netInfo.isConnected;
     if (!hasCellular) return;
 
     // Check SMS availability
@@ -55,7 +56,7 @@ class ConnectivityWatcher {
       this.showSMSBanner(nextQueued);
 
     } catch (error) {
-      console.warn('Failed to check SMS availability:', error);
+      logger.warn('Failed to check SMS availability:', error);
     }
   }
 
@@ -84,12 +85,12 @@ class ConnectivityWatcher {
       const { markSent, getNextQueued } = useIce.getState();
       
       // Open SMS composer
-      await SMS.sendSMSAsync([queueItem.phone], queueItem.body);
+      await SMS.sendSMSAsync([(queueItem as any).phone], (queueItem as any).body);
       
       // Ask user if it was sent
       Alert.alert(
         'SMS Gönderildi mi?',
-        `${queueItem.phone} numarasına mesaj gönderildi mi?`,
+        `${(queueItem as any).phone} numarasına mesaj gönderildi mi?`,
         [
           {
             text: 'Hayır',
@@ -113,7 +114,7 @@ class ConnectivityWatcher {
       );
 
     } catch (error) {
-      console.error('Failed to send SMS:', error);
+      logger.error('Failed to send SMS:', error);
       Alert.alert('Hata', 'SMS gönderilemedi');
     }
   }
@@ -134,10 +135,10 @@ class ConnectivityWatcher {
         return false;
       }
 
-      await this.sendQueuedSMS(nextQueued);
+      await this.sendQueuedSMS(nextQueued as any);
       return true;
     } catch (error) {
-      console.error('Failed to send SMS manually:', error);
+      logger.error('Failed to send SMS manually:', error);
       Alert.alert('Hata', 'SMS gönderilemedi');
       return false;
     }
@@ -147,7 +148,7 @@ class ConnectivityWatcher {
     return this.lastBannerTime;
   }
 
-  isWatching(): boolean {
+  isCurrentlyWatching(): boolean {
     return this.isWatching;
   }
 }

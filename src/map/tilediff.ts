@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system";
+import { logger } from '../utils/productionLogger';
 
 export async function applyTileDiff(diffUrl:string){
   try{
@@ -11,5 +12,5 @@ export async function applyTileDiff(diffUrl:string){
       const path = `${dir}${t.y}.png`;
       await FileSystem.writeAsStringAsync(path, t.base64);
     }
-  }catch(e){ console.log("TileDiff error",e); }
+  }catch(e){ logger.debug("TileDiff error",e); }
 }

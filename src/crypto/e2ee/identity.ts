@@ -1,11 +1,12 @@
 // Safe import for react-native-get-random-values
+import { logger } from '../../utils/productionLogger';
 try {
   require("react-native-get-random-values");
 } catch (e) {
-  console.warn("react-native-get-random-values not available");
+  logger.warn("react-native-get-random-values not available");
 }
-import nacl from "tweetnacl";
 import * as SecureStore from "expo-secure-store";
+import nacl from "tweetnacl";
 
 const IK_SK = "afn:e2ee:ik:sk"; // identity key (X25519)
 const IK_PK = "afn:e2ee:ik:pk";

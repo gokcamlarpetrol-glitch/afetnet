@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { MeshMsg, clampTTL, generateMsgId } from './codec';
 
 export type Priority = 'HIGH' | 'NORMAL' | 'LOW';
@@ -40,7 +41,7 @@ class PriorityQueue {
         this.seenIds = new Set(data.seenIds);
       }
     } catch (error) {
-      console.warn('Failed to load queue from storage:', error);
+      logger.warn('Failed to load queue from storage:', error);
     }
   }
 
@@ -52,7 +53,7 @@ class PriorityQueue {
       };
       await AsyncStorage.setItem(this.storageKey, JSON.stringify(data));
     } catch (error) {
-      console.warn('Failed to save queue to storage:', error);
+      logger.warn('Failed to save queue to storage:', error);
     }
   }
 

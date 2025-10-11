@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { logger } from '../utils/productionLogger';
 import { WORKER_URL, ORG_SECRET } from '../config/worker';
 
 export async function getFcmToken(): Promise<string | undefined> {
@@ -9,10 +10,10 @@ export async function getFcmToken(): Promise<string | undefined> {
       return data as string;
     }
     
-    console.log('FCM token not available, type:', type);
+    logger.debug('FCM token not available, type:', type);
     return undefined;
   } catch (error) {
-    console.error('Failed to get FCM token:', error);
+    logger.error('Failed to get FCM token:', error);
     return undefined;
   }
 }
@@ -20,7 +21,7 @@ export async function getFcmToken(): Promise<string | undefined> {
 export async function registerTokenWithWorker(token: string, provinces: string[]): Promise<boolean> {
   try {
     if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      console.warn('Worker URL not configured');
+      logger.warn('Worker URL not configured');
       return false;
     }
 
@@ -38,15 +39,15 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Registration failed:', response.status, errorText);
+      logger.error('Registration failed:', response.status, errorText);
       return false;
     }
 
-    console.log(`Registered token ${token.substring(0, 6)}... for ${provinces.length} provinces`);
+    logger.debug(`Registered token ${token.substring(0, 6)}... for ${provinces.length} provinces`);
     return true;
 
   } catch (error) {
-    console.error('Registration error:', error);
+    logger.error('Registration error:', error);
     return false;
   }
 }
@@ -54,7 +55,7 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
 export async function unregisterToken(token: string): Promise<boolean> {
   try {
     if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      console.warn('Worker URL not configured');
+      logger.warn('Worker URL not configured');
       return false;
     }
 
@@ -71,15 +72,15 @@ export async function unregisterToken(token: string): Promise<boolean> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Unregistration failed:', response.status, errorText);
+      logger.error('Unregistration failed:', response.status, errorText);
       return false;
     }
 
-    console.log(`Unregistered token ${token.substring(0, 6)}...`);
+    logger.debug(`Unregistered token ${token.substring(0, 6)}...`);
     return true;
 
   } catch (error) {
-    console.error('Unregistration error:', error);
+    logger.error('Unregistration error:', error);
     return false;
   }
 }
@@ -87,7 +88,7 @@ export async function unregisterToken(token: string): Promise<boolean> {
 export async function testWorkerHealth(): Promise<boolean> {
   try {
     if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      console.warn('Worker URL not configured');
+      logger.warn('Worker URL not configured');
       return false;
     }
 
@@ -99,7 +100,7 @@ export async function testWorkerHealth(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      console.error('Health check failed:', response.status);
+      logger.error('Health check failed:', response.status);
       return false;
     }
 
@@ -107,7 +108,7 @@ export async function testWorkerHealth(): Promise<boolean> {
     return data.ok === true;
 
   } catch (error) {
-    console.error('Health check error:', error);
+    logger.error('Health check error:', error);
     return false;
   }
 }
@@ -115,7 +116,7 @@ export async function testWorkerHealth(): Promise<boolean> {
 export async function triggerWorkerTick(): Promise<boolean> {
   try {
     if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      console.warn('Worker URL not configured');
+      logger.warn('Worker URL not configured');
       return false;
     }
 
@@ -127,16 +128,16 @@ export async function triggerWorkerTick(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      console.error('Tick failed:', response.status);
+      logger.error('Tick failed:', response.status);
       return false;
     }
 
     const data = await response.json();
-    console.log('Worker tick result:', data);
+    logger.debug('Worker tick result:', data);
     return true;
 
   } catch (error) {
-    console.error('Tick error:', error);
+    logger.error('Tick error:', error);
     return false;
   }
 }

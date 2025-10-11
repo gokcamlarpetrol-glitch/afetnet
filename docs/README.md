@@ -1,54 +1,33 @@
-# Privacy Policy & Terms of Service
+# AfetNet Documentation
 
-Bu klasör AfetNet uygulamasının yasal dokümantasyonunu içerir.
+## GitHub Pages Setup
 
-## 📄 Dosyalar
+These files MUST be accessible via HTTPS for Apple & Google app store submission.
 
-- **privacy-policy.html** - Gizlilik Politikası (KVKK & GDPR uyumlu)
-- **terms-of-service.html** - Hizmet Şartları
+### URLs:
+- Privacy Policy: https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html
+- Terms of Service: https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html
 
-## 🌐 Yayınlama
+### How to Enable GitHub Pages:
 
-Bu dosyalar GitHub Pages üzerinden yayınlanacak:
+1. Go to GitHub repository settings
+2. Navigate to "Pages" section
+3. Source: Deploy from branch `main`
+4. Folder: `/docs`
+5. Click "Save"
+6. Wait 1-2 minutes for deployment
+7. Verify URLs are accessible
 
+### Testing URLs:
+
+```bash
+curl -I https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html
+curl -I https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html
 ```
-https://[kullanıcıadı].github.io/AfetNet1/docs/privacy-policy.html
-https://[kullanıcıadı].github.io/AfetNet1/docs/terms-of-service.html
-```
 
-## ✅ Store Gereksinimleri
+Both should return `200 OK`
 
-Bu dokümantasyon Apple App Store ve Google Play Store kuralları gereği zorunludur:
-
-- ✅ KVKK (Türkiye) uyumlu
-- ✅ GDPR (AB) uyumlu  
-- ✅ Apple App Store Review Guidelines uyumlu
-- ✅ Google Play Store Policies uyumlu
-
-## 📋 İçerik
-
-### Privacy Policy (Gizlilik Politikası)
-- Toplanan veriler
-- Veri kullanımı
-- Veri güvenliği
-- Kullanıcı hakları
-- İletişim bilgileri
-
-### Terms of Service (Hizmet Şartları)
-- Hizmet tanımı
-- Kullanım koşulları
-- Yasaklı kullanımlar
-- Sorumluluk reddi
-- Ödeme şartları
-
-## 🔄 Güncelleme
-
-Her değişiklikte "Son Güncelleme" tarihi güncellenir ve kullanıcılara bildirim gönderilir.
-
-## 📞 İletişim
-
-- **Privacy:** privacy@afetnet.app
-- **Support:** support@afetnet.app
-- **Legal:** legal@afetnet.app
-
-
+### Important:
+- These URLs are referenced in `app.config.ts`
+- Apple & Google will check these URLs during review
+- 404 = Automatic rejection!

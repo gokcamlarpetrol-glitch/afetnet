@@ -1,4 +1,5 @@
 import { Alert } from 'react-native';
+import { logger } from '../utils/productionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface DeadManConfig {
@@ -29,7 +30,7 @@ class DeadManSwitch {
         this.config = { ...this.config, ...JSON.parse(stored) };
       }
     } catch (error) {
-      console.warn('Failed to load deadman config:', error);
+      logger.warn('Failed to load deadman config:', error);
     }
   }
 
@@ -37,7 +38,7 @@ class DeadManSwitch {
     try {
       await AsyncStorage.setItem('afn/deadman/config', JSON.stringify(this.config));
     } catch (error) {
-      console.warn('Failed to save deadman config:', error);
+      logger.warn('Failed to save deadman config:', error);
     }
   }
 
@@ -90,14 +91,14 @@ class DeadManSwitch {
       this.checkDeadMan();
     }, intervalMs);
 
-    console.log(`Dead man switch started: ${this.config.intervalMinutes} minute intervals`);
+    logger.debug(`Dead man switch started: ${this.config.intervalMinutes} minute intervals`);
   }
 
   private stop() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log('Dead man switch stopped');
+      logger.debug('Dead man switch stopped');
     }
   }
 
@@ -171,7 +172,7 @@ class DeadManSwitch {
       
       await AsyncStorage.setItem('afn/deadman/logs', JSON.stringify(recentLogs));
       
-      console.log(`Dead man response logged: ${response}`);
+      logger.debug(`Dead man response logged: ${response}`);
       
       // If no response or timeout, consider triggering automatic re-broadcast
       if (response === 'no_response' || response === 'timeout') {
@@ -179,12 +180,12 @@ class DeadManSwitch {
       }
       
     } catch (error) {
-      console.warn('Failed to log dead man response:', error);
+      logger.warn('Failed to log dead man response:', error);
     }
   }
 
   private async handleNoResponse() {
-    console.log('Dead man switch: No response received, may trigger automatic SOS');
+    logger.debug('Dead man switch: No response received, may trigger automatic SOS');
     
     // In a real implementation, you might want to:
     // 1. Automatically re-broadcast SOS
@@ -209,7 +210,7 @@ class DeadManSwitch {
       await AsyncStorage.setItem('afn/deadman/incidents', JSON.stringify(recentIncidents));
       
     } catch (error) {
-      console.warn('Failed to log incident:', error);
+      logger.warn('Failed to log incident:', error);
     }
   }
 
@@ -218,7 +219,7 @@ class DeadManSwitch {
       const logs = await AsyncStorage.getItem('afn/deadman/logs');
       return logs ? JSON.parse(logs) : [];
     } catch (error) {
-      console.warn('Failed to get dead man logs:', error);
+      logger.warn('Failed to get dead man logs:', error);
       return [];
     }
   }
@@ -228,7 +229,7 @@ class DeadManSwitch {
       const incidents = await AsyncStorage.getItem('afn/deadman/incidents');
       return incidents ? JSON.parse(incidents) : [];
     } catch (error) {
-      console.warn('Failed to get dead man incidents:', error);
+      logger.warn('Failed to get dead man incidents:', error);
       return [];
     }
   }

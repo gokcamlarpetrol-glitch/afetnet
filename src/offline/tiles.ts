@@ -1,7 +1,8 @@
 import NetInfo from '@react-native-community/netinfo';
+import { logger } from '../utils/productionLogger';
 import * as FileSystem from 'expo-file-system';
 
-export const tileRoot = `${FileSystem.documentDirectory}tiles/`;
+export const tileRoot = `${FileSystem.documentDirectory || ''}tiles/`;
 export const remoteTemplate = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 export function latLonToTile(lat: number, lon: number, zoom: number): { x: number; y: number } {
@@ -73,8 +74,8 @@ export async function prefetchTiles(
   const allTiles: { x: number; y: number; z: number }[] = [];
   
   for (let zoom = minZoom; zoom <= maxZoom; zoom++) {
-    const tiles = tilesForBBox(minLat, minLon, maxLat, maxLon, zoom);
-    allTiles.push(...tiles.map(tile => ({ ...tile, z: zoom })));
+    const tiles = tilesForBBox({ minLat, minLon, maxLat, maxLon }, zoom, zoom);
+    allTiles.push(...tiles);
   }
   
   let downloaded = 0;
@@ -96,7 +97,7 @@ export async function prefetchTiles(
       downloaded++;
       onProgress?.(downloaded, total);
     } catch (error) {
-      console.warn(`Failed to download tile ${tile.x}/${tile.y}/${tile.z}:`, error);
+      logger.warn(`Failed to download tile ${tile.x}/${tile.y}/${tile.z}:`, error);
       // Continue with next tile
     }
   }

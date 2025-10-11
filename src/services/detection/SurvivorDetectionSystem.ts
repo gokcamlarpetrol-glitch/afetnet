@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
@@ -56,7 +57,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
   }
 
   private initializeDetectionPatterns() {
-    console.log('👥 Initializing Survivor Detection System...');
+    logger.debug('👥 Initializing Survivor Detection System...');
 
     // Audio detection patterns
     this.detectionPatterns.set('human_voice', {
@@ -110,7 +111,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       confidence: 80
     });
 
-    console.log('✅ Survivor detection patterns initialized');
+    logger.debug('✅ Survivor detection patterns initialized');
   }
 
   // CRITICAL: Start Survivor Detection Monitoring
@@ -118,7 +119,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
     try {
       if (this.isMonitoring) return true;
 
-      console.log('👥 Starting survivor detection monitoring...');
+      logger.debug('👥 Starting survivor detection monitoring...');
 
       this.isMonitoring = true;
 
@@ -133,12 +134,12 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       this.emit('survivorDetectionStarted');
       emergencyLogger.logSystem('info', 'Survivor detection monitoring started');
 
-      console.log('✅ Survivor detection monitoring started');
+      logger.debug('✅ Survivor detection monitoring started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start survivor detection', { error: String(error) });
-      console.error('❌ Failed to start survivor detection:', error);
+      logger.error('❌ Failed to start survivor detection:', error);
       return false;
     }
   }
@@ -148,7 +149,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
     try {
       if (!this.isMonitoring) return;
 
-      console.log('🛑 Stopping survivor detection monitoring...');
+      logger.debug('🛑 Stopping survivor detection monitoring...');
 
       this.isMonitoring = false;
 
@@ -163,11 +164,11 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       this.emit('survivorDetectionStopped');
       emergencyLogger.logSystem('info', 'Survivor detection monitoring stopped');
 
-      console.log('✅ Survivor detection monitoring stopped');
+      logger.debug('✅ Survivor detection monitoring stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping survivor detection', { error: String(error) });
-      console.error('❌ Error stopping survivor detection:', error);
+      logger.error('❌ Error stopping survivor detection:', error);
     }
   }
 
@@ -178,7 +179,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
       // Validate signal
       if (!this.validateSignal(signal)) {
-        console.warn('⚠️ Invalid signal received:', signal.id);
+        logger.warn('⚠️ Invalid signal received:', signal.id);
         return;
       }
 
@@ -195,7 +196,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error processing survivor signal', { error: String(error) });
-      console.error('❌ Error processing survivor signal:', error);
+      logger.error('❌ Error processing survivor signal:', error);
     }
   }
 
@@ -227,7 +228,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
         this.activeDetections.set(matchedSurvivor.id, matchedSurvivor);
 
         this.emit('survivorSignalUpdated', matchedSurvivor);
-        console.log(`👥 Survivor signal updated: ${matchedSurvivor.id}`);
+        logger.debug(`👥 Survivor signal updated: ${matchedSurvivor.id}`);
 
       } else {
         // Create new survivor detection
@@ -254,7 +255,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
           signalType: signal.type,
           location: signal.location 
         });
-        console.log(`👥 New survivor detected: ${detection.id}`);
+        logger.debug(`👥 New survivor detected: ${detection.id}`);
 
         // Auto-trigger rescue operation for critical survivors
         if (detection.priority === 'critical') {
@@ -264,14 +265,14 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error analyzing signal for survivor', { error: String(error) });
-      console.error('❌ Error analyzing signal for survivor:', error);
+      logger.error('❌ Error analyzing signal for survivor:', error);
     }
   }
 
   // CRITICAL: Trigger Rescue Operation
   private async triggerRescueOperation(detection: SurvivorDetection): Promise<void> {
     try {
-      console.log(`🚁 Triggering rescue operation for survivor: ${detection.id}`);
+      logger.debug(`🚁 Triggering rescue operation for survivor: ${detection.id}`);
 
       // Import rescue coordinator
       const { rescueCoordinator } = await import('../emergency/RescueCoordinator');
@@ -290,11 +291,11 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
       this.emit('rescueOperationTriggered', { detection, missionId });
 
-      console.log(`CRITICAL: Survivor detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`);
+      logger.debug(`CRITICAL: Survivor detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to trigger rescue operation', { error: String(error) });
-      console.error('❌ Failed to trigger rescue operation:', error);
+      logger.error('❌ Failed to trigger rescue operation:', error);
     }
   }
 
@@ -316,7 +317,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error in detection cycle', { error: String(error) });
-      console.error('❌ Error in detection cycle:', error);
+      logger.error('❌ Error in detection cycle:', error);
     }
   }
 
@@ -329,7 +330,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       if (timeSinceLastSignal > 600000) { // 10 minutes
         detection.status = 'lost';
         this.emit('survivorLost', detection);
-        console.log(`⚠️ Survivor lost: ${detection.id}`);
+        logger.debug(`⚠️ Survivor lost: ${detection.id}`);
       }
 
       // If we have recent strong signals, confirm survivor
@@ -342,14 +343,14 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       if (recentStrongSignals.length >= 3 && detection.status === 'detected') {
         detection.status = 'confirmed';
         this.emit('survivorConfirmed', detection);
-        console.log(`✅ Survivor confirmed: ${detection.id}`);
+        logger.debug(`✅ Survivor confirmed: ${detection.id}`);
       }
 
       this.activeDetections.set(detection.id, detection);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error updating survivor status', { error: String(error) });
-      console.error('❌ Error updating survivor status:', error);
+      logger.error('❌ Error updating survivor status:', error);
     }
   }
 
@@ -389,7 +390,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       await this.saveActiveDetections();
 
       this.emit('survivorDetectionUpdated', detection);
-      console.log(`📝 Survivor detection updated: ${id}`);
+      logger.debug(`📝 Survivor detection updated: ${id}`);
 
       return true;
 
@@ -417,7 +418,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
 
       this.emit('survivorRescued', detection);
       emergencyLogger.logSystem('info', 'Survivor marked as rescued', { detectionId: id });
-      console.log(`✅ Survivor rescued: ${id}`);
+      logger.debug(`✅ Survivor rescued: ${id}`);
 
       return true;
 

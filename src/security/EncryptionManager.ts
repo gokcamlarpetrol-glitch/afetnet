@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import CryptoJS from 'crypto-js';
 import { emergencyLogger } from '../services/logging/EmergencyLogger';
 
@@ -41,7 +42,7 @@ class EncryptionManager {
     try {
       if (this.isInitialized) return true;
 
-      console.log('🔐 Initializing encryption system...');
+      logger.debug('🔐 Initializing encryption system...');
 
       // Generate device-specific encryption key
       await this.generateDeviceKey();
@@ -57,13 +58,13 @@ class EncryptionManager {
 
       this.isInitialized = true;
       emergencyLogger.logSystem('info', 'Encryption system initialized successfully');
-      console.log('✅ Encryption system initialized');
+      logger.debug('✅ Encryption system initialized');
 
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to initialize encryption', { error: String(error) });
-      console.error('❌ Failed to initialize encryption:', error);
+      logger.error('❌ Failed to initialize encryption:', error);
       return false;
     }
   }
@@ -192,7 +193,7 @@ class EncryptionManager {
   }
 
   // CRITICAL: Secure Storage
-  async secureStore(key: string, data: any): Promise<void> {
+  async secureStore(key: string, data: unknown): Promise<void> {
     try {
       const encryptedData = await this.encryptObject(data);
       await AsyncStorage.setItem(`secure_${key}`, JSON.stringify(encryptedData));
@@ -317,7 +318,7 @@ class EncryptionManager {
   // CRITICAL: Wipe All Data
   async wipeAllData(): Promise<void> {
     try {
-      console.log('🗑️ Wiping all encrypted data...');
+      logger.debug('🗑️ Wiping all encrypted data...');
       
       // Clear master key
       this.masterKey = null;
@@ -330,7 +331,7 @@ class EncryptionManager {
       await AsyncStorage.multiRemove(secureKeys);
       
       emergencyLogger.logSecurity('warn', 'All encrypted data wiped');
-      console.log('✅ All encrypted data wiped');
+      logger.debug('✅ All encrypted data wiped');
     } catch (error) {
       emergencyLogger.logSecurity('error', 'Data wipe failed', { error: String(error) });
       throw error;

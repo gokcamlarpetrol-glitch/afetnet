@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logEvent } from '../store/devlog';
+import { logger } from '../utils/productionLogger';
 
 export type RemoteCfg = {
   version: number;
@@ -67,7 +68,7 @@ class RemoteConfigManager {
       
       return this.config;
     } catch (error) {
-      console.error('Remote config initialization error:', error);
+      logger.error('Remote config initialization error:', error);
       logEvent('REMOTE_CONFIG_INIT_ERROR', { error: String(error) });
       return this.config;
     }
@@ -90,14 +91,19 @@ class RemoteConfigManager {
     this.isFetching = true;
     
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
       const response = await fetch(REMOTE_CONFIG_URL, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'AfetNet/1.0',
         },
-        timeout: 10000, // 10 second timeout
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -126,7 +132,7 @@ class RemoteConfigManager {
         throw new Error('Invalid remote config structure');
       }
     } catch (error) {
-      console.error('Remote config fetch error:', error);
+      logger.error('Remote config fetch error:', error);
       logEvent('REMOTE_CONFIG_FETCH_ERROR', { error: String(error) });
       
       // Fall back to cached config or default
@@ -136,7 +142,7 @@ class RemoteConfigManager {
     }
   }
 
-  private validateConfig(config: any): boolean {
+  private validateConfig(config: Record<string, unknown>): boolean {
     try {
       // Basic structure validation
       if (typeof config !== 'object' || config === null) return false;
@@ -151,13 +157,14 @@ class RemoteConfigManager {
       // Validate kill switch if present
       if (config.kill !== undefined) {
         if (typeof config.kill !== 'object' || config.kill === null) return false;
-        if (typeof config.kill.active !== 'boolean') return false;
-        if (config.kill.message !== undefined && typeof config.kill.message !== 'string') return false;
+        const killSwitch = config.kill as any;
+        if (typeof killSwitch.active !== 'boolean') return false;
+        if (killSwitch.message !== undefined && typeof killSwitch.message !== 'string') return false;
       }
       
       return true;
     } catch (error) {
-      console.error('Config validation error:', error);
+      logger.error('Config validation error:', error);
       return false;
     }
   }
@@ -166,7 +173,7 @@ class RemoteConfigManager {
     try {
       await AsyncStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(this.config));
     } catch (error) {
-      console.error('Error caching remote config:', error);
+      logger.error('Error caching remote config:', error);
     }
   }
 
@@ -181,7 +188,7 @@ class RemoteConfigManager {
         }
       }
     } catch (error) {
-      console.error('Error loading cached config:', error);
+      logger.error('Error loading cached config:', error);
     }
   }
 
@@ -216,7 +223,7 @@ class RemoteConfigManager {
       this.config = DEFAULT_CONFIG;
       logEvent('REMOTE_CONFIG_CACHE_CLEARED');
     } catch (error) {
-      console.error('Error clearing config cache:', error);
+      logger.error('Error clearing config cache:', error);
     }
   }
 }

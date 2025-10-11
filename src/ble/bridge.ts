@@ -1,15 +1,14 @@
-import * as Native from "./ble.native";
-import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Buffer } from "buffer";
-import { listPeers, openFrom, getOwn, sealFor } from "../security/keys";
-import { encryptText, decryptText, setGroupPin as setGroupPinGroup } from "../security/group";
+import * as Battery from "expo-battery";
+import * as Location from "expo-location";
+import { noteSOS } from "../heat/heatstore";
 import { getDeviceId, short16 } from "../lib/device";
 import * as RStore from "../relay/store";
-import nacl from "tweetnacl";
-import * as Battery from "expo-battery";
-import { noteSOS } from "../heat/heatstore";
+import { decryptText, encryptText, setGroupPin as setGroupPinGroup } from "../security/group";
+import { listPeers, openFrom, sealFor } from "../security/keys";
 import { markBlePacket } from "../watchdogs/core";
+import * as Native from "./ble.native";
 let peerCache: Record<string,string> = {};
 
 export type NearbyFrame = { id:string; lat?:number; lon?:number; batt?:number; txt?:string; ts?:number };
@@ -36,7 +35,21 @@ export async function setGroupPinCrypto(pin: string){ await setGroupPinGroup(pin
 function mask(data: Uint8Array){
   if (!groupPin) {return data;}
   const out = new Uint8Array(data.length);
-  for (let i=0;i<data.length;i++){ out[i] = data[i] ^ groupPin.charCodeAt(i % groupPin.length); }
+  for (let i=0;i<data.length;i++){ 
+    const charIndex = i % groupPin.length;
+    const charCode = groupPin.charCodeAt(charIndex);
+    if (charCode !== undefined) {
+      const dataValue = data[i];
+      if (dataValue !== undefined) {
+        out[i] = dataValue ^ charCode; 
+      } else {
+        out[i] = 0;
+      }
+    } else {
+      const dataValue = data[i];
+      out[i] = dataValue ?? 0;
+    }
+  }
   return out;
 }
 
@@ -172,15 +185,15 @@ export async function broadcastSOS(getBatt:()=>number, statuses: string[] = []){
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     const lat = fix.coords.latitude, lon = fix.coords.longitude, batt = getBatt();
     
-    // Create payload with statuses
-    const payload = {
-      type: "SOS",
-      uuid: deviceId,
-      ts: Date.now(),
-      statuses: statuses,
-      battery: batt,
-      signal: 100 // placeholder signal strength
-    };
+    // Create payload with statuses (for debugging/logging)
+    // const _payload = {
+    //   type: "SOS",
+    //   uuid: deviceId,
+    //   ts: Date.now(),
+    //   statuses: statuses,
+    //   battery: batt,
+    //   signal: 100 // placeholder signal strength
+    // };
     
     // Use appropriate encoder based on whether statuses are provided
     const pkt = statuses.length > 0 
@@ -204,8 +217,11 @@ export async function broadcastText(text: string){
   const pkeys = Object.values(peers);
   let payload = bytes;
   if (pkeys.length>0){
-    const blob = await sealFor(pkeys[0], bytes);
-    payload = Buffer.from(blob);
+    const firstKey = pkeys[0];
+    if (firstKey) {
+      const blob = await sealFor(firstKey, bytes);
+      payload = Buffer.from(blob);
+    }
   }
   else {
     // If no individual E2E peer, try group encryption

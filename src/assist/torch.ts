@@ -1,5 +1,5 @@
 import { SafeTorch } from "./SafeTorch";
-import { Platform } from "react-native";
+// Platform import removed as it's not used
 
 let on = false;
 export async function torchOn(){ try{ await SafeTorch.switchState(true); on=true; }catch{} }
@@ -17,7 +17,10 @@ export async function startMorseSOS(){
     try{
       // on
       await SafeTorch.switchState(true);
-      await sleep(seq[i%seq.length]*unit);
+      const seqIndex = seq[i % seq.length];
+      if (seqIndex !== undefined) {
+        await sleep(seqIndex * unit);
+      }
       // off
       await SafeTorch.switchState(false);
       await sleep(unit);

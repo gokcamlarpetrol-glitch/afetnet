@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { logger } from '../utils/productionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Envelope } from './types';
 
@@ -22,7 +23,7 @@ export async function getOrCreateKey(): Promise<string> {
     await AsyncStorage.setItem(KEY_STORAGE_KEY, key);
     return key;
   } catch (error) {
-    console.warn('Failed to get/create mesh key:', error);
+    logger.warn('Failed to get/create mesh key:', error);
     // Fallback to a simple key
     return 'afetnet-fallback-key-' + Date.now();
   }
@@ -33,7 +34,7 @@ export async function setKey(key: string): Promise<void> {
   try {
     await AsyncStorage.setItem(KEY_STORAGE_KEY, key);
   } catch (error) {
-    console.warn('Failed to set mesh key:', error);
+    logger.warn('Failed to set mesh key:', error);
   }
 }
 
@@ -57,7 +58,7 @@ export async function hmacSign(envelope: Omit<Envelope, 'sig'>, key: string): Pr
     
     return signature;
   } catch (error) {
-    console.warn('HMAC signing failed:', error);
+    logger.warn('HMAC signing failed:', error);
     return '';
   }
 }
@@ -74,7 +75,7 @@ export async function hmacVerify(envelope: Envelope, key: string): Promise<boole
     
     return sig === expectedSig;
   } catch (error) {
-    console.warn('HMAC verification failed:', error);
+    logger.warn('HMAC verification failed:', error);
     return false;
   }
 }
@@ -103,7 +104,7 @@ export async function encrypt(payloadJson: string, key: string): Promise<{ ciphe
       iv: ivBase64,
     };
   } catch (error) {
-    console.warn('Encryption failed:', error);
+    logger.warn('Encryption failed:', error);
     throw error;
   }
 }
@@ -123,7 +124,7 @@ export async function decrypt(ciphertext: string, iv: string, key: string): Prom
     
     return new TextDecoder().decode(plaintext);
   } catch (error) {
-    console.warn('Decryption failed:', error);
+    logger.warn('Decryption failed:', error);
     throw error;
   }
 }

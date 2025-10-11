@@ -1,11 +1,12 @@
 import * as BackgroundFetch from 'expo-background-fetch';
+import { logger } from '../utils/productionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 export async function registerRelayBackgroundTask() {
   if (Platform.OS === 'ios') {
     // iOS has strict background limitations for BLE
-    console.log('Relay background task not supported on iOS');
+    logger.debug('Relay background task not supported on iOS');
     return;
   }
   
@@ -16,21 +17,21 @@ export async function registerRelayBackgroundTask() {
       startOnBoot: true,
     });
     
-    console.log('BLE relay background task registered');
+    logger.debug('BLE relay background task registered');
   } catch (error) {
-    console.error('Failed to register relay background task:', error);
+    logger.error('Failed to register relay background task:', error);
   }
 }
 
 export async function relayBackgroundTask() {
   if (Platform.OS === 'ios') {
     // iOS cannot perform BLE operations in background
-    console.log('BLE relay background task skipped on iOS');
+    logger.debug('BLE relay background task skipped on iOS');
     return BackgroundFetch.BackgroundFetchResult.NoData;
   }
   
   try {
-    console.log('Running BLE relay background task...');
+    logger.debug('Running BLE relay background task...');
     
     // Check if emergency mode is enabled
     const emergencyMode = await checkEmergencyMode();
@@ -39,18 +40,18 @@ export async function relayBackgroundTask() {
     const hasPendingSOS = await checkPendingSOS();
     
     if (!emergencyMode && !hasPendingSOS) {
-      console.log('No emergency mode or pending SOS, skipping relay task');
+      logger.debug('No emergency mode or pending SOS, skipping relay task');
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
     
     // Wake BLE relay briefly for 10-20 seconds
     await wakeBLERelay(emergencyMode);
     
-    console.log('BLE relay background task completed');
+    logger.debug('BLE relay background task completed');
     return BackgroundFetch.BackgroundFetchResult.NewData;
     
   } catch (error) {
-    console.error('BLE relay background task failed:', error);
+    logger.error('BLE relay background task failed:', error);
     return BackgroundFetch.BackgroundFetchResult.Failed;
   }
 }
@@ -63,7 +64,7 @@ async function checkEmergencyMode(): Promise<boolean> {
       return parsed.enabled === true;
     }
   } catch (error) {
-    console.warn('Failed to check emergency mode:', error);
+    logger.warn('Failed to check emergency mode:', error);
   }
   return false;
 }
@@ -82,7 +83,7 @@ async function checkPendingSOS(): Promise<boolean> {
       );
     }
   } catch (error) {
-    console.warn('Failed to check pending SOS:', error);
+    logger.warn('Failed to check pending SOS:', error);
   }
   return false;
 }
@@ -93,7 +94,7 @@ async function wakeBLERelay(emergencyMode: boolean) {
     // For now, we'll just log the action
     const duration = emergencyMode ? 20000 : 10000; // 20s for emergency, 10s normal
     
-    console.log(`Waking BLE relay for ${duration}ms (emergency: ${emergencyMode})`);
+    logger.debug(`Waking BLE relay for ${duration}ms (emergency: ${emergencyMode})`);
     
     // In a real implementation, this would:
     // 1. Start BLE advertising briefly
@@ -104,10 +105,10 @@ async function wakeBLERelay(emergencyMode: boolean) {
     // For now, we'll simulate this with a timeout
     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second simulation
     
-    console.log('BLE relay wake cycle completed');
+    logger.debug('BLE relay wake cycle completed');
     
   } catch (error) {
-    console.error('Failed to wake BLE relay:', error);
+    logger.error('Failed to wake BLE relay:', error);
   }
 }
 

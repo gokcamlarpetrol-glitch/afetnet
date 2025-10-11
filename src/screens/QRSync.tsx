@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { logger } from '../utils/productionLogger';
 import { View, Text, StyleSheet } from "react-native";
 import { useFamily } from "../store/family";
 import { useQueue } from "../store/queue";
@@ -23,11 +24,11 @@ if (!isExpoGo) {
   try {
     QRCode = require('react-native-qrcode-svg').default;
   } catch (e) {
-    console.warn('react-native-qrcode-svg not available, using fallback');
+    logger.warn('react-native-qrcode-svg not available, using fallback');
     isExpoGo = true;
   }
 } else {
-  console.warn('Expo Go detected - skipping QRCode import');
+  logger.warn('Expo Go detected - skipping QRCode import');
 }
 
 // Safe barcode scanner import with fallback for Expo Go
@@ -39,11 +40,11 @@ if (!isExpoGo) {
     const barcodeScanner = require('expo-barcode-scanner');
     BarCodeScanner = barcodeScanner.BarCodeScanner;
   } catch (e) {
-    console.warn('expo-barcode-scanner not available, using fallback');
+    logger.warn('expo-barcode-scanner not available, using fallback');
     isExpoGo = true;
   }
 } else {
-  console.warn('Expo Go detected - skipping barcode scanner import');
+  logger.warn('Expo Go detected - skipping barcode scanner import');
 }
 
 export default function QRSyncScreen() {

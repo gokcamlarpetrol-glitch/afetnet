@@ -1,7 +1,8 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
-import { body, query } from 'express-validator';
+import { body, param, query } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { validate } from '../middleware/validation';
+import { sanitizeInput, validate } from '../middleware/validation';
 import { logger } from '../utils/logger';
 import { prisma } from '../utils/prisma';
 
@@ -65,7 +66,7 @@ router.get('/stats', authenticate, requireAdmin, async (req: AuthRequest, res: R
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('❌ Admin stats error:', error);
+    backendLogger.error('❌ Admin stats error:', error);
     res.status(500).json({ error: 'Failed to fetch statistics' });
   }
 });
@@ -78,14 +79,18 @@ router.get(
   [
     query('page').optional().isInt({ min: 1 }).withMessage('Invalid page'),
     query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be 1-100'),
-    query('search').optional().trim(),
+    query('search')
+      .optional()
+      .trim()
+      .isLength({ max: 100 }).withMessage('Search term too long')
+      .custom((value) => !/<|>|script/i.test(value)).withMessage('Invalid search term'),
   ],
   validate,
   async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
-      const search = req.query.search as string;
+      const search = req.query.search ? sanitizeInput(req.query.search as string) : undefined;
       const skip = (page - 1) * limit;
 
       const where: any = {};
@@ -135,7 +140,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('❌ Admin users list error:', error);
+      backendLogger.error('❌ Admin users list error:', error);
       res.status(500).json({ error: 'Failed to fetch users' });
     }
   }
@@ -185,7 +190,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('❌ Admin audit logs error:', error);
+      backendLogger.error('❌ Admin audit logs error:', error);
       res.status(500).json({ error: 'Failed to fetch audit logs' });
     }
   }
@@ -197,16 +202,38 @@ router.put(
   authenticate,
   requireAdmin,
   [
-    body('reason').trim().notEmpty().withMessage('Reason is required'),
+    param('id').trim().isUUID().withMessage('Invalid user ID'),
+    body('reason')
+      .trim()
+      .notEmpty().withMessage('Reason is required')
+      .isLength({ min: 10, max: 500 }).withMessage('Reason must be 10-500 characters')
+      .custom((value) => !/<|>|script/i.test(value)).withMessage('Invalid characters in reason'),
   ],
   validate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { reason } = req.body;
+      const reason = sanitizeInput(req.body.reason);
+
+      // CRITICAL: Check if user exists first
+      const existingUser = await prisma.user.findUnique({
+        where: { id: req.params.id },
+      });
+
+      if (!existingUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // CRITICAL: Prevent deactivating admin users
+      if (existingUser.id === req.user!.id) {
+        return res.status(403).json({ error: 'Cannot deactivate your own account' });
+      }
 
       const user = await prisma.user.update({
         where: { id: req.params.id },
-        data: { isActive: false },
+        data: { 
+          isActive: false,
+          updatedAt: new Date(),
+        },
       });
 
       // Log the action
@@ -228,7 +255,7 @@ router.put(
 
       res.json(user);
     } catch (error) {
-      console.error('❌ User deactivation error:', error);
+      backendLogger.error('❌ User deactivation error:', error);
       res.status(500).json({ error: 'Failed to deactivate user' });
     }
   }

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { logger } from '../utils/productionLogger';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
@@ -96,7 +97,7 @@ export default function GroupChatScreen() {
       setMessages(prev => [...prev, newMessage]);
       
       // Send via mesh (this would integrate with the mesh relay)
-      console.log('Sending encrypted group message:', {
+      logger.debug('Sending encrypted group message:', {
         groupId: group.gid,
         messageId: newMessage.id,
         boxB64,
@@ -107,7 +108,7 @@ export default function GroupChatScreen() {
       setMessage('');
       updateLastActivity(group.id);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      logger.error('Failed to send message:', error);
       Alert.alert('Hata', 'Mesaj gönderilemedi');
     }
   };
@@ -136,7 +137,7 @@ export default function GroupChatScreen() {
 
   const handleVerificationMatch = () => {
     // This would send GVERA message to the group
-    console.log('Sending verification match for phrase:', verificationPhrase);
+    logger.debug('Sending verification match for phrase:', verificationPhrase);
     Alert.alert('Doğrulama', 'Eşleşme onaylandı');
     setShowVerification(false);
     setVerificationPhrase(null);
@@ -154,7 +155,7 @@ export default function GroupChatScreen() {
         title: 'Grup Daveti',
       });
     } catch (error) {
-      console.error('Share error:', error);
+      logger.error('Share error:', error);
     }
   };
 
@@ -235,6 +236,7 @@ export default function GroupChatScreen() {
       {/* Message Composer */}
       <View style={styles.composer}>
         <TextInput
+          accessibilityRole="text"
           style={styles.messageInput}
           placeholder="Mesaj yazın..."
           value={message}
@@ -243,7 +245,7 @@ export default function GroupChatScreen() {
           multiline
         />
         <View style={styles.composerActions}>
-          <Pressable
+          <Pressable accessible={true}
             onPress={handleToggleEmergency}
             style={[
               styles.emergencyButton,

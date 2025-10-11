@@ -1,4 +1,5 @@
 import { logEvent } from '../store/devlog';
+import { logger } from '../utils/productionLogger';
 
 export interface SafeCallOptions {
   timeout?: number;
@@ -34,7 +35,7 @@ class WatchdogManager {
       if (onTimeout) {
         onTimeout(name, duration);
       } else {
-        console.warn(`Watchdog timeout: ${name} took ${duration}ms (limit: ${timeout}ms)`);
+        logger.warn(`Watchdog timeout: ${name} took ${duration}ms (limit: ${timeout}ms)`);
       }
       
       this.cleanup(name);
@@ -193,7 +194,7 @@ export function createGlobalErrorHandler() {
     
     // Don't crash the app for non-fatal errors
     if (!isFatal) {
-      console.error('Non-fatal global error:', error);
+      logger.error('Non-fatal global error:', error);
     }
   });
 }

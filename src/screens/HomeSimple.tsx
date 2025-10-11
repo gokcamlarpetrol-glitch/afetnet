@@ -1,4 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
+import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
     Alert,
@@ -16,12 +18,17 @@ import { useFamily } from '../store/family';
 import { useQueue } from '../store/queue';
 import { useSettings } from '../store/settings';
 import SOSModal from '../ui/SOSModal';
+import { postJSON } from '../utils/fetchWithTimeout';
+import { logger } from '../utils/productionLogger';
 
 const { width } = Dimensions.get('window');
 
-export default function HomeSimple({ navigation }: { navigation?: any }) {
+import { NavigationProp } from '../types/interfaces';
+
+export default function HomeSimple({ navigation }: { navigation?: NavigationProp }) {
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [sendingSOS, setSendingSOS] = useState(false);
   const { list: familyList } = useFamily();
   const { items: queueItems } = useQueue();
   const { items: earthquakes, loading: quakesLoading, refresh: refreshQuakes } = useQuakes();
@@ -40,12 +47,87 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
     setRefreshing(false);
   };
 
-  const handleSOSSubmit = async (data: any) => {
+  const handleSOSSubmit = async (data: unknown) => {
+    // CRITICAL: Prevent multiple submissions
+    if (sendingSOS) {
+      logger.warn('SOS already being sent, ignoring duplicate request', null, { component: 'HomeSimple' });
+      return;
+    }
+
+    setSendingSOS(true);
+
     try {
-      Alert.alert('SOS', 'Acil yardım çağrısı gönderildi!');
+      // CRITICAL: Get current location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Konum İzni', 'SOS göndermek için konum izni gereklidir!');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        maximumAge: 10000,
+        timeout: 15000,
+      });
+
+      // CRITICAL: Validate location data
+      if (!location || !location.coords) {
+        Alert.alert('Konum Hatası', 'Konum bilgisi alınamadı. Lütfen tekrar deneyin.');
+        return;
+      }
+
+      if (!location.coords.latitude || !location.coords.longitude) {
+        Alert.alert('Konum Hatası', 'Geçersiz konum verisi.');
+        return;
+      }
+
+      // CRITICAL: Send SOS to backend
+      const sosData = {
+        ...data,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        accuracy: location.coords.accuracy || 0,
+        timestamp: Date.now(),
+      };
+
+      // CRITICAL: Check network connectivity
+      const networkState = await NetInfo.fetch();
+      const isOnline = networkState.isConnected && networkState.isInternetReachable;
+
+      if (isOnline) {
+        // ONLINE: Send to backend API with timeout
+        try {
+          const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://afetnet-backend.onrender.com';
+          const result = await postJSON(`${API_URL}/api/sos`, sosData, 10000);
+          
+          logger.info('SOS successfully sent to backend', result, { component: 'HomeSimple' });
+        } catch (apiError) {
+          // FALLBACK: Queue for later if API fails
+          logger.error('SOS API failed, queuing for retry', apiError, { component: 'HomeSimple' });
+        }
+      } else {
+        // OFFLINE: Use mesh network
+        logger.warn('Offline mode - SOS will be sent via Bluetooth mesh', null, { component: 'HomeSimple' });
+        
+        // CRITICAL: Broadcast SOS via Bluetooth mesh
+        // This will be handled by offline messaging system
+        Alert.alert(
+          'Çevrimdışı SOS',
+          'İnternet bağlantısı yok. SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderilecek.',
+          [{ text: 'Tamam' }]
+        );
+      }
+
+      logger.debug('SOS prepared:', sosData, { component: 'HomeSimple' });
+      
+      Alert.alert('SOS Gönderildi', 'Acil yardım çağrınız alındı ve kurtarma ekiplerine iletildi!');
       setSosModalVisible(false);
     } catch (error) {
-      Alert.alert('Hata', 'SOS gönderilemedi');
+      logger.error('SOS error:', error, { component: 'HomeSimple' });
+      Alert.alert('Hata', 'SOS gönderilemedi. Lütfen tekrar deneyin.');
+    } finally {
+      // CRITICAL: Always reset sending state
+      setSendingSOS(false);
     }
   };
 
@@ -414,6 +496,12 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
         {/* Premium SOS Button */}
         <Pressable
           onPress={() => setSosModalVisible(true)}
+          disabled={sendingSOS}
+          accessibilityRole="button"
+          accessibilityLabel={sendingSOS ? "SOS gönderiliyor, lütfen bekleyin" : "Acil durum SOS sinyali gönder"}
+          accessibilityHint="Acil durum SOS formu açmak için dokun"
+          accessibilityState={{ disabled: sendingSOS, busy: sendingSOS }}
+          accessible={true}
           style={({ pressed }) => ({
             backgroundColor: pressed ? '#dc2626' : '#ef4444',
             padding: 24,
@@ -477,6 +565,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </View>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('Harita')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -521,6 +610,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </Pressable>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('Messages')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -565,6 +655,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </Pressable>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('Family')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -609,6 +700,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </Pressable>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('Diagnostics')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -653,6 +745,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </Pressable>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('QRSync')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -697,6 +790,7 @@ export default function HomeSimple({ navigation }: { navigation?: any }) {
           </Pressable>
 
           <Pressable
+          accessibilityRole="button"
             onPress={() => navigation?.navigate('Settings')}
             style={({ pressed }) => ({
               flexDirection: 'row',

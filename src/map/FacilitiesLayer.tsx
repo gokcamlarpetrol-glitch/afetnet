@@ -36,7 +36,7 @@ function lerp(a:number,b:number,t:number){ return a+(b-a)*t; }
 function getOccColorSync(id:string){
   // pull cached occ value from loadOcc(); we map 0..1 to green->red
   // Since getOcc is async, we rely on loadOcc() tick to refresh layer and read from local cache via getOccCached
-  const occCache = (global as any).__AFN_OCC_CACHE__ as Record<string,number>|undefined;
+  const occCache = (global as typeof globalThis).__AFN_OCC_CACHE__ as Record<string,number>|undefined;
   let v = 0; if(occCache && typeof occCache[id]==="number") {v = occCache[id];}
   const r = Math.round(lerp(34, 239, v));   // 0x22 -> 0xef
   const g = Math.round(lerp(197, 68, v));   // 0xc5 -> 0x44

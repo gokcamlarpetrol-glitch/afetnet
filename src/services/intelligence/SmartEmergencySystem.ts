@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
@@ -63,7 +64,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
   }
 
   private initializeEmergencyTemplates() {
-    console.log('🧠 Initializing Smart Emergency System...');
+    logger.debug('🧠 Initializing Smart Emergency System...');
 
     // Earthquake templates
     this.emergencyTemplates.set('earthquake', {
@@ -149,7 +150,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
       ]
     });
 
-    console.log('✅ Emergency templates initialized');
+    logger.debug('✅ Emergency templates initialized');
   }
 
   private async loadContextualData() {
@@ -159,7 +160,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         this.contextualData = JSON.parse(stored);
       }
     } catch (error) {
-      console.error('❌ Failed to load contextual data:', error);
+      logger.error('❌ Failed to load contextual data:', error);
     }
   }
 
@@ -167,7 +168,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
     try {
       await AsyncStorage.setItem('emergency_contextual_data', JSON.stringify(this.contextualData));
     } catch (error) {
-      console.error('❌ Failed to save contextual data:', error);
+      logger.error('❌ Failed to save contextual data:', error);
     }
   }
 

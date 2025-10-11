@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface SimulationScenario {
@@ -91,7 +92,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Simulation Scenarios
   private initializeSimulationScenarios(): void {
-    console.log('🎮 Initializing emergency simulation scenarios...');
+    logger.debug('🎮 Initializing emergency simulation scenarios...');
 
     // Earthquake scenario
     this.addSimulationScenario({
@@ -321,7 +322,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
       estimatedScore: 475
     });
 
-    console.log('✅ Simulation scenarios initialized');
+    logger.debug('✅ Simulation scenarios initialized');
   }
 
   // CRITICAL: Add Simulation Scenario
@@ -329,7 +330,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
     try {
       this.simulationScenarios.set(scenario.id, scenario);
       emergencyLogger.logSystem('info', 'Simulation scenario added', { scenarioId: scenario.id, name: scenario.name });
-      console.log(`📋 Simulation scenario added: ${scenario.name}`);
+      logger.debug(`📋 Simulation scenario added: ${scenario.name}`);
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to add simulation scenario', { error: String(error) });
     }
@@ -340,11 +341,11 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
     try {
       const scenario = this.simulationScenarios.get(scenarioId);
       if (!scenario) {
-        console.warn(`⚠️ Simulation scenario not found: ${scenarioId}`);
+        logger.warn(`⚠️ Simulation scenario not found: ${scenarioId}`);
         return null;
       }
 
-      console.log(`🎮 Starting simulation: ${scenario.name}`);
+      logger.debug(`🎮 Starting simulation: ${scenario.name}`);
 
       const sessionId = `sim_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       
@@ -379,12 +380,12 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         difficulty: scenario.difficulty
       });
 
-      console.log(`✅ Simulation started: ${sessionId}`);
+      logger.debug(`✅ Simulation started: ${sessionId}`);
       return sessionId;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start simulation', { error: String(error) });
-      console.error('❌ Failed to start simulation:', error);
+      logger.error('❌ Failed to start simulation:', error);
       return null;
     }
   }
@@ -419,7 +420,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         consequence: choice.consequence
       });
 
-      console.log(`🎯 Choice processed: ${choice.consequence}`);
+      logger.debug(`🎯 Choice processed: ${choice.consequence}`);
 
       // Check for next event
       if (choice.nextEvent) {
@@ -454,7 +455,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         points: objective.points
       });
 
-      console.log(`✅ Objective completed: ${objective.title}`);
+      logger.debug(`✅ Objective completed: ${objective.title}`);
 
       // Check if all objectives are completed
       if (session.completedObjectives === session.totalObjectives) {
@@ -498,7 +499,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         duration: duration
       });
 
-      console.log(`🎉 Simulation completed: ${sessionId} (Score: ${session.score})`);
+      logger.debug(`🎉 Simulation completed: ${sessionId} (Score: ${session.score})`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to complete simulation', { error: String(error) });
@@ -608,6 +609,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const emergencySimulationSystem = new EmergencySimulationSystem();
 export default EmergencySimulationSystem;
+
 
 
 

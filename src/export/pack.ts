@@ -20,7 +20,7 @@ export async function exportAfetPackage(){
     relayMessages: msgs.slice(-100)
   };
   const path = "/tmp/" + `afet_pkg_${Date.now()}.json`;
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(data, null, 2), { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(path, JSON.stringify(data, null, 2), { encoding: "utf8" });
   const can = await Sharing.isAvailableAsync();
   if (!can) {return { path, shared: false };}
   await Sharing.shareAsync(path, { mimeType: "application/json", dialogTitle: "Afet Paketi" });

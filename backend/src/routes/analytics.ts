@@ -1,7 +1,8 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
-import { body, query } from 'express-validator';
+import { body, query, param } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { validate } from '../middleware/validation';
+import { validate, sanitizeInput, validators } from '../middleware/validation';
 import { prisma } from '../utils/prisma';
 
 const router = express.Router();
@@ -39,7 +40,7 @@ router.post(
 
       res.status(201).json({ success: true });
     } catch (error) {
-      console.error('❌ Analytics event error:', error);
+      backendLogger.error('❌ Analytics event error:', error);
       res.status(500).json({ error: 'Failed to track event' });
     }
   }
@@ -117,7 +118,7 @@ router.get(
         averageDuration: successRate._avg.duration || 0,
       });
     } catch (error) {
-      console.error('❌ Analytics stats error:', error);
+      backendLogger.error('❌ Analytics stats error:', error);
       res.status(500).json({ error: 'Failed to fetch analytics' });
     }
   }
@@ -141,7 +142,7 @@ router.get('/user', authenticate, async (req: AuthRequest, res: Response) => {
 
     res.json(events);
   } catch (error) {
-    console.error('❌ User analytics error:', error);
+    backendLogger.error('❌ User analytics error:', error);
     res.status(500).json({ error: 'Failed to fetch user analytics' });
   }
 });

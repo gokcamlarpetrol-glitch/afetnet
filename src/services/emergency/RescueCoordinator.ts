@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface RescueOperation {
@@ -25,7 +26,7 @@ class RescueCoordinator extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('🚁 Rescue Coordinator initialized');
+    logger.debug('🚁 Rescue Coordinator initialized');
   }
 
   // CRITICAL: Create Rescue Operation
@@ -46,7 +47,7 @@ class RescueCoordinator extends SimpleEventEmitter {
       this.emit('rescueOperationCreated', operation);
       emergencyLogger.logSystem('info', 'Rescue operation created', { operationId, type: operation.type, priority: operation.priority });
       
-      console.log(`🚁 Rescue operation created: ${operationId}`);
+      logger.debug(`🚁 Rescue operation created: ${operationId}`);
       return operationId;
 
     } catch (error) {

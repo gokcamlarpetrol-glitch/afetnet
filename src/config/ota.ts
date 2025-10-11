@@ -1,9 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
-import { setDutyCycle, setGroupPin as setPinCrypto, setGroupPinCrypto } from "../ble/bridge";
-import { start as startSAR, stop as stopSAR, SarConfig } from "../sar/runner";
-import { enableEPM, disableEPM } from "../power/epm";
+import { setDutyCycle, setGroupPinCrypto, setGroupPin as setPinCrypto } from "../ble/bridge";
+import { disableEPM, enableEPM } from "../power/epm";
+import { SarConfig, start as startSAR, stop as stopSAR } from "../sar/runner";
 
 const KEY="afn:cfg:v1";
 export type OTA = {

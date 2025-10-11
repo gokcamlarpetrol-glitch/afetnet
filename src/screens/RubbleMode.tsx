@@ -79,6 +79,7 @@ export default function RubbleMode(){
         <Switch value={st.useFec} onValueChange={v=>setSt(s=>({...s, useFec:v}))}/>
       </View>
       <TextInput
+          accessibilityRole="text"
         style={styles.input}
         placeholder="Kısa mesaj (max 120)"
         value={st.message}

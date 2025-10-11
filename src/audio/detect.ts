@@ -1,19 +1,19 @@
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
+import * as Location from "expo-location";
 import { whisper } from "../family/whisper";
+import { quantizeLatLng } from "../geo/coarse";
 import { addTicket } from "../help/store";
 import { now } from "../relief/util";
-import { quantizeLatLng } from "../geo/coarse";
-import * as Location from "expo-location";
 import { writeAudit } from "../safety/audit";
 
 let rec: Audio.Recording | null = null;
 let on=false;
 let lastSOS=0;
 
-const BUF = 2048; // pseudo buffer len (we don't have PCM frames from expo, we use metering)
-const PEAK_TH = -20; // dBFS peak threshold (heuristic)
-const WHISTLE_MIN_HZ = 3000; // (placeholder: we can't FFT without PCM; use metering+duration heuristic)
+// const BUF = 2048; // pseudo buffer len (we don't have PCM frames from expo, we use metering)
+// const PEAK_TH = -20; // dBFS peak threshold (heuristic)
+// const WHISTLE_MIN_HZ = 3000; // (placeholder: we can't FFT without PCM; use metering+duration heuristic)
 
 export async function startAudioDetect(){
   if(on) {return;} on=true;
@@ -121,7 +121,7 @@ async function triggerSOS(reason:string){
     detail: "Enerji yüksek/keskin tepe — olası düdük/panlama",
     prio: "life",
     status: "new",
-    qlat: q?.lat, qlng: q?.lng
+    qlat: q?.lat ?? 0, qlng: q?.lng ?? 0
   });
   await whisper("s o s ses yardim"); // ULB kısa
   await writeAudit("system","audio.detect.sos",{ reason, q });

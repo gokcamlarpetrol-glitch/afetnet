@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import * as Battery from 'expo-battery';
+import { logger } from '../utils/productionLogger';
 import * as Location from 'expo-location';
+import { useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { meshRelay } from '../services/mesh/relay';
+import { logEvent } from '../store/devlog';
 import { useEmergency } from '../store/emergency';
 import { useIncidents } from '../store/incidents';
-import { logEvent } from '../store/devlog';
 
 export default function SOSScreen() {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -77,7 +78,7 @@ export default function SOSScreen() {
       );
 
     } catch (error) {
-      console.error('SOS send error:', error);
+      logger.error('SOS send error:', error);
       Alert.alert('Hata', 'SOS gönderilemedi');
     } finally {
       setIsBroadcasting(false);
@@ -88,7 +89,8 @@ export default function SOSScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>SOS Yardım Talebi</Text>
       
-      <Pressable
+      <Pressable accessible={true}
+          accessibilityRole="button"
         onPress={startSOS}
         disabled={isBroadcasting}
         style={[styles.sosButton, isBroadcasting && styles.sosButtonDisabled]}
@@ -117,7 +119,8 @@ export default function SOSScreen() {
       <Text style={styles.statusLabel}>Durumunu Belirt:</Text>
       <View style={styles.statusContainer}>
         {statusOptions.map((status) => (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             key={status}
             onPress={() => toggleStatus(status)}
             style={[

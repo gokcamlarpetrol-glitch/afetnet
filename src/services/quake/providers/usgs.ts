@@ -1,4 +1,5 @@
 import { QuakeItem, QuakeProvider } from '../types';
+import { logger } from '../../../utils/productionLogger';
 
 export class USGSProvider implements QuakeProvider {
   name = 'USGS';
@@ -28,12 +29,12 @@ export class USGSProvider implements QuakeProvider {
 
       return this.parseUSGSData(data.features);
     } catch (error) {
-      console.warn('USGS fetch failed:', error);
+      logger.warn('USGS fetch failed:', error);
       return this.getMockData();
     }
   }
 
-  private parseUSGSData(features: any[]): QuakeItem[] {
+  private parseUSGSData(features: unknown[]): QuakeItem[] {
     try {
       const quakes: QuakeItem[] = [];
 
@@ -63,7 +64,7 @@ export class USGSProvider implements QuakeProvider {
             });
           }
         } catch (parseError) {
-          console.warn('Failed to parse USGS feature:', parseError);
+          logger.warn('Failed to parse USGS feature:', parseError);
           // Skip malformed entries
         }
       }
@@ -73,7 +74,7 @@ export class USGSProvider implements QuakeProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      console.warn('USGS parsing failed:', error);
+      logger.warn('USGS parsing failed:', error);
       return this.getMockData();
     }
   }

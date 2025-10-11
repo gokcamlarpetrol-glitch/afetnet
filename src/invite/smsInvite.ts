@@ -1,4 +1,5 @@
 import * as SMS from 'expo-sms';
+import { logger } from '../utils/productionLogger';
 
 export async function composeInvite(phoneE164: string, myAfnId: string): Promise<boolean> {
   try {
@@ -16,7 +17,7 @@ export async function composeInvite(phoneE164: string, myAfnId: string): Promise
     
     return true;
   } catch (error) {
-    console.error('Failed to compose SMS invite:', error);
+    logger.error('Failed to compose SMS invite:', error);
     throw error;
   }
 }
@@ -49,7 +50,7 @@ export async function sendInviteToMultipleContacts(
       await composeInvite(contact.phoneE164, myAfnId);
       sent++;
     } catch (error) {
-      console.error(`Failed to send invite to ${contact.phoneE164}:`, error);
+      logger.error(`Failed to send invite to ${contact.phoneE164}:`, error);
       failed++;
     }
   }

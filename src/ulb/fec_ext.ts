@@ -31,7 +31,7 @@ export async function fecBroadcastX(text:string, N=3, retries=1, interleaveMs=12
     // wait for NAK
     const wait = await new Promise<number[]>((resolve)=>{ 
       const t=setTimeout(()=>resolve([]), 1200);
-      (global as any).__AFN_ULB_NAK__ = (gidIn:string, missing:number[])=>{ if(gidIn===gid){ clearTimeout(t); resolve(missing); } };
+      (global as typeof globalThis).__AFN_ULB_NAK__ = (gidIn:string, missing:number[])=>{ if(gidIn===gid){ clearTimeout(t); resolve(missing); } };
     });
     if(wait.length===0) {break;}
     await sendRound(wait);

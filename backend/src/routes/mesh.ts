@@ -1,7 +1,8 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Response } from 'express';
 import { body, query } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { validate } from '../middleware/validation';
+import { validate, sanitizeInput, validators } from '../middleware/validation';
 import { prisma } from '../utils/prisma';
 
 const router = express.Router();
@@ -71,11 +72,11 @@ router.post(
         },
       });
 
-      console.log(`📡 Mesh message relayed: ${meshId} (${type}) from ${req.user!.afnId}`);
+      backendLogger.debug(`📡 Mesh message relayed: ${meshId} (${type}) from ${req.user!.afnId}`);
 
       res.status(201).json(message);
     } catch (error) {
-      console.error('❌ Mesh relay error:', error);
+      backendLogger.error('❌ Mesh relay error:', error);
       res.status(500).json({ error: 'Failed to relay mesh message' });
     }
   }
@@ -111,7 +112,7 @@ router.get(
 
       res.json(messages);
     } catch (error) {
-      console.error('❌ Mesh messages fetch error:', error);
+      backendLogger.error('❌ Mesh messages fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch mesh messages' });
     }
   }
@@ -150,11 +151,11 @@ router.put(
         },
       });
 
-      console.log(`🔄 Mesh message hopped: ${req.params.meshId} (hop ${updated.hopCount}/${updated.ttl})`);
+      backendLogger.debug(`🔄 Mesh message hopped: ${req.params.meshId} (hop ${updated.hopCount}/${updated.ttl})`);
 
       res.json(updated);
     } catch (error) {
-      console.error('❌ Mesh hop error:', error);
+      backendLogger.error('❌ Mesh hop error:', error);
       res.status(500).json({ error: 'Failed to update mesh message' });
     }
   }
@@ -181,7 +182,7 @@ router.get('/stats', authenticate, async (req: AuthRequest, res: Response) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('❌ Mesh stats error:', error);
+    backendLogger.error('❌ Mesh stats error:', error);
     res.status(500).json({ error: 'Failed to fetch mesh statistics' });
   }
 });

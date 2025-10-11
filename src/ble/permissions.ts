@@ -2,7 +2,7 @@ import { PermissionsAndroid, Platform } from "react-native";
 
 export async function ensureBlePermissions() {
   if (Platform.OS !== "android") return;
-  const sdkInt = parseInt(String((global as any).RNDeviceInfoSDK_INT ?? 31), 10);
+  const sdkInt = parseInt(String((global as typeof globalThis).RNDeviceInfoSDK_INT ?? 31), 10);
   // Android 12+ (SDK 31): BLUETOOTH_SCAN + BLUETOOTH_CONNECT
   const needsScan = PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN as any;
   const needsConnect = PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT as any;

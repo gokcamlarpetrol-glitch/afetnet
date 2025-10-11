@@ -1,4 +1,5 @@
 // Safe BLE wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 let BleManager: any = null;
 let BlePeripheral: any = null;
 
@@ -7,13 +8,13 @@ try {
   const blePlx = require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
 } catch (e) {
-  console.warn('react-native-ble-plx not available');
+  logger.warn('react-native-ble-plx not available');
 }
 
 try {
   BlePeripheral = require('react-native-ble-peripheral').default;
 } catch (e) {
-  console.warn('react-native-ble-peripheral not available');
+  logger.warn('react-native-ble-peripheral not available');
 }
 
 // Safe manager instance
@@ -22,7 +23,7 @@ if (BleManager) {
   try {
     manager = new BleManager();
   } catch (e) {
-    console.warn('Failed to create BleManager instance');
+    logger.warn('Failed to create BleManager instance');
   }
 }
 
@@ -31,7 +32,7 @@ export const SafeBLE = {
   
   startScan: async (onFrame: (from: string, frame: any) => void) => {
     if (!manager) {
-      console.warn('BLE not available, scan not started');
+      logger.warn('BLE not available, scan not started');
       return;
     }
     try {
@@ -47,7 +48,7 @@ export const SafeBLE = {
         } catch {}
       });
     } catch (e) {
-      console.warn('BLE scan failed:', e);
+      logger.warn('BLE scan failed:', e);
     }
   },
 
@@ -56,13 +57,13 @@ export const SafeBLE = {
     try {
       manager.stopDeviceScan();
     } catch (e) {
-      console.warn('BLE stop scan failed:', e);
+      logger.warn('BLE stop scan failed:', e);
     }
   },
 
   advertise: async (data: Uint8Array) => {
     if (!BlePeripheral) {
-      console.warn('BLE peripheral not available, advertising not started');
+      logger.warn('BLE peripheral not available, advertising not started');
       return;
     }
     try {
@@ -77,7 +78,7 @@ export const SafeBLE = {
         manufacturerData: { companyId: 0xffff, bytes: Array.from(data) }
       });
     } catch (e) {
-      console.warn('BLE advertising failed:', e);
+      logger.warn('BLE advertising failed:', e);
     }
   },
 
@@ -86,7 +87,7 @@ export const SafeBLE = {
     try {
       await BlePeripheral.stopAdvertising();
     } catch (e) {
-      console.warn('BLE stop advertising failed:', e);
+      logger.warn('BLE stop advertising failed:', e);
     }
   }
 };

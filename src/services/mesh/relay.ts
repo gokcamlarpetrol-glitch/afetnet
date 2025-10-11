@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../../utils/productionLogger';
 import { decodeBase64 } from 'tweetnacl-util';
 import { decryptGroupMessage, encryptGroupMessage } from '../../lib/cryptoGroup';
 import { usePairing } from '../../store/pairing';
@@ -44,7 +45,7 @@ class MeshRelay {
         this.seenIds = new Set(JSON.parse(stored));
       }
     } catch (error) {
-      console.warn('Failed to load seen IDs:', error);
+      logger.warn('Failed to load seen IDs:', error);
     }
   }
 
@@ -56,7 +57,7 @@ class MeshRelay {
       await AsyncStorage.setItem(this.storageKey, JSON.stringify(recentIds));
       this.seenIds = new Set(recentIds);
     } catch (error) {
-      console.warn('Failed to save seen IDs:', error);
+      logger.warn('Failed to save seen IDs:', error);
     }
   }
 
@@ -163,7 +164,7 @@ class MeshRelay {
       
       return null;
     } catch (error) {
-      console.warn('Failed to decrypt DM:', error);
+      logger.warn('Failed to decrypt DM:', error);
       return null;
     }
   }
@@ -171,8 +172,8 @@ class MeshRelay {
   private sendToBLE(data: string) {
     // This would integrate with the existing BLE layer
     // For now, we'll emit to a global event system
-    if ((global as any).bleRelay) {
-      (global as any).bleRelay.broadcastText(data);
+    if ((global as typeof globalThis).bleRelay) {
+      (global as typeof globalThis).bleRelay.broadcastText(data);
     }
   }
 

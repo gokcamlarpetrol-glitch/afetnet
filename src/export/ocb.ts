@@ -11,7 +11,7 @@ export async function exportClosureBundle(tag="op"){
 
   // CAP docs
   const capDir = "/tmp/docs/cap/";
-  const caps: any[] = [];
+  const caps: unknown[] = [];
   try{
     const entries = await FileSystem.readDirectoryAsync(capDir);
     for (const f of entries){
@@ -35,7 +35,7 @@ export async function exportClosureBundle(tag="op"){
 
   const bundle = { generatedAt: new Date().toISOString(), tag, base, teams, approvals, caps, logs };
   const out = "/tmp/" + `ocb_${tag}_${Date.now()}.json`;
-  await FileSystem.writeAsStringAsync(out, JSON.stringify(bundle, null, 2), { encoding: "utf8" as any });
+  await FileSystem.writeAsStringAsync(out, JSON.stringify(bundle, null, 2), { encoding: "utf8" });
   if (await Sharing.isAvailableAsync()) {await Sharing.shareAsync(out, { mimeType:"application/json", dialogTitle:"Operasyon Özeti" });}
   return out;
 }

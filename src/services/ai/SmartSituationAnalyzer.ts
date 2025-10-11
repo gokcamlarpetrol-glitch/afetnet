@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface SituationAnalysis {
@@ -61,7 +62,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
 
   // CRITICAL: Initialize Risk Thresholds
   private initializeRiskThresholds(): void {
-    console.log('🧠 Initializing smart situation analyzer...');
+    logger.debug('🧠 Initializing smart situation analyzer...');
 
     // Environmental thresholds
     this.riskThresholds.set('temperature', {
@@ -93,7 +94,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       critical: { min: 0, max: 40, risk: 'critical' }
     });
 
-    console.log('✅ Risk thresholds initialized');
+    logger.debug('✅ Risk thresholds initialized');
   }
 
   // CRITICAL: Start Situation Analysis
@@ -101,7 +102,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
     try {
       if (this.isActive) return true;
 
-      console.log('🧠 Starting smart situation analysis...');
+      logger.debug('🧠 Starting smart situation analysis...');
       this.isActive = true;
 
       // Start continuous analysis
@@ -112,12 +113,12 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       this.emit('situationAnalysisStarted');
       emergencyLogger.logSystem('info', 'Smart situation analysis started');
 
-      console.log('✅ Smart situation analysis started');
+      logger.debug('✅ Smart situation analysis started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start situation analysis', { error: String(error) });
-      console.error('❌ Failed to start situation analysis:', error);
+      logger.error('❌ Failed to start situation analysis:', error);
       return false;
     }
   }
@@ -153,7 +154,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         riskFactors: analysis.riskFactors.length
       });
 
-      console.log(`🧠 Situation analysis: ${analysis.riskLevel.toUpperCase()} risk (${analysis.confidence}% confidence)`);
+      logger.debug(`🧠 Situation analysis: ${analysis.riskLevel.toUpperCase()} risk (${analysis.confidence}% confidence)`);
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Situation analysis failed', { error: String(error) });
@@ -551,6 +552,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
 // Export singleton instance
 export const smartSituationAnalyzer = new SmartSituationAnalyzer();
 export default SmartSituationAnalyzer;
+
 
 
 

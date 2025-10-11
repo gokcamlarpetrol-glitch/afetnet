@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2021",
+    "target": "ES2020",
     "lib": [
-      "ES2021",
-      "DOM"
+      "ES2020"
     ],
     "module": "es2020",
     "moduleResolution": "bundler",
@@ -11,13 +10,16 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "noImplicitAny": false,
-    "strictNullChecks": false,
-    "strictFunctionTypes": false,
-    "strictPropertyInitialization": false,
+    "noImplicitReturns": false,
+    "noImplicitThis": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "noUncheckedIndexedAccess": false,
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
@@ -35,7 +37,7 @@
     "tsBuildInfoFile": ".tsbuildinfo",
     "downlevelIteration": true,
     "allowJs": false,
-    "forceConsistentCasingInFileNames": false
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "src/**/*",

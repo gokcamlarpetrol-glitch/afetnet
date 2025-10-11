@@ -1,3 +1,4 @@
+import { backendLogger } from '../utils/productionLogger';
 import express, { Request, Response } from 'express';
 import os from 'os';
 import { checkDatabaseHealth, prisma } from '../utils/prisma';
@@ -28,7 +29,7 @@ router.get('/', async (req: Request, res: Response) => {
           activeSOS: sosCount,
         };
       } catch (error) {
-        console.error('Database stats error:', error);
+        backendLogger.error('Database stats error:', error);
       }
     }
 
@@ -72,7 +73,7 @@ router.get('/', async (req: Request, res: Response) => {
     const statusCode = dbHealthy ? 200 : 503;
     res.status(statusCode).json(health);
   } catch (error) {
-    console.error('Health check error:', error);
+    backendLogger.error('Health check error:', error);
     res.status(503).json({
       status: 'error',
       error: 'Health check failed',

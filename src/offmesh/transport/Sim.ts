@@ -1,4 +1,5 @@
 import { Envelope } from '../types';
+import { logger } from '../../utils/productionLogger';
 
 const listeners = new Set<(m: Envelope) => void>();
 let started = false;
@@ -7,14 +8,14 @@ let room = 'afetnet-dev-room';
 export async function start(roomName = 'afetnet-dev-room'): Promise<void> {
   if (started) {return;}
   room = roomName;
-  console.log('[SimTransport] started in room', room);
+  logger.debug('[SimTransport] started in room', room);
   started = true;
 }
 
 export async function stop(): Promise<void> {
   started = false;
   listeners.clear();
-  console.log('[SimTransport] stopped');
+  logger.debug('[SimTransport] stopped');
 }
 
 export function subscribe(cb: (m: Envelope) => void): () => void {
@@ -26,7 +27,7 @@ export async function broadcast(env: Envelope): Promise<void> {
   if (!started) {return;}
   
   const latency = 300 + Math.random() * 1200; // 300-1500ms random latency
-  console.log(`[SimTransport] broadcasting ${env.type} with ${latency}ms latency`);
+  logger.debug(`[SimTransport] broadcasting ${env.type} with ${latency}ms latency`);
   
   setTimeout(() => {
     const copy = { ...env, hop: env.hop + 1 };
@@ -34,7 +35,7 @@ export async function broadcast(env: Envelope): Promise<void> {
       try {
         cb(copy);
       } catch (error) {
-        console.warn('[SimTransport] listener error:', error);
+        logger.warn('[SimTransport] listener error:', error);
       }
     }
   }, latency);

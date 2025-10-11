@@ -3,7 +3,7 @@ import { SafeSQLite } from "./SafeSQLite";
 // Type definitions for SQLite
 declare namespace SQLite {
   interface SQLiteDatabase {
-    executeSql: (sql: string, params?: any[]) => Promise<any[]>;
+    executeSql: (sql: string, params?: unknown[]) => Promise<any[]>;
     transaction: (fn: (tx: any) => void) => Promise<void>;
     close: () => Promise<void>;
   }

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/productionLogger';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { integrateSOSWithICE, updateSOSStatus } from '../fallback/sosIntegration';
@@ -60,7 +61,7 @@ export const useEmergency = create<EmergencyState & EmergencyActions>()(
         try {
           integrateSOSWithICE();
         } catch (error) {
-          console.error('Failed to integrate SOS with ICE:', error);
+          logger.error('Failed to integrate SOS with ICE:', error);
         }
       },
       
@@ -80,7 +81,7 @@ export const useEmergency = create<EmergencyState & EmergencyActions>()(
         try {
           updateSOSStatus(statuses);
         } catch (error) {
-          console.error('Failed to update SOS status with ICE:', error);
+          logger.error('Failed to update SOS status with ICE:', error);
         }
       },
       

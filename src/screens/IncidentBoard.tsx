@@ -91,7 +91,8 @@ export default function IncidentBoard() {
     const isAssignedToMe = item.assignedTo === myId;
     
     return (
-      <Pressable
+      <Pressable accessible={true}
+          accessibilityRole="button"
         onPress={() => setSelectedIncident(item)}
         style={[
           styles.incidentItem,
@@ -172,7 +173,8 @@ export default function IncidentBoard() {
         </Text>
 
         {!isAssignedToMe && selectedIncident.status === 'open' && (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => handleAssignToMe(selectedIncident)}
             style={styles.assignButton}
           >
@@ -182,14 +184,16 @@ export default function IncidentBoard() {
 
         {isAssignedToMe && (
           <View style={styles.actionRow}>
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={() => handleSetStatus(selectedIncident, 'enroute')}
               style={[styles.actionButton, styles.enrouteButton]}
             >
               <Text style={styles.actionButtonText}>GİDİYORUM</Text>
             </Pressable>
             
-            <Pressable
+            <Pressable accessible={true}
+          accessibilityRole="button"
               onPress={() => handleSetStatus(selectedIncident, 'arrived')}
               style={[styles.actionButton, styles.arrivedButton]}
             >
@@ -199,14 +203,16 @@ export default function IncidentBoard() {
         )}
 
         <View style={styles.confirmationRow}>
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => handleMarkStatus(selectedIncident, 'listen')}
             style={[styles.confirmationButton, styles.listenButton]}
           >
             <Text style={styles.confirmationButtonText}>Dinleme Yapıldı</Text>
           </Pressable>
           
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => handleMarkStatus(selectedIncident, 'sound')}
             style={[styles.confirmationButton, styles.soundButton]}
           >
@@ -215,7 +221,8 @@ export default function IncidentBoard() {
         </View>
 
         {isAssignedToMe && (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={() => handleSetStatus(selectedIncident, 'resolved')}
             style={[styles.actionButton, styles.resolvedButton]}
           >

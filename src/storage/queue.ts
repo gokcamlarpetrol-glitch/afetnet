@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { logger } from '../utils/productionLogger';
 import { postJSON } from "../lib/http";
 
 export type HelpItem = { id: string; createdAt: number; payload: any; attempts?: number };
@@ -17,7 +18,7 @@ export async function writeQueue(items: HelpItem[]) {
   try { 
     await AsyncStorage.setItem(KEY, JSON.stringify(items)); 
   } catch (error) {
-    console.error("AfetNet: Queue yazılamadı:", error);
+    logger.error("AfetNet: Queue yazılamadı:", error);
   }
 }
 
@@ -30,7 +31,7 @@ export async function enqueue(payload: any) {
     attempts: 0
   });
   await writeQueue(q);
-  console.log(`AfetNet: Queue'ya eklendi (${q.length} item)`);
+  logger.debug(`AfetNet: Queue'ya eklendi (${q.length} item)`);
   return q.length;
 }
 
@@ -57,15 +58,15 @@ export async function flush(): Promise<number> {
       });
       
       sent++;
-      console.log(`AfetNet: Queue item gönderildi (${item.id})`);
-    } catch (error: any) {
+      logger.debug(`AfetNet: Queue item gönderildi (${item.id})`);
+    } catch (error: Error | unknown) {
       // Retry logic: 3 denemeden sonra sil
       const attempts = (item.attempts || 0) + 1;
       if (attempts < 3) {
         failed.push({ ...item, attempts });
-        console.warn(`AfetNet: Queue item başarısız (deneme ${attempts}/3):`, error.message);
+        logger.warn(`AfetNet: Queue item başarısız (deneme ${attempts}/3):`, error.message);
       } else {
-        console.error(`AfetNet: Queue item kalıcı hata, siliniyor (${item.id}):`, error.message);
+        logger.error(`AfetNet: Queue item kalıcı hata, siliniyor (${item.id}):`, error.message);
       }
     }
   }
@@ -73,7 +74,7 @@ export async function flush(): Promise<number> {
   // Başarısız olanları tekrar yaz
   await writeQueue(failed);
   
-  console.log(`AfetNet: Queue flush: ${sent} gönderildi, ${failed.length} tekrar deneniyor`);
+  logger.debug(`AfetNet: Queue flush: ${sent} gönderildi, ${failed.length} tekrar deneniyor`);
   return sent;
 }
 

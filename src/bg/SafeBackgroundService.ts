@@ -1,36 +1,37 @@
 // Safe Background Service wrapper to prevent crashes when native modules are not available
+import { logger } from '../utils/productionLogger';
 let BackgroundService: any = null;
 
 try {
   BackgroundService = require('react-native-background-actions');
 } catch (e) {
-  console.warn('react-native-background-actions not available');
+  logger.warn('react-native-background-actions not available');
 }
 
 export const SafeBackgroundService = {
   isAvailable: () => BackgroundService !== null,
   
-  start: async (task: () => Promise<void>, options: any) => {
+  start: async (task: () => Promise<void>, options: Record<string, unknown>) => {
     if (!BackgroundService) {
-      console.warn('BackgroundService not available, cannot start');
+      logger.warn('BackgroundService not available, cannot start');
       return;
     }
     try {
       await BackgroundService.start(task, options);
     } catch (e) {
-      console.warn('Failed to start background service:', e);
+      logger.warn('Failed to start background service:', e);
     }
   },
   
   stop: async () => {
     if (!BackgroundService) {
-      console.warn('BackgroundService not available, cannot stop');
+      logger.warn('BackgroundService not available, cannot stop');
       return;
     }
     try {
       await BackgroundService.stop();
     } catch (e) {
-      console.warn('Failed to stop background service:', e);
+      logger.warn('Failed to stop background service:', e);
     }
   }
 };

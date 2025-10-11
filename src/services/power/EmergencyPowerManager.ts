@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 
 export interface PowerMode {
   id: string;
@@ -15,7 +16,7 @@ class EmergencyPowerManager extends SimpleEventEmitter {
   constructor() {
     super();
     this.initializePowerModes();
-    console.log('🔋 Emergency Power Manager initialized');
+    logger.debug('🔋 Emergency Power Manager initialized');
   }
 
   private initializePowerModes(): void {
@@ -43,17 +44,17 @@ class EmergencyPowerManager extends SimpleEventEmitter {
   // CRITICAL: Start Battery Monitoring
   async startBatteryMonitoring(): Promise<boolean> {
     try {
-      console.log('🔋 Starting battery monitoring...');
+      logger.debug('🔋 Starting battery monitoring...');
       
       // Set default power mode
       this.currentMode = this.powerModes.get('emergency_power') || null;
       
       this.emit('batteryMonitoringStarted');
-      console.log('✅ Battery monitoring started');
+      logger.debug('✅ Battery monitoring started');
       
       return true;
     } catch (error) {
-      console.error('❌ Failed to start battery monitoring:', error);
+      logger.error('❌ Failed to start battery monitoring:', error);
       return false;
     }
   }
@@ -61,16 +62,16 @@ class EmergencyPowerManager extends SimpleEventEmitter {
   // CRITICAL: Stop Battery Monitoring
   async stopBatteryMonitoring(): Promise<boolean> {
     try {
-      console.log('🔋 Stopping battery monitoring...');
+      logger.debug('🔋 Stopping battery monitoring...');
       
       this.currentMode = null;
       
       this.emit('batteryMonitoringStopped');
-      console.log('✅ Battery monitoring stopped');
+      logger.debug('✅ Battery monitoring stopped');
       
       return true;
     } catch (error) {
-      console.error('❌ Failed to stop battery monitoring:', error);
+      logger.error('❌ Failed to stop battery monitoring:', error);
       return false;
     }
   }
@@ -96,10 +97,10 @@ class EmergencyPowerManager extends SimpleEventEmitter {
       this.currentMode = mode;
       this.emit('powerModeChanged', mode);
       
-      console.log(`✅ Power mode changed to: ${mode.name}`);
+      logger.debug(`✅ Power mode changed to: ${mode.name}`);
       return true;
     } catch (error) {
-      console.error('❌ Failed to set power mode:', error);
+      logger.error('❌ Failed to set power mode:', error);
       return false;
     }
   }

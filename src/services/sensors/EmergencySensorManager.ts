@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from '../../lib/SimpleEventEmitter';
+import { logger } from '../../utils/productionLogger';
 import { emergencyLogger } from '../logging/EmergencyLogger';
 
 export interface SensorReading {
@@ -16,7 +17,7 @@ class EmergencySensorManager extends SimpleEventEmitter {
 
   constructor() {
     super();
-    console.log('📡 Emergency Sensor Manager initialized');
+    logger.debug('📡 Emergency Sensor Manager initialized');
   }
 
   // CRITICAL: Start Emergency Monitoring
@@ -24,19 +25,19 @@ class EmergencySensorManager extends SimpleEventEmitter {
     try {
       if (this.isMonitoring) return true;
 
-      console.log('📡 Starting emergency sensor monitoring...');
+      logger.debug('📡 Starting emergency sensor monitoring...');
 
       this.isMonitoring = true;
 
       this.emit('sensorMonitoringStarted');
       emergencyLogger.logSystem('info', 'Emergency sensor monitoring started');
 
-      console.log('✅ Emergency sensor monitoring started');
+      logger.debug('✅ Emergency sensor monitoring started');
       return true;
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to start sensor monitoring', { error: String(error) });
-      console.error('❌ Failed to start sensor monitoring:', error);
+      logger.error('❌ Failed to start sensor monitoring:', error);
       return false;
     }
   }
@@ -46,18 +47,18 @@ class EmergencySensorManager extends SimpleEventEmitter {
     try {
       if (!this.isMonitoring) return;
 
-      console.log('🛑 Stopping emergency sensor monitoring...');
+      logger.debug('🛑 Stopping emergency sensor monitoring...');
 
       this.isMonitoring = false;
 
       this.emit('sensorMonitoringStopped');
       emergencyLogger.logSystem('info', 'Emergency sensor monitoring stopped');
 
-      console.log('✅ Emergency sensor monitoring stopped');
+      logger.debug('✅ Emergency sensor monitoring stopped');
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Error stopping sensor monitoring', { error: String(error) });
-      console.error('❌ Error stopping sensor monitoring:', error);
+      logger.error('❌ Error stopping sensor monitoring:', error);
     }
   }
 

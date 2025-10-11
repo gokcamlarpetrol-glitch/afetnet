@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { logger } from '../utils/productionLogger';
 import { Accelerometer } from 'expo-sensors';
 import { Audio } from 'expo-av';
 import { bleRelay } from '../services/ble/bleRelay';
@@ -42,13 +43,13 @@ export function useTapDetect() {
       try {
         // Try microphone-based detection first if available
         if (await tryMicrophoneDetection()) {
-          console.log('Using microphone for tap detection');
+          logger.debug('Using microphone for tap detection');
           setIsListening(true);
           return;
         }
         
         // Fallback to accelerometer
-        console.log('Using accelerometer for tap detection');
+        logger.debug('Using accelerometer for tap detection');
         Accelerometer.setUpdateInterval(100); // 10Hz
         subscription = Accelerometer.addListener(({ x, y, z }) => {
           const magnitude = Math.sqrt(x * x + y * y + z * z);
@@ -65,7 +66,7 @@ export function useTapDetect() {
         
         setIsListening(true);
       } catch (error) {
-        console.error('Failed to start tap detection:', error);
+        logger.error('Failed to start tap detection:', error);
       }
     };
 
@@ -102,7 +103,7 @@ export function useTapDetect() {
 
   const triggerTapSOS = async () => {
     try {
-      console.log('Tap SOS triggered!');
+      logger.debug('Tap SOS triggered!');
       
       const message = {
         type: 'sos' as const,
@@ -121,9 +122,9 @@ export function useTapDetect() {
       queue.add(message);
       await queue.flush();
       
-      console.log('Tap SOS sent via queue');
+      logger.debug('Tap SOS sent via queue');
     } catch (error) {
-      console.error('Failed to send tap SOS:', error);
+      logger.error('Failed to send tap SOS:', error);
     }
   };
 
@@ -146,7 +147,7 @@ async function tryMicrophoneDetection(): Promise<boolean> {
     // Request microphone permission
     const { status } = await Audio.requestPermissionsAsync();
     if (status !== 'granted') {
-      console.log('Microphone permission denied');
+      logger.debug('Microphone permission denied');
       return false;
     }
 
@@ -165,11 +166,11 @@ async function tryMicrophoneDetection(): Promise<boolean> {
     // 3. Process audio data in real-time to detect tap patterns
     // 4. This is complex and requires native audio processing
     
-    console.log('Microphone tap detection would be implemented here');
+    logger.debug('Microphone tap detection would be implemented here');
     return false; // Disabled for now, use accelerometer instead
     
   } catch (error) {
-    console.warn('Microphone tap detection failed:', error);
+    logger.warn('Microphone tap detection failed:', error);
     return false;
   }
 }

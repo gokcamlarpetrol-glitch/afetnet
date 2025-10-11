@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { logger } from '../utils/productionLogger';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useCompass } from '../hooks/useCompass';
 import { usePDRFuse } from '../hooks/usePDRFuse';
@@ -81,7 +82,7 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
         { text: 'İptal', style: 'cancel' },
         { text: 'Aç', onPress: () => {
           // TODO: Open map with satellite view
-          console.log('Open satellite view for:', target);
+          logger.debug('Open satellite view for:', target);
         }}
       ]
     );
@@ -159,14 +160,16 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
       </View>
 
       <View style={styles.actionsContainer}>
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleCalibrate}
           style={[styles.actionButton, styles.calibrateButton]}
         >
           <Text style={styles.actionButtonText}>Pusula Kalibre Et</Text>
         </Pressable>
 
-        <Pressable
+        <Pressable accessible={true}
+          accessibilityRole="button"
           onPress={handleViewSatellite}
           style={styles.actionButton}
         >
@@ -174,7 +177,8 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
         </Pressable>
 
         {onClose && (
-          <Pressable
+          <Pressable accessible={true}
+          accessibilityRole="button"
             onPress={onClose}
             style={[styles.actionButton, styles.closeButton]}
           >
