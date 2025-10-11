@@ -18,21 +18,6 @@ services:
         fromDatabase:
           name: afetnet-db
           property: connectionString
-      - key: JWT_SECRET
-        generateValue: true
-      - key: ENCRYPTION_SECRET_KEY
-        generateValue: true
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: afetnet-redis
-          property: connectionString
-      - key: FIREBASE_PROJECT_ID
-        sync: false
-      - key: FIREBASE_CLIENT_EMAIL
-        sync: false
-      - key: FIREBASE_PRIVATE_KEY
-        sync: false
       - key: CORS_ORIGIN
         value: https://afetnet.app,https://www.afetnet.app
       - key: AFAD_API_URL

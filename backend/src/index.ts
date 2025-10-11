@@ -13,9 +13,16 @@ import { swaggerSpec } from './utils/swagger';
 // Load environment variables
 dotenv.config();
 
-// CRITICAL: Validate environment variables before starting
+// CRITICAL: Validate environment variables before starting - ELITE ERROR HANDLING
 import { validateEnv } from './utils/env';
-validateEnv();
+
+try {
+  validateEnv();
+} catch (error) {
+  console.error('❌ CRITICAL: Server startup failed due to environment validation:');
+  console.error(error);
+  process.exit(1);
+}
 
 // Import routes
 import adminRoutes from './routes/admin';
@@ -257,9 +264,14 @@ cron.schedule('*/30 * * * * *', async () => {
 
 async function startServer() {
   try {
-    // CRITICAL: Initialize Firebase Admin SDK for push notifications
-    await initializeFirebase();
-    logger.info('✅ Firebase Admin SDK initialized');
+    // CRITICAL: Initialize Firebase Admin SDK for push notifications - ELITE FIX
+    try {
+      await initializeFirebase();
+      logger.info('✅ Firebase Admin SDK initialized');
+    } catch (error) {
+      logger.warn('⚠️ Firebase initialization failed - push notifications will be disabled:', error);
+      // Don't fail startup - continue without Firebase
+    }
     
     // CRITICAL: Verify database connection
     const dbHealthy = await checkDatabaseHealth();
