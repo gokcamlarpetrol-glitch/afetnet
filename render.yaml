@@ -6,7 +6,7 @@ services:
     region: frankfurt
     plan: free
     rootDir: backend
-    buildCommand: npm install && npx tsc --skipLibCheck && npx prisma generate && npx prisma migrate deploy
+    buildCommand: npm install && npx tsc --skipLibCheck && npx prisma generate && npx prisma db push --accept-data-loss
     startCommand: npm start
     healthCheckPath: /health
     envVars:
