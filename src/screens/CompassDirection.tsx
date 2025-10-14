@@ -37,8 +37,8 @@ export default function CompassDirection({ visible, onClose, target, currentPosi
     );
   }
 
-  const distance = haversineDistance(currentPosition, target);
-  const bearing = bearingTo(currentPosition, target);
+  const distance = haversineDistance(currentPosition.lat, currentPosition.lng, target.lat, target.lng);
+  const bearing = bearingTo(currentPosition.lat, currentPosition.lng, target.lat, target.lng);
   const relativeAngle = (bearing - heading + 360) % 360;
 
   return (
@@ -124,13 +124,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    color: palette.text,
+    color: palette.text.primary,
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: spacing(2),
   },
   errorText: {
-    color: palette.danger,
+    color: palette.error.main,
     fontSize: 16,
     marginBottom: spacing(2),
     textAlign: 'center',

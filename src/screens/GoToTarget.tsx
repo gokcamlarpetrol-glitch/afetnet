@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { logger } from '../utils/productionLogger';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useCompass } from '../hooks/useCompass';
 import { usePDRFuse } from '../hooks/usePDRFuse';
 import { bearingTo, haversineDistance } from '../lib/geo';
+import { logger } from '../utils/productionLogger';
 
 interface Target {
   lat: number;
@@ -100,7 +100,7 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
         </Text>
         {onClose && (
           <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>Kapat</Text>
+            <Text style={styles.actionButtonText}>Kapat</Text>
           </Pressable>
         )}
       </View>

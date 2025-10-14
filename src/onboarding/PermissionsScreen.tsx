@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { logger } from '../utils/productionLogger';
 import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { palette, spacing } from '../ui/theme';
+import { logger } from '../utils/productionLogger';
 import { permissionsManager, PermissionStatus } from './PermissionsFlow';
 
 export default function PermissionsScreen() {
@@ -108,23 +108,29 @@ export default function PermissionsScreen() {
     }
   };
 
-  const getStatusIcon = (status: 'granted' | 'denied' | 'undetermined') => {
+  const getStatusIcon = (status: 'granted' | 'denied' | 'undetermined' | undefined) => {
     switch (status) {
       case 'granted':
         return <Ionicons name="checkmark-circle" size={24} color={palette.success.main} />;
       case 'denied':
         return <Ionicons name="close-circle" size={24} color={palette.error.main} />;
+      case 'undetermined':
+      case undefined:
+        return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
       default:
         return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
     }
   };
 
-  const getStatusText = (status: 'granted' | 'denied' | 'undetermined') => {
+  const getStatusText = (status: 'granted' | 'denied' | 'undetermined' | undefined) => {
     switch (status) {
       case 'granted':
         return 'Verildi';
       case 'denied':
         return 'Reddedildi';
+      case 'undetermined':
+      case undefined:
+        return 'Bekleniyor';
       default:
         return 'Bekleniyor';
     }

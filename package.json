@@ -1,6 +1,7 @@
 {
   "name": "afetnet",
   "version": "1.0.0",
+  "type": "module",
   "description": "AfetNet - Emergency Communication App",
   "main": "index.ts",
   "scripts": {

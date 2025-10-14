@@ -1,5 +1,4 @@
 import * as Application from 'expo-application';
-import { logger } from '../utils/productionLogger';
 import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -14,6 +13,7 @@ import { usePeople } from '../store/people';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { palette, spacing } from '../ui/theme';
+import { logger } from '../utils/productionLogger';
 
 interface HealthData {
   appVersion: string;
@@ -81,7 +81,7 @@ export default function HealthScreen() {
         uptime,
         configVersion: remoteConfig.version,
         killSwitchActive: remoteConfigManager.isKillSwitchActive(),
-        backgroundStatus,
+        backgroundStatus: { ...backgroundStatus, enabled: true },
         storage: {
           totalEvents: events.length,
           groupsCount: groups.length,

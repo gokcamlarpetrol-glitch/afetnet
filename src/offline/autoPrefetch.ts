@@ -1,10 +1,10 @@
-import * as Location from "expo-location";
-import { logger } from '../utils/productionLogger';
 import NetInfo from "@react-native-community/netinfo";
 import * as FileSystem from "expo-file-system";
-import { tilesForBBox } from "./tiles";
-import { tileManager } from "./tileManager";
+import * as Location from "expo-location";
 import { AUTO_PREFETCH_KM, AUTO_PREFETCH_ZOOMS, REMOTE_S2_TEMPLATE } from "../config/mapBootstrap";
+import { logger } from '../utils/productionLogger';
+import { tileManager } from "./tileManager";
+import { tilesForBBox } from "./tiles";
 
 function bboxFromCenter(lat: number, lon: number, km: number) {
   const d = km / 111;
@@ -50,7 +50,7 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
       const tiles = tilesForBBox(box, zoom, zoom);
       
       for (const tile of tiles) {
-        const url = REMOTE_S2_TEMPLATE
+        const url = (REMOTE_S2_TEMPLATE as string)
           .replace("{z}", String(tile.z))
           .replace("{x}", String(tile.x))
           .replace("{y}", String(tile.y));
