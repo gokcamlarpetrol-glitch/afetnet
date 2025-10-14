@@ -26,11 +26,13 @@ class LiveFeedManager {
   private burstEndTime = 0;
   private lastEventId: string | null = null;
   private appStateSubscription: any = null;
+  private settings: EewSettings;
 
   constructor(
     private initialSettings: EewSettings,
     private callbacks: LiveFeedCallbacks
   ) {
+    this.settings = initialSettings;
     this.setupAppStateListener();
   }
 
@@ -45,6 +47,7 @@ class LiveFeedManager {
           liveMode: parsed.state?.liveMode !== undefined ? parsed.state.liveMode : this.initialSettings.liveMode,
           pollFastMs: parsed.state?.pollFastMs || this.initialSettings.pollFastMs,
           pollSlowMs: parsed.state?.pollSlowMs || this.initialSettings.pollSlowMs,
+          selectedProvinces: parsed.state?.selectedProvinces || [],
           region: parsed.state?.region || this.initialSettings.region,
           experimentalPWave: parsed.state?.experimentalPWave !== undefined ? parsed.state.experimentalPWave : this.initialSettings.experimentalPWave
         };

@@ -7,6 +7,7 @@ const sample: QuakeItem[] = [
 ];
 
 export const mockProvider: QuakeProvider = {
+  name: 'Mock Provider',
   async fetchRecent() {
     await new Promise(r => setTimeout(r, 200));
     return sample;

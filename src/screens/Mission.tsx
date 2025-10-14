@@ -37,6 +37,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
 
   const { currentPos } = usePDRFuse();
   const [heading, setHeading] = useState(0);
+  // @ts-expect-error - NodeJS.Timeout type mismatch with React Native
   const scanIntervalRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {

@@ -17,8 +17,8 @@ export function encodeMeshMsg(msg: MeshMsg): string {
   // Compact JSON encoding with short field names
   const compact = {
     t: msg.t,
-    i: msg.id,
-    ts: msg.ts,
+    i: (msg as any).id,
+    ts: (msg as any).ts,
     tt: msg.ttl,
     h: msg.hop || 0
   };

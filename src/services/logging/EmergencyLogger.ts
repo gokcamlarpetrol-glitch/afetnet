@@ -456,7 +456,7 @@ class EmergencyLogger {
     try {
       throw new Error();
     } catch (error: Error | unknown) {
-      return error.stack || 'No stack trace available';
+      return (error as any)?.stack || 'No stack trace available';
     }
   }
 

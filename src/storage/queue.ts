@@ -64,9 +64,9 @@ export async function flush(): Promise<number> {
       const attempts = (item.attempts || 0) + 1;
       if (attempts < 3) {
         failed.push({ ...item, attempts });
-        logger.warn(`AfetNet: Queue item başarısız (deneme ${attempts}/3):`, error.message);
+        logger.warn(`AfetNet: Queue item başarısız (deneme ${attempts}/3)`, { error: (error as any)?.message });
       } else {
-        logger.error(`AfetNet: Queue item kalıcı hata, siliniyor (${item.id}):`, error.message);
+        logger.error(`AfetNet: Queue item kalıcı hata, siliniyor (${item.id})`, { error: (error as any)?.message });
       }
     }
   }

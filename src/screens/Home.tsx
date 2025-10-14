@@ -363,7 +363,7 @@ export default function Home() {
       };
       
       const messageId = await offlineMessageManager.sendMessage(
-        JSON.stringify(sosMessage)
+        JSON.stringify(sosMessage) as any
       );
 
       logger.debug('🚨 SOS message sent:', messageId);

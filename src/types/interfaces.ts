@@ -156,19 +156,20 @@ export interface EarthquakeData {
 
 /**
  * Export all interfaces
+ * Note: Commented out to avoid export conflicts - import directly from specific files
  */
-export type {
-  NavigationProp,
-  SOSAlertData,
-  MeshMessage,
-  MeshPayload,
-  QueueItem,
-  MessagePayload,
-  FamilyMember,
-  BLEDevice,
-  Coordinates,
-  APIResponse,
-  UserProfile,
-  EarthquakeData,
-};
+// export type {
+//   NavigationProp,
+//   SOSAlertData,
+//   MeshMessage,
+//   MeshPayload,
+//   QueueItem,
+//   MessagePayload,
+//   FamilyMember,
+//   BLEDevice,
+//   Coordinates,
+//   APIResponse,
+//   UserProfile,
+//   EarthquakeData,
+// };
 

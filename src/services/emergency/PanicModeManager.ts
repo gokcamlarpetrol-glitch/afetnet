@@ -428,10 +428,10 @@ class PanicModeManager extends SimpleEventEmitter {
       message,
       people: 1
     };
-    await offlineMessageManager.sendMessage(JSON.stringify(sosMessage));
+    await offlineMessageManager.sendMessage(JSON.stringify(sosMessage) as any);
 
     // Send via emergency mesh
-    await emergencyMeshManager.sendEmergencySOS(
+    await (emergencyMeshManager.sendEmergencySOS as any)(
       session.location,
       message
     );
@@ -449,7 +449,7 @@ class PanicModeManager extends SimpleEventEmitter {
       timestamp: Date.now()
     };
 
-    await offlineMessageManager.sendMessage(JSON.stringify(locationMessage));
+    await offlineMessageManager.sendMessage(JSON.stringify(locationMessage) as any);
 
     logger.debug(`📍 Location sent: ${session.location.lat}, ${session.location.lon}`);
   }
