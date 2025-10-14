@@ -86,6 +86,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-font",
     "react-native-ble-plx",
     "expo-barcode-scanner"
+    // "react-native-maps" - temporarily disabled for Expo Go compatibility
   ],
   newArchEnabled: true,
   extra: {
