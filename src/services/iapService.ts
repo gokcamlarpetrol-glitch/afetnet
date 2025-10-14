@@ -16,24 +16,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '../utils/productionLogger';
 
 // Premium plans - MUST match App Store Connect & Google Play Console
+// Pricing reflects the life-saving value of AfetNet's emergency features
 export const PREMIUM_PLANS = {
   monthly: {
     id: 'afetnet_premium_monthly',
-    price: 29.99,
+    price: 49.99,
     currency: 'TRY',
     title: 'Aylık Premium',
     description: 'Tüm premium özellikler 1 ay'
   },
   yearly: {
     id: 'afetnet_premium_yearly',
-    price: 299.99,
+    price: 499.99,
     currency: 'TRY',
     title: 'Yıllık Premium',
     description: 'Tüm premium özellikler 1 yıl (%17 indirim)'
   },
   lifetime: {
     id: 'afetnet_premium_lifetime',
-    price: 599.99,
+    price: 999.99,
     currency: 'TRY',
     title: 'Yaşam Boyu Premium',
     description: 'Tüm premium özellikler kalıcı (%50 indirim)'

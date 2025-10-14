@@ -6,16 +6,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAccessibility } from '../store/accessibility';
 import { useEmergency } from '../store/emergency';
 import { useFamily } from '../store/family';
-import { usePremium } from '../store/premium';
+import { usePremium, usePremiumFeatures } from '../store/premium';
 import { useSettings } from '../store/settings';
 // ACTIVE: Premium screen with full IAP support
 import PremiumActiveScreen from './PremiumActive';
 
 export default function Settings() {
   const { updateSettings } = useSettings();
-  const { ultra, updateEmergency } = useEmergency();
+  const { ultra } = useEmergency();
   const { generateMyAfnId } = useFamily();
-  const { isPremium, canUseFeature, getRemainingUsage } = usePremium();
+  const { isPremium } = usePremium();
+  const { canUseFeature, getRemainingUsage } = usePremiumFeatures();
   const { setHighContrast, setBigText, setHapticsStrong } = useAccessibility();
 
   // State management
