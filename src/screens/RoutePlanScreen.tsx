@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+// import MapView, { Marker, Polyline } from "react-native-maps"; // Temporarily disabled for Expo Go
 import QRCode from "react-native-qrcode-svg";
 import { SafeBarcodeScanner } from "../ui/SafeBarcodeScanner";
 import * as Location from "expo-location";

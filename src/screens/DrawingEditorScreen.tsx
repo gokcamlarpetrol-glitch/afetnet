@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
-import MapView, { Polyline } from "react-native-maps";
+// import MapView, { Polyline } from "react-native-maps"; // Temporarily disabled for Expo Go
 import { DrawKind, DrawShape } from "../draw/types";
 import { broadcastShape } from "../draw/mesh";
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import MapView, { Polyline } from "react-native-maps";
+// import MapView, { Polyline } from "react-native-maps"; // Temporarily disabled for Expo Go
 import { readTrack, startTrack, stopTrack } from "../track/bread";
 import { Pressable, Text, View } from "react-native";
 
