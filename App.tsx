@@ -1,6 +1,4 @@
-// APPLE COMPLIANCE: Stripe temporarily disabled for App Store review
-// Will be replaced with Apple In-App Purchase in future update
-// import { StripeProvider } from '@stripe/stripe-react-native';
+// ACTIVE: Native IAP implementation with react-native-iap
 import { useEffect } from 'react';
 import { LogBox, Platform } from 'react-native';
 import 'react-native-gesture-handler';
@@ -9,8 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { configureHandlers, getPushToken } from './src/lib/notifications';
 import RootTabs from './src/navigation/RootTabs';
 
-// APPLE COMPLIANCE: Payment disabled for initial App Store submission
-// const STRIPE_PUBLISHABLE_KEY = process.env['EXPO_PUBLIC_STRIPE_KEY'] || '';
+// ACTIVE: Native IAP implementation ready
 
 export default function App() {
   useEffect(() => {
@@ -44,13 +41,10 @@ export default function App() {
   }, []);
 
   return (
-    // APPLE COMPLIANCE: StripeProvider removed for App Store compliance
-    // <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <RootTabs />
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    // </StripeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <RootTabs />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

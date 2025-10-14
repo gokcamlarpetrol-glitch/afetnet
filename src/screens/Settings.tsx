@@ -8,9 +8,8 @@ import { useEmergency } from '../store/emergency';
 import { useFamily } from '../store/family';
 import { usePremium } from '../store/premium';
 import { useSettings } from '../store/settings';
-// APPLE COMPLIANCE: Premium screen disabled
-// import PremiumScreen from './Premium';
-import PremiumComingSoonScreen from './PremiumComingSoon';
+// ACTIVE: Premium screen with full IAP support
+import PremiumActiveScreen from './PremiumActive';
 
 export default function Settings() {
   const { updateSettings } = useSettings();
@@ -161,7 +160,7 @@ export default function Settings() {
   const renderPremiumSection = () => {
     return (
       <View style={styles.premiumContainer}>
-        <PremiumComingSoonScreen />
+        <PremiumActiveScreen />
       </View>
     );
   };
