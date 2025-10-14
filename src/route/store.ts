@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system";
-// import * as ImagePicker from "expo-image-picker"; // Temporarily disabled
+// import * as ImagePicker from "expo-image-picker"; // Not available
 import { Graph } from "./types";
 
 const DIR = "/tmp/";
@@ -38,20 +38,10 @@ export async function setNodePhoto(id:string, uri:string){
   n.photoUri = uri; await save(g);
 }
 export async function pickPhotoFromCamera(): Promise<string|null>{
-  try{
-    const r = await ImagePicker.requestCameraPermissionsAsync();
-    if(r.status!=="granted") {return null;}
-    const pic = await ImagePicker.launchCameraAsync({ quality:0.6, base64:false });
-    if(pic.canceled) {return null;}
-    return pic.assets?.[0]?.uri || null;
-  }catch{ return null; }
+  // ImagePicker not available - would need expo-image-picker
+  return null;
 }
 export async function pickPhotoFromGallery(): Promise<string|null>{
-  try{
-    const r = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if(r.status!=="granted") {return null;}
-    const pic = await ImagePicker.launchImageLibraryAsync({ quality:0.7, base64:false });
-    if(pic.canceled) {return null;}
-    return pic.assets?.[0]?.uri || null;
-  }catch{ return null; }
+  // ImagePicker not available - would need expo-image-picker
+  return null;
 }

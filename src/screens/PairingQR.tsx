@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
   },
   mockScanner: {
     height: 200,
-    backgroundColor: palette.backgroundDim,
+    backgroundColor: palette.background.dark,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,

@@ -354,11 +354,16 @@ export default function Home() {
       };
 
       // Send SOS via offline message manager
-      const messageId = await offlineMessageManager.sendSOSMessage(
+      const sosMessage = {
+        type: 'sos' as const,
         location,
-        data.note || 'Yardım istiyorum',
-        data.people,
-        undefined // broadcast to all
+        note: (data as any).note || 'Yardım istiyorum',
+        people: (data as any).people,
+        timestamp: Date.now()
+      };
+      
+      const messageId = await offlineMessageManager.sendMessage(
+        JSON.stringify(sosMessage)
       );
 
       logger.debug('🚨 SOS message sent:', messageId);
@@ -381,10 +386,8 @@ export default function Home() {
 
               // Process all queued items
               for (const item of queueItems) {
-                await offlineMessageManager.sendTextMessage(
-                  'Mesaj', // Simplified message
-                  undefined, // broadcast
-                  'medium'
+                await offlineMessageManager.sendMessage(
+                  (item as any).text || 'Mesaj' // Simplified message
                 );
               }
 
@@ -953,7 +956,7 @@ export default function Home() {
                     borderWidth: 1,
                     borderColor: '#1b2746',
                   }}>
-                    <Ionicons name={config.icon} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
+                    <Ionicons name={item.icon as any} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
                     <Text style={{ color: '#cdd7ff', fontSize: 12, fontWeight: '500' }}>
                       {item.label}
                     </Text>
@@ -976,7 +979,7 @@ export default function Home() {
                     borderWidth: 1,
                     borderColor: '#1b2746',
                   }}>
-                    <Ionicons name={config.icon} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
+                    <Ionicons name={item.icon as any} size={24} color="#8da0cc" style={{ marginBottom: 8 }} />
                     <Text style={{ color: '#cdd7ff', fontSize: 12, fontWeight: '500' }}>
                       {item.label}
                     </Text>

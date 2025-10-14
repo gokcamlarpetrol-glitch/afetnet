@@ -39,7 +39,7 @@ export default function Training() {
       clearActiveIncidents();
 
       // Generate synthetic incidents based on scenario
-      const incidents = [];
+      const incidents: Array<{ id: string; lat: number; lon: number; statuses: string[]; ts: number }> = [];
       
       switch (scenario) {
         case 'single':

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { View, Text, Pressable } from "react-native";
+import { Alert, View, Text, Pressable } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { SafeBarcodeScanner } from "../ui/SafeBarcodeScanner";
 import { listInbox, appendInbox } from "../msg/store";
@@ -21,7 +21,7 @@ export default function QRRelayScreen(){
   }
 
   async function onScan({ data }:any){
-    try{ const o=JSON.parse(data); await appendInbox(o); alert("Mesaj alındı"); }catch{}
+    try{ const o=JSON.parse(data); await appendInbox(o); Alert.alert("Başarılı", "Mesaj alındı"); }catch{}
   }
 
   return (

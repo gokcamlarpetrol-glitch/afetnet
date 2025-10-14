@@ -123,14 +123,14 @@ export default function GroupChatScreen() {
     }
   };
 
-  const handleShowVerification = () => {
+  const handleShowVerification = async () => {
     const sharedKey = getSharedKey(group.id);
     if (!sharedKey) {
       Alert.alert('Hata', 'Grup şifreleme anahtarı bulunamadı');
       return;
     }
 
-    const phrase = generateVerificationPhrase(sharedKey);
+    const phrase = await generateVerificationPhrase(sharedKey);
     setVerificationPhrase(phrase);
     setShowVerification(true);
   };
@@ -430,12 +430,12 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     backgroundColor: palette.background.secondary,
     borderTopWidth: 1,
-    borderTopColor: palette.border.primary,
+    borderTopColor: palette.border,
   },
   messageInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: palette.border.primary,
+    borderColor: palette.border,
     borderRadius: 20,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   emergencyButtonActive: {
-    backgroundColor: palette.error.light,
+    backgroundColor: palette.error.main + '20',
     borderRadius: 20,
   },
   sendButton: {
@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
   },
   verificationPhrase: {
     fontSize: 16,
-    color: palette.primary,
+    color: palette.primary.main,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: spacing.md,

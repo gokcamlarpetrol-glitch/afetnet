@@ -34,14 +34,23 @@ export default function Mission({ target }: { target?: MissionTarget }) {
     unsafe: false
   });
 
-  const { heading, currentPos } = usePDRFuse();
+  const { currentPos } = usePDRFuse();
+  const [heading, setHeading] = useState(0);
   const scanIntervalRef = useRef<NodeJS.Timeout>();
+
+  const calculateDirectionAndDistance = () => {
+    // Calculate direction and distance to target
+    if (target && currentPos) {
+      // Placeholder - would calculate bearing and distance
+      logger.debug('Calculating direction to target', { target, currentPos });
+    }
+  };
 
   useEffect(() => {
     if (target && currentPos) {
       calculateDirectionAndDistance();
     }
-  }, [target, currentPos]);
+  }, [target, currentPos, heading]);
 
   useEffect(() => {
     if (isScanning) {
@@ -108,7 +117,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
   const stopGridScan = () => {
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = undefined;
+      scanIntervalRef.current = undefined as any;
     }
   };
 

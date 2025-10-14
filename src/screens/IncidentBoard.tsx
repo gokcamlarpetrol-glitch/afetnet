@@ -144,13 +144,11 @@ export default function IncidentBoard() {
           </Text>
         </View>
 
-        {item.statuses && item.statuses.length > 0 && (
+        {item.status && (
           <View style={styles.statusesContainer}>
-            {item.statuses.map((status, index) => (
-              <View key={index} style={styles.statusTag}>
-                <Text style={styles.statusTagText}>{status}</Text>
-              </View>
-            ))}
+            <View style={styles.statusTag}>
+              <Text style={styles.statusTagText}>{item.status}</Text>
+            </View>
           </View>
         )}
 

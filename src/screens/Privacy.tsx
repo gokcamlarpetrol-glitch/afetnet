@@ -21,7 +21,7 @@ export default function PrivacyScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Card style={styles.headerCard}>
           <View style={styles.header}>
-            <Ionicons name="shield-checkmark" size={48} color={palette.primary} />
+            <Ionicons name="shield-checkmark" size={48} color={palette.primary.main} />
             <Text style={styles.title}>Gizlilik ve Veri Koruma</Text>
             <Text style={styles.subtitle}>
               AfetNet, kişisel verilerinizi güvende tutar
@@ -133,13 +133,13 @@ export default function PrivacyScreen() {
               label="Kabul Etmiyorum"
               onPress={handleDecline}
               variant="ghost"
-              style={[styles.consentButton, !accepted && styles.consentButtonActive]}
+              style={!accepted ? { ...styles.consentButton, ...styles.consentButtonActive } : styles.consentButton}
             />
             <Button
               label="Kabul Ediyorum"
               onPress={handleAccept}
               variant="primary"
-              style={[styles.consentButton, accepted && styles.consentButtonActive]}
+              style={accepted ? { ...styles.consentButton, ...styles.consentButtonActive } : styles.consentButton}
             />
           </View>
           <Text style={styles.consentNote}>

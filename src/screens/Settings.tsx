@@ -1010,7 +1010,7 @@ export default function Settings() {
                 { backgroundColor: activeSection === section.id ? section.color : 'transparent' }
               ]}>
             <Ionicons 
-                  name={section.icon} 
+                  name={section.icon as any} 
                   size={20} 
                   color={activeSection === section.id ? '#FFFFFF' : '#6B7280'} 
                 />

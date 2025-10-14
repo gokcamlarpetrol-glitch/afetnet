@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   tabIndicator: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
     height: 2,
   },
   emptyText: {
