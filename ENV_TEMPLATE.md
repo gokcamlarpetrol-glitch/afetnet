@@ -19,7 +19,7 @@ EXPO_PUBLIC_FIREBASE_APP_ID=your_app_id
 EXPO_PUBLIC_FIREBASE_VAPID_KEY=your_vapid_key
 
 # Stripe
-EXPO_PUBLIC_STRIPE_KEY=pk_live_your_stripe_publishable_key
+EXPO_PUBLIC_STRIPE_KEY=pk_live_[YOUR_PUBLISHABLE_KEY]
 ```
 
 ### Backend (backend/.env)
@@ -42,7 +42,7 @@ FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your_project.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 
 # Stripe
-STRIPE_SECRET_KEY=sk_live_your_stripe_secret_key
+STRIPE_SECRET_KEY=sk_live_[YOUR_SECRET_KEY]
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 
 # Redis
@@ -68,7 +68,7 @@ LOG_LEVEL=info
 - [ ] JWT_SECRET is at least 32 characters
 - [ ] ENCRYPTION_SECRET_KEY is at least 32 characters
 - [ ] Firebase credentials are from production project
-- [ ] Stripe keys are live keys (pk_live_, sk_live_)
+- [ ] Stripe keys are live keys (pk_live_[YOUR_KEY], sk_live_[YOUR_KEY])
 - [ ] CORS_ORIGIN is not '*'
 - [ ] Database URL uses SSL
 - [ ] All secrets are stored in EAS Secrets / Render Environment Variables

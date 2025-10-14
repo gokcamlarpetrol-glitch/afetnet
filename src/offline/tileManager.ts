@@ -8,7 +8,7 @@ export interface TilePack {
   path: string;
   sizeBytes: number;
   zooms: number[];
-  kind: 'raster' | 'vector';
+  kind: 'raster' | 'vector' | 'mbtiles';
   type?: 'mbtiles' | 'directory';
   name?: string;
   description?: string;

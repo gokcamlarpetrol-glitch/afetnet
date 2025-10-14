@@ -162,7 +162,7 @@ FIREBASE_CLIENT_EMAIL=your-client-email
 FIREBASE_PRIVATE_KEY="your-private-key"
 
 # Stripe
-STRIPE_SECRET_KEY=sk_test_your_key
+STRIPE_SECRET_KEY=sk_live_[YOUR_KEY]
 STRIPE_WEBHOOK_SECRET=whsec_your_secret
 
 # APIs
