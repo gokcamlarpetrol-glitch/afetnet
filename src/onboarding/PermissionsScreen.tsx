@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
     borderRadius: 2,
   },
   permissionCard: {

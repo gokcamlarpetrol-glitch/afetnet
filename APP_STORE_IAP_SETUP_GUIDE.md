@@ -27,7 +27,7 @@
 Product ID: afetnet_premium_monthly
 Reference Name: AfetNet Monthly Premium
 Subscription Duration: 1 Month
-Price: ₺29.99
+Price: ₺49.99
 ```
 
 **🔄 Yıllık Premium (afetnet_premium_yearly)**
@@ -35,7 +35,7 @@ Price: ₺29.99
 Product ID: afetnet_premium_yearly
 Reference Name: AfetNet Yearly Premium
 Subscription Duration: 1 Year
-Price: ₺299.99
+Price: ₺499.99
 ```
 
 **🔄 Yaşam Boyu Premium (afetnet_premium_lifetime)**
@@ -43,7 +43,7 @@ Price: ₺299.99
 Product ID: afetnet_premium_lifetime
 Reference Name: AfetNet Lifetime Premium
 Subscription Duration: 1 Year (renewable)
-Price: ₺599.99
+Price: ₺999.99
 ```
 
 ### 2️⃣ **Subscription Group Oluşturma**
@@ -83,7 +83,7 @@ const receiptData = await validateReceiptIos({
 Product ID: afetnet_premium_monthly
 Name: AfetNet Aylık Premium
 Description: Tüm premium özellikler 1 ay
-Price: ₺29.99
+Price: ₺49.99
 Status: Active
 ```
 
@@ -92,7 +92,7 @@ Status: Active
 Product ID: afetnet_premium_yearly
 Name: AfetNet Yıllık Premium
 Description: Tüm premium özellikler 1 yıl (%17 indirim)
-Price: ₺299.99
+Price: ₺499.99
 Status: Active
 ```
 
@@ -101,7 +101,7 @@ Status: Active
 Product ID: afetnet_premium_lifetime
 Name: AfetNet Yaşam Boyu Premium
 Description: Tüm premium özellikler kalıcı (%50 indirim)
-Price: ₺599.99
+Price: ₺999.99
 Status: Active
 ```
 

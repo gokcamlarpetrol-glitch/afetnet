@@ -98,7 +98,7 @@ export default function Onboarding() {
 
         <Card style={styles.pageCard}>
           <View style={styles.iconContainer}>
-            <Ionicons name={currentPageData.icon} size={80} color={palette.primary} />
+            <Ionicons name={currentPageData.icon} size={80} color={palette.primary.main} />
           </View>
           
           <Text style={styles.pageTitle}>{currentPageData.title}</Text>
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
   },
   pageSubtitle: {
     fontSize: 16,
-    color: palette.primary,
+    color: palette.primary.main,
     textAlign: 'center',
     marginBottom: spacing.lg,
   },
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
     backgroundColor: (palette.border as any).primary || '#E0E0E0',
   },
   paginationDotActive: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
   },
   footer: {
     padding: spacing.lg,

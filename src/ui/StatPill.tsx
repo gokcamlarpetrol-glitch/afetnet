@@ -25,5 +25,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: palette.border,
   },
-  value: { color: palette.text, fontWeight: "700" },
+  value: { color: palette.text.primary, fontWeight: "700" },
 });

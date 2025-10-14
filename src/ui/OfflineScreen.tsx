@@ -19,7 +19,7 @@ export default function OfflineScreen({
       {showOfflineIndicator && (
         <View style={styles.offlineIndicator}>
           <Ionicons
-            name="wifi-off"
+            name="cloud-offline-outline"
             size={24}
             color={brandPalette.accent.main}
             style={styles.offlineIcon}
