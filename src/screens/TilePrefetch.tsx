@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.border,
   },
   sliderButtonActive: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
   },
   sliderButtonText: {
     color: palette.text.primary,
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.border,
   },
   zoomButtonActive: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
   },
   zoomButtonText: {
     color: palette.text.primary,
@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
   },
   actions: {
     flexDirection: 'row',

@@ -112,7 +112,6 @@ export default function MapOffline() {
 
       const currentLocation = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
-        maximumAge: 10000,
       });
       setLocation(currentLocation);
       setRegion({
@@ -121,7 +120,10 @@ export default function MapOffline() {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       });
-      logger.debug('Location acquired:', currentLocation.coords.latitude, currentLocation.coords.longitude);
+      logger.debug('Location acquired', { 
+        lat: currentLocation.coords.latitude, 
+        lon: currentLocation.coords.longitude 
+      });
     } catch (error) {
       logger.error('Location error:', error);
       Alert.alert('Konum Hatası', 'Konum alınamadı. GPS aktif olduğundan emin olun.');
@@ -567,7 +569,7 @@ export default function MapOffline() {
         {trail.length > 1 && (
           <Polyline
             coordinates={trail}
-            strokeColor={palette.primary}
+            strokeColor={palette.primary.main}
             strokeWidth={4}
             lineCap="round"
             lineJoin="round"
@@ -640,8 +642,8 @@ export default function MapOffline() {
           <Marker
             coordinate={{ latitude: currentPos.lat, longitude: currentPos.lon }}
             title="Konum"
-            description={`${currentPos.source} • ${Math.round(currentPos.accuracy)}m`}
-            pinColor={currentPos.source === 'GPS' ? 'blue' : currentPos.source === 'PDR' ? 'orange' : 'green'}
+            description={`${(currentPos as any).source || 'GPS'} • ${Math.round(currentPos.accuracy || 0)}m`}
+            pinColor={(currentPos as any).source === 'GPS' ? 'blue' : (currentPos as any).source === 'PDR' ? 'orange' : 'green'}
           />
         )}
       </MapView>

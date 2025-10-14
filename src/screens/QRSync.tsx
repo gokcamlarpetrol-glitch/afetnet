@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { logger } from '../utils/productionLogger';
-import { View, Text, StyleSheet } from "react-native";
+import { Alert, View, Text, StyleSheet } from "react-native";
 import { useFamily } from "../store/family";
 import { useQueue } from "../store/queue";
 import Card from "../ui/Card";
@@ -61,7 +61,7 @@ export default function QRSyncScreen() {
           {QRCode && !isExpoGo ? (
             <QRCode value={payload} size={220} />
           ) : (
-            <View style={{ width: 220, height: 220, backgroundColor: palette.bgDim, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }}>
+            <View style={{ width: 220, height: 220, backgroundColor: palette.background.dark, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }}>
               <Text style={{ color: palette.textDim, textAlign: 'center', fontSize: 12 }}>
                 QR Code not available in Expo Go{'\n'}
                 Use development build for full functionality
@@ -79,19 +79,26 @@ export default function QRSyncScreen() {
                 try {
                   const obj = JSON.parse(String(data));
                   if (Array.isArray(obj?.fam)) {
-                    obj.fam.forEach((m: any) => fam.add({ name: m.name ?? "Kişi", emoji: m.emoji ?? "🧑", status: "unknown" }));
+                    obj.fam.forEach((m: any) => fam.add({ 
+                      name: m.name ?? "Kişi", 
+                      emoji: m.emoji ?? "🧑", 
+                      status: "unknown",
+                      isVerified: false,
+                      addedAt: Date.now(),
+                      connectionMethod: 'qr'
+                    }));
                   }
                   // kuyrukları etik olarak doğrudan birleştirmiyoruz; sadece göster/gerekiyorsa kullanıcı ekler → basit tut
                   setScan(false);
-                  alert("Veri alındı.");
+                  Alert.alert("Başarılı", "Veri alındı");
                 } catch {
-                  alert("Geçersiz QR");
+                  Alert.alert("Hata", "Geçersiz QR");
                   setScan(false);
                 }
               }}
             />
           ) : (
-            <View style={{ height: 260, backgroundColor: palette.bgDim, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }}>
+            <View style={{ height: 260, backgroundColor: palette.background.dark, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }}>
               <Text style={{ color: palette.textDim, textAlign: 'center' }}>
                 QR Scanner not available in Expo Go{'\n'}
                 Use development build for full functionality

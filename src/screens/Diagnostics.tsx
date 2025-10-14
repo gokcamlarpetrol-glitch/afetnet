@@ -204,7 +204,7 @@ export default function Diagnostics() {
           run: async () => {
             const hasPosition = !!currentPos;
             const source = (currentPos as any)?.source || 'yok';
-            const accuracy = currentPos ? Math.round(currentPos.accuracy) : 0;
+            const accuracy = currentPos ? Math.round(currentPos.accuracy || 0) : 0;
             return {
               ok: hasPosition,
               note: hasPosition ? `${source} ±${accuracy}m` : 'konum yok'
@@ -1023,7 +1023,7 @@ export default function Diagnostics() {
 
   const runAll = async () => {
     setBusy(true);
-    const out: unknown[] = [];
+    const out: Array<{ key: string; label: string; ok?: boolean; note?: string }> = [];
     for (const t of tests) {
       try {
         const r = await t.run();
@@ -1408,7 +1408,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing(0.5),
   },
   suggestionHow: {
-    color: palette.primary,
+    color: palette.primary.main,
     fontSize: 12,
     marginBottom: spacing(0.5),
   },
@@ -1429,7 +1429,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   acceptanceKey: {
-    color: palette.primary,
+    color: palette.primary.main,
     fontSize: 12,
     fontWeight: 'bold',
     minWidth: 60,

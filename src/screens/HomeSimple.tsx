@@ -66,8 +66,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
-        maximumAge: 10000,
-        timeout: 15000,
+        timeInterval: 10000,
       });
 
       // CRITICAL: Validate location data
@@ -83,7 +82,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
       // CRITICAL: Send SOS to backend
       const sosData = {
-        ...data,
+        ...(typeof data === 'object' && data !== null ? data : {}),
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy || 0,

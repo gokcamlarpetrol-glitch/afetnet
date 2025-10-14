@@ -119,7 +119,7 @@ export default function ConsentScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Card style={styles.headerCard}>
           <View style={styles.header}>
-            <Ionicons name="document-text" size={48} color={palette.primary} />
+            <Ionicons name="document-text" size={48} color={palette.primary.main} />
             <Text style={styles.title}>Onam ve İzinler</Text>
             <Text style={styles.subtitle}>
               Veri işleme ve paylaşım izinleri

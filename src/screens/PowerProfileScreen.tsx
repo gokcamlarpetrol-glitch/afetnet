@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { loadPower, savePower, getPower } from "../power/profile";
 import { startAudioDetect, stopAudioDetect } from "../audio/detect";
 
@@ -12,7 +12,7 @@ export default function PowerProfileScreen(){
   async function apply(){
     const p = await savePower({ meshPingSec: parseInt(mesh||"30",10), ulbRateLimitSec: parseInt(ulb||"10",10), audioDetect: audioOn, screenDimming: dim });
     if(p.audioDetect) {await startAudioDetect();} else {await stopAudioDetect();}
-    alert("Kaydedildi");
+    Alert.alert("Başarılı", "Güç profili kaydedildi");
   }
 
   return (
