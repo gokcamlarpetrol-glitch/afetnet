@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, Alert, Dimensions } from 'react-nati
 import { usePDRFuse } from '../hooks/usePDRFuse';
 import { computeWeightedCentroid, RSSISample, combineEstimates } from '../algorithms/rssiGradient';
 import { meshRelay } from '../services/mesh/relay';
+import { logger } from '../utils/productionLogger';
 
 const { width } = Dimensions.get('window');
 
@@ -37,14 +38,6 @@ export default function Mission({ target }: { target?: MissionTarget }) {
   const { currentPos } = usePDRFuse();
   const [heading, setHeading] = useState(0);
   const scanIntervalRef = useRef<NodeJS.Timeout>();
-
-  const calculateDirectionAndDistance = () => {
-    // Calculate direction and distance to target
-    if (target && currentPos) {
-      // Placeholder - would calculate bearing and distance
-      logger.debug('Calculating direction to target', { target, currentPos });
-    }
-  };
 
   useEffect(() => {
     if (target && currentPos) {

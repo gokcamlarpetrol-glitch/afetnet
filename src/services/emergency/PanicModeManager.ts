@@ -422,19 +422,18 @@ class PanicModeManager extends SimpleEventEmitter {
     const priority = parameters.priority || 'critical';
 
     // Send via offline message manager
-    await offlineMessageManager.sendSOSMessage(
-      session.location,
+    const sosMessage = {
+      type: 'sos',
+      location: session.location,
       message,
-      1,
-      undefined
-    );
+      people: 1
+    };
+    await offlineMessageManager.sendMessage(JSON.stringify(sosMessage));
 
     // Send via emergency mesh
     await emergencyMeshManager.sendEmergencySOS(
       session.location,
-      message,
-      1,
-      priority as any
+      message
     );
 
     logger.debug(`🚨 SOS sent: ${message}`);
@@ -444,13 +443,13 @@ class PanicModeManager extends SimpleEventEmitter {
   private async sendLocation(parameters: any, session: PanicModeSession): Promise<void> {
     const { offlineMessageManager } = await import('../messaging/OfflineMessageManager');
 
-    const priority = parameters.priority || 'high';
+    const locationMessage = {
+      type: 'location',
+      location: session.location,
+      timestamp: Date.now()
+    };
 
-    await offlineMessageManager.sendLocationMessage(
-      session.location,
-      undefined,
-      priority as any
-    );
+    await offlineMessageManager.sendMessage(JSON.stringify(locationMessage));
 
     logger.debug(`📍 Location sent: ${session.location.lat}, ${session.location.lon}`);
   }
@@ -460,13 +459,8 @@ class PanicModeManager extends SimpleEventEmitter {
     const { offlineMessageManager } = await import('../messaging/OfflineMessageManager');
 
     const message = parameters.message || 'Panic mode message';
-    const priority = parameters.priority || 'high';
 
-    await offlineMessageManager.sendTextMessage(
-      message,
-      undefined,
-      priority as any
-    );
+    await offlineMessageManager.sendMessage(message);
 
     logger.debug(`📨 Message sent: ${message}`);
   }
