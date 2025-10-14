@@ -32,7 +32,7 @@ export default function HeatOverlay({ width, height, samples }:{width:number;hei
     return () => {
       // Clear any pending timeouts
       // Simplified cleanup - would need proper timeout management
-      console.log('HeatOverlay cleanup');
+      // HeatOverlay cleanup completed
     };
   }, []);
 

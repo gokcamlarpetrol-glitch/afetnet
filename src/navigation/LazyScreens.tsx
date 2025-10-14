@@ -1,12 +1,6 @@
 /**
- * Lazy Loading for Screens
- * Elite Performance Optimization
- * 
- * Benefits:
- * - Smaller initial bundle
- * - Faster app startup
- * - Better memory usage
- * - On-demand loading
+ * Lazy Loading for Screens - FIXED VERSION
+ * No circular dependencies
  */
 
 import React, { Suspense, lazy } from 'react';
@@ -42,7 +36,7 @@ export const Chat = lazy(() => import('../screens/ChatScreen'));
 
 // Advanced Features (load when needed)
 export const BlackBox = lazy(() => import('../screens/BlackBox'));
-export const Diagnostics = lazy(() => import('../screens/DiagnosticsScreen'));
+export const Diagnostics = lazy(() => import('../screens/Diagnostics'));
 export const Health = lazy(() => import('../screens/Health'));
 export const Groups = lazy(() => import('../screens/Groups'));
 
@@ -55,21 +49,8 @@ export const AssemblyPoints = lazy(() => import('../screens/AssemblyPoints'));
 export const Onboarding = lazy(() => import('../onboarding/Onboarding'));
 export const PermissionsScreen = lazy(() => import('../onboarding/PermissionsScreen'));
 
-// Testing & Debug (development only)
-export const TestSuite = lazy(() => import('../screens/TestSuiteScreen'));
-export const DiagnosticsScreen = lazy(() => import('../screens/DiagnosticsScreen'));
-
 /**
  * Wrap lazy component with Suspense
- * 
- * @param Component - Lazy-loaded component
- * @param fallback - Loading component (optional)
- * 
- * @example
- * ```tsx
- * const LazySettings = withSuspense(Settings);
- * <LazySettings />
- * ```
  */
 export function withSuspense<P extends object>(
   Component: React.LazyExoticComponent<React.ComponentType<P>>,
@@ -84,14 +65,6 @@ export function withSuspense<P extends object>(
 
 /**
  * Preload screen for faster navigation
- * 
- * @param Component - Lazy component to preload
- * 
- * @example
- * ```typescript
- * // Preload Settings when user opens menu
- * preloadScreen(Settings);
- * ```
  */
 export function preloadScreen(
   Component: React.LazyExoticComponent<React.ComponentType<any>>
@@ -99,17 +72,3 @@ export function preloadScreen(
   // Trigger dynamic import
   (Component as any)._payload?._result;
 }
-
-/**
- * USAGE IN NAVIGATION:
- * 
- * ```tsx
- * import { HomeScreen, Settings, withSuspense } from './navigation/LazyScreens';
- * 
- * const LazySettings = withSuspense(Settings);
- * 
- * <Tab.Screen name="Home" component={HomeScreen} /> // Critical - no lazy
- * <Tab.Screen name="Settings" component={LazySettings} /> // Lazy-loaded
- * ```
- */
-

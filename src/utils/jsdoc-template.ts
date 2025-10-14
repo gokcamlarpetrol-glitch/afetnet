@@ -71,7 +71,7 @@ export async function sendSOSAlert(sosData: any): Promise<any> {
  *   toAfnId: 'AFN-ABCD1234'
  * });
  * 
- * console.log(`Relayed to ${result.relayedCount} devices`);
+ * logger.info(`Relayed to ${result.relayedCount} devices`);
  * ```
  * 
  * @see {@link https://docs.afetnet.org/mesh|Mesh Network Documentation}
@@ -138,7 +138,7 @@ export function encryptMessage(
  *   39.9334, 32.8597   // Ankara
  * );
  * 
- * console.log(`Distance: ${distance.toFixed(2)} km`);
+ * logger.info(`Distance: ${distance.toFixed(2)} km`);
  * ```
  * 
  * @algorithm Haversine formula for great-circle distance

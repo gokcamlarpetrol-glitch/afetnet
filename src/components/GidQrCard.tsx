@@ -1,4 +1,4 @@
-import React from 'react';
+import { logger } from '../utils/productionLogger';import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -20,7 +20,7 @@ export default function GidQrCard({ gid, groupName, onClose }: GidQrCardProps) {
 
   const handleShare = async () => {
     // This would typically use expo-sharing
-    console.log('Share GID:', gid);
+    logger.info('Share GID:', gid);
   };
 
   return (

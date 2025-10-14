@@ -1,7 +1,0 @@
-- Sensör tespiti false-positive üretebilir. Bu nedenle varsayılan davranış *Auto-SOS Taslağı* oluşturup onay istemektir.
-- "Bilinçsiz Modu" sahada özellikle enkaz senaryosunda kullanılmalı; yanlış alarm riskine dikkat.
-- Ses ölçümü yalnızca anlık seviye için; kayıt saklanmaz.
-- Pil düşük/ısı yüksek durumlarında profil otomatik düşürülür (sessiz modda sesli uyarı çalmaz).
-
-
-

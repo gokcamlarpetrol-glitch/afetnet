@@ -85,7 +85,7 @@ class ProductionLogger {
     
     const formatted = this.formatMessage('debug', message, context);
     const masked = this.maskSensitiveData(data);
-    console.log(formatted, masked || '');
+    logger.info(formatted, masked || '');
   }
 
   /**
@@ -96,7 +96,7 @@ class ProductionLogger {
     
     const formatted = this.formatMessage('info', message, context);
     const masked = this.maskSensitiveData(data);
-    console.log(formatted, masked || '');
+    logger.info(formatted, masked || '');
   }
 
   /**
@@ -107,7 +107,7 @@ class ProductionLogger {
     
     const formatted = this.formatMessage('warn', message, context);
     const masked = this.maskSensitiveData(data);
-    console.warn(formatted, masked || '');
+    logger.warn(formatted, masked || '');
   }
 
   /**
@@ -122,7 +122,7 @@ class ProductionLogger {
       // Sentry.captureException(error, { tags: context });
     }
     
-    console.error(formatted, error || '');
+    logger.error(formatted, error || '');
   }
 
   /**
@@ -137,7 +137,7 @@ class ProductionLogger {
       // Sentry.captureException(error, { level: 'fatal', tags: context });
     }
     
-    console.error('🚨 CRITICAL:', formatted, error || '');
+    logger.error('🚨 CRITICAL:', formatted, error || '');
   }
 
   /**
@@ -147,7 +147,7 @@ class ProductionLogger {
     if (!this.isDevelopment) return;
     
     const formatted = this.formatMessage('info', `Performance: ${operation}`, context);
-    console.log(formatted, `${duration}ms`);
+    logger.info(formatted, `${duration}ms`);
   }
 
   /**
@@ -157,7 +157,7 @@ class ProductionLogger {
     if (!this.isDevelopment) return;
     
     const message = `API ${method} ${url} - ${status} (${duration}ms)`;
-    console.log(this.formatMessage('info', message));
+    logger.info(this.formatMessage('info', message));
   }
 }
 
