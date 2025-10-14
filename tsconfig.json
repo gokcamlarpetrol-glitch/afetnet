@@ -29,7 +29,8 @@
     },
     "types": [
       "react",
-      "react-native"
+      "react-native",
+      "node"
     ],
     "isolatedModules": true,
     "noEmit": true,

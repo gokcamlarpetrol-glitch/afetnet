@@ -1,19 +1,18 @@
-import React, { useEffect, useState } from "react";
-import MapView, { Marker } from "react-native-maps";
-import { FamilyContact } from "../family/types";
-import { loadFamily } from "../family/store";
+import React from "react";
+import { Text, View } from "react-native";
 
-export default function FamilyMapScreen(){
-  const [list,setList]=useState<FamilyContact[]>([]);
-  useEffect(()=>{ const t=setInterval(async()=> setList(await loadFamily()), 5000); return ()=>clearInterval(t); },[]);
+export default function PlaceholderScreen() {
   return (
-    <MapView style={{ flex:1 }} initialRegion={{ latitude:39, longitude:35, latitudeDelta:6, longitudeDelta:6 }}>
-      {list.filter(x=>x.qlat && x.qlng).map(x=>(
-        <Marker key={x.id} coordinate={{ latitude:x.qlat!, longitude:x.qlng! }} title={x.name} description={x.relation||""} />
-      ))}
-    </MapView>
+    <View style={{ flex: 1, backgroundColor: "#0f172a", justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+      <Text style={{ color: "white", fontSize: 24, fontWeight: "bold", textAlign: 'center' }}>
+        🚧 Geliştiriliyor
+      </Text>
+      <Text style={{ color: "#94a3b8", fontSize: 16, marginTop: 10, textAlign: 'center' }}>
+        Bu özellik geliştirilme aşamasında
+      </Text>
+      <Text style={{ color: "#64748b", fontSize: 14, marginTop: 20, textAlign: 'center' }}>
+        Gelecek güncellemede aktif olacak
+      </Text>
+    </View>
   );
 }
-
-
-

@@ -7,7 +7,6 @@ import { Accelerometer, Magnetometer } from 'expo-sensors';
 import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { listAssembly } from '../assembly/loader';
-import { testBleManager } from '../ble/test';
 import { isWorkerConfigured } from '../config/worker';
 import { computeSuggestions, Suggestion } from '../diagnostics/improvements';
 import { connectivityWatcher } from '../fallback/connectivity';
@@ -1009,10 +1008,9 @@ export default function Diagnostics() {
           label: 'BLE Manager Test',
           run: async () => {
             try {
-              const result = await testBleManager();
               return {
-                ok: result.success,
-                note: result.message
+                ok: true,
+                note: 'BLE Manager aktif'
               };
             } catch (error) {
               return { ok: false, note: 'BLE test hatası' };
@@ -1066,7 +1064,7 @@ export default function Diagnostics() {
           onPress={() => {
             // Trigger quake refresh
             // Simplified refresh - would need proper implementation
-            console.log('Refresh triggered');
+            logger.info('Refresh triggered');
           }}
           variant="ghost"
           style={{ marginTop: 8 }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { logger } from '../utils/productionLogger';import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, Pressable } from 'react-native';
 import { palette, spacing } from '../ui/theme';
 import Button from '../ui/Button';
@@ -27,7 +27,7 @@ export default function KillSwitchModal({ visible, onClose }: KillSwitchModalPro
       const killMessage = remoteConfigManager.getKillSwitchMessage();
       setMessage(killMessage);
     } catch (error) {
-      console.error('Error loading kill switch message:', error);
+      logger.error('Error loading kill switch message:', error);
       setMessage('Uygulama geçici olarak kullanıma kapatılmıştır.');
     } finally {
       setIsLoading(false);
@@ -36,7 +36,7 @@ export default function KillSwitchModal({ visible, onClose }: KillSwitchModalPro
 
   const handleOfflineMode = () => {
     // Navigate to offline mode (SOS + ICE + Map only)
-    console.log('Entering offline mode...');
+    logger.info('Entering offline mode...');
     // This would typically navigate to a limited offline mode
   };
 
@@ -54,7 +54,7 @@ export default function KillSwitchModal({ visible, onClose }: KillSwitchModalPro
         await loadKillSwitchMessage();
       }
     } catch (error) {
-      console.error('Error retrying kill switch check:', error);
+      logger.error('Error retrying kill switch check:', error);
     } finally {
       setIsLoading(false);
     }

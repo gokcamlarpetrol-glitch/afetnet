@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { logger } from '../utils/productionLogger';import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { palette, spacing } from '../ui/theme';
 import Button from '../ui/Button';
@@ -72,7 +72,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     });
     
     // This would typically open an email composer or feedback form
-    console.log('Error report requested:', {
+    logger.info('Error report requested:', {
       errorId,
       error: error?.message,
       stack: error?.stack,

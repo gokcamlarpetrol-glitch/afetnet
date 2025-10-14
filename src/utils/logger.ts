@@ -8,30 +8,30 @@ const isDevelopment = __DEV__;
 export const logger = {
   info: (message: string, data?: any) => {
     if (isDevelopment) {
-      console.log(`[INFO] ${message}`, data || '');
+      logger.info(`[INFO] ${message}`, data || '');
     }
   },
   
   warn: (message: string, data?: any) => {
     if (isDevelopment) {
-      console.warn(`[WARN] ${message}`, data || '');
+      logger.warn(`[WARN] ${message}`, data || '');
     }
   },
   
   error: (message: string, data?: any) => {
     if (isDevelopment) {
-      console.error(`[ERROR] ${message}`, data || '');
+      logger.error(`[ERROR] ${message}`, data || '');
     }
   },
   
   debug: (message: string, data?: any) => {
     if (isDevelopment) {
-      console.log(`[DEBUG] ${message}`, data || '');
+      logger.info(`[DEBUG] ${message}`, data || '');
     }
   },
   
   // Emergency logs - always shown
   emergency: (message: string, data?: any) => {
-    console.error(`[EMERGENCY] ${message}`, data || '');
+    logger.error(`[EMERGENCY] ${message}`, data || '');
   }
 };

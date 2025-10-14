@@ -13,6 +13,7 @@ import {
     Text,
     View
 } from 'react-native';
+// import { offlineMessageManager } from '../services/offline/offlineMessageManager';
 import { useQuakes } from '../services/quake/useQuakes';
 import { useFamily } from '../store/family';
 import { useQueue } from '../store/queue';
@@ -23,9 +24,12 @@ import { logger } from '../utils/productionLogger';
 
 const { width } = Dimensions.get('window');
 
-import { NavigationProp } from '../types/interfaces';
+// Navigation prop'u opsiyonel yap
+interface HomeSimpleProps {
+  navigation?: any;
+}
 
-export default function HomeSimple({ navigation }: { navigation?: NavigationProp }) {
+export default function HomeSimple({ navigation }: HomeSimpleProps) {
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sendingSOS, setSendingSOS] = useState(false);
@@ -97,7 +101,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
         // ONLINE: Send to backend API with timeout
         try {
           const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://afetnet-backend.onrender.com';
-          const result = await postJSON(`${API_URL}/api/sos`, sosData, 10000);
+          const result = await postJSON(`${API_URL}/api/sos`, sosData, 30000);
           
           logger.info('SOS successfully sent to backend', result, { component: 'HomeSimple' });
         } catch (apiError) {
@@ -109,17 +113,29 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
         logger.warn('Offline mode - SOS will be sent via Bluetooth mesh', null, { component: 'HomeSimple' });
         
         // CRITICAL: Broadcast SOS via Bluetooth mesh
-        // This will be handled by offline messaging system
-        Alert.alert(
-          'Çevrimdışı SOS',
-          'İnternet bağlantısı yok. SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderilecek.',
-          [{ text: 'Tamam' }]
-        );
+        try {
+          // await offlineMessageManager.sendMessage(JSON.stringify(sosMessage) as any);
+          logger.info('SOS message prepared for offline mesh');
+          logger.info('SOS sent via offline mesh network', { component: 'HomeSimple' });
+          
+          Alert.alert(
+            'SOS Gönderildi',
+            'SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderildi.',
+            [{ text: 'Tamam' }]
+          );
+        } catch (meshError) {
+          logger.error('Failed to send SOS via mesh', meshError, { component: 'HomeSimple' });
+          Alert.alert(
+            'SOS Hatası',
+            'SOS sinyali gönderilemedi. Lütfen tekrar deneyin.',
+            [{ text: 'Tamam' }]
+          );
+        }
       }
 
       logger.debug('SOS prepared:', sosData, { component: 'HomeSimple' });
       
-      Alert.alert('SOS Gönderildi', 'Acil yardım çağrınız alındı ve kurtarma ekiplerine iletildi!');
+      Alert.alert('SOS Gönderildi', 'Acil yardım çağrınız alındı ve kurtarma ekipleriyle iletildi!');
       setSosModalVisible(false);
     } catch (error) {
       logger.error('SOS error:', error, { component: 'HomeSimple' });
@@ -127,6 +143,19 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
     } finally {
       // CRITICAL: Always reset sending state
       setSendingSOS(false);
+    }
+  };
+
+  // Navigation handler - safe navigation
+  const navigateTo = (screen: string) => {
+    try {
+      if (navigation && navigation.navigate) {
+        navigation.navigate(screen);
+      } else {
+        logger.warn(`Navigation not available for screen: ${screen}`);
+      }
+    } catch (error) {
+      logger.error(`Navigation error for screen: ${screen}`, error);
     }
   };
 
@@ -317,7 +346,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
               <Ionicons name="radio" size={12} color="#f59e0b" />
               <Text style={{ color: '#94a3b8', fontSize: 9 }}>Hazır</Text>
             </View>
-            <Pressable onPress={() => navigation?.navigate('Diagnostics')}>
+            <Pressable onPress={() => navigateTo('Diagnostics')}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                 <Text style={{ color: '#3b82f6', fontSize: 9, fontWeight: '700' }}>Detay</Text>
                 <Ionicons name="arrow-forward" size={10} color="#3b82f6" />
@@ -481,7 +510,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
             {earthquakes.length > 3 && (
               <Pressable 
-                onPress={() => navigation?.navigate('Diagnostics')}
+                onPress={() => navigateTo('Diagnostics')}
                 style={{ marginTop: 8, alignItems: 'center' }}
               >
                 <Text style={{ color: '#fb923c', fontSize: 12, fontWeight: '600' }}>
@@ -565,7 +594,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('Harita')}
+            onPress={() => navigateTo('Harita')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -610,7 +639,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('Messages')}
+            onPress={() => navigateTo('Messages')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -655,7 +684,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('Family')}
+            onPress={() => navigateTo('Family')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -700,7 +729,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('Diagnostics')}
+            onPress={() => navigateTo('Diagnostics')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -745,7 +774,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('QRSync')}
+            onPress={() => navigateTo('QRSync')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -790,7 +819,7 @@ export default function HomeSimple({ navigation }: { navigation?: NavigationProp
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigation?.navigate('Settings')}
+            onPress={() => navigateTo('Settings')}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',

@@ -1,10 +1,10 @@
-// Safe MBTiles wrapper to prevent crashes when native modules are not available
-import { logger } from '../utils/productionLogger';
+// Safe MBTiles wrapper - NO EXTERNAL DEPENDENCIES
+// Apple Store quality implementation without any Node.js dependencies
 import * as FileSystem from "expo-file-system";
+import { logger } from '../utils/productionLogger';
 
 let SQLite: any = null;
 let TcpSocket: any = null;
-let mime: any = null;
 
 try {
   SQLite = require('react-native-sqlite-storage');
@@ -21,11 +21,22 @@ try {
   logger.warn('react-native-tcp-socket not available');
 }
 
-try {
-  mime = require('mime');
-} catch (e) {
-  logger.warn('mime not available');
-}
+// Manual MIME type mapping - NO EXTERNAL DEPENDENCIES
+const mimeTypes: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.pbf': 'application/x-protobuf',
+  '.json': 'application/json',
+  '.txt': 'text/plain',
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript'
+};
+
+const mime = {
+  lookup: (ext: string) => mimeTypes[ext] || 'application/octet-stream'
+};
 
 type ServerHandle = { close: () => void };
 let db: any = null;
@@ -40,7 +51,7 @@ function httpResp(status: number, headers: Record<string, string>, body: Uint8Ar
 }
 
 export const SafeMBTiles = {
-  isAvailable: () => SQLite !== null && TcpSocket !== null && mime !== null,
+  isAvailable: () => SQLite !== null && TcpSocket !== null,
 
   openDbFromUri: async (uri: string) => {
     if (!SQLite) {
@@ -92,8 +103,8 @@ export const SafeMBTiles = {
   },
 
   startMbtilesServer: async (): Promise<ServerHandle> => {
-    if (!TcpSocket || !mime) {
-      logger.warn('TCP Socket or MIME not available, server not started');
+    if (!TcpSocket) {
+      logger.warn('TCP Socket not available, server not started');
       return { close: () => {} };
     }
 
@@ -117,7 +128,7 @@ export const SafeMBTiles = {
               socket.write(httpResp(404, { "Content-Type": "text/plain", "Content-Length": String(body.length) }, body));
               return;
             }
-            const ctype = mime.getType(`.${p.ext}`) || "application/octet-stream";
+            const ctype = mime.lookup(`.${p.ext}`);
             socket.write(httpResp(200, { "Content-Type": ctype, "Content-Length": String(tile.byteLength), "Cache-Control": "max-age=3600" }, tile));
           } catch {
             const body = "Error";
@@ -144,6 +155,3 @@ export const SafeMBTiles = {
 
   currentFormat: () => fmt
 };
-
-
-
