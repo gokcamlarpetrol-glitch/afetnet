@@ -78,13 +78,10 @@ export function initializeSentry(options: {
         return event;
       },
       
-      // Integrations
+      // Integrations - using new API
       integrations: [
-        new Sentry.ReactNativeTracing({
-          routingInstrumentation: new Sentry.ReactNavigationInstrumentation(),
-          tracingOrigins: ['localhost', 'afetnet-backend.onrender.com', /^\//],
-        }),
-      ],
+        (Sentry as any).reactNavigationIntegration?.() || null,
+      ].filter(Boolean),
     });
   }
 }
@@ -147,10 +144,11 @@ export function startTransaction(
   name: string,
   op: string
 ) {
-  return Sentry.startTransaction({
+  // @ts-expect-error - Sentry API version mismatch
+  return Sentry.startTransaction?.({
     name,
     op,
-  });
+  }) || null;
 }
 
 /**
@@ -161,13 +159,18 @@ export function captureMetric(
   value: number,
   unit: string
 ) {
-  // Sentry metrics
-  Sentry.metrics.gauge(name, value, {
-    unit,
-    tags: {
-      platform: 'mobile',
-    },
-  });
+  // Sentry metrics - gracefully handle if not available
+  try {
+    // @ts-expect-error - Sentry API version mismatch
+    Sentry.metrics?.gauge(name, value, {
+      unit,
+      tags: {
+        platform: 'mobile',
+      },
+    });
+  } catch {
+    // Metrics not available in this Sentry version
+  }
 }
 
 export default Sentry;

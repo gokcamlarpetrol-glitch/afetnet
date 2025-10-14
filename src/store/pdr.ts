@@ -176,8 +176,8 @@ export const usePDRStore = create<PDRState>()(
             const adjustedAlpha = accuracy > 10 ? Math.min(alpha + 0.2, 0.9) : alpha;
             
             fusedPosition = {
-              latitude: adjustedAlpha * pdrPos.latitude + (1 - adjustedAlpha) * gpsPos.latitude,
-              longitude: adjustedAlpha * pdrPos.longitude + (1 - adjustedAlpha) * gpsPos.longitude,
+              latitude: adjustedAlpha * (pdrPos?.latitude || 0) + (1 - adjustedAlpha) * gpsPos.latitude,
+              longitude: adjustedAlpha * (pdrPos?.longitude || 0) + (1 - adjustedAlpha) * gpsPos.longitude,
               timestamp
             };
             

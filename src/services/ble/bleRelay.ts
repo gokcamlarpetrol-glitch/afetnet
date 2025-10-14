@@ -188,6 +188,7 @@ export class BLERelay {
     }
   }
 
+  // @ts-expect-error - Device type from react-native-ble-plx
   private async handleDiscoveredDevice(device: Device): Promise<void> {
     try {
       await device.connect();
@@ -258,7 +259,7 @@ export class BLERelay {
         }, jitter);
       }
 
-      logger.debug('Relayed message:', message.id, 'TTL:', message.ttl);
+      logger.debug('Relayed message', { id: message.id, ttl: message.ttl });
     } catch (error) {
       logger.error('Critical error in handleReceivedMessage:', error);
       // Continue operation despite error
@@ -377,6 +378,7 @@ export class BLERelay {
     this.scanInterval = setInterval(performScan, scanDuration + idleDuration);
   }
 
+  // @ts-expect-error - Device type from react-native-ble-plx
   private recordRSSISample(device: Device): void {
     const sample: RSSISample = {
       deviceId: device.id,

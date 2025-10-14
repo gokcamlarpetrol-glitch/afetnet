@@ -40,10 +40,11 @@ export class USGSProvider implements QuakeProvider {
 
       for (const feature of features) {
         try {
-          const properties = feature.properties;
-          const geometry = feature.geometry;
+          const f = feature as any;
+          const properties = f.properties;
+          const geometry = f.geometry;
           
-          const id = feature.id || `${properties.time}_${geometry.coordinates[0]}_${geometry.coordinates[1]}`;
+          const id = f.id || `${properties.time}_${geometry.coordinates[0]}_${geometry.coordinates[1]}`;
           const time = properties.time;
           const mag = properties.mag;
           const place = properties.place || 'Türkiye';

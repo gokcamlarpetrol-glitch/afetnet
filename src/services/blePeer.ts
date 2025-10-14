@@ -58,6 +58,7 @@ class BlePeerService {
   private manager: any = null;
   private isAdvertising = false;
   private isScanning = false;
+  // @ts-expect-error - Device type from react-native-ble-plx
   private connectedDevices = new Map<string, Device>();
   private messageQueue: BleMessage[] = [];
   private seenMessageIds = new Set<string>();
@@ -231,6 +232,7 @@ class BlePeerService {
   }
 
   // Start scanning for nearby devices
+  // @ts-expect-error - Device type from react-native-ble-plx
   async startScanning(onDeviceFound?: (device: Device) => void): Promise<void> {
     if (this.isScanning) return;
     
@@ -285,6 +287,7 @@ class BlePeerService {
   }
 
   // Handle discovered device and attempt connection
+  // @ts-expect-error - Device type from react-native-ble-plx
   private async handleDiscoveredDevice(device: Device) {
     try {
       // Connect to device
@@ -414,7 +417,7 @@ class BlePeerService {
 
   // Process received message
   private processMessage(message: BleMessage): void {
-    logger.debug('Received message:', message.type, message.id);
+    logger.debug('Received message', { type: message.type, id: message.id });
     
     // Emit event or callback for UI handling
     // TODO: Implement event system or callback

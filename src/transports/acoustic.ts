@@ -25,10 +25,11 @@ function base32encode(bytes: Uint8Array){
 function base32decode(str:string){
   const alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; const map:Record<string,number>={};
   for(let i=0;i<alph.length;i++) {map[alph[i]]=i;}
-  let val=0,valb=-5,out=[];
+  let val=0,valb=-5;
+  const out: number[] = [];
   for(const c of str){
     if(map[c]===undefined) {continue;}
-    val=(val<<5)|map[c]; valb+=5;
+    val=(val<<5)|(map[c] as number); valb+=5;
     if(valb>=8){ out.push((val>> (valb-8)) & 255); valb-=8; }
   }
   return new Uint8Array(out);

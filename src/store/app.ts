@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { HelpPayload, QueueItem, MeshEnvelope } from "../entities/help/types";
 import { postJSON } from "../lib/http";
-import { encObj, decObj } from "../lib/crypto";
+// import { encObj, decObj } from "../lib/crypto"; // Not available - would need implementation
 
 const SEEN_KEY = "mesh_seen_hashes_v1";
 

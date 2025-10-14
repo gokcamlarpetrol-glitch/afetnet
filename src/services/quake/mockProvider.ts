@@ -7,6 +7,7 @@ const sample: QuakeItem[] = [
 ];
 
 export const mockQuakeProvider: QuakeProvider = {
+  name: 'Mock Provider',
   async fetchRecent(): Promise<QuakeItem[]> {
     await new Promise(r => setTimeout(r, 250));
     return sample.sort((a,b)=>b.time-a.time);

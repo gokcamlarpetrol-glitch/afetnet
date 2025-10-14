@@ -66,8 +66,10 @@ class PriorityQueue {
   }
 
   enqueue(msg: MeshMsg, priority: Priority = 'NORMAL', maxAttempts: number = 3): boolean {
+    const msgId = (msg as any).id;
+    
     // Check if already seen
-    if (this.seenIds.has(msg.id)) {
+    if (msgId && this.seenIds.has(msgId)) {
       return false;
     }
 
@@ -83,7 +85,9 @@ class PriorityQueue {
     };
 
     this.queues.get(priority)!.push(queuedMsg);
-    this.seenIds.add(msg.id);
+    if (msgId) {
+      this.seenIds.add(msgId);
+    }
     this.cleanupSeenIds();
     this.saveToStorage();
     return true;

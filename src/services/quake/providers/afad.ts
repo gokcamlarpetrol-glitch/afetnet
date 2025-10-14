@@ -55,13 +55,14 @@ export class AFADProvider implements QuakeProvider {
       for (const event of eventList) {
         try {
           // Parse AFAD event structure
-          const id = event.eventId || event.id || `${event.eventDate}_${event.latitude}_${event.longitude}`;
-          const time = this.parseDateTime(event.eventDate, event.eventTime);
-          const mag = parseFloat(event.magnitude || event.ml || event.mw || '0');
-          const place = this.parseLocation(event.location, event.district, event.city);
-          const lat = parseFloat(event.latitude || '0');
-          const lon = parseFloat(event.longitude || '0');
-          const depth = parseFloat(event.depth || '0');
+          const e = event as any;
+          const id = e.eventId || e.id || `${e.eventDate}_${e.latitude}_${e.longitude}`;
+          const time = this.parseDateTime(e.eventDate, e.eventTime);
+          const mag = parseFloat(e.magnitude || e.ml || e.mw || '0');
+          const place = this.parseLocation(e.location, e.district, e.city);
+          const lat = parseFloat(e.latitude || '0');
+          const lon = parseFloat(e.longitude || '0');
+          const depth = parseFloat(e.depth || '0');
 
           if (time && mag > 0) {
             quakes.push({

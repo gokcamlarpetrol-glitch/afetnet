@@ -118,7 +118,7 @@ export const useFamily = create<State>()(
           set((s) => ({ list: [newMember, ...s.list] }));
           return { success: true, member: newMember };
         } catch (error: Error | unknown) {
-          return { success: false, error: error.message };
+          return { success: false, error: (error as any)?.message || 'Unknown error' };
         }
       },
 
@@ -131,7 +131,7 @@ export const useFamily = create<State>()(
           }
           return { success: false, error: result.error };
         } catch (error: Error | unknown) {
-          return { success: false, error: error.message };
+          return { success: false, error: (error as any)?.message || 'Unknown error' };
         }
       },
 
