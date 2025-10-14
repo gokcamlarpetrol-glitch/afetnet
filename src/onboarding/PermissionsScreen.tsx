@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   footer: {
     padding: spacing.lg,
     borderTopWidth: 1,
-    borderTopColor: palette.border.primary,
+    borderTopColor: palette.text.secondary,
   },
   buttonContainer: {
     flexDirection: 'row',

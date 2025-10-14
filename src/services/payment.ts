@@ -1,11 +1,15 @@
+// APPLE COMPLIANCE: Payment system temporarily disabled for App Store review
+// Will be replaced with Apple In-App Purchase in future update
+// See: IN_APP_PURCHASE_COMPLIANCE.md for implementation plan
+
 import { PremiumPlan } from '../store/premium';
 import { logger } from '../utils/productionLogger';
 
-// Stripe configuration
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_51234567890abcdef'; // Replace with your actual Stripe key
-const STRIPE_SECRET_KEY = 'sk_test_51234567890abcdef'; // Replace with your actual Stripe secret key
+// DISABLED FOR APPLE STORE COMPLIANCE
+// const STRIPE_PUBLISHABLE_KEY = 'pk_test_51234567890abcdef';
+// const STRIPE_SECRET_KEY = 'sk_test_51234567890abcdef';
 
-// Payment service for handling premium subscriptions
+// Payment service - DISABLED for Apple Store compliance
 export class PaymentService {
   private static instance: PaymentService;
   
@@ -16,40 +20,26 @@ export class PaymentService {
     return PaymentService.instance;
   }
 
-  // Initialize Stripe
+  // DISABLED: Stripe initialization removed for Apple Store compliance
   async initializeStripe(): Promise<boolean> {
-    try {
-      // In a real app, you would initialize Stripe here
-      logger.debug('Stripe initialized successfully');
-      return true;
-    } catch (error) {
-      logger.error('Stripe initialization failed:', error);
-      return false;
-    }
+    // Payment system disabled - will be replaced with Apple IAP
+    logger.warn('Payment system disabled for Apple Store compliance - Premium features coming soon');
+    return false;
   }
 
-  // Create payment intent on your backend
+  // DISABLED: Payment intent creation removed for Apple Store compliance
   async createPaymentIntent(planId: PremiumPlan['id'], amount: number): Promise<{
     clientSecret: string;
     error?: string;
   }> {
-    try {
-      // In a real app, this would call your backend API
-      // For demo purposes, we'll simulate the response
-      const clientSecret = `pi_${planId}_${Date.now()}_secret_${Math.random().toString(36).substring(2)}`;
-      
-      return {
-        clientSecret
-      };
-    } catch (error) {
-      return {
-        clientSecret: '',
-        error: error instanceof Error ? error.message : 'Payment intent creation failed'
-      };
-    }
+    // Payment disabled - will be replaced with Apple IAP
+    return {
+      clientSecret: '',
+      error: 'Premium features coming soon with Apple In-App Purchase'
+    };
   }
 
-  // Process payment with Stripe
+  // DISABLED: Stripe payment processing removed for Apple Store compliance
   async processStripePayment(
     clientSecret: string, 
     paymentMethodId: string
@@ -58,103 +48,37 @@ export class PaymentService {
     error?: string;
     transactionId?: string;
   }> {
-    try {
-      // In a real app, you would use Stripe's confirmPayment method
-      // For demo purposes, we'll simulate the payment
-      logger.debug('Processing Stripe payment...');
-      
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Simulate payment success (90% success rate for demo)
-      const success = Math.random() > 0.1;
-      
-      if (success) {
-        const transactionId = this.generateTransactionId();
-        return {
-          success: true,
-          transactionId
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Payment failed. Please try again.'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Payment processing failed'
-      };
-    }
+    // Payment disabled - will be replaced with Apple IAP
+    return {
+      success: false,
+      error: 'Premium features coming soon with Apple In-App Purchase'
+    };
   }
 
-  // Process Apple Pay payment
+  // DISABLED: Will be replaced with Apple In-App Purchase
   async processApplePay(planId: PremiumPlan['id']): Promise<{
     success: boolean;
     error?: string;
     transactionId?: string;
   }> {
-    try {
-      logger.debug('Processing Apple Pay payment...');
-      
-      // Simulate Apple Pay processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const success = Math.random() > 0.05; // 95% success rate for Apple Pay
-      
-      if (success) {
-        const transactionId = this.generateTransactionId();
-        return {
-          success: true,
-          transactionId
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Apple Pay payment failed'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Apple Pay processing failed'
-      };
-    }
+    // Payment disabled - will be replaced with Apple IAP
+    return {
+      success: false,
+      error: 'Premium features coming soon with Apple In-App Purchase'
+    };
   }
 
-  // Process Google Pay payment
+  // DISABLED: Android payment - not applicable for iOS App Store
   async processGooglePay(planId: PremiumPlan['id']): Promise<{
     success: boolean;
     error?: string;
     transactionId?: string;
   }> {
-    try {
-      logger.debug('Processing Google Pay payment...');
-      
-      // Simulate Google Pay processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const success = Math.random() > 0.05; // 95% success rate for Google Pay
-      
-      if (success) {
-        const transactionId = this.generateTransactionId();
-        return {
-          success: true,
-          transactionId
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Google Pay payment failed'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Google Pay processing failed'
-      };
-    }
+    // Payment disabled
+    return {
+      success: false,
+      error: 'Premium features coming soon'
+    };
   }
 
   // Process subscription purchase

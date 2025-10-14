@@ -474,12 +474,12 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 4,
-    backgroundColor: palette.border.primary,
+    backgroundColor: palette.text.secondary,
     borderRadius: 2,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
     borderRadius: 2,
   },
   runAllButton: {
@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   errorContainer: {
-    backgroundColor: palette.error.light,
+    backgroundColor: palette.error.main + '20', // 20% opacity
     padding: spacing.sm,
     borderRadius: 4,
     marginTop: spacing.sm,

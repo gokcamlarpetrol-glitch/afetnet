@@ -145,7 +145,7 @@ await fetch('https://your-backend.com/api/users/register-push-token', {
 
 **Dosya:** `App.tsx`
 ```typescript
-const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_KEY || 'pk_test_51QFakeKeyForDevelopment';
+const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_KEY || 'pk_test_[PLACEHOLDER]';
 ```
 
 **Çözüm:**
@@ -322,8 +322,8 @@ EXPO_PUBLIC_PROJECT_ID=your-expo-project-id
 EAS_PROJECT_ID=your-eas-project-id
 
 # Stripe
-EXPO_PUBLIC_STRIPE_KEY=pk_live_xxxxx
-STRIPE_SECRET_KEY=sk_live_xxxxx
+EXPO_PUBLIC_STRIPE_KEY=pk_live_[YOUR_KEY]
+STRIPE_SECRET_KEY=sk_live_[YOUR_KEY]
 STRIPE_WEBHOOK_SECRET=whsec_xxxxx
 
 # Backend API

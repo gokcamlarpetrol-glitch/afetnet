@@ -32,7 +32,7 @@ ios/AfetNet/PrivacyInfo.xcprivacy oluşturuldu
 
 **Sorun:**
 ```typescript
-const STRIPE_KEY = 'pk_live_51QYourRealProductionKey'; // FAKE!
+const STRIPE_KEY = 'pk_live_[YOUR_PRODUCTION_KEY]'; // Production key
 ```
 
 **ÇÖZÜM:** ✅ DÜZELTILDI

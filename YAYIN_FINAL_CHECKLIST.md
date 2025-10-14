@@ -199,7 +199,7 @@
 ```bash
 # Production için ayarla:
 EXPO_PUBLIC_API_URL=https://your-backend-url.com
-EXPO_PUBLIC_STRIPE_KEY=pk_live_your_key
+EXPO_PUBLIC_STRIPE_KEY=pk_live_[YOUR_STRIPE_KEY]
 SENTRY_DSN=https://your-sentry-dsn
 ```
 

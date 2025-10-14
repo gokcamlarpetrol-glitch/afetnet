@@ -104,7 +104,7 @@ railway add postgresql
 
 # Environment variables ekle
 railway variables set JWT_SECRET=your-secret
-railway variables set STRIPE_SECRET_KEY=sk_live_...
+railway variables set STRIPE_SECRET_KEY=sk_live_[YOUR_KEY]
 # ... diğer variables
 
 # Deploy
@@ -140,7 +140,7 @@ heroku addons:create heroku-postgresql:mini
 
 # Environment variables ekle
 heroku config:set JWT_SECRET=your-secret
-heroku config:set STRIPE_SECRET_KEY=sk_live_...
+heroku config:set STRIPE_SECRET_KEY=sk_live_[YOUR_KEY]
 # ... diğer variables
 
 # Deploy

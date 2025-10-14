@@ -1,5 +1,7 @@
+// APPLE COMPLIANCE: Premium screen temporarily disabled
+// Will be replaced with Apple IAP implementation
 import { Ionicons } from '@expo/vector-icons';
-import { useStripe } from '@stripe/stripe-react-native';
+// DISABLED: import { useStripe } from '@stripe/stripe-react-native';
 import { useState } from 'react';
 import {
     Alert,
@@ -20,7 +22,7 @@ const { width } = Dimensions.get('window');
 
 export default function PremiumScreen() {
   const { isPremium, currentPlan, setPremium, subscriptionEndDate } = usePremium();
-  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  // DISABLED: const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [selectedPlan, setSelectedPlan] = useState<PremiumPlan['id'] | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'apple' | 'google'>('card');
   const [showPaymentModal, setShowPaymentModal] = useState(false);

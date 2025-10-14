@@ -4,7 +4,7 @@
  */
 
 import * as nacl from 'tweetnacl';
-import { decodeBase64, decodeUTF8, encodeBase64 } from 'tweetnacl-util';
+import { decodeBase64, decodeUTF8, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 
 /**
  * Generate a new Curve25519 key pair for asymmetric encryption
@@ -52,7 +52,7 @@ export function genKeyPair() {
  */
 export function boxEncrypt(message: string, theirPublicKeyBase64: string, mySecretKey: Uint8Array) {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const msg = decodeUTF8(message);
+  const msg = encodeUTF8(message);
   const theirPublic = decodeBase64(theirPublicKeyBase64);
   const cipher = nacl.box(msg, nonce, theirPublic, mySecretKey);
   return { cipher: encodeBase64(cipher), nonce: encodeBase64(nonce) };
@@ -75,7 +75,7 @@ export function generateSharedSecret(mySecretKey: Uint8Array, theirPublicKeyBase
 
 // Sign message with private key
 export function signMessage(message: string, secretKey: Uint8Array): string {
-  const msg = decodeUTF8(message);
+  const msg = encodeUTF8(message);
   const signature = nacl.sign.detached(msg, secretKey);
   return encodeBase64(signature);
 }
@@ -83,7 +83,7 @@ export function signMessage(message: string, secretKey: Uint8Array): string {
 // Verify message signature
 export function verifySignature(message: string, signatureBase64: string, publicKeyBase64: string): boolean {
   try {
-    const msg = decodeUTF8(message);
+    const msg = encodeUTF8(message);
     const signature = decodeBase64(signatureBase64);
     const publicKey = decodeBase64(publicKeyBase64);
     return nacl.sign.detached.verify(msg, signature, publicKey);
