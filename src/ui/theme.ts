@@ -33,7 +33,9 @@ export const palette = {
     onDark: brandPalette.text.onDark,
   },
   textDim: brandPalette.text.secondary,
-  primary: brandPalette.primary.main,
+  primary: {
+    main: brandPalette.primary.main,
+  },
   danger: brandPalette.error.main,
   error: {
     main: brandPalette.error.main,
