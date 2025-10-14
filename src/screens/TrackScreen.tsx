@@ -1,25 +1,77 @@
-import React, { useEffect, useState } from "react";
-// import MapView, { Polyline } from "react-native-maps"; // Temporarily disabled for Expo Go
-import { readTrack, startTrack, stopTrack } from "../track/bread";
-import { Pressable, Text, View } from "react-native";
+import React from "react";
+import { Alert, Pressable, Text, View, StyleSheet } from "react-native";
 
 export default function TrackScreen(){
-  const [pts,setPts]=useState<{lat:number;lng:number}[]>([]);
-  useEffect(()=>{ const t=setInterval(async()=> setPts(await readTrack()), 4000); return ()=>clearInterval(t); },[]);
   return (
-    <View style={{ flex:1 }}>
-      <MapView style={{ flex:1 }} initialRegion={{ latitude:39, longitude:35, latitudeDelta:6, longitudeDelta:6 }}>
-        {pts.length>1 && <Polyline coordinates={pts.map(p=>({ latitude:p.lat, longitude:p.lng }))} strokeWidth={5} strokeColor="#22c55e" />}
-      </MapView>
-      <View style={{ position:"absolute", bottom:8, left:8, right:8, backgroundColor:"#0b1220", padding:8, borderRadius:10 }}>
-        <View style={{ flexDirection:"row", gap:8 }}>
-          <Pressable onPress={()=>startTrack(15)} style={{ backgroundColor:"#2563eb", padding:8, borderRadius:8 }}><Text style={{ color:"white" }}>İZİ BAŞLAT</Text></Pressable>
-          <Pressable onPress={stopTrack} style={{ backgroundColor:"#1f2937", padding:8, borderRadius:8 }}><Text style={{ color:"white" }}>DURDUR</Text></Pressable>
-        </View>
+    <View style={styles.container}>
+      <Text style={styles.title}>📍 İz Takibi</Text>
+      <Text style={styles.subtitle}>Production build'de aktif olacak</Text>
+      
+      <View style={styles.featureContainer}>
+        <Text style={styles.featureTitle}>🎯 Özellikler</Text>
+        <Text style={styles.featureItem}>• Gerçek zamanlı konum takibi</Text>
+        <Text style={styles.featureItem}>• Breadcrumb trail</Text>
+        <Text style={styles.featureItem}>• Gezinme geçmişi</Text>
+        <Text style={styles.featureItem}>• Güvenli rotalar</Text>
       </View>
+
+      <Pressable 
+        style={styles.actionButton}
+        onPress={() => Alert.alert('Bilgi', 'İz takibi production build\'de aktif olacak')}
+      >
+        <Text style={styles.actionButtonText}>📍 İz Başlat</Text>
+      </Pressable>
     </View>
   );
 }
 
-
-
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 40,
+  },
+  featureContainer: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 40,
+    width: '100%',
+  },
+  featureTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  featureItem: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  actionButton: {
+    backgroundColor: '#C62828',
+    padding: 16,
+    borderRadius: 8,
+    width: '100%',
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+});

@@ -3,8 +3,7 @@ import { logger } from '../utils/productionLogger';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePDRFuse } from '../hooks/usePDRFuse';
-import { palette } from '../theme/colors';
-import { spacing } from '../theme/spacing';
+// Theme imports - using inline styles for compatibility
 
 export default function MapOffline() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -74,10 +73,10 @@ export default function MapOffline() {
             <View style={styles.pdrInfo}>
               <Text style={styles.pdrTitle}>🚶 Pedestrian Dead Reckoning</Text>
               <Text style={styles.pdrText}>
-                Enlem: {currentPos.latitude.toFixed(6)}
+                Enlem: {(currentPos as any).latitude?.toFixed(6) || 'N/A'}
               </Text>
               <Text style={styles.pdrText}>
-                Boylam: {currentPos.longitude.toFixed(6)}
+                Boylam: {(currentPos as any).longitude?.toFixed(6) || 'N/A'}
               </Text>
             </View>
           )}
@@ -121,120 +120,120 @@ export default function MapOffline() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: palette.background.light,
+    backgroundColor: '#f5f5f5',
   },
   header: {
-    padding: spacing.lg,
-    backgroundColor: palette.background.dark,
+    padding: 20,
+    backgroundColor: '#2c2c2c',
     borderBottomWidth: 1,
-    borderBottomColor: palette.border,
+    borderBottomColor: '#e0e0e0',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: palette.text.primary,
+    color: '#ffffff',
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: palette.text.secondary,
+    color: '#cccccc',
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginTop: 8,
   },
   mapContainer: {
     flex: 1,
-    margin: spacing.lg,
+    margin: 20,
   },
   mapPlaceholder: {
     flex: 1,
-    backgroundColor: palette.background.dark,
+    backgroundColor: '#2c2c2c',
     borderRadius: 12,
-    padding: spacing.lg,
+    padding: 20,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: palette.border,
+    borderColor: '#e0e0e0',
     borderStyle: 'dashed',
   },
   mapTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: palette.text.primary,
-    marginBottom: spacing.sm,
+    color: '#ffffff',
+    marginBottom: 12,
   },
   mapDescription: {
     fontSize: 14,
-    color: palette.text.secondary,
+    color: '#cccccc',
     textAlign: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: 20,
   },
   locationInfo: {
-    backgroundColor: palette.background.light,
-    padding: spacing.md,
+    backgroundColor: '#f5f5f5',
+    padding: 16,
     borderRadius: 8,
-    marginBottom: spacing.md,
+    marginBottom: 16,
     width: '100%',
   },
   locationTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: palette.text.primary,
-    marginBottom: spacing.xs,
+    color: '#333333',
+    marginBottom: 8,
   },
   locationText: {
     fontSize: 14,
-    color: palette.text.secondary,
+    color: '#666666',
     marginBottom: 2,
   },
   pdrInfo: {
-    backgroundColor: palette.background.light,
-    padding: spacing.md,
+    backgroundColor: '#f5f5f5',
+    padding: 16,
     borderRadius: 8,
-    marginBottom: spacing.md,
+    marginBottom: 16,
     width: '100%',
   },
   pdrTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: palette.text.primary,
-    marginBottom: spacing.xs,
+    color: '#333333',
+    marginBottom: 8,
   },
   pdrText: {
     fontSize: 14,
-    color: palette.text.secondary,
+    color: '#666666',
     marginBottom: 2,
   },
   featuresContainer: {
-    backgroundColor: palette.background.light,
-    padding: spacing.md,
+    backgroundColor: '#f5f5f5',
+    padding: 16,
     borderRadius: 8,
     width: '100%',
   },
   featuresTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: palette.text.primary,
-    marginBottom: spacing.xs,
+    color: '#333333',
+    marginBottom: 8,
   },
   featureItem: {
     fontSize: 14,
-    color: palette.text.secondary,
+    color: '#666666',
     marginBottom: 4,
   },
   actionContainer: {
     flexDirection: 'row',
-    padding: spacing.lg,
-    gap: spacing.md,
+    padding: 20,
+    gap: 16,
   },
   actionButton: {
     flex: 1,
-    backgroundColor: palette.primary.main,
-    padding: spacing.md,
+    backgroundColor: '#C62828',
+    padding: 16,
     borderRadius: 8,
     alignItems: 'center',
   },
   actionButtonText: {
-    color: palette.text.primary,
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
   },
