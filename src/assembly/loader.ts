@@ -27,6 +27,7 @@ export async function loadBundledAssembly(): Promise<AssemblyPoint[]> {
 
 export async function importAssemblyFromFile(uri: string): Promise<number> {
   try {
+    if (!uri) throw new Error('No URI provided');
     const content = await FileSystem.readAsStringAsync(uri);
     let assemblyPoints: AssemblyPoint[] = [];
 

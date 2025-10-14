@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
+import { ORG_SECRET, WORKER_URL } from '../config/worker';
 import { logger } from '../utils/productionLogger';
-import { WORKER_URL, ORG_SECRET } from '../config/worker';
 
 export async function getFcmToken(): Promise<string | undefined> {
   try {
@@ -39,7 +39,7 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
 
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('Registration failed:', response.status, errorText);
+      logger.error('Registration failed:', { status: response.status, error: errorText });
       return false;
     }
 
@@ -72,7 +72,7 @@ export async function unregisterToken(token: string): Promise<boolean> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('Unregistration failed:', response.status, errorText);
+      logger.error('Unregistration failed:', { status: response.status, error: errorText });
       return false;
     }
 

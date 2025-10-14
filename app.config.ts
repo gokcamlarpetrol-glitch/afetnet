@@ -48,7 +48,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "audio",
         "location",
         "background-fetch"
-      ]
+      ],
+      ITSAppUsesNonExemptEncryption: false
     }
   },
   android: {

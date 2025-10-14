@@ -1,32 +1,29 @@
 import * as Crypto from "expo-crypto";
-import { logger } from '../utils/productionLogger';
-import { Platform } from "react-native";
-import * as Device from "expo-device";
-import { P2P_SERVICE, P2P_CHAR_INBOX, P2P_CHAR_OUTBOX, P2PHello, CourierBundle, CourierPacket } from "./types";
-import { list, stats } from "../queue/v2";
 import * as FileSystem from "expo-file-system";
-import { useProfile } from "../state/profileStore";
-import { paramsFor } from "../profile/params";
-import { upsertTask } from "../tasks/store";
-import { addReceived } from "../route/share";
-import { incr } from "../mesh/health";
-import { upsertApproval } from "../team/store";
+import { handleIncoming as drawHandle } from "../draw/mesh";
 import { handleIncoming as helpHandle } from "../help/mesh";
+import { incr } from "../mesh/health";
+import { inboxWrite } from "../mesh/queue";
+import { handleIncoming as bullHandle } from "../ops/bulletinMesh";
 import { handleIncoming as invHandle } from "../ops/inventoryMesh";
 import { handleIncoming as taskHandle } from "../ops/taskMesh";
-import { handleIncoming as bullHandle } from "../ops/bulletinMesh";
-import { handleIncoming as roadHandle } from "../routing/mesh";
-import { handleIncoming as drawHandle } from "../draw/mesh";
-import { handleIncoming as occHandle } from "../relief/occupancy";
-import { handleIncoming as shareHandle } from "../share/mesh";
-import { getRxStates, handleChunk, requestMissing } from "../share/transfer";
-import { serveChunks } from "../share/sender";
-import { inboxWrite } from "../mesh/queue";
-import { enqueue } from "../mesh/queue";
-import { ackULB } from "../ulb/api";
-import { p2pLocalSend } from "./send";
-import { handleEEWIncoming } from "../quake/mesh";
 import { setNeighborCount } from "../p2p/peers";
+import { paramsFor } from "../profile/params";
+import { handleEEWIncoming } from "../quake/mesh";
+import { list, stats } from "../queue/v2";
+import { handleIncoming as occHandle } from "../relief/occupancy";
+import { addReceived } from "../route/share";
+import { handleIncoming as roadHandle } from "../routing/mesh";
+import { handleIncoming as shareHandle } from "../share/mesh";
+import { serveChunks } from "../share/sender";
+import { getRxStates, handleChunk, requestMissing } from "../share/transfer";
+import { useProfile } from "../state/profileStore";
+import { upsertTask } from "../tasks/store";
+import { upsertApproval } from "../team/store";
+import { ackULB } from "../ulb/api";
+import { logger } from '../utils/productionLogger';
+import { p2pLocalSend } from "./send";
+import { CourierBundle, CourierPacket, P2P_CHAR_INBOX, P2P_CHAR_OUTBOX, P2P_SERVICE, P2PHello } from "./types";
 
 // Safe BLE manager to prevent crashes when native modules are not available
 let BleManager: any = null;
@@ -144,7 +141,7 @@ async function handleDevice(dev: any){
     const conn = await MANAGER.connectToDevice(dev.id, { timeout: 6000 });
     await conn.discoverAllServicesAndCharacteristics();
     const services = await conn.services();
-    const has = services.find((s: any)=>s.uuid.toUpperCase().includes(P2P_SERVICE.replaceAll("-","")));
+    const has = services.find((s: any)=>s.uuid.toUpperCase().includes(P2P_SERVICE.replace(/-/g,"")));
     // Even if service is not found (platform/advert limits), still try chars by UUID known path.
     const outPayload = await buildBundle(12);
     if(outPayload.items.length){
@@ -258,7 +255,7 @@ async function handleDevice(dev: any){
         try{
           await shareHandle(bundle);
           if((bundle as any).kind==="pack_offer" && (bundle as any).off){ 
-            offers = offers.filter(o=> Date.now()-o.ts < 6*60*60*1000);
+            offers = offers.filter((o: any)=> Date.now()-o.ts < 6*60*60*1000);
             offers.push((bundle as any).off);
           }
         }catch{ /* ignore share errors */ }
@@ -267,8 +264,8 @@ async function handleDevice(dev: any){
       // Handle pack request messages
       if((bundle as any).kind==="pack_req" && (bundle as any).id && Array.isArray((bundle as any).need)){
         // find matching offer (same id prefix or any)
-        const off = offers.find(o=> o.id===(bundle as any).id || o.man?.name?.includes((bundle as any).id));
-        if(off){ serveChunks(off.man, { id: (bundle as any).id, need: (bundle as any).need }).catch(()=>{}); }
+        const off = offers.find((o: any)=> o.id===(bundle as any).id || o.man?.name?.includes((bundle as any).id));
+        if(off){ serveChunks((off as any).man, { id: (bundle as any).id, need: (bundle as any).need }).catch(()=>{}); }
       }
       
       // Handle pack chunk messages

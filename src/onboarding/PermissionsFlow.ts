@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { logger } from '../utils/productionLogger';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { Alert, Platform } from 'react-native';
 import { ble } from '../ble/manager';
+import { logger } from '../utils/productionLogger';
 
 export type PermissionStatus = {
   notifications: 'granted' | 'denied' | 'undetermined';
@@ -165,7 +165,7 @@ export class PermissionsManager {
 
       // Bluetooth permission status
       if (Platform.OS === 'android') {
-        const bluetoothStatus = await (Bluetooth as any)?.getPermissionsAsync?.() || { granted: false };
+        const bluetoothStatus = await (globalThis as any).Bluetooth?.getPermissionsAsync?.() || { granted: false };
         this.status.bluetooth = bluetoothStatus.granted ? 'granted' : 'denied';
       } else {
         this.status.bluetooth = 'granted'; // iOS handles this automatically

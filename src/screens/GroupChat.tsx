@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { logger } from '../utils/productionLogger';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
@@ -11,6 +10,7 @@ import { usePeople } from '../store/people';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { palette, spacing } from '../ui/theme';
+import { logger } from '../utils/productionLogger';
 
 type GroupMessage = {
   id: string;
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     backgroundColor: palette.background.secondary,
     borderBottomWidth: 1,
-    borderBottomColor: palette.border.primary,
+    borderBottomColor: palette.text.primary,
   },
   backButton: {
     padding: spacing.xs,
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emergencyText: {
-    color: palette.text.onError,
+    color: palette.error.main,
     fontWeight: 'bold',
     fontSize: 14,
   },

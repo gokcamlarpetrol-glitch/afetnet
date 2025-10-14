@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { logger } from '../utils/productionLogger';
 import * as FileSystem from 'expo-file-system';
+import { logger } from '../utils/productionLogger';
 import { tilesForBBox } from './tiles';
 
 export interface TilePack {
@@ -225,7 +225,8 @@ class TileManager {
         zooms,
         type: 'mbtiles',
         name: packId,
-        description: `MBTiles database (${zooms.length} zoom levels)`
+        description: `MBTiles database (${zooms.length} zoom levels)`,
+        kind: 'mbtiles' as const
       });
       
       logger.debug(`Opened MBTiles pack: ${packId}`);
@@ -247,7 +248,12 @@ class TileManager {
 
   async estimatePrefetchSize(bbox: { north: number; south: number; east: number; west: number }, zoombounds: { min: number; max: number }): Promise<number> {
     try {
-      const tiles = tilesForBBox(bbox, zoombounds.min, zoombounds.max);
+      const tiles = tilesForBBox({
+        minLat: bbox.south,
+        minLon: bbox.west,
+        maxLat: bbox.north,
+        maxLon: bbox.east
+      }, zoombounds.min, zoombounds.max);
       // Estimate 50KB per tile (typical satellite tile size)
       return tiles.length * 50 * 1024;
     } catch (error) {
@@ -288,7 +294,12 @@ class TileManager {
         west: center.lon - (radiusKm / (111.32 * Math.cos(center.lat * Math.PI / 180)))
       };
 
-      const tiles = tilesForBBox(bbox, minZoom, maxZoom);
+      const tiles = tilesForBBox({
+        minLat: bbox.south,
+        minLon: bbox.west,
+        maxLat: bbox.north,
+        maxLon: bbox.east
+      }, minZoom, maxZoom);
       const packIdFinal = packId || `prefetch_${Date.now()}`;
       const packPath = `${this.documentDir}tiles/${packIdFinal}`;
       

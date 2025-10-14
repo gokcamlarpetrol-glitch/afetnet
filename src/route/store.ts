@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system";
-import * as ImagePicker from "expo-image-picker";
-import { Graph, WP, Edge } from "./types";
+// import * as ImagePicker from "expo-image-picker"; // Temporarily disabled
+import { Graph } from "./types";
 
 const DIR = "/tmp/";
 const FILE = DIR + "route.graph.json";

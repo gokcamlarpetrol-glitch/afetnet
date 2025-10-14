@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
-import { listHazards, upsertHazard, removeHazard } from "../hazard/store";
-import { HazardType, HazardZone } from "../hazard/types";
-import { listDrafts, inferHazards } from "../hazard/infer";
 import * as Location from "expo-location";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { inferHazards, listDrafts } from "../hazard/infer";
+import { listHazards, removeHazard, upsertHazard } from "../hazard/store";
+import { HazardType, HazardZone } from "../hazard/types";
 
 function makeId(){ return "hz_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
@@ -83,7 +83,7 @@ export default function HazardScreen(){
               <Text style={{ color:"#e5e7eb", fontWeight:"700" }}>{String(d.t).toUpperCase()} • Sev.{d.severity} • {d.radius}m</Text>
               <Text style={{ color:"#93c5fd", fontSize:12 }}>~ öneri</Text>
               <View style={{ flexDirection:"row", gap:8, marginTop:6 }}>
-                <Pressable onPress={async()=>{ await upsertHazard({ ...d, draft: undefined }); alert("Taslak kaydedildi"); await reload(); }} style={{ backgroundColor:"#10b981", padding:8, borderRadius:8 }}>
+                <Pressable onPress={async()=>{ await upsertHazard({ ...d, draft: undefined }); (globalThis as any).alert("Taslak kaydedildi"); await reload(); }} style={{ backgroundColor:"#10b981", padding:8, borderRadius:8 }}>
                   <Text style={{ color:"white" }}>KAYDET</Text>
                 </Pressable>
               </View>

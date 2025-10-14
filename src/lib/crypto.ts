@@ -64,7 +64,7 @@ export function boxDecrypt(cipherBase64: string, nonceBase64: string, theirPubli
   const theirPublic = decodeBase64(theirPublicKeyBase64);
   const decrypted = nacl.box.open(cipher, nonce, theirPublic, mySecretKey);
   if (!decrypted) return null;
-  return decodeUTF8(new Uint8Array(decrypted));
+  return decodeUTF8(decrypted);
 }
 
 // Generate shared secret for group encryption

@@ -179,7 +179,7 @@ export function safeAwait<T>(
 export function createGlobalErrorHandler() {
   const originalHandler = ErrorUtils.getGlobalHandler();
   
-  ErrorUtils.setGlobalHandler((error: Error, isFatal: boolean) => {
+  ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
     logEvent('GLOBAL_ERROR', {
       message: error.message,
       stack: error.stack,
