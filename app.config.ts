@@ -93,6 +93,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app",
-    privacyEmail: "privacy@afetnet.app"
+    privacyEmail: "privacy@afetnet.app",
+    // Firebase configuration
+    firebase: {
+      projectId: process.env.FIREBASE_PROJECT_ID || "afetnet-app",
+      apiKey: process.env.FIREBASE_API_KEY || "demo-api-key",
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || "afetnet-app.firebaseapp.com",
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "afetnet-app.appspot.com",
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "123456789",
+      appId: process.env.FIREBASE_APP_ID || "1:123456789:ios:abcdef123456"
+    }
   }
 });
