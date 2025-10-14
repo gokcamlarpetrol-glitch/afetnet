@@ -85,14 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ["expo-location"],
     "expo-font",
     "react-native-ble-plx",
-    "expo-barcode-scanner",
-    [
-      "@stripe/stripe-react-native",
-      {
-        merchantIdentifier: "merchant.com.afetnet.app",
-        enableGooglePay: true,
-      }
-    ]
+    "expo-barcode-scanner"
   ],
   newArchEnabled: true,
   extra: {
