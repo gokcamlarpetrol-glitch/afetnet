@@ -56,11 +56,11 @@ export default function GidQrCard({ gid, groupName, onClose }: GidQrCardProps) {
 
       <View style={styles.actions}>
         <Pressable style={styles.actionButton} onPress={handleCopyGid}>
-          <Ionicons name="copy" size={20} color={palette.primary} />
+          <Ionicons name="copy" size={20} color={palette.primary.main} />
           <Text style={styles.actionText}>Kopyala</Text>
         </Pressable>
         <Pressable style={styles.actionButton} onPress={handleShare}>
-          <Ionicons name="share" size={20} color={palette.primary} />
+          <Ionicons name="share" size={20} color={palette.primary.main} />
           <Text style={styles.actionText}>Paylaş</Text>
         </Pressable>
       </View>
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   },
   actionText: {
     fontSize: 14,
-    color: palette.primary,
+    color: palette.primary.main,
     marginLeft: spacing.xs,
     fontWeight: '600',
   },

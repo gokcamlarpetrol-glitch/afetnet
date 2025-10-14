@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
   },
   myMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
   },
   otherMessage: {
     alignSelf: 'flex-start',

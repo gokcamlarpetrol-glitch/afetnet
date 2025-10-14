@@ -20,7 +20,7 @@ const s = StyleSheet.create({
     borderColor: palette.border
   },
   title: {
-    color: palette.text,
+    color: palette.text.primary,
     fontWeight: "600",
     marginBottom: spacing(1),
     fontSize: 16

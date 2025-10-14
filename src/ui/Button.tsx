@@ -35,7 +35,7 @@ const s = StyleSheet.create({
     borderWidth: 1
   },
   primary: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primary.main,
     borderColor: "#1ea952"
   },
   danger: {
@@ -51,6 +51,6 @@ const s = StyleSheet.create({
     fontWeight: "700"
   },
   ghostText: {
-    color: palette.text
+    color: palette.text.primary
   }
 });
