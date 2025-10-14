@@ -10,9 +10,9 @@
 
 ### 2. 🔴 FIREBASE API KEY AÇIKTA
 **Risk Seviyesi: YÜKSEK** 
-- `AIzaSyCUUanHUdit8LM6LlCXSt_eV9Rf36Dg-ug`
+- `AIzaSy[REDACTED]` (Google API Key tespit edildi)
 - `android/app/google-services.json` dosyasında hardcoded
-- **Çözüm:** Environment variable'a taşınmalı
+- **Çözüm:** Environment variable'a taşındı ✅
 
 ### 3. 🟡 HARDCODED TEST KEYS
 **Risk Seviyesi: ORTA**
