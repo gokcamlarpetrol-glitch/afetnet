@@ -24,6 +24,8 @@ if (!isExpoGo) {
 
 export const SafeBarcodeScanner = {
   isAvailable: () => BarcodeScanner !== null,
+  // Expose underlying component when available
+  Component: BarcodeScanner?.BarCodeScanner || null,
   
   requestPermissionsAsync: async () => {
     if (!BarcodeScanner) {

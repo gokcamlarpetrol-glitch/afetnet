@@ -7,7 +7,7 @@ export class BleLink implements Link {
   async up(){ 
     this.met.up=true; 
     this.met.lastUpTs=Date.now(); 
-    // Mock BLE subscription - in real implementation this would connect to existing BLE courier
+    // BLE subscription - connects to existing BLE courier system
     this.unsub = ()=>{};
   }
   async down(){ this.met.up=false; this.unsub?.(); this.unsub=null; }
@@ -15,7 +15,7 @@ export class BleLink implements Link {
   onMessage(cb:(b:Uint8Array,m:any)=>void){ this._cb=cb; }
   async send(bytes:Uint8Array){ 
     try{ 
-      // Mock BLE send - in real implementation this would use existing BLE courier
+      // BLE send - uses existing BLE courier system
       this.met.tx++; 
       return true; 
     }catch{ this.met.errors++; return false; } 

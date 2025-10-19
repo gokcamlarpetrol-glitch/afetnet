@@ -18,17 +18,28 @@ import {
     Text,
     View
 } from 'react-native';
-// MapView temporarily disabled for Expo Go compatibility
-// #import MapView, {
-//     Circle,
-//     Marker,
-//     Polyline,
-//     PROVIDER_GOOGLE,
-//     UrlTile
-// } from '#react-native-maps';
 import { usePDRFuse } from '../hooks/usePDRFuse';
 import { currentFormat, localTileUrlTemplate, startMbtilesServer } from '../offline/mbtiles-server';
 import { logger } from '../utils/productionLogger';
+import NetInfo from '@react-native-community/netinfo';
+
+// Import expo-maps with fallback
+let ExpoMap: any = null;
+let MapView: any = null;
+let Marker: any = null;
+let Circle: any = null;
+let Polyline: any = null;
+
+try {
+  const maps = require('expo-maps');
+  ExpoMap = maps.default;
+  MapView = maps.MapView;
+  Marker = maps.Marker;
+  Circle = maps.Circle;
+  Polyline = maps.Polyline;
+} catch (e) {
+  // expo-maps not available - fallback to alternative map solution
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -85,6 +96,7 @@ export default function AdvancedMapOffline() {
   const [panelExpanded, setPanelExpanded] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [tilePacksModalVisible, setTilePacksModalVisible] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
 
   // Advanced state
   const [trackingMode, setTrackingMode] = useState<'off' | 'basic' | 'precise'>('off');
@@ -99,7 +111,6 @@ export default function AdvancedMapOffline() {
     showCompass: true,
     showScale: true,
   });
-  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState<Location.LocationObject[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<MapMarker | null>(null);
@@ -108,6 +119,7 @@ export default function AdvancedMapOffline() {
   const panelAnimation = useRef(new Animated.Value(0)).current;
   const mapOpacity = useRef(new Animated.Value(1)).current;
   const pulseAnimation = useRef(new Animated.Value(1)).current;
+  const mapRef = useRef<any>(null);
 
   // Hooks
   const { currentPos } = usePDRFuse();
@@ -118,6 +130,12 @@ export default function AdvancedMapOffline() {
     loadOfflineTilePacks();
     setupLocationTracking();
     startPulseAnimation();
+    
+    // Network status monitoring
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(!!state.isConnected);
+    });
+    return () => unsubscribe();
   }, []);
 
   // Panel animation
@@ -325,6 +343,18 @@ export default function AdvancedMapOffline() {
 
   const handleMarkerPress = (marker: MapMarker) => {
     setSelectedMarker(marker);
+    Alert.alert(
+      marker.title,
+      marker.description || 'Detay yok',
+      [
+        { text: 'Tamam' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: () => removeMarker(marker.id),
+        },
+      ]
+    );
   };
 
   // Advanced features
@@ -619,6 +649,9 @@ export default function AdvancedMapOffline() {
           <Text style={styles.systemText}>
             PDR Füzyon: {currentPos ? '✅ Aktif' : '❌ Pasif'}
           </Text>
+          <Text style={styles.systemText}>
+            Network: {isOnline ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}
+          </Text>
         </View>
       </ScrollView>
     </Animated.View>
@@ -633,75 +666,157 @@ export default function AdvancedMapOffline() {
     );
   }
 
+  // Fallback UI when expo-maps is not available
+  if (!ExpoMap || !MapView) {
+    return (
+      <View style={styles.container}>
+        {/* Elite Map - Expo Go Compatible */}
+        <Animated.View style={[styles.mapContainer, { opacity: mapOpacity }]}>
+          <View style={styles.mapPlaceholder}>
+            <Text style={styles.mapPlaceholderTitle}>🗺️ Elite Offline Map System</Text>
+            <Text style={styles.mapPlaceholderText}>
+              Advanced location tracking and offline capabilities
+            </Text>
+            
+            {/* Location Display */}
+            {location && (
+              <View style={styles.locationDisplay}>
+                <Text style={styles.locationDisplayTitle}>📍 Current Location</Text>
+                <Text style={styles.locationDisplayText}>
+                  Lat: {location.coords.latitude.toFixed(6)}
+                </Text>
+                <Text style={styles.locationDisplayText}>
+                  Lng: {location.coords.longitude.toFixed(6)}
+                </Text>
+                <Text style={styles.locationDisplayText}>
+                  Accuracy: {location.coords.accuracy?.toFixed(2)}m
+                </Text>
+              </View>
+            )}
+
+            {/* PDR Display */}
+            {currentPos && (
+              <View style={styles.pdrDisplay}>
+                <Text style={styles.pdrDisplayTitle}>🎯 PDR Fusion</Text>
+                <Text style={styles.pdrDisplayText}>
+                  Lat: {(currentPos as any).latitude.toFixed(6)}
+                </Text>
+                <Text style={styles.pdrDisplayText}>
+                  Lng: {(currentPos as any).longitude.toFixed(6)}
+                </Text>
+              </View>
+            )}
+
+            {/* Markers Display */}
+            {markers.length > 0 && (
+              <View style={styles.markersDisplay}>
+                <Text style={styles.markersDisplayTitle}>📍 Markers ({markers.length})</Text>
+                {markers.slice(0, 3).map((marker) => (
+                  <Text key={marker.id} style={styles.markersDisplayText}>
+                    {getMarkerEmoji(marker.type)} {marker.title}
+                  </Text>
+                ))}
+                {markers.length > 3 && (
+                  <Text style={styles.markersDisplayText}>
+                    ... and {markers.length - 3} more
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Tracking Display */}
+            {trackingMode !== 'off' && (
+              <View style={styles.trackingDisplay}>
+                <Text style={styles.trackingDisplayTitle}>🎯 Tracking Active</Text>
+                <Text style={styles.trackingDisplayText}>
+                  Mode: {trackingMode === 'basic' ? 'Basic' : 'Precise'}
+                </Text>
+                <Text style={styles.trackingDisplayText}>
+                  Points: {trackingHistory.length}
+                </Text>
+              </View>
+            )}
+          </View>
+        </Animated.View>
+
+        {/* Elite Status Bar */}
+        <View style={styles.statusBar}>
+          <Text style={styles.statusText}>
+            {tileServerActive ? '✅ Elite Offline' : '⚠️ Online Fallback'} | 
+            {trackingMode === 'off' ? ' 📍 Kapalı' : 
+             trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
+            {markers.length} işaret
+          </Text>
+        </View>
+
+        {/* Advanced Controls */}
+        {renderAdvancedControls()}
+
+        {/* Expandable Panel Handle */}
+        <Pressable 
+          style={[styles.panelHandle, panelExpanded && styles.panelHandleExpanded]}
+          onPress={() => setPanelExpanded(!panelExpanded)}
+        >
+          <Text style={styles.panelHandleText}>
+            {panelExpanded ? '▼' : '▲'} Elite Harita Bilgileri
+          </Text>
+        </Pressable>
+
+        {/* Expandable Panel */}
+        {renderExpandablePanel()}
+
+        {/* Modals */}
+        {renderSettingsModal()}
+        {renderTilePacksModal()}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* Elite Map - Expo Go Compatible */}
+      {/* Elite Map with expo-maps */}
       <Animated.View style={[styles.mapContainer, { opacity: mapOpacity }]}>
-        <View style={styles.mapPlaceholder}>
-          <Text style={styles.mapPlaceholderTitle}>🗺️ Elite Offline Map System</Text>
-          <Text style={styles.mapPlaceholderText}>
-            Advanced location tracking and offline capabilities
-          </Text>
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          initialRegion={mapRegion}
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          showsCompass={mapSettings.showCompass}
+          mapType={mapSettings.showSatellite ? 'satellite' : 'standard'}
+          onPress={handleMapPress}
+        >
+          {tileServerActive && tileUrlTemplate && (
+            <MapView.TileOverlay
+              urlTemplate={tileUrlTemplate}
+              zIndex={-1}
+              maximumZ={18}
+              flipY={false}
+            />
+          )}
           
-          {/* Location Display */}
-          {location && (
-            <View style={styles.locationDisplay}>
-              <Text style={styles.locationDisplayTitle}>📍 Current Location</Text>
-              <Text style={styles.locationDisplayText}>
-                Lat: {location.coords.latitude.toFixed(6)}
-              </Text>
-              <Text style={styles.locationDisplayText}>
-                Lng: {location.coords.longitude.toFixed(6)}
-              </Text>
-              <Text style={styles.locationDisplayText}>
-                Accuracy: {location.coords.accuracy?.toFixed(2)}m
-              </Text>
-            </View>
+          {markers.map((marker) => (
+            <Marker
+              key={marker.id}
+              coordinate={marker.coordinate}
+              title={marker.title}
+              description={marker.description}
+              pinColor={getMarkerColor(marker.type)}
+              onPress={() => handleMarkerPress(marker)}
+            />
+          ))}
+          
+          {trackingHistory.length > 1 && (
+            <Polyline
+              coordinates={trackingHistory.map(loc => ({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude,
+              }))}
+              strokeColor="#10b981"
+              strokeWidth={3}
+            />
           )}
-
-          {/* PDR Display */}
-          {currentPos && (
-            <View style={styles.pdrDisplay}>
-              <Text style={styles.pdrDisplayTitle}>🎯 PDR Fusion</Text>
-              <Text style={styles.pdrDisplayText}>
-                Lat: {(currentPos as any).latitude.toFixed(6)}
-              </Text>
-              <Text style={styles.pdrDisplayText}>
-                Lng: {(currentPos as any).longitude.toFixed(6)}
-              </Text>
-            </View>
-          )}
-
-          {/* Markers Display */}
-          {markers.length > 0 && (
-            <View style={styles.markersDisplay}>
-              <Text style={styles.markersDisplayTitle}>📍 Markers ({markers.length})</Text>
-              {markers.slice(0, 3).map((marker) => (
-                <Text key={marker.id} style={styles.markersDisplayText}>
-                  {getMarkerEmoji(marker.type)} {marker.title}
-                </Text>
-              ))}
-              {markers.length > 3 && (
-                <Text style={styles.markersDisplayText}>
-                  ... and {markers.length - 3} more
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* Tracking Display */}
-          {trackingMode !== 'off' && (
-            <View style={styles.trackingDisplay}>
-              <Text style={styles.trackingDisplayTitle}>🎯 Tracking Active</Text>
-              <Text style={styles.trackingDisplayText}>
-                Mode: {trackingMode === 'basic' ? 'Basic' : 'Precise'}
-              </Text>
-              <Text style={styles.trackingDisplayText}>
-                Points: {trackingHistory.length}
-              </Text>
-            </View>
-          )}
-        </View>
+        </MapView>
       </Animated.View>
 
       {/* Elite Status Bar */}
@@ -710,7 +825,7 @@ export default function AdvancedMapOffline() {
           {tileServerActive ? '✅ Elite Offline' : '⚠️ Online Fallback'} | 
           {trackingMode === 'off' ? ' 📍 Kapalı' : 
            trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
-          {markers.length} işaret
+          {markers.length} işaret | {isOnline ? '🟢' : '🔴'}
         </Text>
       </View>
 
@@ -740,13 +855,13 @@ export default function AdvancedMapOffline() {
 // Helper functions
 const getMarkerColor = (type: MapMarker['type']): string => {
   switch (type) {
-    case 'safe_zone': return '#10b981';
-    case 'emergency': return '#ef4444';
-    case 'family_member': return '#3b82f6';
-    case 'incident': return '#f59e0b';
-    case 'waypoint': return '#8b5cf6';
-    case 'danger': return '#dc2626';
-    default: return '#6b7280';
+    case 'safe_zone': return 'green';
+    case 'emergency': return 'red';
+    case 'family_member': return 'blue';
+    case 'incident': return 'orange';
+    case 'waypoint': return 'purple';
+    case 'danger': return 'red';
+    default: return 'gray';
   }
 };
 
@@ -939,19 +1054,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
-  },
-  customMarker: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#ffffff',
-  },
-  markerEmoji: {
-    fontSize: 20,
   },
   modalContainer: {
     flex: 1,

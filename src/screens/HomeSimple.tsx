@@ -18,9 +18,12 @@ import { useQuakes } from '../services/quake/useQuakes';
 import { useFamily } from '../store/family';
 import { useQueue } from '../store/queue';
 import { useSettings } from '../store/settings';
+import { usePremiumFeatures } from '../store/premium';
 import SOSModal from '../ui/SOSModal';
 import { postJSON } from '../utils/fetchWithTimeout';
 import { logger } from '../utils/productionLogger';
+import { criticalAlarmSystem } from '../services/alerts/CriticalAlarmSystem';
+import { notifyQuake } from '../alerts/notify';
 
 const { width } = Dimensions.get('window');
 
@@ -37,13 +40,49 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
   const { items: queueItems } = useQueue();
   const { items: earthquakes, loading: quakesLoading, refresh: refreshQuakes } = useQuakes();
   const settings = useSettings();
+  const { isPremium, canUseFeature } = usePremiumFeatures();
   
-  // Deprem verilerini yenile
+  // Deprem verilerini yenile ve kritik alarmları kontrol et
   useEffect(() => {
     refreshQuakes();
     const interval = setInterval(refreshQuakes, 60000); // Her dakika yenile
     return () => clearInterval(interval);
   }, []);
+
+  // CRITICAL: Monitor new earthquakes and trigger alarms
+  useEffect(() => {
+    if (earthquakes.length === 0) return;
+
+    // Get the most recent earthquake
+    const latestQuake = earthquakes[0];
+    if (!latestQuake) return;
+
+    // Check if this is a new earthquake (within last 5 minutes)
+    const quakeAge = Date.now() - latestQuake.time;
+    if (quakeAge > 5 * 60 * 1000) return; // Older than 5 minutes, skip
+
+    const magnitude = latestQuake.mag || 0;
+    
+    // CRITICAL: Trigger alarm for significant earthquakes
+    if (magnitude >= 4.0) {
+      logger.debug(`🚨 CRITICAL EARTHQUAKE DETECTED: M${magnitude} at ${latestQuake.place}`);
+      
+      // Trigger critical alarm (bypasses silent mode)
+      criticalAlarmSystem.triggerEarthquakeAlarm(latestQuake, false).catch(err => {
+        logger.error('Failed to trigger critical alarm:', err);
+      });
+
+      // Send standard notification
+      notifyQuake(latestQuake, 'live').catch(err => {
+        logger.error('Failed to send notification:', err);
+      });
+    } else if (magnitude >= 3.0) {
+      // Send standard notification for minor earthquakes
+      notifyQuake(latestQuake, 'live').catch(err => {
+        logger.error('Failed to send notification:', err);
+      });
+    }
+  }, [earthquakes]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -188,7 +227,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
               </Text>
             </View>
             <View style={{
-              backgroundColor: '#10b981',
+              backgroundColor: isPremium ? '#10b981' : '#f59e0b',
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 20,
@@ -203,10 +242,51 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                 backgroundColor: '#ffffff',
               }} />
               <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '700' }}>
-                AKTİF
+                {isPremium ? 'PREMIUM' : 'ÜCRETSİZ'}
               </Text>
             </View>
           </View>
+
+          {/* Premium Status Banner */}
+          {!isPremium && (
+            <View style={{
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(245, 158, 11, 0.2)',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+            }}>
+              <Ionicons name="lock-closed" size={24} color="#f59e0b" />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '700', marginBottom: 2 }}>
+                  Premium Gerekli
+                </Text>
+                <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 16 }}>
+                  Sadece deprem bildirimleri ücretsizdir. Diğer tüm özellikler için Premium satın alın.
+                </Text>
+              </View>
+              <Pressable 
+                style={{
+                  backgroundColor: '#10b981',
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                }}
+                onPress={() => {
+                  // Navigate to premium screen
+                  navigation?.navigate('Premium');
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '700' }}>
+                  Satın Al
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* System Status Info Card */}
           <View style={{
@@ -521,9 +601,26 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </View>
         )}
 
-        {/* Premium SOS Button */}
+        {/* SOS Button - Premium Required */}
         <Pressable
-          onPress={() => setSosModalVisible(true)}
+          onPress={() => {
+            if (!canUseFeature('rescue_tools')) {
+              Alert.alert(
+                'Premium Gerekli',
+                'SOS özelliği Premium üyelik gerektirir. Premium satın alın.',
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  { 
+                    text: 'Premium Satın Al', 
+                    style: 'default',
+                    onPress: () => navigation?.navigate('Premium')
+                  }
+                ]
+              );
+              return;
+            }
+            setSosModalVisible(true);
+          }}
           disabled={sendingSOS}
           accessibilityRole="button"
           accessibilityLabel={sendingSOS ? "SOS gönderiliyor, lütfen bekleyin" : "Acil durum SOS sinyali gönder"}
@@ -541,6 +638,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
             shadowRadius: 12,
             elevation: 10,
             transform: [{ scale: pressed ? 0.98 : 1 }],
+            opacity: canUseFeature('rescue_tools') ? 1 : 0.6,
           })}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
@@ -560,9 +658,19 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                 ACİL DURUM / SOS
               </Text>
               <Text style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: 13, fontWeight: '500' }}>
-                Anında yardım çağrısı gönder
+                {canUseFeature('rescue_tools') ? 'Anında yardım çağrısı gönder' : 'Premium gerekli'}
               </Text>
             </View>
+            {!canUseFeature('rescue_tools') && (
+              <View style={{
+                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 8,
+              }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+              </View>
+            )}
           </View>
           <View style={{
             backgroundColor: 'rgba(255, 255, 255, 0.15)',
@@ -576,7 +684,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           }}>
             <Ionicons name="location" size={14} color="#ffffff" />
             <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '600' }}>
-              Konumunuz otomatik gönderilir
+              {canUseFeature('rescue_tools') ? 'Konumunuz otomatik gönderilir' : 'Premium ile konum paylaşımı'}
             </Text>
           </View>
         </Pressable>
@@ -594,7 +702,24 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigateTo('Harita')}
+            onPress={() => {
+              if (!canUseFeature('advanced_maps')) {
+                Alert.alert(
+                  'Premium Gerekli',
+                  'Harita özelliği Premium üyelik gerektirir.',
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { 
+                      text: 'Premium Satın Al', 
+                      style: 'default',
+                      onPress: () => navigation?.navigate('Premium')
+                    }
+                  ]
+                );
+                return;
+              }
+              navigateTo('Harita');
+            }}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -604,6 +729,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
               borderWidth: 1,
               borderColor: 'rgba(51, 65, 85, 0.5)',
               transform: [{ scale: pressed ? 0.98 : 1 }],
+              opacity: canUseFeature('advanced_maps') ? 1 : 0.6,
             })}
           >
             <View style={{
@@ -622,7 +748,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                 Offline Harita
               </Text>
               <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '500' }}>
-                İnternet olmadan navigasyon
+                {canUseFeature('advanced_maps') ? 'İnternet olmadan navigasyon' : 'Premium gerekli'}
               </Text>
             </View>
             <View style={{
@@ -633,13 +759,34 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              <Ionicons name="chevron-forward" size={18} color="#3b82f6" />
+              {canUseFeature('advanced_maps') ? (
+                <Ionicons name="chevron-forward" size={18} color="#3b82f6" />
+              ) : (
+                <Ionicons name="lock-closed" size={18} color="#f59e0b" />
+              )}
             </View>
           </Pressable>
 
           <Pressable
           accessibilityRole="button"
-            onPress={() => navigateTo('Messages')}
+            onPress={() => {
+              if (!canUseFeature('p2p_messaging')) {
+                Alert.alert(
+                  'Premium Gerekli',
+                  'Mesajlaşma özelliği Premium üyelik gerektirir.',
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { 
+                      text: 'Premium Satın Al', 
+                      style: 'default',
+                      onPress: () => navigation?.navigate('Premium')
+                    }
+                  ]
+                );
+                return;
+              }
+              navigateTo('Messages');
+            }}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -649,6 +796,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
               borderWidth: 1,
               borderColor: 'rgba(51, 65, 85, 0.5)',
               transform: [{ scale: pressed ? 0.98 : 1 }],
+              opacity: canUseFeature('p2p_messaging') ? 1 : 0.6,
             })}
           >
             <View style={{
@@ -667,7 +815,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                 Mesh Mesajlaşma
               </Text>
               <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '500' }}>
-                Bluetooth mesh ağı
+                {canUseFeature('p2p_messaging') ? 'Bluetooth mesh ağı' : 'Premium gerekli'}
               </Text>
             </View>
             <View style={{
@@ -678,7 +826,11 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              <Ionicons name="chevron-forward" size={18} color="#8b5cf6" />
+              {canUseFeature('p2p_messaging') ? (
+                <Ionicons name="chevron-forward" size={18} color="#8b5cf6" />
+              ) : (
+                <Ionicons name="lock-closed" size={18} color="#f59e0b" />
+              )}
             </View>
           </Pressable>
 

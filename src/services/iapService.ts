@@ -1,46 +1,55 @@
-// APPLE & GOOGLE IAP SERVICE - PRODUCTION READY
-// Elite level implementation with comprehensive error handling
+// APPLE & GOOGLE IAP SERVICE - PRODUCTION READY WITH SERVER VERIFICATION
+// Elite level implementation with comprehensive error handling and server-side verification
 import { Alert, Platform } from 'react-native';
-// IAP temporarily disabled for build
-type Product = any;
-type Purchase = any;
-type PurchaseError = any;
-const initConnection = async () => {};
-const endConnection = async () => {};
-const requestPurchase = async (sku: string) => {};
-const finishTransaction = async (purchase: any) => {};
-const purchaseUpdatedListener = (callback: any) => ({ remove: () => {} });
-const purchaseErrorListener = (callback: any) => ({ remove: () => {} });
+import * as InAppPurchases from 'expo-in-app-purchases';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { logger } from '../utils/productionLogger';
+import { logger } from '../utils/logger';
+import { 
+  IAP_PRODUCTS,
+  IAP_PRODUCT_IDS,
+  SUBSCRIPTION_PRODUCTS,
+  LIFETIME_PRODUCTS,
+  isSubscriptionProduct,
+  isLifetimeProduct,
+  isValidProduct,
+  PRODUCT_CONFIG,
+  logProductDetection,
+  logPremiumStatus,
+  ProductId,
+  ProductInfo
+} from '@shared/iap/products';
 
-// Premium plans - MUST match App Store Connect & Google Play Console
-// Pricing reflects the life-saving value of AfetNet's emergency features
+// Server configuration
+const SERVER_BASE_URL = __DEV__ 
+  ? 'http://localhost:3001/api' 
+  : 'https://your-production-server.com/api';
+
+// Type definitions
+type Product = InAppPurchases.InAppPurchase;
+type Purchase = InAppPurchases.InAppPurchase;
+type PurchaseError = any;
+
+interface ServerEntitlements {
+  isPremium: boolean;
+  productId?: string;
+  expiresAt?: number;
+  source?: 'monthly' | 'yearly' | 'lifetime';
+}
+
+interface ServerResponse {
+  success: boolean;
+  entitlements?: ServerEntitlements;
+  error?: string;
+}
+
+// Premium plans - Using centralized products
 export const PREMIUM_PLANS = {
-  monthly: {
-    id: 'afetnet_premium_monthly',
-    price: 49.99,
-    currency: 'TRY',
-    title: 'Aylık Premium',
-    description: 'Tüm premium özellikler 1 ay'
-  },
-  yearly: {
-    id: 'afetnet_premium_yearly',
-    price: 499.99,
-    currency: 'TRY',
-    title: 'Yıllık Premium',
-    description: 'Tüm premium özellikler 1 yıl (%17 indirim)'
-  },
-  lifetime: {
-    id: 'afetnet_premium_lifetime',
-    price: 999.99,
-    currency: 'TRY',
-    title: 'Yaşam Boyu Premium',
-    description: 'Tüm premium özellikler kalıcı (%50 indirim)'
-  }
+  [IAP_PRODUCTS.monthly]: PRODUCT_CONFIG[IAP_PRODUCTS.monthly],
+  [IAP_PRODUCTS.yearly]: PRODUCT_CONFIG[IAP_PRODUCTS.yearly],
+  [IAP_PRODUCTS.lifetime]: PRODUCT_CONFIG[IAP_PRODUCTS.lifetime]
 } as const;
 
-export type PremiumPlanId = keyof typeof PREMIUM_PLANS;
+export type PremiumPlanId = ProductId;
 
 const PREMIUM_STATUS_KEY = '@afetnet_premium_status';
 const LAST_PURCHASE_KEY = '@afetnet_last_purchase';
@@ -75,7 +84,7 @@ class IAPService {
       logger.info('Initializing IAP service...');
 
       // Initialize connection with timeout
-      const initPromise = initConnection();
+      const initPromise = InAppPurchases.connectAsync();
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('IAP initialization timeout')), 10000)
       );
@@ -99,98 +108,113 @@ class IAPService {
   // Setup purchase update and error listeners with comprehensive error handling
   private setupPurchaseListeners(): void {
     try {
-      // Purchase update listener
-      this.purchaseUpdateSubscription = purchaseUpdatedListener(
-        async (purchase: Purchase) => {
-          logger.info('📦 Purchase updated:', {
-            productId: purchase.productId,
-            transactionId: purchase.transactionId,
-            transactionDate: purchase.transactionDate
-          });
+      // Purchase listener (handles both success and error)
+      InAppPurchases.setPurchaseListener(
+        async ({ responseCode, results, errorCode }) => {
+          logger.info('📦 Purchase event:', { responseCode, resultsCount: results?.length, errorCode });
 
-          // Prevent duplicate processing
-          if (this.isProcessingPurchase) {
-            logger.warn('⚠️ Purchase already being processed, skipping...');
-            return;
-          }
+          // Handle successful purchase
+          if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
+            for (const purchase of results) {
+              // Prevent duplicate processing
+              if (this.isProcessingPurchase) {
+                logger.warn('⚠️ Purchase already being processed, skipping...');
+                continue;
+              }
 
-          this.isProcessingPurchase = true;
+              this.isProcessingPurchase = true;
 
-          try {
-            // Validate receipt
-            const isValid = await this.validateReceipt(purchase);
+              try {
+                // Check if this is a valid product
+                if (!isValidProduct(purchase.productId)) {
+                  logger.warn('⚠️ Invalid product purchased:', purchase.productId);
+                  await InAppPurchases.finishTransactionAsync(purchase, false);
+                  continue;
+                }
 
-            if (isValid) {
-              // Update premium status
-              await this.updatePremiumStatus(purchase);
+                // Log product detection
+                logProductDetection(purchase.productId);
 
-              // Finish transaction (CRITICAL - prevents duplicate charges)
-              await finishTransaction({ purchase, isConsumable: false });
+                // Validate receipt
+                const isValid = await this.validateReceipt(purchase);
 
-              // Save purchase info
-              await this.savePurchaseInfo(purchase);
+                if (isValid) {
+                  // Update premium status
+                  await this.updatePremiumStatus(purchase);
 
-              logger.info('✅ Purchase completed successfully');
+                  // Finish transaction (CRITICAL - prevents duplicate charges)
+                  await InAppPurchases.finishTransactionAsync(purchase, false);
 
-              Alert.alert(
-                '✅ Başarılı!',
-                'Premium üyeliğiniz aktif edildi!',
-                [{ text: 'Tamam', style: 'default' }]
-              );
-            } else {
-              logger.error('❌ Receipt validation failed');
-              Alert.alert(
-                '❌ Hata',
-                'Satın alma doğrulanamadı. Lütfen destek ekibiyle iletişime geçin.',
-                [{ text: 'Tamam', style: 'default' }]
-              );
+                  // Save purchase info
+                  await this.savePurchaseInfo(purchase);
+
+                  // Log premium status
+                  logPremiumStatus(true, purchase.productId);
+
+                  logger.iap.purchaseSuccess(purchase.productId, purchase.orderId);
+
+                  Alert.alert(
+                    '✅ Başarılı!',
+                    'Premium üyeliğiniz aktif edildi!',
+                    [{ text: 'Tamam', style: 'default' }]
+                  );
+                } else {
+                  logger.iap.verificationFailed(purchase.productId, 'Server validation failed');
+                  Alert.alert(
+                    '❌ Hata',
+                    'Satın alma doğrulanamadı. Lütfen destek ekibiyle iletişime geçin.',
+                    [{ text: 'Tamam', style: 'default' }]
+                  );
+                }
+              } catch (error) {
+                logger.error('❌ Purchase processing error:', error);
+                Alert.alert(
+                  '❌ Hata',
+                  'Satın alma işlenirken hata oluştu. Lütfen tekrar deneyin.',
+                  [{ text: 'Tamam', style: 'default' }]
+                );
+              } finally {
+                this.isProcessingPurchase = false;
+              }
             }
-          } catch (error) {
-            logger.error('❌ Purchase processing error:', error);
+          } 
+          // Handle user cancellation
+          else if (responseCode === InAppPurchases.IAPResponseCode.USER_CANCELED) {
+            logger.info('ℹ️ User cancelled purchase');
+          }
+          // Handle deferred (iOS parental approval)
+          else if (responseCode === InAppPurchases.IAPResponseCode.DEFERRED) {
+            logger.info('ℹ️ Purchase deferred - awaiting parental approval (iOS)');
             Alert.alert(
-              '❌ Hata',
-              'Satın alma işlenirken hata oluştu. Lütfen tekrar deneyin.',
+              '⏳ Beklemede',
+              'Satın alma onay bekliyor (ebeveyn onayı gerekli).',
               [{ text: 'Tamam', style: 'default' }]
             );
-          } finally {
-            this.isProcessingPurchase = false;
           }
-        }
-      );
-
-      // Purchase error listener
-      this.purchaseErrorSubscription = purchaseErrorListener(
-        (error: PurchaseError) => {
-          logger.error('❌ Purchase error:', {
-            code: error.code,
-            message: error.message
-          });
-
-          // Handle user cancellation gracefully
-          if (error.code && String(error.code).includes('CANCELLED')) {
-            logger.info('ℹ️ User cancelled purchase');
-            return;
-          }
-
           // Handle other errors
-          const errorMessages: { [key: string]: string } = {
-            E_UNKNOWN: 'Bilinmeyen bir hata oluştu.',
-            E_SERVICE_ERROR: 'Mağaza servisi hatası. Lütfen tekrar deneyin.',
-            E_USER_ERROR: 'Kullanıcı hatası. Lütfen tekrar deneyin.',
-            E_ITEM_UNAVAILABLE: 'Ürün şu anda mevcut değil.',
-            E_REMOTE_ERROR: 'Bağlantı hatası. İnternet bağlantınızı kontrol edin.',
-            E_NETWORK_ERROR: 'Ağ hatası. Lütfen tekrar deneyin.',
-            E_RECEIPT_FAILED: 'Makbuz doğrulaması başarısız.',
-            E_RECEIPT_FINISHED_FAILED: 'Makbuz tamamlanamadı.'
-          };
+          else {
+            logger.error('❌ Purchase error:', { responseCode, errorCode });
 
-          const message = error.code ? (errorMessages[error.code] || 'Satın alma işlemi başarısız oldu.') : 'Satın alma işlemi başarısız oldu.';
+            // Handle other errors
+            const errorMessages: { [key: string]: string } = {
+              E_UNKNOWN: 'Bilinmeyen bir hata oluştu.',
+              E_SERVICE_ERROR: 'Mağaza servisi hatası. Lütfen tekrar deneyin.',
+              E_USER_ERROR: 'Kullanıcı hatası. Lütfen tekrar deneyin.',
+              E_ITEM_UNAVAILABLE: 'Ürün şu anda mevcut değil.',
+              E_REMOTE_ERROR: 'Bağlantı hatası. İnternet bağlantınızı kontrol edin.',
+              E_NETWORK_ERROR: 'Ağ hatası. Lütfen tekrar deneyin.',
+              E_RECEIPT_FAILED: 'Makbuz doğrulaması başarısız.',
+              E_RECEIPT_FINISHED_FAILED: 'Makbuz tamamlanamadı.'
+            };
 
-          Alert.alert(
-            '❌ Satın Alma Hatası',
-            message,
-            [{ text: 'Tamam', style: 'default' }]
-          );
+            const message = errorCode ? (errorMessages[errorCode] || 'Satın alma işlemi başarısız oldu.') : 'Satın alma işlemi başarısız oldu.';
+
+            Alert.alert(
+              '❌ Satın Alma Hatası',
+              message,
+              [{ text: 'Tamam', style: 'default' }]
+            );
+          }
         }
       );
 
@@ -208,14 +232,19 @@ class IAPService {
         await this.initialize();
       }
 
-      const productIds = Object.values(PREMIUM_PLANS).map(plan => plan.id);
+      const productIds = IAP_PRODUCT_IDS; // Get all valid product IDs
       logger.info('📦 Fetching products:', productIds);
 
-      // For now, return empty array - products will be fetched from store
-      // TODO: Implement proper product fetching after store setup
-      logger.info('ℹ️ Product fetching placeholder - configure in App Store Connect first');
-
-      return [];
+      // Fetch products from store
+      const { responseCode, results } = await InAppPurchases.getProductsAsync(productIds);
+      
+      if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
+        logger.info('✅ Products fetched:', results.length);
+        return results as any;
+      } else {
+        logger.warn('⚠️ Failed to fetch products:', responseCode);
+        return [];
+      }
     } catch (error) {
       logger.error('❌ Failed to get products:', error);
       // Return empty array instead of throwing
@@ -256,7 +285,7 @@ class IAPService {
       logger.info('🛒 Starting purchase for plan:', planId);
 
       // Request purchase - use correct API
-      await requestPurchase({ sku: plan.id } as any);
+      await InAppPurchases.purchaseItemAsync(plan.id);
 
       logger.info('✅ Purchase request sent successfully');
       return true;
@@ -276,18 +305,13 @@ class IAPService {
     }
   }
 
-  // Validate receipt (placeholder - implement backend validation)
+  // Validate receipt with server
   private async validateReceipt(purchase: Purchase): Promise<boolean> {
     try {
-      logger.info('🔐 Validating receipt for:', purchase.productId);
+      logger.info('🔐 Validating receipt with server for:', purchase.productId);
 
-      // IMPORTANT: In production, validate receipts on your backend server
-      // This is a placeholder that assumes valid for now
-      // Backend validation prevents fraud and ensures security
-
-      // For now, basic validation
-      if (!purchase.transactionId) {
-        logger.error('❌ No transaction ID found');
+      if (!purchase.orderId) {
+        logger.error('❌ No order ID found');
         return false;
       }
 
@@ -296,24 +320,75 @@ class IAPService {
         return false;
       }
 
-      // TODO: Send to backend for validation
-      // const response = await fetch('YOUR_BACKEND_URL/validate-receipt', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     receipt: purchase.transactionReceipt,
-      //     productId: purchase.productId,
-      //     platform: Platform.OS
-      //   })
-      // });
-      // const data = await response.json();
-      // return data.valid;
+      // Get user ID (implement your user identification method)
+      const userId = await this.getUserId();
+      
+      // Send receipt to server for verification
+      const response = await fetch(`${SERVER_BASE_URL}/iap/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptData: purchase.orderId,
+          userId,
+          productId: purchase.productId
+        })
+      });
 
-      logger.info('✅ Receipt validation passed (placeholder)');
-      return true;
+      const data: ServerResponse = await response.json();
+      
+      if (data.success && data.entitlements?.isPremium) {
+        logger.info('✅ Server receipt validation passed');
+        return true;
+      } else {
+        logger.iap.serverError('/iap/verify', data.error || 'Unknown error');
+        return false;
+      }
     } catch (error) {
       logger.error('❌ Receipt validation failed:', error);
       return false;
+    }
+  }
+
+  // Get user ID (implement your user identification method)
+  private async getUserId(): Promise<string> {
+    try {
+      // Try to get from AsyncStorage first
+      const storedUserId = await AsyncStorage.getItem('@afetnet_user_id');
+      if (storedUserId) {
+        return storedUserId;
+      }
+
+      // Generate new user ID (implement your user creation logic)
+      const userId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      await AsyncStorage.setItem('@afetnet_user_id', userId);
+      
+      logger.info('🆔 Generated new user ID:', userId);
+      return userId;
+    } catch (error) {
+      logger.error('❌ Failed to get user ID:', error);
+      // Fallback to device-based ID
+      return `device_${Date.now()}`;
+    }
+  }
+
+  // Get entitlements from server
+  private async getServerEntitlements(): Promise<ServerEntitlements | null> {
+    try {
+      const userId = await this.getUserId();
+      
+      const response = await fetch(`${SERVER_BASE_URL}/user/entitlements?userId=${userId}`);
+      const data: ServerResponse = await response.json();
+      
+      if (data.success && data.entitlements) {
+        logger.info('📊 Server entitlements:', data.entitlements);
+        return data.entitlements;
+      } else {
+        logger.warn('⚠️ Failed to get server entitlements:', data.error);
+        return null;
+      }
+    } catch (error) {
+      logger.error('❌ Error getting server entitlements:', error);
+      return null;
     }
   }
 
@@ -322,12 +397,37 @@ class IAPService {
     try {
       logger.info('💾 Updating premium status for:', purchase.productId);
 
+      const productConfig = PRODUCT_CONFIG[purchase.productId as keyof typeof PRODUCT_CONFIG];
+      if (!productConfig) {
+        logger.error('❌ Unknown product configuration:', purchase.productId);
+        return;
+      }
+
+      // Calculate expiry date based on product type
+      let expiryDate: number | null = null;
+      
+      if (isLifetimeProduct(purchase.productId)) {
+        // Lifetime products never expire
+        expiryDate = null;
+        logger.info('🔄 Lifetime product - premium permanent');
+      } else if (isSubscriptionProduct(purchase.productId)) {
+        // Calculate subscription expiry
+        const purchaseTime = purchase.purchaseTime || Date.now();
+        const durationMs = productConfig.duration === 'monthly' 
+          ? 30 * 24 * 60 * 60 * 1000  // 30 days
+          : 365 * 24 * 60 * 60 * 1000; // 365 days
+        
+        expiryDate = purchaseTime + durationMs;
+        logger.info(`🔄 Subscription product - expires in ${productConfig.duration}`);
+      }
+
       const premiumStatus = {
         isPremium: true,
         productId: purchase.productId,
-        transactionId: purchase.transactionId,
-        transactionDate: purchase.transactionDate,
-        expiryDate: null, // Set based on subscription type
+        orderId: purchase.orderId,
+        purchaseTime: purchase.purchaseTime,
+        expiryDate,
+        productType: productConfig.type,
         updatedAt: Date.now()
       };
 
@@ -346,8 +446,8 @@ class IAPService {
     try {
       const purchaseInfo = {
         productId: purchase.productId,
-        transactionId: purchase.transactionId,
-        transactionDate: purchase.transactionDate,
+        orderId: purchase.orderId,
+        purchaseTime: purchase.purchaseTime,
         savedAt: Date.now()
       };
 
@@ -361,22 +461,57 @@ class IAPService {
   // Check if user has active premium subscription
   async checkPremiumStatus(): Promise<boolean> {
     try {
-      // Check local storage first
+      // First try to get entitlements from server
+      const serverEntitlements = await this.getServerEntitlements();
+      
+      if (serverEntitlements) {
+        // Use server entitlements as source of truth
+        const isPremium = serverEntitlements.isPremium;
+        
+        // Update local storage to match server
+        const premiumStatus = {
+          isPremium,
+          productId: serverEntitlements.productId,
+          expiresAt: serverEntitlements.expiresAt,
+          source: serverEntitlements.source,
+          updatedAt: Date.now(),
+          fromServer: true
+        };
+        
+        await AsyncStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(premiumStatus));
+        
+        logPremiumStatus(isPremium, serverEntitlements.productId);
+        return isPremium;
+      }
+
+      // Fallback to local storage if server is unavailable
+      logger.warn('⚠️ Server unavailable, checking local storage');
       const statusStr = await AsyncStorage.getItem(PREMIUM_STATUS_KEY);
       if (statusStr) {
         const status = JSON.parse(statusStr);
         logger.info('📊 Premium status from storage:', status);
 
-        // Check if expired (for subscriptions)
+        // Check if expired (for subscriptions only)
         if (status.expiryDate && status.expiryDate < Date.now()) {
           logger.info('⏰ Premium subscription expired');
+          await AsyncStorage.removeItem(PREMIUM_STATUS_KEY);
+          logPremiumStatus(false, status.productId);
           return false;
         }
 
+        // Check if it's a valid product
+        if (!isValidProduct(status.productId)) {
+          logger.warn('⚠️ Invalid product in storage:', status.productId);
+          await AsyncStorage.removeItem(PREMIUM_STATUS_KEY);
+          return false;
+        }
+
+        logPremiumStatus(true, status.productId);
         return status.isPremium;
       }
 
       // No purchase history found
+      logPremiumStatus(false);
       return false;
     } catch (error) {
       logger.error('❌ Failed to check premium status:', error);
@@ -397,15 +532,61 @@ class IAPService {
         }
       }
 
-      // For now, just show info message
-      // TODO: Implement proper restore after App Store Connect setup
-      Alert.alert(
-        'ℹ️ Bilgi',
-        'Satın alımlarınız otomatik olarak geri yüklenecektir.',
-        [{ text: 'Tamam', style: 'default' }]
-      );
+      // Restore purchases from store
+      const { responseCode, results } = await InAppPurchases.getPurchaseHistoryAsync();
+      
+      if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
+        logger.iap.restoreSuccess(results.length);
 
-      logger.info('ℹ️ Restore purchases placeholder - configure in App Store Connect first');
+        if (results.length > 0) {
+          // Process restored purchases - only valid products
+          let premiumPurchases = 0;
+          for (const purchase of results) {
+            if (isValidProduct(purchase.productId)) {
+              logProductDetection(purchase.productId);
+              
+              // Verify with server
+              const isValid = await this.validateReceipt(purchase);
+              if (isValid) {
+                await this.updatePremiumStatus(purchase);
+                premiumPurchases++;
+              } else {
+                logger.warn('⚠️ Server verification failed for:', purchase.productId);
+              }
+            } else {
+              logger.warn('⚠️ Invalid product in restore:', purchase.productId);
+            }
+          }
+
+          if (premiumPurchases > 0) {
+            Alert.alert(
+              '✅ Başarılı!',
+              `${premiumPurchases} premium satın alım geri yüklendi.`,
+              [{ text: 'Tamam', style: 'default' }]
+            );
+          } else {
+            Alert.alert(
+              'ℹ️ Bilgi',
+              'Geri yüklenecek premium satın alım bulunamadı.',
+              [{ text: 'Tamam', style: 'default' }]
+            );
+          }
+        } else {
+          Alert.alert(
+            'ℹ️ Bilgi',
+            'Geri yüklenecek satın alım bulunamadı.',
+            [{ text: 'Tamam', style: 'default' }]
+          );
+        }
+      } else {
+        logger.error('❌ Failed to restore purchases:', responseCode);
+        Alert.alert(
+          '❌ Hata',
+          'Satın alımlar geri yüklenemedi. Lütfen tekrar deneyin.',
+          [{ text: 'Tamam', style: 'default' }]
+        );
+      }
+
       return true;
     } catch (error) {
       logger.error('❌ Failed to restore purchases:', error);
@@ -437,7 +618,7 @@ class IAPService {
       }
 
       // End connection
-      await endConnection();
+      await InAppPurchases.disconnectAsync();
       this.isInitialized = false;
       this.isProcessingPurchase = false;
 

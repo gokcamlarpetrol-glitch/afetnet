@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, Alert, Pressable, Dimensions } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { SafeBarcodeScanner } from '../ui/SafeBarcodeScanner';
 import { useFamily } from '../store/family';
 import { logger } from '../utils/productionLogger';
 
@@ -14,7 +14,7 @@ export default function QRScannerScreen() {
 
   useEffect(() => {
     const getBarCodeScannerPermissions = async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
+      const { status } = await SafeBarcodeScanner.requestPermissionsAsync();
       setHasPermission(status === 'granted');
     };
 
@@ -73,7 +73,7 @@ export default function QRScannerScreen() {
       <View style={styles.container}>
         <Text style={styles.message}>Kamera erişimi reddedildi</Text>
         <Pressable style={styles.button} onPress={() => {
-          BarCodeScanner.requestPermissionsAsync().then(({ status }) => {
+          SafeBarcodeScanner.requestPermissionsAsync().then(({ status }) => {
             setHasPermission(status === 'granted');
           });
         }}>
@@ -94,11 +94,19 @@ export default function QRScannerScreen() {
 
       {isScanning ? (
         <View style={styles.scannerContainer}>
-          <BarCodeScanner
-            onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
-            style={styles.scanner}
-            barCodeTypes={[BarCodeScanner.Constants.BarCodeType.qr]}
-          />
+          {/* If scanner is unavailable (e.g., Expo Go), show placeholder area */}
+          {SafeBarcodeScanner.isAvailable() ? (
+            // @ts-ignore - rendered component provided by native module when available
+            <SafeBarcodeScanner.Component
+              onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+              style={styles.scanner}
+              barCodeTypes={[SafeBarcodeScanner.Constants.BarCodeType.qr]}
+            />
+          ) : (
+            <View style={[styles.scanner, { alignItems: 'center', justifyContent: 'center' }]}>
+              <Text style={{ color: '#999' }}>QR tarayıcı bu ortamda devre dışı</Text>
+            </View>
+          )}
           
           {/* Scanner overlay */}
           <View style={styles.overlay}>
