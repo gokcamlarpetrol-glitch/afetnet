@@ -193,49 +193,105 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
   }
 }));
 
-// Premium feature access helpers
+// Premium feature access helpers - STRICT PREMIUM GATING
 export const usePremiumFeatures = () => {
   const { isPremium, currentPlan } = usePremium();
   
   const canUseFeature = (feature: string): boolean => {
-    if (!isPremium) return false;
+    // FREE FEATURES - Only earthquake notifications are free
+    const freeFeatures = [
+      'earthquake_notifications',  // Only earthquake notifications are free
+      'basic_deprem_takip',        // Basic earthquake tracking
+      'deprem_verisi'             // Earthquake data viewing
+    ];
     
-    // Add feature-specific logic here
+    // If it's a free feature, allow access
+    if (freeFeatures.includes(feature)) {
+      return true;
+    }
+    
+    // ALL OTHER FEATURES REQUIRE PREMIUM
+    if (!isPremium) {
+      return false;
+    }
+    
+    // Premium features
     switch (feature) {
-      case 'unlimited_family':
-        return isPremium;
+      case 'family_tracking':
+      case 'family_messaging':
+      case 'family_map':
+      case 'mesh_network':
+      case 'offline_maps':
       case 'advanced_maps':
-        return isPremium;
-      case 'priority_notifications':
-        return isPremium;
-      case 'enhanced_security':
+      case 'route_planning':
+      case 'p2p_messaging':
+      case 'rescue_tools':
+      case 'sar_mode':
+      case 'triage_system':
+      case 'health_monitoring':
+      case 'self_check':
+      case 'ice_data':
+      case 'security_features':
+      case 'encryption':
+      case 'biometric_auth':
+      case 'backup_restore':
+      case 'data_export':
+      case 'voice_commands':
+      case 'audio_beacon':
+      case 'sonar_system':
+      case 'pdr_tracking':
+      case 'sensor_fusion':
+      case 'ai_features':
+      case 'smart_analytics':
+      case 'drone_control':
+      case 'logistics_management':
+      case 'training_simulations':
+      case 'advanced_reporting':
+      case 'accessibility_features':
+      case 'haptic_navigation':
+      case 'comprehensive_features':
+      case 'premium_settings':
+      case 'unlimited_storage':
+      case 'priority_support':
         return isPremium;
       default:
+        // All unknown features require premium
         return isPremium;
     }
   };
   
   const getRemainingUsage = (feature: string): { used: number; limit: number; remaining: number } => {
     if (isPremium) {
-      return { used: 0, limit: -1, remaining: -1 }; // Unlimited
+      return { used: 0, limit: -1, remaining: -1 }; // Unlimited for premium
     }
     
-    // Free tier limits
-    switch (feature) {
-      case 'family_members':
-        return { used: 3, limit: 5, remaining: 2 };
-      case 'offline_maps':
-        return { used: 1, limit: 2, remaining: 1 };
-      default:
-        return { used: 0, limit: 3, remaining: 3 };
+    // FREE TIER - Only earthquake notifications are unlimited
+    if (feature === 'earthquake_notifications') {
+      return { used: 0, limit: -1, remaining: -1 }; // Unlimited earthquake notifications
     }
+    
+    // All other features are blocked for free users
+    return { used: 0, limit: 0, remaining: 0 };
+  };
+  
+  const getFeatureDescription = (feature: string): string => {
+    if (isPremium) {
+      return 'Premium özellik aktif';
+    }
+    
+    if (feature === 'earthquake_notifications') {
+      return 'Ücretsiz - Deprem bildirimleri';
+    }
+    
+    return 'Premium gerekli - Satın alın';
   };
   
   return {
     isPremium,
     currentPlan,
     canUseFeature,
-    getRemainingUsage
+    getRemainingUsage,
+    getFeatureDescription
   };
 };
 

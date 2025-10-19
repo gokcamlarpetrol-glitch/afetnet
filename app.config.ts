@@ -5,7 +5,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "AfetNet",
   slug: "afetnet",
   scheme: "afetnet",
-  version: "1.0.0",
+  owner: "gokhancamci1",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -24,6 +25,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-barcode-scanner",
     "expo-font",
     "expo-localization",
+    "expo-maps",
     [
       "expo-build-properties",
       {
@@ -35,6 +37,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
+    buildNumber: "4",
     bundleIdentifier: "org.afetnet.app",
     supportsTablet: true,
     infoPlist: {
@@ -56,7 +59,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: "org.afetnet.app",
-    versionCode: 1,
+          versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png"
@@ -76,6 +79,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },
+    devClient: true,
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app"

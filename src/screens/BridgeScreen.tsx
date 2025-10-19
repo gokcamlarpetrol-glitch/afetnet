@@ -23,7 +23,7 @@ export default function BridgeScreen(){
           </View>
         ))}
       </View>
-      <Text style={{ color:"#94a3b8", fontSize:12, marginTop:8 }}>Not: WFD/LoRa şu an **mock link**; gerçek native sürücüler aynı arayüzle yer değiştirir.</Text>
+      <Text style={{ color:"#94a3b8", fontSize:12, marginTop:8 }}>Not: WFD/LoRa bağlantıları geliştirilme aşamasındadır.</Text>
     </ScrollView>
   );
 }

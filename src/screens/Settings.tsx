@@ -1,23 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAccessibility } from '../store/accessibility';
 import { useEmergency } from '../store/emergency';
 import { useFamily } from '../store/family';
 import { usePremium, usePremiumFeatures } from '../store/premium';
-import { useSettings } from '../store/settings';
+import { useAppSettings } from '../store/appSettings';
 // ACTIVE: Premium screen with full IAP support
 import PremiumActiveScreen from './PremiumActive';
+import LanguageRegionScreen from './LanguageRegionScreen';
+import ProfileEditScreen from './ProfileEditScreen';
+import ComprehensiveFeaturesScreen from './ComprehensiveFeaturesScreen';
 
 export default function Settings() {
-  const { updateSettings } = useSettings();
+  const { updateSetting, initializeSettings } = useAppSettings();
   const { ultra } = useEmergency();
   const { generateMyAfnId } = useFamily();
   const { isPremium } = usePremium();
   const { canUseFeature, getRemainingUsage } = usePremiumFeatures();
   const { setHighContrast, setBigText, setHapticsStrong } = useAccessibility();
+
+  // Initialize settings on component mount
+  useEffect(() => {
+    initializeSettings();
+  }, [initializeSettings]);
 
   // State management
   const [activeSection, setActiveSection] = useState('premium');
@@ -46,85 +54,16 @@ export default function Settings() {
     insuranceNumber: '12345678901',
   });
 
-  // Settings state
-  const [settings, setSettings] = useState({
-    // Uygulama Ayarları
-    autoUpdate: true,
-    errorReports: true,
-    analyticsData: true,
-    usageStatistics: true,
-    darkMode: true,
-    language: 'tr',
-    region: 'TR',
-    timezone: 'Europe/Istanbul',
-    
-    // Deprem Ayarları
-    liveMode: true,
-    experimentalPWave: true,
-    magnitudeThreshold: 4.0,
-    alertRadius: 500,
-    alertDelay: 0,
-    dataSource: 'AFAD',
-    
-    // Bildirim Ayarları
-    pushNotifications: true,
-    soundEnabled: true,
-    vibrationEnabled: true,
-    emergencyAlerts: true,
-    familyAlerts: true,
-    messageAlerts: true,
-    systemAlerts: true,
-    marketingAlerts: true,
-    quietHours: true,
-    ledNotification: true,
-    badgeCount: true,
-    notificationSound: 'default',
-    vibrationPattern: 'default',
-    quietStartTime: '22:00',
-    quietEndTime: '08:00',
-    
-    // Mesh Ağ Ayarları
-    bleEnabled: true,
-    meshDiscovery: true,
-    relayMode: true,
-    powerSaving: true,
-    meshEncryption: true,
-    autoConnect: true,
-    meshRange: 100,
-    
-    // Güvenlik Ayarları
-    biometricEnabled: true,
-    encryptionEnabled: true,
-    screenLockEnabled: true,
-    appLockEnabled: true,
-    twoFactorAuth: true,
-    loginNotifications: true,
-    suspiciousActivityAlerts: true,
-    sessionTimeout: 15,
-    passwordComplexity: 'high',
-    dataSharing: true,
-    analyticsSharing: true,
-    crashReports: true,
-    
-    // Veri Ayarları
-    autoBackup: true,
-    cloudSync: true,
-    syncWifiOnly: true,
-    debugMode: true,
-    backupFrequency: 'daily',
-    dataRetention: 365,
-    localStorage: 256,
-    compressionLevel: 'medium',
-    encryptionLevel: 'high',
-    dataUsageLimit: 1024,
-    cacheSize: 100,
-    logLevel: 'info',
-  });
+  // Get current settings from store
+  const settings = useAppSettings();
 
-  const handleSettingChange = (key: string, value: boolean) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-    updateSettings({ [key]: value });
-    Alert.alert('✅ Güncellendi', `${key} ayarı ${value ? 'aktif' : 'pasif'} edildi.`);
+  const handleSettingChange = async (key: string, value: boolean) => {
+    try {
+      await updateSetting(key as any, value);
+      Alert.alert('✅ Güncellendi', `${key} ayarı ${value ? 'aktif' : 'pasif'} edildi.`);
+    } catch (error) {
+      Alert.alert('❌ Hata', 'Ayar güncellenemedi. Lütfen tekrar deneyin.');
+    }
   };
 
   const handleSaveProfile = () => {
@@ -159,9 +98,165 @@ export default function Settings() {
 
   // Premium section render
   const renderPremiumSection = () => {
+    if (!isPremium) {
+      return (
+        <ScrollView style={styles.sectionContent} showsVerticalScrollIndicator={false}>
+          {/* Free User Premium Section */}
+          <View style={styles.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 16,
+              }}>
+                <Ionicons name="lock-closed" size={24} color="#f59e0b" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Premium Üyelik Gerekli</Text>
+                <Text style={{ color: '#94a3b8', fontSize: 14, marginTop: 4 }}>
+                  Tüm özellikler için Premium satın alın
+                </Text>
+              </View>
+            </View>
+
+            <View style={{
+              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(16, 185, 129, 0.2)',
+            }}>
+              <Text style={{ color: '#10b981', fontSize: 16, fontWeight: '700', marginBottom: 8 }}>
+                Ücretsiz Özellikler
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Deprem bildirimleri (Sınırsız)
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Temel deprem takibi
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Temel ayarlar
+                </Text>
+              </View>
+            </View>
+
+            <View style={{
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(245, 158, 11, 0.2)',
+            }}>
+              <Text style={{ color: '#f59e0b', fontSize: 16, fontWeight: '700', marginBottom: 8 }}>
+                Premium Özellikler
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Aile takibi ve mesajlaşma
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Offline harita ve navigasyon
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  SOS ve kurtarma araçları
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Şebekesiz offline mesajlaşma
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Bluetooth mesh ağı iletişimi
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  İnternet olmadan P2P mesajlaşma
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Gelişmiş güvenlik özellikleri
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="lock-closed" size={16} color="#f59e0b" />
+                <Text style={{ color: '#e2e8f0', fontSize: 14, marginLeft: 8 }}>
+                  Ve 200+ diğer özellik
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#10b981',
+                paddingVertical: 16,
+                borderRadius: 12,
+                alignItems: 'center',
+                marginTop: 16,
+              }}
+              onPress={() => {
+                // Navigate to premium purchase screen
+                setActiveSection('premium');
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '800' }}>
+                Premium Satın Al
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      );
+    }
     return (
       <View style={styles.premiumContainer}>
         <PremiumActiveScreen />
+      </View>
+    );
+  };
+
+  // Language & Region section render
+  const renderLanguageRegionSection = () => {
+    return (
+      <View style={styles.languageRegionContainer}>
+        <LanguageRegionScreen />
+      </View>
+    );
+  };
+
+  // Profile Edit section render
+  const renderProfileEditSection = () => {
+    return (
+      <View style={styles.profileEditContainer}>
+        <ProfileEditScreen />
       </View>
     );
   };
@@ -190,10 +285,10 @@ export default function Settings() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Hızlı İşlemler</Text>
         <View style={styles.actionGrid}>
-          <Pressable style={styles.actionButton} onPress={() => setShowProfileModal(true)}>
+          <Pressable style={styles.actionButton} onPress={() => setActiveSection('profile')}>
             <Ionicons name="create-outline" size={24} color="#3B82F6" />
             <Text style={styles.actionText}>Profili Düzenle</Text>
-        </Pressable>
+          </Pressable>
           <Pressable style={styles.actionButton} onPress={() => {
             Clipboard.setStringAsync(generateMyAfnId());
             Alert.alert('✅ Kopyalandı', 'AFN-ID panoya kopyalandı');
@@ -303,16 +398,16 @@ export default function Settings() {
 
           <View style={styles.settingItem}>
             <View style={styles.settingInfo}>
-              <Ionicons name="analytics-outline" size={20} color="#8B5CF6" />
+              <Ionicons name="analytics-outline" size={20} color="#F59E0B" />
               <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Kullanım İstatistikleri</Text>
-                <Text style={styles.settingDescription}>Anonim kullanım verileri gönder</Text>
+                <Text style={styles.settingLabel}>Analitik Veriler</Text>
+                <Text style={styles.settingDescription}>Uygulama performans verileri</Text>
               </View>
             </View>
             <Switch
-              value={settings.usageStatistics}
-              onValueChange={(value) => handleSettingChange('usageStatistics', value)}
-              trackColor={{ false: '#374151', true: '#8B5CF6' }}
+              value={settings.analyticsData}
+              onValueChange={(value) => handleSettingChange('analyticsData', value)}
+              trackColor={{ false: '#374151', true: '#F59E0B' }}
               thumbColor="#FFFFFF"
             />
           </View>
@@ -341,7 +436,7 @@ export default function Settings() {
                 <Text style={styles.settingDescription}>Türkçe</Text>
               </View>
             </View>
-            <Pressable onPress={() => Alert.alert('Dil Seçimi', 'Türkçe - English - العربية seçenekleri')}>
+            <Pressable onPress={() => setActiveSection('language')}>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />
             </Pressable>
           </View>
@@ -354,7 +449,7 @@ export default function Settings() {
                 <Text style={styles.settingDescription}>Türkiye</Text>
               </View>
             </View>
-            <Pressable onPress={() => Alert.alert('Bölge Seçimi', 'Türkiye - USA - EU - MENA seçenekleri')}>
+            <Pressable onPress={() => setActiveSection('region')}>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />
             </Pressable>
           </View>
@@ -458,127 +553,217 @@ export default function Settings() {
   // Notifications section render
   const renderNotificationSection = () => (
     <ScrollView style={styles.sectionContent} showsVerticalScrollIndicator={false}>
-      {/* Notification Settings */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Bildirim Ayarları</Text>
-        <View style={styles.settingList}>
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="notifications-outline" size={20} color="#3B82F6" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Push Bildirimleri</Text>
-                <Text style={styles.settingDescription}>Tüm bildirimleri al</Text>
+        {/* Notification Settings */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Bildirim Ayarları</Text>
+          <View style={styles.settingList}>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="notifications-outline" size={20} color="#3B82F6" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Push Bildirimleri</Text>
+                  <Text style={styles.settingDescription}>Tüm bildirimleri al</Text>
+                </View>
               </View>
+              <Switch
+                value={settings.pushNotifications}
+                onValueChange={(value) => handleSettingChange('pushNotifications', value)}
+                trackColor={{ false: '#374151', true: '#3B82F6' }}
+                thumbColor="#FFFFFF"
+              />
             </View>
-          <Switch
-              value={settings.pushNotifications}
-              onValueChange={(value) => handleSettingChange('pushNotifications', value)}
-              trackColor={{ false: '#374151', true: '#3B82F6' }}
-              thumbColor="#FFFFFF"
-          />
-        </View>
 
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="volume-high-outline" size={20} color="#10B981" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Ses</Text>
-                <Text style={styles.settingDescription}>Bildirim sesi çalsın</Text>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="volume-high-outline" size={20} color="#10B981" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Ses</Text>
+                  <Text style={styles.settingDescription}>Bildirim sesi çalsın</Text>
+                </View>
               </View>
+              <Switch
+                value={settings.soundEnabled}
+                onValueChange={(value) => handleSettingChange('soundEnabled', value)}
+                trackColor={{ false: '#374151', true: '#10B981' }}
+                thumbColor="#FFFFFF"
+              />
             </View>
-          <Switch
-              value={settings.soundEnabled}
-              onValueChange={(value) => handleSettingChange('soundEnabled', value)}
-              trackColor={{ false: '#374151', true: '#10B981' }}
-              thumbColor="#FFFFFF"
-          />
-          </View>
 
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="phone-portrait-outline" size={20} color="#F59E0B" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Titreşim</Text>
-                <Text style={styles.settingDescription}>Bildirimde titreşim</Text>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="phone-portrait-outline" size={20} color="#F59E0B" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Titreşim</Text>
+                  <Text style={styles.settingDescription}>Bildirimde titreşim</Text>
+                </View>
               </View>
+              <Switch
+                value={settings.vibrationEnabled}
+                onValueChange={(value) => handleSettingChange('vibrationEnabled', value)}
+                trackColor={{ false: '#374151', true: '#F59E0B' }}
+                thumbColor="#FFFFFF"
+              />
             </View>
-          <Switch
-              value={settings.vibrationEnabled}
-              onValueChange={(value) => handleSettingChange('vibrationEnabled', value)}
-              trackColor={{ false: '#374151', true: '#F59E0B' }}
-              thumbColor="#FFFFFF"
-          />
-        </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="bulb-outline" size={20} color="#8B5CF6" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>LED Bildirimi</Text>
+                  <Text style={styles.settingDescription}>LED ışığı ile bildirim</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.ledNotification}
+                onValueChange={(value) => handleSettingChange('ledNotification', value)}
+                trackColor={{ false: '#374151', true: '#8B5CF6' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="notifications-circle-outline" size={20} color="#06B6D4" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Rozet Sayısı</Text>
+                  <Text style={styles.settingDescription}>Uygulama ikonunda sayı göster</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.badgeCount}
+                onValueChange={(value) => handleSettingChange('badgeCount', value)}
+                trackColor={{ false: '#374151', true: '#06B6D4' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="moon-outline" size={20} color="#6B7280" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Sessiz Saatler</Text>
+                  <Text style={styles.settingDescription}>Gece saatlerinde bildirimleri sustur</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.quietHours}
+                onValueChange={(value) => handleSettingChange('quietHours', value)}
+                trackColor={{ false: '#374151', true: '#6B7280' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
         
-      {/* Alert Types */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Bildirim Türleri</Text>
-        <View style={styles.settingList}>
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="warning-outline" size={20} color="#EF4444" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Acil Durum</Text>
-                <Text style={styles.settingDescription}>Deprem ve afet uyarıları</Text>
-          </View>
-          </View>
-          <Switch
-              value={settings.emergencyAlerts}
-              onValueChange={(value) => handleSettingChange('emergencyAlerts', value)}
-              trackColor={{ false: '#374151', true: '#EF4444' }}
-              thumbColor="#FFFFFF"
-          />
-        </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="people-outline" size={20} color="#3B82F6" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Aile Bildirimleri</Text>
-                <Text style={styles.settingDescription}>Aile üyelerinden gelen mesajlar</Text>
-          </View>
-      </View>
-          <Switch
-              value={settings.familyAlerts}
-              onValueChange={(value) => handleSettingChange('familyAlerts', value)}
-              trackColor={{ false: '#374151', true: '#3B82F6' }}
-              thumbColor="#FFFFFF"
-          />
-        </View>
-        
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="chatbubble-outline" size={20} color="#10B981" />
-              <View style={styles.settingContent}>
-                <Text style={styles.settingLabel}>Mesaj Bildirimleri</Text>
-                <Text style={styles.settingDescription}>Yeni mesaj bildirimleri</Text>
-        </View>
-        </View>
-          <Switch
-              value={settings.messageAlerts}
-              onValueChange={(value) => handleSettingChange('messageAlerts', value)}
-              trackColor={{ false: '#374151', true: '#10B981' }}
-              thumbColor="#FFFFFF"
-                />
+        {/* Alert Types */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Bildirim Türleri</Text>
+          <View style={styles.settingList}>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="warning-outline" size={20} color="#EF4444" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Acil Durum</Text>
+                  <Text style={styles.settingDescription}>Deprem ve afet uyarıları</Text>
+                </View>
               </View>
+              <Switch
+                value={settings.emergencyAlerts}
+                onValueChange={(value) => handleSettingChange('emergencyAlerts', value)}
+                trackColor={{ false: '#374151', true: '#EF4444' }}
+                thumbColor="#FFFFFF"
+              />
             </View>
-      </View>
-    </ScrollView>
-  );
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="people-outline" size={20} color="#3B82F6" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Aile Bildirimleri</Text>
+                  <Text style={styles.settingDescription}>Aile üyelerinden gelen mesajlar</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.familyAlerts}
+                onValueChange={(value) => handleSettingChange('familyAlerts', value)}
+                trackColor={{ false: '#374151', true: '#3B82F6' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="chatbubble-outline" size={20} color="#10B981" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Mesaj Bildirimleri</Text>
+                  <Text style={styles.settingDescription}>Yeni mesaj bildirimleri</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.messageAlerts}
+                onValueChange={(value) => handleSettingChange('messageAlerts', value)}
+                trackColor={{ false: '#374151', true: '#10B981' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="settings-outline" size={20} color="#6B7280" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Sistem Bildirimleri</Text>
+                  <Text style={styles.settingDescription}>Uygulama güncellemeleri ve sistem mesajları</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.systemAlerts}
+                onValueChange={(value) => handleSettingChange('systemAlerts', value)}
+                trackColor={{ false: '#374151', true: '#6B7280' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="megaphone-outline" size={20} color="#F59E0B" />
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Pazarlama Bildirimleri</Text>
+                  <Text style={styles.settingDescription}>Yeni özellikler ve kampanyalar</Text>
+                </View>
+              </View>
+              <Switch
+                value={settings.marketingAlerts}
+                onValueChange={(value) => handleSettingChange('marketingAlerts', value)}
+                trackColor={{ false: '#374151', true: '#F59E0B' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    );
 
   // Main sections configuration
   const sections = [
     { id: 'premium', label: 'Premium', icon: 'shield-checkmark-outline', color: '#10B981' },
-    { id: 'profile', label: 'Profil', icon: 'person-outline', color: '#3B82F6' },
+    { id: 'profile', label: 'Profil', icon: 'person-outline', color: '#3B82F6', premium: true },
     { id: 'general', label: 'Genel', icon: 'settings-outline', color: '#10B981' },
-    { id: 'notifications', label: 'Bildirimler', icon: 'notifications-outline', color: '#F59E0B' },
+    { id: 'notifications', label: 'Bildirimler', icon: 'notifications-outline', color: '#F59E0B', premium: true },
     { id: 'earthquake', label: 'Deprem', icon: 'pulse-outline', color: '#EF4444' },
-    { id: 'mesh', label: 'Mesh', icon: 'radio-outline', color: '#8B5CF6' },
-    { id: 'security', label: 'Güvenlik', icon: 'shield-outline', color: '#06B6D4' },
-    { id: 'data', label: 'Veri', icon: 'server-outline', color: '#84CC16' },
+    { id: 'comprehensive', label: 'Kapsamlı Özellikler', icon: 'grid-outline', color: '#8B5CF6', premium: true },
+    { id: 'mesh', label: 'Mesh', icon: 'radio-outline', color: '#8B5CF6', premium: true },
+    { id: 'security', label: 'Güvenlik', icon: 'shield-outline', color: '#06B6D4', premium: true },
+    { id: 'data', label: 'Veri', icon: 'server-outline', color: '#84CC16', premium: true },
   ];
+
+  // Comprehensive features section render
+  const renderComprehensiveFeaturesSection = () => {
+    return (
+      <View style={styles.comprehensiveContainer}>
+        <ComprehensiveFeaturesScreen />
+      </View>
+    );
+  };
 
   // Earthquake section render
   const renderEarthquakeSection = () => (
@@ -961,12 +1146,17 @@ export default function Settings() {
     switch (activeSection) {
       case 'premium':
         return renderPremiumSection();
+      case 'language':
+      case 'region':
+        return renderLanguageRegionSection();
       case 'profile':
-        return renderProfileSection();
+        return renderProfileEditSection();
       case 'general':
         return renderGeneralSection();
       case 'notifications':
         return renderNotificationSection();
+      case 'comprehensive':
+        return renderComprehensiveFeaturesSection();
       case 'earthquake':
         return renderEarthquakeSection();
       case 'mesh':
@@ -996,33 +1186,58 @@ export default function Settings() {
       {/* Section Navigation */}
       <View style={styles.sectionNav}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sectionNavContent}>
-          {sections.map((section) => (
-          <Pressable accessible={true}
-              key={section.id}
-              onPress={() => setActiveSection(section.id)}
-            style={[
-                styles.sectionButton,
-                activeSection === section.id && styles.activeSectionButton,
-            ]}
-          >
-              <View style={[
-                styles.sectionIcon,
-                { backgroundColor: activeSection === section.id ? section.color : 'transparent' }
+          {sections.map((section) => {
+            const isPremiumRequired = section.premium && !isPremium;
+            return (
+            <Pressable accessible={true}
+                key={section.id}
+                onPress={() => {
+                  if (isPremiumRequired) {
+                    Alert.alert(
+                      'Premium Gerekli',
+                      `${section.label} özelliği Premium üyelik gerektirir.`,
+                      [
+                        { text: 'İptal', style: 'cancel' },
+                        { 
+                          text: 'Premium Satın Al', 
+                          style: 'default',
+                          onPress: () => setActiveSection('premium')
+                        }
+                      ]
+                    );
+                    return;
+                  }
+                  setActiveSection(section.id);
+                }}
+              style={[
+                  styles.sectionButton,
+                  activeSection === section.id && styles.activeSectionButton,
+                  isPremiumRequired && { opacity: 0.6 }
+              ]}
+            >
+                <View style={[
+                  styles.sectionIcon,
+                  { backgroundColor: activeSection === section.id ? section.color : 'transparent' }
+                ]}>
+              <Ionicons 
+                    name={section.icon as any} 
+                    size={20} 
+                    color={isPremiumRequired ? '#6b7280' : (activeSection === section.id ? '#FFFFFF' : '#6B7280')} 
+                  />
+                </View>
+              <Text style={[
+                  styles.sectionLabel,
+                  activeSection === section.id && styles.activeSectionLabel,
+                  isPremiumRequired && { color: '#6b7280' }
               ]}>
-            <Ionicons 
-                  name={section.icon as any} 
-                  size={20} 
-                  color={activeSection === section.id ? '#FFFFFF' : '#6B7280'} 
-                />
-              </View>
-            <Text style={[
-                styles.sectionLabel,
-                activeSection === section.id && styles.activeSectionLabel
-            ]}>
-                {section.label}
-            </Text>
-          </Pressable>
-        ))}
+                  {section.label}
+              </Text>
+              {isPremiumRequired && (
+                <Ionicons name="lock-closed" size={12} color="#6b7280" style={{ marginLeft: 4 }} />
+              )}
+            </Pressable>
+          );
+        })}
       </ScrollView>
         </View>
 
@@ -1193,6 +1408,18 @@ const styles = StyleSheet.create({
     paddingBottom: 80, // Alt navigation bar için boşluk
   },
   premiumContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  languageRegionContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  profileEditContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  comprehensiveContainer: {
     flex: 1,
     backgroundColor: '#0F172A',
   },

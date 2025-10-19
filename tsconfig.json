@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "src/*"
+      ],
+      "@shared/*": [
+        "shared/*"
       ]
     },
     "types": [
@@ -42,6 +45,7 @@
   },
   "include": [
     "src/**/*",
+    "shared/**/*",
     "App.tsx",
     "index.ts",
     "global.d.ts"
@@ -52,5 +56,5 @@
     "**/*.test.ts",
     "**/*.test.tsx"
   ],
-  "extends": "expo/tsconfig.base"
+  "extends": "./node_modules/expo/tsconfig.base.json"
 }
