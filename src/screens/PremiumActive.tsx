@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Linking,
   Pressable,
   ScrollView,
   StatusBar,
@@ -569,20 +570,20 @@ export default function PremiumActiveScreen() {
           işleminden sonra Hesap Ayarlarınıza gidin.{'\n\n'}
           <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]} 
                 onPress={() => {
-                  const url = 'https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html';
-                  if (typeof window !== 'undefined') {
-                    window.open(url, '_blank');
-                  }
+                  Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html').catch(err => {
+                    Alert.alert('Hata', 'Gizlilik Politikası açılamadı');
+                    logger.error('Failed to open privacy policy:', err);
+                  });
                 }}>
             Gizlilik Politikası
           </Text>
           {' • '}
           <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]}
                 onPress={() => {
-                  const url = 'https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html';
-                  if (typeof window !== 'undefined') {
-                    window.open(url, '_blank');
-                  }
+                  Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html').catch(err => {
+                    Alert.alert('Hata', 'Kullanım Koşulları açılamadı');
+                    logger.error('Failed to open terms of service:', err);
+                  });
                 }}>
             Kullanım Koşulları
           </Text>

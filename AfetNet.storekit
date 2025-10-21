@@ -1,0 +1,158 @@
+{
+  "identifier" : "NEW_BUNDLE_AFETNET1",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "999.99",
+      "familyShareable" : false,
+      "internalID" : "NEW_LIFETIME_001",
+      "localizations" : [
+        {
+          "description" : "Tüm premium özellikler kalıcı (%50 indirim)",
+          "displayName" : "Yaşam Boyu Premium",
+          "locale" : "tr"
+        },
+        {
+          "description" : "All premium features permanently (50% off)",
+          "displayName" : "Lifetime Premium",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "org.afetnet1.premium.lifetime",
+      "referenceName" : "Yaşam Boyu Premium",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "NEW_APP_ID",
+    "_developerTeamID" : "3H4SWQ8VJL",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 750556800.0,
+    "_locale" : "tr",
+    "_storefront" : "TUR",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Receipt"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "NEW_SUB_GROUP_001",
+      "localizations" : [
+        {
+          "description" : "AfetNet Premium Üyelik",
+          "displayName" : "AfetNet Premium Üyelik",
+          "locale" : "tr"
+        },
+        {
+          "description" : "AfetNet Premium Membership",
+          "displayName" : "AfetNet Premium Membership",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "AfetNet Premium Membership",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "NEW_MONTHLY_001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Tüm premium özellikler 1 ay",
+              "displayName" : "Aylık Premium",
+              "locale" : "tr"
+            },
+            {
+              "description" : "All premium features for 1 month",
+              "displayName" : "Monthly Premium",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "org.afetnet1.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Aylık Premium",
+          "subscriptionGroupID" : "NEW_SUB_GROUP_001",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "499.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "NEW_YEARLY_001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Tüm premium özellikler 1 yıl (%17 indirim)",
+              "displayName" : "Yıllık Premium",
+              "locale" : "tr"
+            },
+            {
+              "description" : "All premium features for 1 year (17% off)",
+              "displayName" : "Yearly Premium",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "org.afetnet1.premium.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Yıllık Premium",
+          "subscriptionGroupID" : "NEW_SUB_GROUP_001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
+

@@ -2,18 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CLIENT_ID</key>
+	<string>YOUR_CLIENT_ID.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.YOUR_REVERSED_CLIENT_ID</string>
 	<key>API_KEY</key>
-	<string>AIzaSyDbnHvMplT8Bio2J-p0GjJhf5ITAuuWdXw</string>
+	<string>YOUR_API_KEY</string>
 	<key>GCM_SENDER_ID</key>
-	<string>473993100557</string>
+	<string>YOUR_SENDER_ID</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>org.afetnet1.app</string>
+	<string>org.afetnet.app</string>
 	<key>PROJECT_ID</key>
-	<string>afetnet-c1ca7</string>
+	<string>YOUR_PROJECT_ID</string>
 	<key>STORAGE_BUCKET</key>
-	<string>afetnet-c1ca7.firebasestorage.app</string>
+	<string>YOUR_PROJECT_ID.appspot.com</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,6 +29,7 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:473993100557:ios:defa3d2d5c9635f0c6c444</string>
+	<string>1:YOUR_APP_ID:ios:YOUR_IOS_APP_ID</string>
 </dict>
 </plist>
+

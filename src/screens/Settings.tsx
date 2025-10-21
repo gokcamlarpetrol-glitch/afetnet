@@ -28,7 +28,8 @@ export default function Settings() {
   }, [initializeSettings]);
 
   // State management
-  const [activeSection, setActiveSection] = useState('premium');
+  // Premium kullanıcı için ilk section'ı profile yap
+  const [activeSection, setActiveSection] = useState(isPremium ? 'profile' : 'premium');
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -744,7 +745,17 @@ export default function Settings() {
     );
 
   // Main sections configuration
-  const sections = [
+  // Premium kullanıcı için Premium tab'ını gizle
+  const sections = isPremium ? [
+    { id: 'profile', label: 'Profil', icon: 'person-outline', color: '#3B82F6' },
+    { id: 'general', label: 'Genel', icon: 'settings-outline', color: '#10B981' },
+    { id: 'notifications', label: 'Bildirimler', icon: 'notifications-outline', color: '#F59E0B' },
+    { id: 'earthquake', label: 'Deprem', icon: 'pulse-outline', color: '#EF4444' },
+    { id: 'comprehensive', label: 'Kapsamlı Özellikler', icon: 'grid-outline', color: '#8B5CF6' },
+    { id: 'mesh', label: 'Mesh', icon: 'radio-outline', color: '#8B5CF6' },
+    { id: 'security', label: 'Güvenlik', icon: 'shield-outline', color: '#06B6D4' },
+    { id: 'data', label: 'Veri', icon: 'server-outline', color: '#84CC16' },
+  ] : [
     { id: 'premium', label: 'Premium', icon: 'shield-checkmark-outline', color: '#10B981' },
     { id: 'profile', label: 'Profil', icon: 'person-outline', color: '#3B82F6', premium: true },
     { id: 'general', label: 'Genel', icon: 'settings-outline', color: '#10B981' },
