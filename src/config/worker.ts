@@ -7,5 +7,6 @@ export const ORG_SECRET = '278a6f3c8a4e86014bc1559d3210daf09022a405eeb22c2b9b2db
 
 // Helper to check if worker is configured
 export function isWorkerConfigured(): boolean {
-  return WORKER_URL !== 'https://YOUR-WORKER-URL' && ORG_SECRET !== 'REPLACE_ME_DEV';
+  return Boolean(WORKER_URL) && Boolean(ORG_SECRET) &&
+         WORKER_URL.includes('render.com') && ORG_SECRET.length > 20;
 }
