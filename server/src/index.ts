@@ -6,7 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
-import { db } from './database';
+import { pool, pingDb } from './database';
 
 // Load environment variables
 dotenv.config();
@@ -25,9 +25,9 @@ app.use('/push', pushRoutes);
 // Health check with database status
 app.get('/health', async (req, res) => {
   try {
-    const dbConnected = await db.testConnection();
-    res.json({ 
-      status: 'OK', 
+    const dbConnected = await pingDb();
+    res.json({
+      status: 'OK',
       timestamp: new Date().toISOString(),
       database: dbConnected ? 'connected' : 'disconnected'
     });
@@ -53,13 +53,13 @@ app.use((error: any, req: any, res: any, next: any) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('🛑 Shutting down server...');
-  await db.close();
+  await pool.end();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('🛑 Shutting down server...');
-  await db.close();
+  await pool.end();
   process.exit(0);
 });
 
@@ -78,7 +78,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /push/tick`);
   
   // Test database connection
-  const dbConnected = await db.testConnection();
+  const dbConnected = await pingDb();
   if (!dbConnected) {
     console.error('❌ Database connection failed - server may not work properly');
   }
