@@ -4,7 +4,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-// import iapRoutes from './iap-routes'; // Temporarily disabled
+import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
 
@@ -15,11 +15,15 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [/^https?:\/\/(localhost:|127\.0\.0\.1:)/, /render\.com$/, /afetnet/],
+  credentials: true
+}));
+app.set('trust proxy', 1);
 app.use(express.json());
 
-// Routes - IAP temporarily disabled for database fix
-// app.use('/api', iapRoutes);
+// Routes
+app.use('/api', iapRoutes);
 app.use('/push', pushRoutes);
 
 // Health check with database status
