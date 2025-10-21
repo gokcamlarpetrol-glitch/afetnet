@@ -4,7 +4,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import iapRoutes from './iap-routes';
+// import iapRoutes from './iap-routes'; // Temporarily disabled
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
 
@@ -18,8 +18,8 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api', iapRoutes);
+// Routes - IAP temporarily disabled for database fix
+// app.use('/api', iapRoutes);
 app.use('/push', pushRoutes);
 
 // Health check with database status
