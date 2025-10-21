@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
+import pushRoutes from './push-routes';
 import { db } from './src/database';
 
 // Load environment variables
@@ -19,6 +20,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api', iapRoutes);
+app.use('/push', pushRoutes);
 
 // Health check with database status
 app.get('/health', async (req, res) => {
@@ -70,6 +72,10 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/user/entitlements`);
   console.log(`   POST /api/iap/apple-notifications`);
   console.log(`   GET  /health`);
+  console.log(`   POST /push/register`);
+  console.log(`   POST /push/unregister`);
+  console.log(`   GET  /push/health`);
+  console.log(`   GET  /push/tick`);
   
   // Test database connection
   const dbConnected = await db.testConnection();

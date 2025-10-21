@@ -19,6 +19,7 @@ import { iapService, PREMIUM_PLANS, PremiumPlanId } from '../services/iapService
 import { usePremium, usePremiumFeatures } from '../store/premium';
 import { logger } from '../utils/productionLogger';
 import { useTranslation } from 'react-i18next';
+import { IAP_PRODUCTS } from '../../shared/iap/products';
 
 const { width } = Dimensions.get('window');
 
@@ -26,7 +27,7 @@ export default function PremiumActiveScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [availableProducts, setAvailableProducts] = useState<any[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<PremiumPlanId>('monthly');
+  const [selectedPlan, setSelectedPlan] = useState<PremiumPlanId>(IAP_PRODUCTS.monthly);
   const [initError, setInitError] = useState<string | null>(null);
   
   // Use premium store
@@ -560,8 +561,31 @@ export default function PremiumActiveScreen() {
         </Pressable>
 
         <Text style={styles.termsText}>
-          Satın alma işlemi Apple/Google hesabınızdan ücretlendirilecektir. 
-          Abonelik otomatik olarak yenilenir, iptal etmediğiniz sürece.
+          Satın alma işlemi Apple hesabınızdan ücretlendirilecektir. Abonelik, 
+          mevcut dönemin bitiminden en az 24 saat önce iptal edilmediği sürece 
+          otomatik olarak yenilenir. Hesabınız, mevcut dönemin bitiminden 24 saat 
+          önce yenileme için ücretlendirilecektir.{'\n\n'}
+          Abonelikleri yönetmek ve otomatik yenilemeyi kapatmak için satın alma 
+          işleminden sonra Hesap Ayarlarınıza gidin.{'\n\n'}
+          <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]} 
+                onPress={() => {
+                  const url = 'https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html';
+                  if (typeof window !== 'undefined') {
+                    window.open(url, '_blank');
+                  }
+                }}>
+            Gizlilik Politikası
+          </Text>
+          {' • '}
+          <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]}
+                onPress={() => {
+                  const url = 'https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html';
+                  if (typeof window !== 'undefined') {
+                    window.open(url, '_blank');
+                  }
+                }}>
+            Kullanım Koşulları
+          </Text>
         </Text>
       </ScrollView>
     </View>

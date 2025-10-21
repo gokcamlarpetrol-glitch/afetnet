@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.0.1",
+  version: "1.0.2",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -37,8 +37,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "4",
-    bundleIdentifier: "org.afetnet.app",
+    buildNumber: "14",
+    bundleIdentifier: "org.afetnet1.app",
     supportsTablet: true,
     infoPlist: {
       ...(config.ios?.infoPlist || {}),
@@ -58,8 +58,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     ...config.android,
-    package: "org.afetnet.app",
-          versionCode: 3,
+    package: "org.afetnet1.app",
+    versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png"
