@@ -4,7 +4,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { IAP_PRODUCTS, IAP_PRODUCT_IDS, isSubscriptionProduct, isLifetimeProduct } from './products';
-import { db, User, Purchase, Entitlement } from './database';
+import { pool, pingDb } from './database';
 
 const router = express.Router();
 
