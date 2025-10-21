@@ -3,7 +3,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
-import { IAP_PRODUCTS, IAP_PRODUCT_IDS, isSubscriptionProduct, isLifetimeProduct } from '@shared/iap/products';
+import { IAP_PRODUCTS, IAP_PRODUCT_IDS, isSubscriptionProduct, isLifetimeProduct } from './products';
 import { db, User, Purchase, Entitlement } from './database';
 
 const router = express.Router();
