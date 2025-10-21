@@ -38,8 +38,8 @@ export async function getPushTokenDetailed(): Promise<PushTokenInfo> {
 
 export async function registerTokenWithWorker(token: string, provinces: string[]): Promise<boolean> {
   try {
-    if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      logger.warn('Worker URL not configured');
+    if (!WORKER_URL || !ORG_SECRET || !WORKER_URL.includes('render.com') || ORG_SECRET.length <= 20) {
+      logger.warn('Worker URL or secret not configured');
       return false;
     }
 
@@ -75,8 +75,8 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
 
 export async function unregisterToken(token: string): Promise<boolean> {
   try {
-    if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      logger.warn('Worker URL not configured');
+    if (!WORKER_URL || !ORG_SECRET || !WORKER_URL.includes('render.com') || ORG_SECRET.length <= 20) {
+      logger.warn('Worker URL or secret not configured');
       return false;
     }
 
@@ -108,8 +108,8 @@ export async function unregisterToken(token: string): Promise<boolean> {
 
 export async function testWorkerHealth(): Promise<boolean> {
   try {
-    if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      logger.warn('Worker URL not configured');
+    if (!WORKER_URL || !ORG_SECRET || !WORKER_URL.includes('render.com') || ORG_SECRET.length <= 20) {
+      logger.warn('Worker URL or secret not configured');
       return false;
     }
 
@@ -136,8 +136,8 @@ export async function testWorkerHealth(): Promise<boolean> {
 
 export async function triggerWorkerTick(): Promise<boolean> {
   try {
-    if (!WORKER_URL || WORKER_URL === 'https://YOUR-WORKER-URL') {
-      logger.warn('Worker URL not configured');
+    if (!WORKER_URL || !ORG_SECRET || !WORKER_URL.includes('render.com') || ORG_SECRET.length <= 20) {
+      logger.warn('Worker URL or secret not configured');
       return false;
     }
 

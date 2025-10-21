@@ -30,7 +30,7 @@ export { default as SOSScreen } from '../screens/SOSScreen';
  */
 
 // Settings & Profile (low priority)
-export const Settings = lazy(() => import('../screens/Settings'));
+export const Settings = lazy(() => import('../screens/Settings/SettingsCore'));
 export const Family = lazy(() => import('../screens/Family'));
 export const Chat = lazy(() => import('../screens/ChatScreen'));
 

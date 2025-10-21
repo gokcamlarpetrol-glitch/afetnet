@@ -9,7 +9,7 @@ import FamilyScreen from '../screens/Family';
 import HomeScreen from '../screens/HomeSimple';
 import MapScreen from '../screens/Map';
 import MessagesScreen from '../screens/Messages';
-import SettingsScreen from '../screens/Settings';
+import SettingsScreen from '../screens/Settings/SettingsCore';
 import PremiumActiveScreen from '../screens/PremiumActive';
 
 // Premium control
