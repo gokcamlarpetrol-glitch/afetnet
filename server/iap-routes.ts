@@ -4,7 +4,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { IAP_PRODUCTS, IAP_PRODUCT_IDS, isSubscriptionProduct, isLifetimeProduct } from '@shared/iap/products';
-import { db, User, Purchase, Entitlement } from './src/database';
+import { db, User, Purchase, Entitlement } from './database';
 
 const router = express.Router();
 
@@ -267,7 +267,7 @@ async function verifyReceiptWithApple(receiptData: string): Promise<{
       })
     });
 
-    let result = await response.json();
+    let result: any = await response.json();
     
     // If production fails with 21007, try sandbox
     if (result.status === 21007) {
