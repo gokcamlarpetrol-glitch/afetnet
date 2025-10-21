@@ -10,9 +10,9 @@ const path = require('path');
 
 // Valid product IDs
 const VALID_PRODUCTS = [
-  'afetnet_premium_monthly1',
-  'afetnet_premium_yearly1', 
-  'afetnet_premium_lifetime'
+  'org.afetnet1.premium.monthly',
+  'org.afetnet1.premium.yearly', 
+  'org.afetnet1.premium.lifetime'
 ];
 
 // Invalid/old product IDs to check for
@@ -185,9 +185,9 @@ console.log('\n🗄️ 6. Checking database schema...');
 try {
   const migrationFile = fs.readFileSync('server/migrations/001_create_iap_tables.sql', 'utf8');
   
-  if (migrationFile.includes('afetnet_premium_monthly1') && 
-      migrationFile.includes('afetnet_premium_yearly1') && 
-      migrationFile.includes('afetnet_premium_lifetime')) {
+  if (migrationFile.includes('org.afetnet1.premium.monthly') && 
+      migrationFile.includes('org.afetnet1.premium.yearly') && 
+      migrationFile.includes('org.afetnet1.premium.lifetime')) {
     console.log('✅ Database schema includes all valid products');
   } else {
     console.log('❌ Database schema missing valid products');

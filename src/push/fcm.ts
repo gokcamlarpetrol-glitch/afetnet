@@ -1,20 +1,38 @@
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { ORG_SECRET, WORKER_URL } from '../config/worker';
 import { logger } from '../utils/productionLogger';
 
+/**
+ * Returns the native push token for the device.
+ * - On Android with FCM: type === 'fcm' and data is the FCM token.
+ * - On iOS: type is usually 'ios' (APNs device token). When Firebase is
+ *   configured with APNs key, FCM will deliver via APNs using this token.
+ */
 export async function getFcmToken(): Promise<string | undefined> {
   try {
     const { data, type } = await Notifications.getDevicePushTokenAsync();
-    
-    if (type === 'fcm' && data) {
+    if (typeof data === 'string' && data.length > 0) {
+      logger.debug(`Push token received (type=${String(type)}): …${data.slice(-6)}`);
       return data as string;
     }
-    
-    logger.debug('FCM token not available, type:', type);
+    logger.debug('Push token not available');
     return undefined;
   } catch (error) {
-    logger.error('Failed to get FCM token:', error);
+    logger.error('Failed to get push token:', error);
     return undefined;
+  }
+}
+
+export type PushTokenInfo = { token?: string; type?: string };
+
+export async function getPushTokenDetailed(): Promise<PushTokenInfo> {
+  try {
+    const { data, type } = await Notifications.getDevicePushTokenAsync();
+    return { token: typeof data === 'string' ? data : undefined, type: String(type) };
+  } catch (error) {
+    logger.error('Failed to get push token (detailed):', error);
+    return {};
   }
 }
 
@@ -25,7 +43,7 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/register`, {
+    const response = await fetch(`${WORKER_URL}/push/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -33,6 +51,9 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
       },
       body: JSON.stringify({
         token,
+        // iOS currently provides APNs token via expo-notifications
+        // Backend will determine routing by type
+        type: Platform.OS === 'ios' ? 'ios' : 'fcm',
         provinces
       })
     });
@@ -59,7 +80,7 @@ export async function unregisterToken(token: string): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/unregister`, {
+    const response = await fetch(`${WORKER_URL}/push/unregister`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -92,7 +113,7 @@ export async function testWorkerHealth(): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/health`, {
+    const response = await fetch(`${WORKER_URL}/push/health`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -120,7 +141,7 @@ export async function triggerWorkerTick(): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/tick`, {
+    const response = await fetch(`${WORKER_URL}/push/tick`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

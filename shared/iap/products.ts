@@ -1,10 +1,11 @@
-// SHARED IAP PRODUCTS MODULE
+// SHARED IAP PRODUCTS MODULE - NEW BUNDLE ID (org.afetnet1.app)
 // Single source of truth for all IAP product IDs across client and server
+// IMPORTANT: These are NEW product IDs for the NEW App Store submission
 
 export const IAP_PRODUCTS = {
-  monthly: 'afetnet_premium_monthly1',
-  yearly: 'afetnet_premium_yearly1',
-  lifetime: 'afetnet_premium_lifetime',
+  monthly: 'org.afetnet1.premium.monthly',
+  yearly: 'org.afetnet1.premium.yearly',
+  lifetime: 'org.afetnet1.premium.lifetime',
 } as const;
 
 export type ProductKey = keyof typeof IAP_PRODUCTS;

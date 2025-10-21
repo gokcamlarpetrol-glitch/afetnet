@@ -1,8 +1,9 @@
-// FCM Worker Configuration
-// TODO: Set these values in production environment
+// FCM Worker Configuration (Production)
+// Backend push worker base URL and shared secret header.
+// NOTE: ORG_SECRET must match the server's expected secret (x-org-secret)
 
-export const WORKER_URL = 'https://YOUR-WORKER-URL'; // Replace with actual Cloudflare Worker URL
-export const ORG_SECRET = 'REPLACE_ME_DEV'; // Must match server ORG_SECRET
+export const WORKER_URL = 'https://afetnet-backend.onrender.com';
+export const ORG_SECRET = '278a6f3c8a4e86014bc1559d3210daf09022a405eeb22c2b9b2db00176b37406';
 
 // Helper to check if worker is configured
 export function isWorkerConfigured(): boolean {

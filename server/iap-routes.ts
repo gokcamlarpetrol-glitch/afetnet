@@ -370,27 +370,27 @@ async function handleRevoke(data: any) {
 
 function getProductTitle(productId: string): string {
   switch (productId) {
-    case IAP_PRODUCTS.MONTHLY: return 'Aylık Premium';
-    case IAP_PRODUCTS.YEARLY: return 'Yıllık Premium';
-    case IAP_PRODUCTS.LIFETIME: return 'Yaşam Boyu Premium';
+    case IAP_PRODUCTS.monthly: return 'Aylık Premium';
+    case IAP_PRODUCTS.yearly: return 'Yıllık Premium';
+    case IAP_PRODUCTS.lifetime: return 'Yaşam Boyu Premium';
     default: return 'Premium';
   }
 }
 
 function getProductDescription(productId: string): string {
   switch (productId) {
-    case IAP_PRODUCTS.MONTHLY: return 'Tüm premium özellikler 1 ay';
-    case IAP_PRODUCTS.YEARLY: return 'Tüm premium özellikler 1 yıl (%17 indirim)';
-    case IAP_PRODUCTS.LIFETIME: return 'Tüm premium özellikler kalıcı (%50 indirim)';
+    case IAP_PRODUCTS.monthly: return 'Tüm premium özellikler 1 ay';
+    case IAP_PRODUCTS.yearly: return 'Tüm premium özellikler 1 yıl (%17 indirim)';
+    case IAP_PRODUCTS.lifetime: return 'Tüm premium özellikler kalıcı (%50 indirim)';
     default: return 'Premium özellikler';
   }
 }
 
 function getProductPrice(productId: string): number {
   switch (productId) {
-    case IAP_PRODUCTS.MONTHLY: return 49.99;
-    case IAP_PRODUCTS.YEARLY: return 499.99;
-    case IAP_PRODUCTS.LIFETIME: return 999.99;
+    case IAP_PRODUCTS.monthly: return 49.99;
+    case IAP_PRODUCTS.yearly: return 499.99;
+    case IAP_PRODUCTS.lifetime: return 999.99;
     default: return 0;
   }
 }
