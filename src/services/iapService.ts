@@ -4,6 +4,7 @@ import { Alert, Platform } from 'react-native';
 import * as InAppPurchases from 'expo-in-app-purchases';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '../utils/logger';
+import { usePremium } from '../store/premium';
 import { 
   IAP_PRODUCTS,
   IAP_PRODUCT_IDS,
@@ -22,7 +23,7 @@ import {
 // Server configuration
 const SERVER_BASE_URL = __DEV__ 
   ? 'http://localhost:3001/api' 
-  : 'https://your-production-server.com/api';
+  : 'https://afetnet-backend.onrender.com/api';
 
 // Type definitions
 type Product = InAppPurchases.InAppPurchase;
@@ -434,7 +435,23 @@ class IAPService {
       // Save to AsyncStorage
       await AsyncStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(premiumStatus));
 
-      logger.info('✅ Premium status updated successfully');
+      // CRITICAL: Update Zustand premium store immediately
+      const { setPremium } = usePremium.getState();
+      const planInfo = {
+        id: purchase.productId,
+        title: productConfig.title,
+        price: 0, // Will be fetched from store
+        currency: 'TRY',
+        description: productConfig.description
+      };
+      
+      setPremium(
+        true,
+        planInfo,
+        expiryDate ? new Date(expiryDate) : undefined
+      );
+
+      logger.info('✅ Premium status updated successfully (AsyncStorage + Zustand)');
     } catch (error) {
       logger.error('❌ Failed to update premium status:', error);
       throw error;
@@ -480,6 +497,27 @@ class IAPService {
         
         await AsyncStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(premiumStatus));
         
+        // CRITICAL: Update Zustand store
+        const { setPremium } = usePremium.getState();
+        if (isPremium && serverEntitlements.productId) {
+          const productConfig = PRODUCT_CONFIG[serverEntitlements.productId as keyof typeof PRODUCT_CONFIG];
+          if (productConfig) {
+            setPremium(
+              true,
+              {
+                id: serverEntitlements.productId,
+                title: productConfig.title,
+                price: 0,
+                currency: 'TRY',
+                description: productConfig.description
+              },
+              serverEntitlements.expiresAt ? new Date(serverEntitlements.expiresAt) : undefined
+            );
+          }
+        } else {
+          setPremium(false);
+        }
+        
         logPremiumStatus(isPremium, serverEntitlements.productId);
         return isPremium;
       }
@@ -495,6 +533,11 @@ class IAPService {
         if (status.expiryDate && status.expiryDate < Date.now()) {
           logger.info('⏰ Premium subscription expired');
           await AsyncStorage.removeItem(PREMIUM_STATUS_KEY);
+          
+          // Update Zustand store
+          const { setPremium } = usePremium.getState();
+          setPremium(false);
+          
           logPremiumStatus(false, status.productId);
           return false;
         }
@@ -503,7 +546,29 @@ class IAPService {
         if (!isValidProduct(status.productId)) {
           logger.warn('⚠️ Invalid product in storage:', status.productId);
           await AsyncStorage.removeItem(PREMIUM_STATUS_KEY);
+          
+          // Update Zustand store
+          const { setPremium } = usePremium.getState();
+          setPremium(false);
+          
           return false;
+        }
+
+        // Update Zustand store with local data
+        const { setPremium } = usePremium.getState();
+        const productConfig = PRODUCT_CONFIG[status.productId as keyof typeof PRODUCT_CONFIG];
+        if (productConfig) {
+          setPremium(
+            true,
+            {
+              id: status.productId,
+              title: productConfig.title,
+              price: 0,
+              currency: 'TRY',
+              description: productConfig.description
+            },
+            status.expiryDate ? new Date(status.expiryDate) : undefined
+          );
         }
 
         logPremiumStatus(true, status.productId);
@@ -511,6 +576,9 @@ class IAPService {
       }
 
       // No purchase history found
+      const { setPremium } = usePremium.getState();
+      setPremium(false);
+      
       logPremiumStatus(false);
       return false;
     } catch (error) {

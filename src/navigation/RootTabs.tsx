@@ -1,6 +1,7 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
 import { View, Text, Pressable } from 'react-native';
 
 // Available screens
@@ -19,6 +20,7 @@ const Tab = createBottomTabNavigator();
 // Premium Gate Component - Shows premium required message
 function PremiumGate({ children, featureName }: { children: React.ReactNode; featureName: string }) {
   const { isPremium, canUseFeature } = usePremiumFeatures();
+  const navigation = useNavigation<any>();
   
   if (canUseFeature(featureName)) {
     return <>{children}</>;
@@ -45,7 +47,12 @@ function PremiumGate({ children, featureName }: { children: React.ReactNode; fea
           marginTop: 24 
         }}
         onPress={() => {
-          // Navigate to premium screen
+          // Navigate to premium screen using root navigator
+          try {
+            navigation.getParent()?.navigate('Premium');
+          } catch (error) {
+            console.log('Navigation error:', error);
+          }
         }}
       >
         <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '800' }}>
