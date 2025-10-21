@@ -6,7 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
-import { db } from './src/database';
+import { db } from './database';
 
 // Load environment variables
 dotenv.config();
