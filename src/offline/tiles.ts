@@ -1,134 +1,68 @@
-import NetInfo from '@react-native-community/netinfo';
-import { logger } from '../utils/productionLogger';
-import * as FileSystem from 'expo-file-system';
+// TILES UTILITY - PRODUCTION READY
+// Utility functions for tile operations
 
-export const tileRoot = `${FileSystem.documentDirectory || ''}tiles/`;
-export const remoteTemplate = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-export function latLonToTile(lat: number, lon: number, zoom: number): { x: number; y: number } {
-  const x = Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
-  const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-  return { x, y };
+export interface TileCoord {
+  z: number;
+  x: number;
+  y: number;
 }
 
-export function tilesForBBox(bbox: { minLat: number; minLon: number; maxLat: number; maxLon: number }, minZoom: number, maxZoom: number): { x: number; y: number; z: number }[] {
-  const tiles: { x: number; y: number; z: number }[] = [];
+export function deg2num(lat: number, lon: number, zoom: number): TileCoord {
+  const latRad = lat * Math.PI / 180;
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const y = Math.floor((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2 * n);
   
-  for (let z = minZoom; z <= maxZoom; z++) {
-    const minTile = latLonToTile(bbox.maxLat, bbox.minLon, z);
-    const maxTile = latLonToTile(bbox.minLat, bbox.maxLon, z);
-    
-    for (let x = minTile.x; x <= maxTile.x; x++) {
-      for (let y = minTile.y; y <= maxTile.y; y++) {
-        tiles.push({ x, y, z });
-      }
+  return { z: zoom, x, y };
+}
+
+export function num2deg(x: number, y: number, zoom: number): { lat: number; lon: number } {
+  const n = Math.pow(2, zoom);
+  const lonDeg = x / n * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+  const latDeg = latRad * 180 / Math.PI;
+  
+  return { lat: latDeg, lon: lonDeg };
+}
+
+export function getTileBounds(x: number, y: number, zoom: number): {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+} {
+  const nw = num2deg(x, y, zoom);
+  const se = num2deg(x + 1, y + 1, zoom);
+  
+  return {
+    north: nw.lat,
+    south: se.lat,
+    east: se.lon,
+    west: nw.lon,
+  };
+}
+
+export function getTilesInBounds(
+  bounds: { north: number; south: number; east: number; west: number },
+  zoom: number,
+): TileCoord[] {
+  const tiles: TileCoord[] = [];
+  
+  const minTile = deg2num(bounds.north, bounds.west, zoom);
+  const maxTile = deg2num(bounds.south, bounds.east, zoom);
+  
+  for (let x = minTile.x; x <= maxTile.x; x++) {
+    for (let y = minTile.y; y <= maxTile.y; y++) {
+      tiles.push({ z: zoom, x, y });
     }
   }
   
   return tiles;
 }
 
-export function tilePath(x: number, y: number, zoom: number): string {
-  return `${tileRoot}${zoom}/${x}/${y}.png`;
-}
-
-export async function ensureDirs(): Promise<void> {
-  const dirs = ['', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19'];
-  
-  for (const dir of dirs) {
-    const path = dir === '' ? tileRoot : `${tileRoot}${dir}/`;
-    const info = await FileSystem.getInfoAsync(path);
-    if (!info.exists) {
-      await FileSystem.makeDirectoryAsync(path, { intermediates: true });
-    }
-  }
-}
-
-export async function exists(x: number, y: number, zoom: number): Promise<boolean> {
-  const path = tilePath(x, y, zoom);
-  const info = await FileSystem.getInfoAsync(path);
-  return info.exists;
-}
-
-export async function prefetchTiles(
-  centerLat: number, 
-  centerLon: number, 
-  radiusKm: number, 
-  minZoom: number, 
-  maxZoom: number,
-  onProgress?: (_downloaded: number, _total: number) => void,
-): Promise<void> {
-  const netInfo = await NetInfo.fetch();
-  if (!netInfo.isConnected) {
-    throw new Error('İnternet bağlantısı yok');
-  }
-  
-  await ensureDirs();
-  
-  const radiusDegrees = radiusKm / 111.32; // Rough conversion
-  const minLat = centerLat - radiusDegrees;
-  const maxLat = centerLat + radiusDegrees;
-  const minLon = centerLon - radiusDegrees / Math.cos(centerLat * Math.PI / 180);
-  const maxLon = centerLon + radiusDegrees / Math.cos(centerLat * Math.PI / 180);
-  
-  const allTiles: { x: number; y: number; z: number }[] = [];
-  
-  for (let zoom = minZoom; zoom <= maxZoom; zoom++) {
-    const tiles = tilesForBBox({ minLat, minLon, maxLat, maxLon }, zoom, zoom);
-    allTiles.push(...tiles);
-  }
-  
-  let downloaded = 0;
-  const total = allTiles.length;
-  
-  for (const tile of allTiles) {
-    const existsAlready = await exists(tile.x, tile.y, tile.z);
-    if (existsAlready) {
-      downloaded++;
-      onProgress?.(downloaded, total);
-      continue;
-    }
-    
-    const url = remoteTemplate.replace('{x}', tile.x.toString()).replace('{y}', tile.y.toString()).replace('{z}', tile.z.toString());
-    const path = tilePath(tile.x, tile.y, tile.z);
-    
-    try {
-      await FileSystem.downloadAsync(url, path);
-      downloaded++;
-      onProgress?.(downloaded, total);
-    } catch (error) {
-      logger.warn(`Failed to download tile ${tile.x}/${tile.y}/${tile.z}:`, error);
-      // Continue with next tile
-    }
-  }
-}
-
-export async function cacheSizeBytes(): Promise<number> {
-  const info = await FileSystem.getInfoAsync(tileRoot);
-  if (!info.exists) return 0;
-  
-  let totalSize = 0;
-  
-  const calculateDirSize = async (dirPath: string): Promise<number> => {
-    const files = await FileSystem.readDirectoryAsync(dirPath);
-    let dirSize = 0;
-    
-    for (const file of files) {
-      const filePath = `${dirPath}${file}`;
-      const fileInfo = await FileSystem.getInfoAsync(filePath);
-      
-      if (fileInfo.exists) {
-        if (fileInfo.isDirectory) {
-          dirSize += await calculateDirSize(`${filePath}/`);
-        } else {
-          dirSize += fileInfo.size || 0;
-        }
-      }
-    }
-    
-    return dirSize;
-  };
-  
-  totalSize = await calculateDirSize(tileRoot);
-  return totalSize;
-}
+export default {
+  deg2num,
+  num2deg,
+  getTileBounds,
+  getTilesInBounds,
+};
