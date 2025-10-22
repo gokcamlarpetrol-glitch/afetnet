@@ -1,4 +1,4 @@
-export type BeaconKind = "announcement" | "sos" | "status";
+export type BeaconKind = 'announcement' | 'sos' | 'status';
 
 export type Beacon = {
   id: string;           // uuid
@@ -18,7 +18,7 @@ export const DEFAULTS = {
   STATUS_TTL: 6*3600,
   RUBBLE_REPEAT: 90,    // 90 seconds (battery safe)
   NORMAL_REPEAT: 180,   // 3 minutes
-  MAX_MSG: 120
+  MAX_MSG: 120,
 };
 
 

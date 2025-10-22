@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { logger } from "../utils/productionLogger";
 import { View, Text, Pressable, StyleSheet, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
@@ -10,12 +11,12 @@ let Polyline: any = null;
 let Marker: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Polyline = maps.Polyline;
   Marker = maps.Marker;
-} catch (e) {
+} catch {
   // expo-maps not available - fallback to alternative map solution
 }
 
@@ -81,7 +82,7 @@ export default function RoutePlannerScreen() {
         }
       }
     } catch (error) {
-      console.error('Failed to load current location:', error);
+      logger.error('Failed to load current location:', error);
     }
   };
 
@@ -108,7 +109,7 @@ export default function RoutePlannerScreen() {
     setIsCalculating(true);
     try {
       // Simulate route calculation
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 2000));
       
       // Generate route path
       const path = generateRoutePath(waypoints, selectedRouteType);
@@ -276,13 +277,13 @@ export default function RoutePlannerScreen() {
               key={option.type}
               style={[
                 styles.routeOptionButton,
-                selectedRouteType === option.type && styles.routeOptionButtonActive
+                selectedRouteType === option.type && styles.routeOptionButtonActive,
               ]}
               onPress={() => setSelectedRouteType(option.type)}
             >
               <Text style={[
                 styles.routeOptionText,
-                selectedRouteType === option.type && styles.routeOptionTextActive
+                selectedRouteType === option.type && styles.routeOptionTextActive,
               ]}>
                 {option.label}
               </Text>

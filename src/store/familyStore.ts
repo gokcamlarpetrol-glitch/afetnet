@@ -27,7 +27,7 @@ export const useFamily = create<FamilyState>()(
       updateMember: (id, updates) => {
         set((state) => ({
           members: state.members.map((member) =>
-            member.id === id ? { ...member, ...updates } : member
+            member.id === id ? { ...member, ...updates } : member,
           ),
         }));
       },
@@ -40,6 +40,6 @@ export const useFamily = create<FamilyState>()(
     {
       name: 'family-store',
       storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    },
+  ),
 );

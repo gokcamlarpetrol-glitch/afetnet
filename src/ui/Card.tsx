@@ -1,6 +1,6 @@
-import { PropsWithChildren } from "react";
-import { StyleSheet, Text, View, ViewStyle } from "react-native";
-import { palette, spacing } from "./theme";
+import { PropsWithChildren } from 'react';
+import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { palette, spacing } from './theme';
 
 export default function Card({ title, children, style }: PropsWithChildren<{ title?: string; style?: ViewStyle }>) {
   return (
@@ -17,12 +17,12 @@ const s = StyleSheet.create({
     borderRadius: 12,
     padding: spacing(2),
     borderWidth: 1,
-    borderColor: palette.border
+    borderColor: palette.border,
   },
   title: {
     color: palette.text.primary,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: spacing(1),
-    fontSize: 16
-  }
+    fontSize: 16,
+  },
 });

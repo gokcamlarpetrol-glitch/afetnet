@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { notificationService } from '../services/notifications/NotificationService';
 import { getFcmToken, registerTokenWithWorker } from '../push/fcm';
@@ -13,13 +13,13 @@ export default function NotificationInitializer() {
     const initializeNotifications = async () => {
       try {
         await notificationService.initializeChannels();
-        console.log('✅ Notification service initialized');
+        logger.info('✅ Notification service initialized');
 
         // Request permissions on first launch (idempotent)
         const perm = await Notifications.getPermissionsAsync();
         if (!perm.granted) {
           await Notifications.requestPermissionsAsync({
-            ios: { allowAlert: true, allowBadge: true, allowSound: true }
+            ios: { allowAlert: true, allowBadge: true, allowSound: true },
           });
         }
 
@@ -32,7 +32,7 @@ export default function NotificationInitializer() {
           logger.warn('Push token not available on init');
         }
       } catch (error) {
-        console.warn('Failed to initialize notification service:', error);
+        logger.warn('Failed to initialize notification service:', error);
       }
     };
 

@@ -19,7 +19,7 @@ interface AccessibilityActions {
 const defaultState: AccessibilityState = {
   highContrast: false,
   bigText: false,
-  hapticsStrong: false
+  hapticsStrong: false,
 };
 
 export const useAccessibility = create<AccessibilityState & AccessibilityActions>()(
@@ -45,7 +45,7 @@ export const useAccessibility = create<AccessibilityState & AccessibilityActions
 
       reset: () => {
         set(defaultState);
-      }
+      },
     }),
     {
       name: 'afn/accessibility/v1',
@@ -53,9 +53,9 @@ export const useAccessibility = create<AccessibilityState & AccessibilityActions
       version: 1,
       migrate: (persistedState: any, version: number) => {
         return { ...defaultState, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );
 
 // Global theme helper
@@ -72,7 +72,7 @@ export function getAccessibilityTheme() {
       error: '#ff0000',
       success: '#00ff00',
       warning: '#ffff00',
-      border: '#ffffff'
+      border: '#ffffff',
     } : {
       background: '#0f172a',
       surface: '#111827',
@@ -82,7 +82,7 @@ export function getAccessibilityTheme() {
       error: '#ef4444',
       success: '#10b981',
       warning: '#f59e0b',
-      border: '#374151'
+      border: '#374151',
     },
     typography: {
       fontSize: bigText ? {
@@ -90,21 +90,21 @@ export function getAccessibilityTheme() {
         medium: 18,
         large: 22,
         xlarge: 26,
-        xxlarge: 30
+        xxlarge: 30,
       } : {
         small: 12,
         medium: 14,
         large: 16,
         xlarge: 18,
-        xxlarge: 20
+        xxlarge: 20,
       },
       fontWeight: bigText ? {
         normal: '600' as const,
-        bold: '800' as const
+        bold: '800' as const,
       } : {
         normal: '400' as const,
-        bold: '700' as const
-      }
-    }
+        bold: '700' as const,
+      },
+    },
   };
 }

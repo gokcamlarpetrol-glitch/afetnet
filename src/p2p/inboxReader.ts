@@ -1,13 +1,13 @@
-import * as FileSystem from "expo-file-system";
-import { ageBucket } from "../geo/coarse";
+import * as FileSystem from 'expo-file-system';
+import { ageBucket } from '../geo/coarse';
 
-const DIR = "/tmp/";
-const INBOX = DIR + "p2p.inbox.json";
+const DIR = '/tmp/';
+const INBOX = DIR + 'p2p.inbox.json';
 
 export type MapSignal = {
   id: string;
   ts: number;
-  kind: "sos"|"status";
+  kind: 'sos'|'status';
   qlat?: number;
   qlng?: number;
   payload?: any;
@@ -32,15 +32,15 @@ export async function readInbox(): Promise<MapSignal[]>{
         acc[key] = {
           id: it.id,
           ts: it.ts,
-          kind: (it.kind === "sos" ? "sos" : "status"),
+          kind: (it.kind === 'sos' ? 'sos' : 'status'),
           qlat,
           qlng,
-          payload: it.payload
+          payload: it.payload,
         };
       }
     }
     // filter expired
-    return Object.values(acc).filter(x => ageBucket(x.ts) !== "expired");
+    return Object.values(acc).filter(x => ageBucket(x.ts) !== 'expired');
   }catch{
     return [];
   }

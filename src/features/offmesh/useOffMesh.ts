@@ -28,13 +28,13 @@ export function useOffMesh() {
     updateStats();
 
     // Update every 5 seconds
-    const interval = setInterval(updateStats, 5000);
+    const interval = (globalThis as any).setInterval(updateStats, 5000);
 
     // Subscribe to peer changes
     const unsubscribePeers = offMeshRouter.subscribeToPeers(setPeers);
 
     return () => {
-      clearInterval(interval);
+      (globalThis as any).clearInterval(interval);
       unsubscribePeers();
     };
   }, [updateStats]);
@@ -71,6 +71,7 @@ export function useOffMesh() {
     }
   }, [updateStats]);
 
+   
   const subscribeToMessages = useCallback((callback: (envelope: Envelope) => void) => {
     return offMeshRouter.subscribe(callback);
   }, []);

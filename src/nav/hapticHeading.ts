@@ -1,5 +1,5 @@
-import * as Haptics from "expo-haptics";
-import { haversine } from "../geo/haversine";
+import * as Haptics from 'expo-haptics';
+import { haversine } from '../geo/haversine';
 
 let t:any=null;
 
@@ -7,7 +7,7 @@ export function startHapticHeading(getHead:()=>number, getMe:()=>{lat:number;lng
   stopHapticHeading();
   async function loop(){
     const target = getTarget(); const me = getMe();
-    if(!target || !me){ t=setTimeout(loop, 1500) as any; return; }
+    if(!target || !me){ t=(globalThis as any).setTimeout(loop, 1500) as any; return; }
     const head = getHead(); // 0..360, 0=N
     const bearing = bearingTo(me, target);
     const d = normAngle(bearing - head); // -180..180
@@ -32,11 +32,11 @@ export function startHapticHeading(getHead:()=>number, getMe:()=>{lat:number;lng
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(()=>{});
       }
     }
-    t=setTimeout(loop, period) as any;
+    t=(globalThis as any).setTimeout(loop, period) as any;
   }
   loop();
 }
-export function stopHapticHeading(){ if(t){ clearTimeout(t); t=null; } }
+export function stopHapticHeading(){ if(t){ (globalThis as any).clearTimeout(t); t=null; } }
 
 function bearingTo(a:{lat:number;lng:number}, b:{lat:number;lng:number}){
   const toR=(x:number)=>x*Math.PI/180;
@@ -46,7 +46,7 @@ function bearingTo(a:{lat:number;lng:number}, b:{lat:number;lng:number}){
   return (br+360)%360;
 }
 function normAngle(a:number){ const x=((a+540)%360)-180; return x; }
-function sleep(ms:number){ return new Promise(r=>setTimeout(r,ms)); }
+function sleep(ms:number){ return new Promise(r=>(globalThis as any).setTimeout(r,ms)); }
 
 
 

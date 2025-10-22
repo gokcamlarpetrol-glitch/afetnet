@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useComprehensiveFeatures } from '../store/comprehensiveFeatures';
 import { startLiveFeed } from '../services/quake/realtime';
 import { useSettings } from '../store/settings';
@@ -24,18 +24,17 @@ export default function ComprehensiveFeaturesInitializer() {
         pollSlowMs: settings.pollSlowMs,
         region: settings.region,
         experimentalPWave: settings.experimentalPWave,
-        selectedProvinces: settings.selectedProvinces
+        selectedProvinces: settings.selectedProvinces,
       },
       {
         onEvents: () => {
           // No-op: screens using useQuakes will reflect cache updates
         },
-        onError: (err) => logger.warn('Live feed error (global):', err)
-      }
+        onError: (err) => logger.warn('Live feed error (global):', err),
+      },
     );
 
     return () => live.stop();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return null; // This component doesn't render anything

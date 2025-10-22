@@ -2,7 +2,7 @@
 // Automatically checks premium status on app startup
 import { iapService } from '../services/iapService';
 import { logger } from '../utils/productionLogger';
-import { logPremiumStatus } from '@shared/iap/products';
+import { logPremiumStatus } from '../../shared/iap/products';
 
 class PremiumInitializationService {
   private static instance: PremiumInitializationService;

@@ -1,7 +1,7 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from 'expo-file-system';
 
-const DIR = "/tmp/";
-const FILE = DIR + "mesh.health.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'mesh.health.json';
 const BUCKET_MS = 5*60*1000; // 5 dk
 
 export type HealthTotals = {
@@ -38,7 +38,7 @@ async function save(doc: HealthDoc){ await FileSystem.writeAsStringAsync(FILE, J
 
 function bucketKey(ts:number){ return Math.floor(ts/BUCKET_MS)*BUCKET_MS; }
 
-export async function incr(ev: { t?:number; peer?:string; kind: "bundle_tx"|"bundle_rx"|"msg_tx"|"msg_rx"|"relayed"|"ack_tx"|"ack_rx"|"dup_drop"; hop?:number; sos?:boolean }){
+export async function incr(ev: { t?:number; peer?:string; kind: 'bundle_tx'|'bundle_rx'|'msg_tx'|'msg_rx'|'relayed'|'ack_tx'|'ack_rx'|'dup_drop'; hop?:number; sos?:boolean }){
   const now = ev.t ?? Date.now();
   const doc = await load();
   const tot = doc.totals;
@@ -50,21 +50,21 @@ export async function incr(ev: { t?:number; peer?:string; kind: "bundle_tx"|"bun
   }
 
   switch(ev.kind){
-    case "bundle_tx": tot.bundles_tx++; break;
-    case "bundle_rx": tot.bundles_rx++; break;
-    case "msg_tx": tot.msgs_tx++; if(typeof ev.hop==="number"){ tot.sum_hop_out+=ev.hop; tot.cnt_hop_out++; } break;
-    case "msg_rx": tot.msgs_rx++; if(typeof ev.hop==="number"){ tot.sum_hop_in+=ev.hop; tot.cnt_hop_in++; } break;
-    case "relayed": tot.relayed++; break;
-    case "ack_tx": tot.acks_tx++; break;
-    case "ack_rx": tot.acks_rx++; break;
-    case "dup_drop": tot.dup_dropped++; break;
+  case 'bundle_tx': tot.bundles_tx++; break;
+  case 'bundle_rx': tot.bundles_rx++; break;
+  case 'msg_tx': tot.msgs_tx++; if(typeof ev.hop==='number'){ tot.sum_hop_out+=ev.hop; tot.cnt_hop_out++; } break;
+  case 'msg_rx': tot.msgs_rx++; if(typeof ev.hop==='number'){ tot.sum_hop_in+=ev.hop; tot.cnt_hop_in++; } break;
+  case 'relayed': tot.relayed++; break;
+  case 'ack_tx': tot.acks_tx++; break;
+  case 'ack_rx': tot.acks_rx++; break;
+  case 'dup_drop': tot.dup_dropped++; break;
   }
 
   const bk = bucketKey(now);
   let b = doc.buckets.find(x=>x.t===bk);
   if(!b){ b = { t: bk, tx:0, rx:0, sos:0 }; doc.buckets.push(b); }
-  if(ev.kind==="msg_tx") {b.tx++;}
-  if(ev.kind==="msg_rx") {b.rx++;}
+  if(ev.kind==='msg_tx') {b.tx++;}
+  if(ev.kind==='msg_rx') {b.rx++;}
   if(ev.sos) {b.sos++;}
 
   // GC: keep last 24h
@@ -80,7 +80,7 @@ export async function incr(ev: { t?:number; peer?:string; kind: "bundle_tx"|"bun
   await save(doc);
 }
 
-export async function readHealth(): Promise<{ totals: HealthTotals & { success_rate:number; avg_hop_out:number; avg_hop_in:number }; peers: PeerSeen[]; buckets: HealthDoc["buckets"] }>{
+export async function readHealth(): Promise<{ totals: HealthTotals & { success_rate:number; avg_hop_out:number; avg_hop_in:number }; peers: PeerSeen[]; buckets: HealthDoc['buckets'] }>{
   const doc = await load();
   const t = doc.totals;
   const success = t.msgs_tx>0 ? t.acks_tx / t.msgs_tx : 0;

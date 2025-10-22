@@ -112,8 +112,8 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
   private drones = new Map<string, Drone>();
   private missions = new Map<string, DroneMission>();
   private isActive = false;
-  private coordinationInterval: NodeJS.Timeout | null = null;
-  private missionInterval: NodeJS.Timeout | null = null;
+  private coordinationInterval: any = null;
+  private missionInterval: any = null;
 
   constructor() {
     super();
@@ -138,25 +138,25 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         cameras: [
           { id: 'cam_1', type: 'visible', resolution: '4K', zoom: 30, isActive: true },
           { id: 'cam_2', type: 'thermal', resolution: '1080p', zoom: 20, isActive: true },
-          { id: 'cam_3', type: 'night_vision', resolution: '720p', zoom: 15, isActive: false }
+          { id: 'cam_3', type: 'night_vision', resolution: '720p', zoom: 15, isActive: false },
         ],
         sensors: [
           { id: 'sens_1', type: 'lidar', dataType: '3d_mapping', accuracy: 95, range: 100, isActive: true },
           { id: 'sens_2', type: 'life_detector', dataType: 'heartbeat', accuracy: 85, range: 50, isActive: true },
-          { id: 'sens_3', type: 'gas_detector', dataType: 'air_quality', accuracy: 90, range: 30, isActive: false }
+          { id: 'sens_3', type: 'gas_detector', dataType: 'air_quality', accuracy: 90, range: 30, isActive: false },
         ],
         communication: [
           { id: 'comm_1', type: 'wifi', range: 1000, bandwidth: 100, isActive: true },
-          { id: 'comm_2', type: 'mesh', range: 500, bandwidth: 50, isActive: true }
+          { id: 'comm_2', type: 'mesh', range: 500, bandwidth: 50, isActive: true },
         ],
         rescueEquipment: [
           { id: 'eq_1', type: 'rope', quantity: 1, weight: 2.5 },
           { id: 'eq_2', type: 'life_vest', quantity: 2, weight: 1.0 },
-          { id: 'eq_3', type: 'rescue_harness', quantity: 1, weight: 3.0 }
-        ]
+          { id: 'eq_3', type: 'rescue_harness', quantity: 1, weight: 3.0 },
+        ],
       },
       capabilities: ['search', 'rescue', 'surveillance', 'communication_relay'],
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
     });
 
     // Medical Delivery Drone
@@ -171,22 +171,22 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       maxFlightTime: 30,
       payload: {
         cameras: [
-          { id: 'cam_4', type: 'visible', resolution: '1080p', zoom: 10, isActive: true }
+          { id: 'cam_4', type: 'visible', resolution: '1080p', zoom: 10, isActive: true },
         ],
         sensors: [
-          { id: 'sens_4', type: 'air_quality', dataType: 'temperature', accuracy: 98, range: 10, isActive: true }
+          { id: 'sens_4', type: 'air_quality', dataType: 'temperature', accuracy: 98, range: 10, isActive: true },
         ],
         communication: [
-          { id: 'comm_3', type: 'wifi', range: 500, bandwidth: 50, isActive: true }
+          { id: 'comm_3', type: 'wifi', range: 500, bandwidth: 50, isActive: true },
         ],
         medicalSupplies: [
           { id: 'med_1', type: 'first_aid', quantity: 5, expiryDate: Date.now() + 365 * 24 * 60 * 60 * 1000 },
           { id: 'med_2', type: 'medicine', quantity: 10, expiryDate: Date.now() + 180 * 24 * 60 * 60 * 1000 },
-          { id: 'med_3', type: 'defibrillator', quantity: 1, expiryDate: Date.now() + 365 * 24 * 60 * 60 * 1000 }
-        ]
+          { id: 'med_3', type: 'defibrillator', quantity: 1, expiryDate: Date.now() + 365 * 24 * 60 * 60 * 1000 },
+        ],
       },
       capabilities: ['delivery', 'medical_support', 'surveillance'],
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
     });
 
     // Communication Relay Drone
@@ -201,19 +201,19 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       maxFlightTime: 60,
       payload: {
         cameras: [
-          { id: 'cam_5', type: 'visible', resolution: '720p', zoom: 5, isActive: true }
+          { id: 'cam_5', type: 'visible', resolution: '720p', zoom: 5, isActive: true },
         ],
         sensors: [
-          { id: 'sens_5', type: 'radar', dataType: 'weather', accuracy: 95, range: 200, isActive: true }
+          { id: 'sens_5', type: 'radar', dataType: 'weather', accuracy: 95, range: 200, isActive: true },
         ],
         communication: [
           { id: 'comm_4', type: 'wifi', range: 2000, bandwidth: 200, isActive: true },
           { id: 'comm_5', type: 'satellite', range: 10000, bandwidth: 100, isActive: true },
-          { id: 'comm_6', type: 'mesh', range: 1000, bandwidth: 100, isActive: true }
-        ]
+          { id: 'comm_6', type: 'mesh', range: 1000, bandwidth: 100, isActive: true },
+        ],
       },
       capabilities: ['communication_relay', 'surveillance', 'weather_monitoring'],
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
     });
 
     logger.debug('✅ Drone fleet initialized');
@@ -228,12 +228,12 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start drone monitoring
-      this.coordinationInterval = setInterval(() => {
+      this.coordinationInterval = (globalThis as any).setInterval(() => {
         this.monitorDroneFleet();
       }, 5000); // Every 5 seconds
 
       // Start mission processing
-      this.missionInterval = setInterval(() => {
+      this.missionInterval = (globalThis as any).setInterval(() => {
         this.processMissions();
       }, 10000); // Every 10 seconds
 
@@ -262,7 +262,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         id: missionId,
         startTime: Date.now(),
         status: 'planned',
-        assignedDrones: []
+        assignedDrones: [],
       };
 
       // Assign best available drones
@@ -287,7 +287,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
         missionId,
         type: mission.type,
         priority: mission.priority,
-        assignedDrones: assignedDrones.length
+        assignedDrones: assignedDrones.length,
       });
 
       logger.debug(`🚁 Emergency mission created: ${missionId} (${assignedDrones.length} drones assigned)`);
@@ -306,7 +306,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       .filter(drone => 
         drone.status === 'idle' && 
         drone.batteryLevel > 30 &&
-        drone.capabilities.some(cap => this.getRequiredCapabilities(mission.type).includes(cap))
+        drone.capabilities.some(cap => this.getRequiredCapabilities(mission.type).includes(cap)),
       );
 
     const assignedDrones: string[] = [];
@@ -330,7 +330,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       'rescue': ['search', 'rescue', 'surveillance'],
       'delivery': ['delivery'],
       'surveillance': ['surveillance'],
-      'communication': ['communication_relay']
+      'communication': ['communication_relay'],
     };
 
     return capabilities[missionType] || [];
@@ -343,7 +343,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       'rescue': 2,
       'delivery': 1,
       'surveillance': 2,
-      'communication': 1
+      'communication': 1,
     };
 
     return maxDrones[missionType] || 1;
@@ -363,7 +363,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Drone added to fleet', { 
         droneId: drone.id, 
         name: drone.name,
-        type: drone.type
+        type: drone.type,
       });
       logger.debug(`🚁 Drone added: ${drone.name}`);
     } catch (error) {
@@ -401,7 +401,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
   // CRITICAL: Process Missions
   private async processMissions(): Promise<void> {
     try {
-      for (const [missionId, mission] of this.missions) {
+      for (const [, mission] of this.missions) {
         if (mission.status === 'active') {
           await this.executeMission(mission);
         }
@@ -464,15 +464,15 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
           location: {
             lat: mission.targetLocation.lat + (Math.random() - 0.5) * 0.01,
             lon: mission.targetLocation.lon + (Math.random() - 0.5) * 0.01,
-            accuracy: 5
+            accuracy: 5,
           },
           data: {
             confidence: Math.random() * 40 + 60,
             details: `Found via ${objective.type} mission`,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           },
           confidence: Math.random() * 40 + 60,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         };
 
         return result;
@@ -504,7 +504,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       this.emit('missionCompleted', mission);
       emergencyLogger.logSystem('info', 'Drone mission completed', {
         missionId: mission.id,
-        results: mission.results?.length || 0
+        results: mission.results?.length || 0,
       });
 
       logger.debug(`✅ Mission completed: ${mission.id}`);
@@ -579,7 +579,7 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
     availableDrones: number;
     activeMissions: number;
     totalMissions: number;
-  } {
+    } {
     const activeDrones = Array.from(this.drones.values()).filter(d => d.status !== 'maintenance');
     const deployedDrones = Array.from(this.drones.values()).filter(d => d.status === 'deployed');
     const availableDrones = Array.from(this.drones.values()).filter(d => d.status === 'idle' && d.batteryLevel > 30);
@@ -592,14 +592,14 @@ class DroneCoordinationSystem extends SimpleEventEmitter {
       deployedDrones: deployedDrones.length,
       availableDrones: availableDrones.length,
       activeMissions: activeMissions.length,
-      totalMissions: this.missions.size
+      totalMissions: this.missions.size,
     };
   }
 
   // CRITICAL: Get Available Drones
   getAvailableDrones(): Drone[] {
     return Array.from(this.drones.values()).filter(drone => 
-      drone.status === 'idle' && drone.batteryLevel > 30
+      drone.status === 'idle' && drone.batteryLevel > 30,
     );
   }
 

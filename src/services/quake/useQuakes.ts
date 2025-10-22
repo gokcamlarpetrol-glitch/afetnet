@@ -25,7 +25,7 @@ export function useQuakes() {
     error: null,
     lastFetch: null,
     source: '',
-    fallbackUsed: false
+    fallbackUsed: false,
   });
 
   const { quakeProvider, pollMs } = useSettings();
@@ -37,11 +37,11 @@ export function useQuakes() {
 
   // Auto-refresh based on polling interval
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = (globalThis as any).setInterval(() => {
       refresh();
     }, pollMs);
 
-    return () => clearInterval(interval);
+    return () => (globalThis as any).clearInterval(interval);
   }, [pollMs, quakeProvider]);
 
   const loadCache = async () => {
@@ -55,7 +55,7 @@ export function useQuakes() {
           ...prev,
           items,
           lastFetch: lastFetch ? parseInt(lastFetch) : null,
-          source: 'cache'
+          source: 'cache',
         }));
       }
     } catch (error) {
@@ -95,7 +95,7 @@ export function useQuakes() {
           ...prev, 
           loading: false, 
           error: 'Çevrimdışı - önbellek kullanılıyor',
-          source: 'cache'
+          source: 'cache',
         }));
         return;
       }
@@ -139,7 +139,7 @@ export function useQuakes() {
         error: null,
         lastFetch: Date.now(),
         source,
-        fallbackUsed
+        fallbackUsed,
       }));
 
     } catch (error) {
@@ -147,7 +147,7 @@ export function useQuakes() {
       setState(prev => ({
         ...prev,
         loading: false,
-        error: error instanceof Error ? error.message : 'Deprem verisi alınamadı'
+        error: error instanceof Error ? error.message : 'Deprem verisi alınamadı',
       }));
     }
   }, [quakeProvider, state.items.length]);
@@ -159,6 +159,6 @@ export function useQuakes() {
   return {
     ...state,
     refresh,
-    pull
+    pull,
   };
 }

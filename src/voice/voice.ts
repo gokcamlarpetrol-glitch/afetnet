@@ -1,11 +1,11 @@
-import * as FileSystem from "expo-file-system";
-import { Audio } from "expo-av";
-import * as Speech from "expo-speech";
-import { paramsFor } from "../profile/params";
-import { useProfile } from "../state/profileStore";
-import { getLang, t } from "../i18n/runtime";
+import * as FileSystem from 'expo-file-system';
+import { Audio } from 'expo-av';
+import * as Speech from 'expo-speech';
+import { paramsFor } from '../profile/params';
+import { useProfile } from '../state/profileStore';
+import { getLang, t } from '../i18n/runtime';
 
-const ROOT = "/tmp/afn_data/i18n/";
+const ROOT = '/tmp/afn_data/i18n/';
 
 let enabled = true;
 let volume = 1.0;
@@ -20,7 +20,9 @@ async function tryPlayFile(key:string){
   if(!ex.exists) {return false;}
   try{
     const { sound } = await Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, volume });
-    await sound.playAsync(); setTimeout(()=>sound.unloadAsync().catch(()=>{}), 2000);
+    await sound.playAsync(); (globalThis as any).setTimeout(()=>sound.unloadAsync().catch(()=>{
+      // Ignore unload errors
+    }), 2000);
     return true;
   }catch{ return false; }
 }
@@ -32,5 +34,7 @@ export async function sayKey(key:string, vars?:Record<string,string|number>){
   try{
     const phrase = await t(key, vars);
     await Speech.speak(phrase, { language: getLang(), rate: 1.0, pitch: 1.0, volume });
-  }catch{}
+  }catch{
+    // Ignore speech errors
+  }
 }

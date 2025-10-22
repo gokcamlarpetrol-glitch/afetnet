@@ -57,8 +57,8 @@ class VictimDetectionSystem extends SimpleEventEmitter {
   private victimSignals = new Map<string, VictimSignal[]>();
   private acousticPatterns = new Map<string, AcousticPattern>();
   private isMonitoring = false;
-  private monitoringInterval: NodeJS.Timeout | null = null;
-  private signalProcessingInterval: NodeJS.Timeout | null = null;
+  private monitoringInterval: any = null;
+  private signalProcessingInterval: any = null;
 
   constructor() {
     super();
@@ -159,12 +159,12 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       logger.debug('🛑 Stopping victim detection monitoring...');
 
       if (this.monitoringInterval) {
-        clearInterval(this.monitoringInterval);
+        (globalThis as any).clearInterval(this.monitoringInterval);
         this.monitoringInterval = null;
       }
 
       if (this.signalProcessingInterval) {
-        clearInterval(this.signalProcessingInterval);
+        (globalThis as any).clearInterval(this.signalProcessingInterval);
         this.signalProcessingInterval = null;
       }
 
@@ -184,7 +184,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
       logger.debug('🔊 Starting acoustic monitoring...');
 
       // Simulate acoustic monitoring
-      this.monitoringInterval = setInterval(async () => {
+      this.monitoringInterval = (globalThis as any).setInterval(async () => {
         await this.scanForAcousticSignals();
       }, 2000); // Scan every 2 seconds
 
@@ -367,7 +367,7 @@ class VictimDetectionSystem extends SimpleEventEmitter {
 
   // CRITICAL: Start Signal Processing
   private startSignalProcessing(): void {
-    this.signalProcessingInterval = setInterval(async () => {
+    this.signalProcessingInterval = (globalThis as any).setInterval(async () => {
       await this.processPendingSignals();
     }, 5000); // Process signals every 5 seconds
   }

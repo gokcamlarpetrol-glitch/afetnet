@@ -28,16 +28,27 @@ export type Group = {
 export type GroupsState = {
   items: Group[];
   groups: Group[]; // Alias for items
+   
   createLocal: (name: string) => Group;
+   
   joinWithCode: (gid: string, name: string) => { ok: boolean; group?: Group; error?: string };
+   
   addMember: (groupId: string, member: GroupMember) => void;
+   
   removeMember: (groupId: string, afnId: string) => void;
+   
   setVerified: (groupId: string, afnId: string, verified: boolean) => void;
+   
   setSharedKey: (groupId: string, keyB64: string) => void;
+   
   getSharedKey: (groupId: string) => string | undefined;
+   
   updateLastActivity: (groupId: string) => void;
+   
   getByGid: (gid: string) => Group | undefined;
+   
   getById: (id: string) => Group | undefined;
+   
   remove: (id: string) => void;
 };
 
@@ -101,14 +112,14 @@ export const useGroups = create<GroupsState>()(
           items: state.items.map((group) =>
             group.id === groupId
               ? {
-                  ...group,
-                  members: [
-                    ...group.members.filter(m => m.afnId !== member.afnId),
-                    member,
-                  ],
-                  lastActivity: Date.now(),
-                }
-              : group
+                ...group,
+                members: [
+                  ...group.members.filter(m => m.afnId !== member.afnId),
+                  member,
+                ],
+                lastActivity: Date.now(),
+              }
+              : group,
           ),
         }));
       },
@@ -118,11 +129,11 @@ export const useGroups = create<GroupsState>()(
           items: state.items.map((group) =>
             group.id === groupId
               ? {
-                  ...group,
-                  members: group.members.filter(m => m.afnId !== afnId),
-                  lastActivity: Date.now(),
-                }
-              : group
+                ...group,
+                members: group.members.filter(m => m.afnId !== afnId),
+                lastActivity: Date.now(),
+              }
+              : group,
           ),
         }));
       },
@@ -132,13 +143,13 @@ export const useGroups = create<GroupsState>()(
           items: state.items.map((group) =>
             group.id === groupId
               ? {
-                  ...group,
-                  members: group.members.map((member) =>
-                    member.afnId === afnId ? { ...member, verified } : member
-                  ),
-                  lastActivity: Date.now(),
-                }
-              : group
+                ...group,
+                members: group.members.map((member) =>
+                  member.afnId === afnId ? { ...member, verified } : member,
+                ),
+                lastActivity: Date.now(),
+              }
+              : group,
           ),
         }));
       },
@@ -146,7 +157,7 @@ export const useGroups = create<GroupsState>()(
       setSharedKey: (groupId: string, keyB64: string) => {
         set((state) => ({
           items: state.items.map((group) =>
-            group.id === groupId ? { ...group, sharedKeyB64: keyB64 } : group
+            group.id === groupId ? { ...group, sharedKeyB64: keyB64 } : group,
           ),
         }));
       },
@@ -154,7 +165,7 @@ export const useGroups = create<GroupsState>()(
       updateLastActivity: (groupId: string) => {
         set((state) => ({
           items: state.items.map((group) =>
-            group.id === groupId ? { ...group, lastActivity: Date.now() } : group
+            group.id === groupId ? { ...group, lastActivity: Date.now() } : group,
           ),
         }));
       },
@@ -181,6 +192,6 @@ export const useGroups = create<GroupsState>()(
     {
       name: 'afn/groups/v1',
       storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    },
+  ),
 );

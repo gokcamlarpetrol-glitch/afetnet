@@ -5,6 +5,7 @@ import { SimulationScenario } from '../services/simulation/EmergencySimulationSy
 
 interface SimulationCardProps {
   scenario: SimulationScenario;
+   
   onStartSimulation: (scenarioId: string) => void;
   userStats?: any;
 }
@@ -27,7 +28,7 @@ export default function SimulationCard({ scenario, onStartSimulation, userStats 
             duration: 2000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
       pulse.start();
       return () => pulse.stop();
@@ -36,41 +37,41 @@ export default function SimulationCard({ scenario, onStartSimulation, userStats 
 
   const getDifficultyColor = (difficulty: SimulationScenario['difficulty']) => {
     switch (difficulty) {
-      case 'beginner': return '#10b981';
-      case 'intermediate': return '#f59e0b';
-      case 'advanced': return '#ef4444';
-      case 'expert': return '#8b5cf6';
+    case 'beginner': return '#10b981';
+    case 'intermediate': return '#f59e0b';
+    case 'advanced': return '#ef4444';
+    case 'expert': return '#8b5cf6';
     }
   };
 
   const getDifficultyBg = (difficulty: SimulationScenario['difficulty']) => {
     switch (difficulty) {
-      case 'beginner': return '#064e3b';
-      case 'intermediate': return '#78350f';
-      case 'advanced': return '#7f1d1d';
-      case 'expert': return '#5b21b6';
+    case 'beginner': return '#064e3b';
+    case 'intermediate': return '#78350f';
+    case 'advanced': return '#7f1d1d';
+    case 'expert': return '#5b21b6';
     }
   };
 
   const getTypeIcon = (type: SimulationScenario['type']) => {
     switch (type) {
-      case 'earthquake': return '🌍';
-      case 'fire': return '🔥';
-      case 'flood': return '🌊';
-      case 'gas_leak': return '⛽';
-      case 'medical': return '🏥';
-      case 'evacuation': return '🚨';
-      case 'terrorism': return '⚠️';
-      default: return '🎯';
+    case 'earthquake': return '🌍';
+    case 'fire': return '🔥';
+    case 'flood': return '🌊';
+    case 'gas_leak': return '⛽';
+    case 'medical': return '🏥';
+    case 'evacuation': return '🚨';
+    case 'terrorism': return '⚠️';
+    default: return '🎯';
     }
   };
 
   const getDifficultyIcon = (difficulty: SimulationScenario['difficulty']) => {
     switch (difficulty) {
-      case 'beginner': return '🟢';
-      case 'intermediate': return '🟡';
-      case 'advanced': return '🟠';
-      case 'expert': return '🔴';
+    case 'beginner': return '🟢';
+    case 'intermediate': return '🟡';
+    case 'advanced': return '🟠';
+    case 'expert': return '🔴';
     }
   };
 
@@ -241,8 +242,8 @@ export default function SimulationCard({ scenario, onStartSimulation, userStats 
                     </View>
                     <View style={{
                       backgroundColor: reward.rarity === 'legendary' ? '#fbbf24' : 
-                                     reward.rarity === 'epic' ? '#8b5cf6' :
-                                     reward.rarity === 'rare' ? '#3b82f6' : '#10b981',
+                        reward.rarity === 'epic' ? '#8b5cf6' :
+                          reward.rarity === 'rare' ? '#3b82f6' : '#10b981',
                       paddingHorizontal: 6,
                       paddingVertical: 2,
                       borderRadius: 4,

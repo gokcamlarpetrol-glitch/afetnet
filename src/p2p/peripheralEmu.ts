@@ -1,23 +1,27 @@
-import { CourierBundle } from "./types";
-import * as FileSystem from "expo-file-system";
-import { buildInboxBundle } from "./utilInbox";
+import { CourierBundle } from './types';
+import * as FileSystem from 'expo-file-system';
+import { buildInboxBundle } from './utilInbox';
 
-const DIR = "/tmp/";
+const DIR = '/tmp/';
 
-let writeBuf = "";
+let writeBuf = '';
 export function onInboxChunk(b64: string){
   try{
     const part = atob(b64);
     if(part.includes('"end":true')){ flushInbox(); }
     else { writeBuf += b64; }
-  }catch{ /* ignore */ }
+  }catch{
+    // Ignore errors
+  }
 }
 async function flushInbox(){
   try{
     const json = atob(writeBuf);
-    await FileSystem.writeAsStringAsync(DIR+"p2p.inbox.json", json);
-  }catch{}
-  writeBuf = "";
+    await FileSystem.writeAsStringAsync(DIR+'p2p.inbox.json', json);
+  }catch{
+    // Ignore errors
+  }
+  writeBuf = '';
 }
 
 export async function readOutboxB64(): Promise<string>{

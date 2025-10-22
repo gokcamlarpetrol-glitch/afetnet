@@ -51,12 +51,12 @@ export const useOfflineMapStore = create<OfflineMapState>()(
         progress: 0,
         isDownloading: false,
         cacheSizeMB: 0,
-        availableStorage: 0
-      })
+        availableStorage: 0,
+      }),
     }),
     {
       name: 'offline-map-storage',
-      storage: createJSONStorage(() => AsyncStorage)
-    }
-  )
+      storage: createJSONStorage(() => AsyncStorage),
+    },
+  ),
 );

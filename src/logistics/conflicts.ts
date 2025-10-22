@@ -1,11 +1,11 @@
-import * as FileSystem from "expo-file-system";
-import { similar } from "../util/similarity";
-import { LItem } from "./types";
-import { cellFor } from "../geo/grid";
+import * as FileSystem from 'expo-file-system';
+import { similar } from '../util/similarity';
+import { LItem } from './types';
+import { cellFor } from '../geo/grid';
 
-const DIR = "/tmp/";
-const FILE = DIR + "logistics.json";
-const CONFLICTS = DIR + "logistics.conflicts.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'logistics.json';
+const CONFLICTS = DIR + 'logistics.conflicts.json';
 
 export type Conflict = {
   id: string;
@@ -23,7 +23,7 @@ export async function detectConflicts(windowMs = 2*3600*1000, simThresh = 0.5): 
   let arr: LItem[] = [];
   try{ arr = JSON.parse(txt); }catch{ return []; }
   const now = Date.now();
-  const recent = arr.filter(it => (now-it.ts)<=windowMs && it.mode==="request" && typeof it.qlat==="number" && typeof it.qlng==="number");
+  const recent = arr.filter(it => (now-it.ts)<=windowMs && it.mode==='request' && typeof it.qlat==='number' && typeof it.qlng==='number');
   const byCell = new Map<string, LItem[]>();
   for(const it of recent){
     const { key } = cellFor(it.qlat!, it.qlng!);

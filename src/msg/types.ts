@@ -1,4 +1,4 @@
-export type MsgKind = "text" | "sos" | "status";
+export type MsgKind = 'text' | 'sos' | 'status';
 export type Msg = {
   v: 1;
   id: string;            // unique per message

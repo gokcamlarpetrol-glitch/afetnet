@@ -79,7 +79,7 @@ async function checkPendingSOS(): Promise<boolean> {
       // Check if there are any SOS messages in the queue
       return items.some((item: any) => 
         item.type === 'sos' && 
-        (Date.now() - item.ts) < 300000 // Within last 5 minutes
+        (Date.now() - item.ts) < 300000, // Within last 5 minutes
       );
     }
   } catch (error) {
@@ -103,7 +103,7 @@ async function wakeBLERelay(emergencyMode: boolean) {
     // 4. Stop after the duration
     
     // For now, we'll simulate this with a timeout
-    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second simulation
+    await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1000)); // 1 second simulation
     
     logger.debug('BLE relay wake cycle completed');
     

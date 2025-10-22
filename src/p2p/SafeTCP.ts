@@ -3,8 +3,8 @@ import { logger } from '../utils/productionLogger';
 let net: any = null;
 
 try {
-  net = require('react-native-tcp-socket');
-} catch (e) {
+  net = (globalThis as any).require('react-native-tcp-socket');
+} catch {
   logger.warn('react-native-tcp-socket not available');
 }
 
@@ -22,25 +22,25 @@ export const SafeTCP = {
             close: (callback?: any) => {
               logger.warn('Mock TCP server closed');
               if (callback) {callback();}
-            }
+            },
           };
         },
         close: (callback?: any) => {
           logger.warn('Mock TCP server closed');
           if (callback) {callback();}
-        }
+        },
       };
     }
     try {
       return net.createServer(callback);
-    } catch (e) {
-      logger.warn('Failed to create TCP server:', e);
+    } catch {
+      logger.warn('Failed to create TCP server');
       return {
         listen: (options: Record<string, unknown>, callback?: any) => {
           if (callback) {callback();}
           return { close: (callback?: any) => { if (callback) {callback();} } };
         },
-        close: (callback?: any) => { if (callback) {callback();} }
+        close: (callback?: any) => { if (callback) {callback();} },
       };
     }
   },
@@ -59,24 +59,24 @@ export const SafeTCP = {
         },
         on: (event: string, callback: any) => {
           logger.warn('Mock TCP event listener:', event);
-        }
+        },
       };
       if (callback) {callback();}
       return mockSocket;
     }
     try {
       return net.createConnection(options, callback);
-    } catch (e) {
-      logger.warn('Failed to create TCP connection:', e);
+    } catch {
+      logger.warn('Failed to create TCP connection');
       const mockSocket = {
         write: (data: unknown, callback?: any) => { if (callback) {callback();} },
         end: (callback?: any) => { if (callback) {callback();} },
-        on: (event: string, callback: any) => {}
+        on: (event: string, callback: any) => {},
       };
       if (callback) {callback();}
       return mockSocket;
     }
-  }
+  },
 };
 
 

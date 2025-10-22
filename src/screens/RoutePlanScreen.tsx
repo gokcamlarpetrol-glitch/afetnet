@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logger } from "../utils/productionLogger";
 import { Alert, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
@@ -10,13 +11,13 @@ let Polyline: any = null;
 let Marker: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Polyline = maps.Polyline;
   Marker = maps.Marker;
-} catch (e) {
-  console.warn('expo-maps not available:', e);
+} catch {
+  logger.warn('expo-maps not available');
 }
 
 interface RoutePoint {
@@ -80,7 +81,7 @@ export default function RoutePlanScreen() {
     
     try {
       // Simulate route planning (in production, use real routing API)
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1500));
       
       // Generate route points (simple straight line for now)
       const points = generateRoutePoints(startPoint, endPoint);

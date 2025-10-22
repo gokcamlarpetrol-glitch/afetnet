@@ -33,7 +33,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
   private recommendations = new Map<string, SmartRecommendation>();
   private userContext: UserContext | null = null;
   private isActive = false;
-  private analysisInterval: NodeJS.Timeout | null = null;
+  private analysisInterval: any = null;
 
   constructor() {
     super();
@@ -49,7 +49,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start continuous analysis
-      this.analysisInterval = setInterval(() => {
+      this.analysisInterval = (globalThis as any).setInterval(() => {
         this.performSmartAnalysis();
       }, 30000); // Every 30 seconds
 
@@ -116,7 +116,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         estimatedImpact: 'high',
         timestamp: Date.now(),
         category: 'power_management',
-        tags: ['battery', 'power', 'optimization']
+        tags: ['battery', 'power', 'optimization'],
       });
     }
 
@@ -133,7 +133,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         estimatedImpact: 'medium',
         timestamp: Date.now(),
         category: 'connectivity',
-        tags: ['offline', 'mesh', 'communication']
+        tags: ['offline', 'mesh', 'communication'],
       });
     }
 
@@ -150,7 +150,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         estimatedImpact: 'high',
         timestamp: Date.now(),
         category: 'emergency',
-        tags: ['emergency', 'safety', 'critical']
+        tags: ['emergency', 'safety', 'critical'],
       });
     }
 
@@ -167,7 +167,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         estimatedImpact: 'high',
         timestamp: Date.now(),
         category: 'weather_safety',
-        tags: ['weather', 'storm', 'safety']
+        tags: ['weather', 'storm', 'safety'],
       });
     }
 
@@ -184,7 +184,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         estimatedImpact: 'medium',
         timestamp: Date.now(),
         category: 'time_safety',
-        tags: ['night', 'visibility', 'safety']
+        tags: ['night', 'visibility', 'safety'],
       });
     }
 
@@ -213,7 +213,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
         recommendationId: recommendation.id,
         type: recommendation.type,
         priority: recommendation.priority,
-        confidence: recommendation.confidence
+        confidence: recommendation.confidence,
       });
 
       logger.debug(`🧠 Smart recommendation: ${recommendation.title}`);
@@ -289,7 +289,7 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
 
       emergencyLogger.logSystem('info', 'Recommendation executed', {
         recommendationId,
-        action: recommendation.action
+        action: recommendation.action,
       });
 
       logger.debug(`✅ Recommendation executed: ${recommendation.title}`);
@@ -305,33 +305,33 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
   private async performAction(action: string, recommendation: SmartRecommendation): Promise<void> {
     try {
       switch (action) {
-        case 'enable_power_saving_mode':
-          // Implementation would enable power saving mode
-          logger.debug('🔋 Power saving mode enabled');
-          break;
+      case 'enable_power_saving_mode':
+        // Implementation would enable power saving mode
+        logger.debug('🔋 Power saving mode enabled');
+        break;
         
-        case 'use_offline_features':
-          // Implementation would activate offline features
-          logger.debug('📡 Offline features activated');
-          break;
+      case 'use_offline_features':
+        // Implementation would activate offline features
+        logger.debug('📡 Offline features activated');
+        break;
         
-        case 'activate_emergency_mode':
-          // Implementation would activate emergency mode
-          logger.debug('🚨 Emergency mode activated');
-          break;
+      case 'activate_emergency_mode':
+        // Implementation would activate emergency mode
+        logger.debug('🚨 Emergency mode activated');
+        break;
         
-        case 'find_safe_location':
-          // Implementation would help find safe location
-          logger.debug('🛡️ Safe location guidance activated');
-          break;
+      case 'find_safe_location':
+        // Implementation would help find safe location
+        logger.debug('🛡️ Safe location guidance activated');
+        break;
         
-        case 'enable_night_mode':
-          // Implementation would enable night mode
-          logger.debug('🌙 Night mode enabled');
-          break;
+      case 'enable_night_mode':
+        // Implementation would enable night mode
+        logger.debug('🌙 Night mode enabled');
+        break;
         
-        default:
-          logger.debug(`🎯 Action performed: ${action}`);
+      default:
+        logger.debug(`🎯 Action performed: ${action}`);
       }
     } catch (error) {
       emergencyLogger.logSystem('error', 'Action execution failed', { action, error: String(error) });
@@ -345,13 +345,13 @@ class SmartRecommendationEngine extends SimpleEventEmitter {
     totalRecommendations: number;
     criticalRecommendations: number;
     userContext: UserContext | null;
-  } {
+    } {
     return {
       isActive: this.isActive,
       totalRecommendations: this.recommendations.size,
       criticalRecommendations: Array.from(this.recommendations.values())
         .filter(r => r.priority === 'critical').length,
-      userContext: this.userContext
+      userContext: this.userContext,
     };
   }
 }

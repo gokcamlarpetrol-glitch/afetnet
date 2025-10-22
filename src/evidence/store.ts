@@ -1,12 +1,12 @@
-import * as FileSystem from "expo-file-system";
-import * as Crypto from "expo-crypto";
-import { sign, getPublicKeyB64 } from "../crypto/keys";
-import * as Timechain from "../timechain/store";
-import { EvidenceItem, EvidencePack } from "./types";
+import * as FileSystem from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+import { sign, getPublicKeyB64 } from '../crypto/keys';
+import * as Timechain from '../timechain/store';
+import { EvidenceItem, EvidencePack } from './types';
 
-const DIR = "/tmp/";
-export const EV_DIR = DIR + "evidence/";
-const INDEX = EV_DIR + "index.json";
+const DIR = '/tmp/';
+export const EV_DIR = DIR + 'evidence/';
+const INDEX = EV_DIR + 'index.json';
 
 async function ensureDir(){
   const ex = await FileSystem.getInfoAsync(EV_DIR);
@@ -45,7 +45,7 @@ export async function createPack(qlat?:number, qlng?:number){
 export async function addItem(packId: string, item: EvidenceItem){
   const list = await loadIndex();
   const i = list.findIndex(p=>p.id===packId);
-  if(i<0) {throw new Error("Pack not found");}
+  if(i<0) {throw new Error('Pack not found');}
   list[i].items.push(item);
   await saveIndex(list);
   return list[i];
@@ -54,7 +54,7 @@ export async function addItem(packId: string, item: EvidenceItem){
 export async function finalizePack(packId: string){
   const list = await loadIndex();
   const i = list.findIndex(p=>p.id===packId);
-  if(i<0) {throw new Error("Pack not found");}
+  if(i<0) {throw new Error('Pack not found');}
   const manifest = JSON.stringify(list[i], null, 2);
   const sha = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, manifest);
   list[i].sha256 = sha;
@@ -67,7 +67,7 @@ export async function finalizePack(packId: string){
   const sigDoc = { v:1, packId, ts: Date.now(), pubKeyB64: pubB64, sha256: sha, sigB64: sigB64 };
   await FileSystem.writeAsStringAsync(EV_DIR + `${packId}_signature.json`, JSON.stringify(sigDoc, null, 2));
   // timechain append
-  await Timechain.append({ v:1, ts: Date.now(), type: "evidence", ref: packId, hash: sha });
+  await Timechain.append({ v:1, ts: Date.now(), type: 'evidence', ref: packId, hash: sha });
   return list[i];
 }
 

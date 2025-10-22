@@ -1,5 +1,5 @@
 import { logger } from '../utils/productionLogger';import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Modal } from 'react-native';
 import { palette, spacing } from '../ui/theme';
 import Button from '../ui/Button';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +23,7 @@ export default function KillSwitchModal({ visible, onClose }: KillSwitchModalPro
   const loadKillSwitchMessage = async () => {
     setIsLoading(true);
     try {
-      const config = await remoteConfigManager.getRemoteCfg();
+      await remoteConfigManager.getRemoteCfg();
       const killMessage = remoteConfigManager.getKillSwitchMessage();
       setMessage(killMessage);
     } catch (error) {

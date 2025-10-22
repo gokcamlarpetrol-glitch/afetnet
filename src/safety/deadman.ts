@@ -14,9 +14,9 @@ class DeadManSwitch {
     enabled: true,
     intervalMinutes: 10,
     lastCheck: 0,
-    sosActive: false
+    sosActive: false,
   };
-  private intervalId: NodeJS.Timeout | null = null;
+  private intervalId: any = null;
   private onSOSCallback?: () => void;
 
   constructor() {
@@ -87,7 +87,7 @@ class DeadManSwitch {
 
     const intervalMs = this.config.intervalMinutes * 60 * 1000;
     
-    this.intervalId = setInterval(() => {
+    this.intervalId = (globalThis as any).setInterval(() => {
       this.checkDeadMan();
     }, intervalMs);
 
@@ -96,7 +96,7 @@ class DeadManSwitch {
 
   private stop() {
     if (this.intervalId) {
-      clearInterval(this.intervalId);
+      (globalThis as any).clearInterval(this.intervalId);
       this.intervalId = null;
       logger.debug('Dead man switch stopped');
     }
@@ -121,7 +121,7 @@ class DeadManSwitch {
             this.config.lastCheck = now;
             this.saveConfig();
             this.logResponse('confirmed');
-          }
+          },
         },
         {
           text: 'Hayır, yardım gerekli',
@@ -133,20 +133,20 @@ class DeadManSwitch {
             if (this.onSOSCallback) {
               this.onSOSCallback();
             }
-          }
-        }
+          },
+        },
       ],
       {
         cancelable: false,
         onDismiss: () => {
           // If user dismisses without responding, consider it a non-response
           this.logResponse('no_response');
-        }
-      }
+        },
+      },
     );
 
     // Auto-dismiss after 30 seconds if no response
-    setTimeout(() => {
+    (globalThis as any).setTimeout(() => {
       this.logResponse('timeout');
     }, 30000);
   }
@@ -157,7 +157,7 @@ class DeadManSwitch {
         timestamp: Date.now(),
         response,
         intervalMinutes: this.config.intervalMinutes,
-        sosActive: this.config.sosActive
+        sosActive: this.config.sosActive,
       };
 
       // Get existing logs
@@ -198,7 +198,7 @@ class DeadManSwitch {
         timestamp: Date.now(),
         type: 'deadman_no_response',
         intervalMinutes: this.config.intervalMinutes,
-        sosActive: this.config.sosActive
+        sosActive: this.config.sosActive,
       };
 
       const existingIncidents = await AsyncStorage.getItem('afn/deadman/incidents');
@@ -240,7 +240,7 @@ class DeadManSwitch {
       intervalMinutes: this.config.intervalMinutes,
       sosActive: this.config.sosActive,
       isRunning: this.intervalId !== null,
-      lastCheck: this.config.lastCheck
+      lastCheck: this.config.lastCheck,
     };
   }
 
@@ -250,7 +250,7 @@ class DeadManSwitch {
       enabled: true,
       intervalMinutes: 10,
       lastCheck: 0,
-      sosActive: false
+      sosActive: false,
     };
     this.saveConfig();
   }

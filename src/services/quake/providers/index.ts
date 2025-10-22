@@ -6,7 +6,7 @@ import { usgsProvider } from './usgs';
 export const providerRegistry: Record<QuakeProviderType, QuakeProvider> = {
   USGS: usgsProvider,
   AFAD: afadProvider,
-  KANDILLI: kandilliProvider
+  KANDILLI: kandilliProvider,
 };
 
 export { afadProvider, kandilliProvider, usgsProvider };

@@ -3,15 +3,15 @@ import NetInfo from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Platform,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    Text,
-    View
+  Alert,
+  Dimensions,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  Text,
+  View,
 } from 'react-native';
 // import { offlineMessageManager } from '../services/offline/offlineMessageManager';
 import { useQuakes } from '../services/quake/useQuakes';
@@ -25,8 +25,6 @@ import { logger } from '../utils/productionLogger';
 import { criticalAlarmSystem } from '../services/alerts/CriticalAlarmSystem';
 import { notifyQuake } from '../alerts/notify';
 
-const { width } = Dimensions.get('window');
-
 // Navigation prop'u opsiyonel yap
 interface HomeSimpleProps {
   navigation?: any;
@@ -39,14 +37,13 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
   const { list: familyList } = useFamily();
   const { items: queueItems } = useQueue();
   const { items: earthquakes, loading: quakesLoading, refresh: refreshQuakes } = useQuakes();
-  const settings = useSettings();
   const { isPremium, canUseFeature } = usePremiumFeatures();
   
   // Deprem verilerini yenile ve kritik alarmları kontrol et
   useEffect(() => {
     refreshQuakes();
-    const interval = setInterval(refreshQuakes, 60000); // Her dakika yenile
-    return () => clearInterval(interval);
+    const interval = (globalThis as any).setInterval(refreshQuakes, 60000); // Her dakika yenile
+    return () => (globalThis as any).clearInterval(interval);
   }, []);
 
   // CRITICAL: Monitor new earthquakes and trigger alarms
@@ -139,7 +136,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
       if (isOnline) {
         // ONLINE: Send to backend API with timeout
         try {
-          const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://afetnet-backend.onrender.com';
+          const API_URL = (globalThis as any).process?.env?.EXPO_PUBLIC_API_URL || 'https://afetnet-backend.onrender.com';
           const result = await postJSON(`${API_URL}/api/sos`, sosData, 30000);
           
           logger.info('SOS successfully sent to backend', result, { component: 'HomeSimple' });
@@ -160,14 +157,14 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           Alert.alert(
             'SOS Gönderildi',
             'SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderildi.',
-            [{ text: 'Tamam' }]
+            [{ text: 'Tamam' }],
           );
         } catch (meshError) {
           logger.error('Failed to send SOS via mesh', meshError, { component: 'HomeSimple' });
           Alert.alert(
             'SOS Hatası',
             'SOS sinyali gönderilemedi. Lütfen tekrar deneyin.',
-            [{ text: 'Tamam' }]
+            [{ text: 'Tamam' }],
           );
         }
       }
@@ -202,19 +199,19 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
     <View style={{ flex: 1, backgroundColor: '#0a0f1f' }}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" />
       
-        <ScrollView 
-          style={{ flex: 1, marginTop: 50 }}
-          contentContainerStyle={{ padding: 16, paddingBottom: Platform.OS === 'ios' ? 120 : 90 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#3b82f6"
-              colors={['#3b82f6']}
-            />
-          }
-        >
+      <ScrollView 
+        style={{ flex: 1, marginTop: 50 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: Platform.OS === 'ios' ? 120 : 90 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#3b82f6"
+            colors={['#3b82f6']}
+          />
+        }
+      >
         {/* Premium Header with Status Banner */}
         <View style={{ marginBottom: 20 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -443,7 +440,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
             padding: 16,
             marginBottom: 16,
             borderWidth: 2,
-            borderColor: '#ea580c'
+            borderColor: '#ea580c',
           }}>
             {/* Genel Durum Bildirim Kartı */}
             <View style={{
@@ -550,7 +547,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                     padding: 12,
                     marginBottom: index < 2 ? 8 : 0,
                     borderLeftWidth: 4,
-                    borderLeftColor: isMajor ? '#ef4444' : '#fb923c'
+                    borderLeftColor: isMajor ? '#ef4444' : '#fb923c',
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
@@ -559,7 +556,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                       paddingHorizontal: 8,
                       paddingVertical: 4,
                       borderRadius: 8,
-                      marginRight: 8
+                      marginRight: 8,
                     }}>
                       <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '800' }}>
                         {magnitude.toFixed(1)} ML
@@ -613,9 +610,9 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                   { 
                     text: 'Premium Satın Al', 
                     style: 'default',
-                    onPress: () => navigation?.navigate('Premium')
-                  }
-                ]
+                    onPress: () => navigation?.navigate('Premium'),
+                  },
+                ],
               );
               return;
             }
@@ -623,7 +620,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           }}
           disabled={sendingSOS}
           accessibilityRole="button"
-          accessibilityLabel={sendingSOS ? "SOS gönderiliyor, lütfen bekleyin" : "Acil durum SOS sinyali gönder"}
+          accessibilityLabel={sendingSOS ? 'SOS gönderiliyor, lütfen bekleyin' : 'Acil durum SOS sinyali gönder'}
           accessibilityHint="Acil durum SOS formu açmak için dokun"
           accessibilityState={{ disabled: sendingSOS, busy: sendingSOS }}
           accessible={true}
@@ -701,7 +698,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </View>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => {
               if (!canUseFeature('advanced_maps')) {
                 Alert.alert(
@@ -712,9 +709,9 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                     { 
                       text: 'Premium Satın Al', 
                       style: 'default',
-                      onPress: () => navigation?.navigate('Premium')
-                    }
-                  ]
+                      onPress: () => navigation?.navigate('Premium'),
+                    },
+                  ],
                 );
                 return;
               }
@@ -768,7 +765,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </Pressable>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => {
               if (!canUseFeature('p2p_messaging')) {
                 Alert.alert(
@@ -779,9 +776,9 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                     { 
                       text: 'Premium Satın Al', 
                       style: 'default',
-                      onPress: () => navigation?.navigate('Premium')
-                    }
-                  ]
+                      onPress: () => navigation?.navigate('Premium'),
+                    },
+                  ],
                 );
                 return;
               }
@@ -835,7 +832,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </Pressable>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => navigateTo('Family')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -880,7 +877,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </Pressable>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => navigateTo('Diagnostics')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -925,7 +922,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </Pressable>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => navigateTo('QRSync')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -970,7 +967,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           </Pressable>
 
           <Pressable
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => navigateTo('Settings')}
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -1022,7 +1019,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
           borderRadius: 12,
           borderWidth: 1,
           borderColor: '#1e40af',
-          marginTop: 16
+          marginTop: 16,
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
             <Ionicons name="information-circle" size={20} color="#60a5fa" />
@@ -1042,7 +1039,7 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
         visible={sosModalVisible}
         onClose={() => setSosModalVisible(false)}
         onSubmit={handleSOSSubmit}
-             />
-           </View>
-         );
-       }
+      />
+    </View>
+  );
+}

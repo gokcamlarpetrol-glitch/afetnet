@@ -29,7 +29,7 @@ export async function broadcast(env: Envelope): Promise<void> {
   const latency = 300 + Math.random() * 1200; // 300-1500ms random latency
   logger.debug(`[SimTransport] broadcasting ${env.type} with ${latency}ms latency`);
   
-  setTimeout(() => {
+  (globalThis as any).setTimeout(() => {
     const copy = { ...env, hop: env.hop + 1 };
     for (const cb of listeners) {
       try {

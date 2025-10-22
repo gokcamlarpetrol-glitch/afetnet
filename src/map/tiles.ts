@@ -1,6 +1,6 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from 'expo-file-system';
 
-export const TILE_ROOT = "/tmp/tiles/";
+export const TILE_ROOT = '/tmp/tiles/';
 
 export type BBox = { minLat:number; minLng:number; maxLat:number; maxLng:number };
 export type TileJob = { zFrom:number; zTo:number; bbox:BBox; sourceTemplate:string /* e.g. https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png */ };
@@ -22,7 +22,7 @@ export function estimateTiles(job:TileJob){
 
 async function ensureDir(path:string){ await FileSystem.makeDirectoryAsync(path, { intermediates:true }).catch(()=>{}); }
 
-export async function downloadTiles(job:TileJob, onProgress?:(done:number, total:number)=>void){
+export async function downloadTiles(job:TileJob, onProgress?:(_done:number, _total:number)=>void){
   const { count } = estimateTiles(job);
   let done = 0;
   for(let z=job.zFrom; z<=job.zTo; z++){
@@ -36,8 +36,8 @@ export async function downloadTiles(job:TileJob, onProgress?:(done:number, total
         const ex = await FileSystem.getInfoAsync(path);
         if(!ex.exists){
           // round-robin subdomain
-          const sub = ["a","b","c"][(x+y+z)%3];
-          const url = job.sourceTemplate.replace("{s}", sub).replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
+          const sub = ['a','b','c'][(x+y+z)%3];
+          const url = job.sourceTemplate.replace('{s}', sub).replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
           try{
             const res = await FileSystem.downloadAsync(url, path);
             if(res.status!==200){ /* ignore; leave hole */ }
@@ -61,9 +61,9 @@ export async function tileStats(){
   async function walk(dir:string){
     const list = await FileSystem.readDirectoryAsync(dir);
     for(const f of list){
-      const p = dir+ (dir.endsWith("/")?"":"/") + f;
+      const p = dir+ (dir.endsWith('/')?'':'/') + f;
       const inf = await FileSystem.getInfoAsync(p);
-      if(inf.isDirectory){ await walk(p+"/"); }
+      if(inf.isDirectory){ await walk(p+'/'); }
       else{ files++; mb += ((inf as any).size||0)/1_000_000; }
     }
   }

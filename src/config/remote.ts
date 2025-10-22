@@ -41,7 +41,7 @@ const DEFAULT_CONFIG: RemoteCfg = {
   lastUpdated: Date.now(),
 };
 
-const REMOTE_CONFIG_URL = process.env.EXPO_PUBLIC_REMOTE_CONFIG_URL || 'https://afetnet-config.example.com/config.json';
+const REMOTE_CONFIG_URL = (globalThis as any).process?.env?.EXPO_PUBLIC_REMOTE_CONFIG_URL || 'https://afetnet-config.example.com/config.json';
 const CONFIG_CACHE_KEY = 'afn/rcfg/v1';
 const CONFIG_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -91,10 +91,10 @@ class RemoteConfigManager {
     this.isFetching = true;
     
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const controller = new (globalThis as any).AbortController();
+      const timeoutId = (globalThis as any).setTimeout(() => controller.abort(), 10000);
       
-      const response = await fetch(REMOTE_CONFIG_URL, {
+      const response = await (globalThis as any).fetch(REMOTE_CONFIG_URL, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -103,7 +103,7 @@ class RemoteConfigManager {
         signal: controller.signal,
       });
       
-      clearTimeout(timeoutId);
+      (globalThis as any).clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -150,7 +150,7 @@ class RemoteConfigManager {
       if (typeof config.flags !== 'object' || config.flags === null) return false;
       
       // Validate flags are boolean
-      for (const [key, value] of Object.entries(config.flags)) {
+      for (const [, value] of Object.entries(config.flags)) {
         if (typeof value !== 'boolean') return false;
       }
       

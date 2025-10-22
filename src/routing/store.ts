@@ -1,8 +1,8 @@
-import * as FileSystem from "expo-file-system";
-import { RoadGraph, RoadNode, RoadEdge, Closure } from "./types";
+import * as FileSystem from 'expo-file-system';
+import { RoadGraph, RoadNode, RoadEdge, Closure } from './types';
 
-const GFILE = "/tmp/roads.graph.json";
-const CFILE = "/tmp/roads.closures.jsonl";
+const GFILE = '/tmp/roads.graph.json';
+const CFILE = '/tmp/roads.closures.jsonl';
 
 let gmem: RoadGraph | null = null;
 
@@ -35,14 +35,14 @@ export async function saveGraph(j: RoadGraph){
 }
 
 export async function addClosure(c: Closure){
-  const existing = await FileSystem.readAsStringAsync(CFILE).catch(()=>"");
-  await FileSystem.writeAsStringAsync(CFILE, existing + JSON.stringify(c)+"\n");
+  const existing = await FileSystem.readAsStringAsync(CFILE).catch(()=>'');
+  await FileSystem.writeAsStringAsync(CFILE, existing + JSON.stringify(c)+'\n');
 }
 export async function listClosures(limit=500): Promise<Closure[]>{
   const ex = await FileSystem.getInfoAsync(CFILE); if(!ex.exists) {return [];}
   const txt = await FileSystem.readAsStringAsync(CFILE);
   const now = Date.now();
-  return txt.split("\n").filter(Boolean).slice(-limit).map(l=>{ try{return JSON.parse(l);}catch{return null;} })
+  return txt.split('\n').filter(Boolean).slice(-limit).map(l=>{ try{return JSON.parse(l);}catch{return null;} })
     .filter(Boolean)
     .filter((c:Closure)=> !c.ttlSec || (c.ts + c.ttlSec*1000) > now) as Closure[];
 }

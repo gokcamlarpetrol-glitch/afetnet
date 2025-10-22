@@ -39,7 +39,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
   private healthChecks: Map<string, () => Promise<HealthCheck>> = new Map();
   private healthHistory: HealthCheck[] = [];
   private isMonitoring = false;
-  private monitoringInterval: NodeJS.Timeout | null = null;
+  private monitoringInterval: any = null;
   private metrics: HealthMetrics = {
     uptime: 0,
     memoryUsage: 0,
@@ -89,12 +89,12 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       await this.runAllHealthChecks();
       
       // Start continuous monitoring
-      this.monitoringInterval = setInterval(async () => {
+      this.monitoringInterval = (globalThis as any).setInterval(async () => {
         await this.runAllHealthChecks();
       }, 30000); // Check every 30 seconds
 
       // Critical systems check every 10 seconds
-      setInterval(async () => {
+      (globalThis as any).setInterval(async () => {
         await this.runCriticalHealthChecks();
       }, 10000);
 
@@ -117,7 +117,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       this.isMonitoring = false;
       
       if (this.monitoringInterval) {
-        clearInterval(this.monitoringInterval);
+        (globalThis as any).clearInterval(this.monitoringInterval);
         this.monitoringInterval = null;
       }
 
@@ -159,13 +159,13 @@ class SystemHealthMonitor extends SimpleEventEmitter {
               },
             };
           }
-        }
+        },
       );
 
       const results = await Promise.all(checkPromises);
 
       // Process results
-      for (const { id, check } of results) {
+      for (const { check } of results) {
         checks.push(check);
 
         // Count issues
@@ -184,7 +184,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
       // Determine overall health
       const overall = criticalIssues > 0 ? 'critical' : 
-                     warningIssues > 0 ? 'warning' : 'healthy';
+        warningIssues > 0 ? 'warning' : 'healthy';
 
       const systemHealth: SystemHealth = {
         overall,
@@ -378,7 +378,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
       // Try to get current location
       const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High
+        accuracy: Location.Accuracy.High,
       });
 
       const accuracy = location.coords.accuracy || 0;
@@ -591,7 +591,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
   private async checkVoiceCommands(): Promise<HealthCheck> {
     try {
-      const { voiceCommandManager } = await import('../voice/VoiceCommandManager');
+      await import('../voice/VoiceCommandManager');
       
       return {
         id: 'voice_commands',
@@ -694,47 +694,51 @@ class SystemHealthMonitor extends SimpleEventEmitter {
       logger.debug(`🔧 Attempting auto-fix for ${check.name}...`);
 
       switch (check.id) {
-        case 'mesh_network':
-          const { emergencyMeshManager } = await import('../emergency/EmergencyMeshManager');
-          await emergencyMeshManager.startEmergencyMesh();
-          break;
+      case 'mesh_network': {
+        const { emergencyMeshManager } = await import('../emergency/EmergencyMeshManager');
+        await emergencyMeshManager.startEmergencyMesh();
+        break;
+      }
 
-        case 'sos_system':
-          const { offlineMessageManager } = await import('../messaging/OfflineMessageManager');
-          await offlineMessageManager.retryFailedMessages();
-          break;
+      case 'sos_system': {
+        const { offlineMessageManager } = await import('../messaging/OfflineMessageManager');
+        await offlineMessageManager.retryFailedMessages();
+        break;
+      }
 
-        case 'location_services':
-          await Location.requestForegroundPermissionsAsync();
-          break;
+      case 'location_services':
+        await Location.requestForegroundPermissionsAsync();
+        break;
 
-        case 'battery_level':
-          // Enable power saving mode
-          logger.debug('🔋 Enabling power saving mode');
-          break;
+      case 'battery_level':
+        // Enable power saving mode
+        logger.debug('🔋 Enabling power saving mode');
+        break;
 
-        case 'storage_space':
-          // Clear old logs and cache
-          logger.debug('🧹 Clearing old data');
-          break;
+      case 'storage_space':
+        // Clear old logs and cache
+        logger.debug('🧹 Clearing old data');
+        break;
 
-        case 'voice_commands':
-          const { voiceCommandManager } = await import('../voice/VoiceCommandManager');
-          await voiceCommandManager.startVoiceRecognition();
-          break;
+      case 'voice_commands': {
+        const { voiceCommandManager } = await import('../voice/VoiceCommandManager');
+        await voiceCommandManager.startVoiceRecognition();
+        break;
+      }
 
-        case 'sensor_monitoring':
-          const { emergencySensorManager } = await import('../sensors/EmergencySensorManager');
-          await emergencySensorManager.startEmergencyMonitoring();
-          break;
+      case 'sensor_monitoring': {
+        const { emergencySensorManager } = await import('../sensors/EmergencySensorManager');
+        await emergencySensorManager.startEmergencyMonitoring();
+        break;
+      }
 
-        case 'encryption_keys':
-          // Re-initialize encryption keys
-          logger.debug('🔐 Re-initializing encryption keys');
-          break;
+      case 'encryption_keys':
+        // Re-initialize encryption keys
+        logger.debug('🔐 Re-initializing encryption keys');
+        break;
 
-        default:
-          return false;
+      default:
+        return false;
       }
 
       logger.debug(`✅ Auto-fix successful for ${check.name}`);
@@ -765,7 +769,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
 
   // Metrics collection
   private startMetricsCollection(): void {
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.updateMetrics();
     }, 5000); // Update metrics every 5 seconds
   }
@@ -804,7 +808,7 @@ class SystemHealthMonitor extends SimpleEventEmitter {
     const warningChecks = this.healthHistory.filter(check => check.status === 'warning').length;
     
     const overall = criticalChecks > 0 ? 'critical' : 
-                   warningChecks > 0 ? 'warning' : 'healthy';
+      warningChecks > 0 ? 'warning' : 'healthy';
 
     return {
       overall,

@@ -5,17 +5,17 @@ let isExpoGo = false;
 
 // Detect Expo Go environment FIRST
 try {
-  const Constants = require('expo-constants');
+  const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient';
-} catch (e) {
+} catch {
   // Ignore
 }
 
 // Only try to import barcode scanner if NOT in Expo Go
 if (!isExpoGo) {
   try {
-    BarcodeScanner = require('expo-barcode-scanner');
-  } catch (e) {
+    BarcodeScanner = (globalThis as any).require('expo-barcode-scanner');
+  } catch {
     logger.warn('expo-barcode-scanner not available');
   }
 } else {
@@ -34,8 +34,8 @@ export const SafeBarcodeScanner = {
     }
     try {
       return await BarcodeScanner.requestPermissionsAsync();
-    } catch (e) {
-      logger.warn('Barcode scanner permission request failed:', e);
+    } catch {
+      logger.warn('Barcode scanner permission request failed');
       return { status: 'denied' };
     }
   },
@@ -47,8 +47,8 @@ export const SafeBarcodeScanner = {
     }
     try {
       return await BarcodeScanner.getPermissionsAsync();
-    } catch (e) {
-      logger.warn('Barcode scanner permission check failed:', e);
+    } catch {
+      logger.warn('Barcode scanner permission check failed');
       return { status: 'denied' };
     }
   },
@@ -66,9 +66,9 @@ export const SafeBarcodeScanner = {
       ean13: 'ean13',
       itf14: 'itf14',
       upc_e: 'upc_e',
-      upc_a: 'upc_a'
-    }
-  }
+      upc_a: 'upc_a',
+    },
+  },
 };
 
 

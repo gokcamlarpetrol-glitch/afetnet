@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from "../utils/productionLogger";
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as Notifications from 'expo-notifications';
@@ -183,7 +184,7 @@ export const useAppSettings = create<AppSettingsState>()(
         try {
           await AsyncStorage.setItem('afn/app-settings/v1', JSON.stringify(newSettings));
         } catch (error) {
-          console.warn('Failed to save settings:', error);
+          logger.warn('Failed to save settings:', error);
         }
       },
       
@@ -203,7 +204,7 @@ export const useAppSettings = create<AppSettingsState>()(
         try {
           await AsyncStorage.setItem('afn/app-settings/v1', JSON.stringify(newSettings));
         } catch (error) {
-          console.warn('Failed to save settings:', error);
+          logger.warn('Failed to save settings:', error);
         }
       },
       
@@ -220,7 +221,7 @@ export const useAppSettings = create<AppSettingsState>()(
         try {
           await AsyncStorage.setItem('afn/app-settings/v1', JSON.stringify(defaultSettings));
         } catch (error) {
-          console.warn('Failed to save default settings:', error);
+          logger.warn('Failed to save default settings:', error);
         }
       },
       
@@ -239,9 +240,9 @@ export const useAppSettings = create<AppSettingsState>()(
             await applySettingEffect('vibrationEnabled', mergedSettings.vibrationEnabled, mergedSettings);
           }
         } catch (error) {
-          console.warn('Failed to initialize settings:', error);
+          logger.warn('Failed to initialize settings:', error);
         }
-      }
+      },
     }),
     {
       name: 'afn/app-settings/v1',
@@ -249,165 +250,165 @@ export const useAppSettings = create<AppSettingsState>()(
       version: 1,
       migrate: (persistedState: any, version: number) => {
         return { ...defaultSettings, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );
 
 // Apply real-time effects for settings changes
 async function applySettingEffect(
   key: keyof AppSettings, 
   value: any, 
-  allSettings: AppSettings
+  allSettings: AppSettings,
 ): Promise<void> {
   try {
     switch (key) {
-      case 'darkMode':
-        await applyDarkModeEffect(value);
-        break;
+    case 'darkMode':
+      await applyDarkModeEffect(value);
+      break;
         
-      case 'pushNotifications':
-        await applyPushNotificationsEffect(value);
-        break;
+    case 'pushNotifications':
+      await applyPushNotificationsEffect(value);
+      break;
         
-      case 'soundEnabled':
-        await applySoundEffect(value);
-        break;
+    case 'soundEnabled':
+      await applySoundEffect(value);
+      break;
         
-      case 'vibrationEnabled':
-        await applyVibrationEffect(value);
-        break;
+    case 'vibrationEnabled':
+      await applyVibrationEffect(value);
+      break;
         
-      case 'emergencyAlerts':
-        await applyEmergencyAlertsEffect(value);
-        break;
+    case 'emergencyAlerts':
+      await applyEmergencyAlertsEffect(value);
+      break;
         
-      case 'familyAlerts':
-        await applyFamilyAlertsEffect(value);
-        break;
+    case 'familyAlerts':
+      await applyFamilyAlertsEffect(value);
+      break;
         
-      case 'messageAlerts':
-        await applyMessageAlertsEffect(value);
-        break;
+    case 'messageAlerts':
+      await applyMessageAlertsEffect(value);
+      break;
         
-      case 'systemAlerts':
-        await applySystemAlertsEffect(value);
-        break;
+    case 'systemAlerts':
+      await applySystemAlertsEffect(value);
+      break;
         
-      case 'marketingAlerts':
-        await applyMarketingAlertsEffect(value);
-        break;
+    case 'marketingAlerts':
+      await applyMarketingAlertsEffect(value);
+      break;
         
-      case 'quietHours':
-        await applyQuietHoursEffect(value, allSettings);
-        break;
+    case 'quietHours':
+      await applyQuietHoursEffect(value, allSettings);
+      break;
         
-      case 'ledNotification':
-        await applyLedNotificationEffect(value);
-        break;
+    case 'ledNotification':
+      await applyLedNotificationEffect(value);
+      break;
         
-      case 'badgeCount':
-        await applyBadgeCountEffect(value);
-        break;
+    case 'badgeCount':
+      await applyBadgeCountEffect(value);
+      break;
         
-      case 'bleEnabled':
-        await applyBleEffect(value);
-        break;
+    case 'bleEnabled':
+      await applyBleEffect(value);
+      break;
         
-      case 'meshDiscovery':
-        await applyMeshDiscoveryEffect(value);
-        break;
+    case 'meshDiscovery':
+      await applyMeshDiscoveryEffect(value);
+      break;
         
-      case 'relayMode':
-        await applyRelayModeEffect(value);
-        break;
+    case 'relayMode':
+      await applyRelayModeEffect(value);
+      break;
         
-      case 'powerSaving':
-        await applyPowerSavingEffect(value);
-        break;
+    case 'powerSaving':
+      await applyPowerSavingEffect(value);
+      break;
         
-      case 'meshEncryption':
-        await applyMeshEncryptionEffect(value);
-        break;
+    case 'meshEncryption':
+      await applyMeshEncryptionEffect(value);
+      break;
         
-      case 'autoConnect':
-        await applyAutoConnectEffect(value);
-        break;
+    case 'autoConnect':
+      await applyAutoConnectEffect(value);
+      break;
         
-      case 'biometricEnabled':
-        await applyBiometricEffect(value);
-        break;
+    case 'biometricEnabled':
+      await applyBiometricEffect(value);
+      break;
         
-      case 'encryptionEnabled':
-        await applyEncryptionEffect(value);
-        break;
+    case 'encryptionEnabled':
+      await applyEncryptionEffect(value);
+      break;
         
-      case 'screenLockEnabled':
-        await applyScreenLockEffect(value);
-        break;
+    case 'screenLockEnabled':
+      await applyScreenLockEffect(value);
+      break;
         
-      case 'appLockEnabled':
-        await applyAppLockEffect(value);
-        break;
+    case 'appLockEnabled':
+      await applyAppLockEffect(value);
+      break;
         
-      case 'twoFactorAuth':
-        await applyTwoFactorAuthEffect(value);
-        break;
+    case 'twoFactorAuth':
+      await applyTwoFactorAuthEffect(value);
+      break;
         
-      case 'loginNotifications':
-        await applyLoginNotificationsEffect(value);
-        break;
+    case 'loginNotifications':
+      await applyLoginNotificationsEffect(value);
+      break;
         
-      case 'suspiciousActivityAlerts':
-        await applySuspiciousActivityEffect(value);
-        break;
+    case 'suspiciousActivityAlerts':
+      await applySuspiciousActivityEffect(value);
+      break;
         
-      case 'autoBackup':
-        await applyAutoBackupEffect(value);
-        break;
+    case 'autoBackup':
+      await applyAutoBackupEffect(value);
+      break;
         
-      case 'cloudSync':
-        await applyCloudSyncEffect(value);
-        break;
+    case 'cloudSync':
+      await applyCloudSyncEffect(value);
+      break;
         
-      case 'syncWifiOnly':
-        await applySyncWifiOnlyEffect(value);
-        break;
+    case 'syncWifiOnly':
+      await applySyncWifiOnlyEffect(value);
+      break;
         
-      case 'debugMode':
-        await applyDebugModeEffect(value);
-        break;
+    case 'debugMode':
+      await applyDebugModeEffect(value);
+      break;
         
-      case 'errorReports':
-        await applyErrorReportsEffect(value);
-        break;
+    case 'errorReports':
+      await applyErrorReportsEffect(value);
+      break;
         
-      case 'analyticsData':
-        await applyAnalyticsDataEffect(value);
-        break;
+    case 'analyticsData':
+      await applyAnalyticsDataEffect(value);
+      break;
         
-      case 'usageStatistics':
-        await applyUsageStatisticsEffect(value);
-        break;
+    case 'usageStatistics':
+      await applyUsageStatisticsEffect(value);
+      break;
         
-      case 'crashReports':
-        await applyCrashReportsEffect(value);
-        break;
+    case 'crashReports':
+      await applyCrashReportsEffect(value);
+      break;
         
-      case 'liveMode':
-        await applyLiveModeEffect(value);
-        break;
+    case 'liveMode':
+      await applyLiveModeEffect(value);
+      break;
         
-      case 'experimentalPWave':
-        await applyExperimentalPWaveEffect(value);
-        break;
+    case 'experimentalPWave':
+      await applyExperimentalPWaveEffect(value);
+      break;
         
-      case 'autoUpdate':
-        await applyAutoUpdateEffect(value);
-        break;
+    case 'autoUpdate':
+      await applyAutoUpdateEffect(value);
+      break;
     }
   } catch (error) {
-    console.warn(`Failed to apply setting effect for ${key}:`, error);
+    logger.warn(`Failed to apply setting effect for ${key}:`, error);
   }
 }
 
@@ -420,7 +421,7 @@ async function applyDarkModeEffect(enabled: boolean): Promise<void> {
       Appearance.setColorScheme('light');
     }
   } catch (error) {
-    console.warn('Failed to apply dark mode:', error);
+    logger.warn('Failed to apply dark mode:', error);
   }
 }
 
@@ -430,22 +431,22 @@ async function applyPushNotificationsEffect(enabled: boolean): Promise<void> {
       const granted = await notificationService.requestPermissions();
       if (granted) {
         await notificationService.initializeChannels();
-        console.log('✅ Push notifications enabled');
+        logger.info('✅ Push notifications enabled');
       } else {
-        console.warn('Push notification permission not granted');
+        logger.warn('Push notification permission not granted');
       }
     }
   } catch (error) {
-    console.warn('Failed to apply push notifications:', error);
+    logger.warn('Failed to apply push notifications:', error);
   }
 }
 
 async function applySoundEffect(enabled: boolean): Promise<void> {
   try {
     await notificationService.configureNotificationHandler(enabled, true);
-    console.log(`✅ Sound notifications ${enabled ? 'enabled' : 'disabled'}`);
+    logger.info(`✅ Sound notifications ${enabled ? 'enabled' : 'disabled'}`);
   } catch (error) {
-    console.warn('Failed to apply sound effect:', error);
+    logger.warn('Failed to apply sound effect:', error);
   }
 }
 
@@ -454,12 +455,12 @@ async function applyVibrationEffect(enabled: boolean): Promise<void> {
     if (enabled) {
       // Enable haptic feedback
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      console.log('✅ Vibration enabled');
+      logger.info('✅ Vibration enabled');
     } else {
-      console.log('✅ Vibration disabled');
+      logger.info('✅ Vibration disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply vibration effect:', error);
+    logger.warn('Failed to apply vibration effect:', error);
   }
 }
 
@@ -467,12 +468,12 @@ async function applyEmergencyAlertsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.initializeChannels();
-      console.log('✅ Emergency alerts enabled');
+      logger.info('✅ Emergency alerts enabled');
     } else {
-      console.log('✅ Emergency alerts disabled');
+      logger.info('✅ Emergency alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply emergency alerts effect:', error);
+    logger.warn('Failed to apply emergency alerts effect:', error);
   }
 }
 
@@ -480,12 +481,12 @@ async function applyFamilyAlertsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.initializeChannels();
-      console.log('✅ Family alerts enabled');
+      logger.info('✅ Family alerts enabled');
     } else {
-      console.log('✅ Family alerts disabled');
+      logger.info('✅ Family alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply family alerts effect:', error);
+    logger.warn('Failed to apply family alerts effect:', error);
   }
 }
 
@@ -493,12 +494,12 @@ async function applyMessageAlertsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.initializeChannels();
-      console.log('✅ Message alerts enabled');
+      logger.info('✅ Message alerts enabled');
     } else {
-      console.log('✅ Message alerts disabled');
+      logger.info('✅ Message alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply message alerts effect:', error);
+    logger.warn('Failed to apply message alerts effect:', error);
   }
 }
 
@@ -506,12 +507,12 @@ async function applySystemAlertsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.initializeChannels();
-      console.log('✅ System alerts enabled');
+      logger.info('✅ System alerts enabled');
     } else {
-      console.log('✅ System alerts disabled');
+      logger.info('✅ System alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply system alerts effect:', error);
+    logger.warn('Failed to apply system alerts effect:', error);
   }
 }
 
@@ -519,12 +520,12 @@ async function applyMarketingAlertsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.initializeChannels();
-      console.log('✅ Marketing alerts enabled');
+      logger.info('✅ Marketing alerts enabled');
     } else {
-      console.log('✅ Marketing alerts disabled');
+      logger.info('✅ Marketing alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply marketing alerts effect:', error);
+    logger.warn('Failed to apply marketing alerts effect:', error);
   }
 }
 
@@ -536,22 +537,22 @@ async function applyQuietHoursEffect(enabled: boolean, settings: AppSettings): P
       const endTime = settings.quietEndTime;
       
       // This would integrate with a quiet hours service
-      console.log(`Quiet hours enabled: ${startTime} - ${endTime}`);
+      logger.info(`Quiet hours enabled: ${startTime} - ${endTime}`);
     }
   } catch (error) {
-    console.warn('Failed to apply quiet hours effect:', error);
+    logger.warn('Failed to apply quiet hours effect:', error);
   }
 }
 
 async function applyLedNotificationEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
-      console.log('✅ LED notifications enabled');
+      logger.info('✅ LED notifications enabled');
     } else {
-      console.log('✅ LED notifications disabled');
+      logger.info('✅ LED notifications disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply LED notification effect:', error);
+    logger.warn('Failed to apply LED notification effect:', error);
   }
 }
 
@@ -559,13 +560,13 @@ async function applyBadgeCountEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       await notificationService.setBadgeCount(1);
-      console.log('✅ Badge count enabled');
+      logger.info('✅ Badge count enabled');
     } else {
       await notificationService.setBadgeCount(0);
-      console.log('✅ Badge count disabled');
+      logger.info('✅ Badge count disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply badge count effect:', error);
+    logger.warn('Failed to apply badge count effect:', error);
   }
 }
 
@@ -573,13 +574,13 @@ async function applyBleEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable BLE
-      console.log('BLE enabled');
+      logger.info('BLE enabled');
     } else {
       // Disable BLE
-      console.log('BLE disabled');
+      logger.info('BLE disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply BLE effect:', error);
+    logger.warn('Failed to apply BLE effect:', error);
   }
 }
 
@@ -587,13 +588,13 @@ async function applyMeshDiscoveryEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable mesh discovery
-      console.log('Mesh discovery enabled');
+      logger.info('Mesh discovery enabled');
     } else {
       // Disable mesh discovery
-      console.log('Mesh discovery disabled');
+      logger.info('Mesh discovery disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply mesh discovery effect:', error);
+    logger.warn('Failed to apply mesh discovery effect:', error);
   }
 }
 
@@ -601,13 +602,13 @@ async function applyRelayModeEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable relay mode
-      console.log('Relay mode enabled');
+      logger.info('Relay mode enabled');
     } else {
       // Disable relay mode
-      console.log('Relay mode disabled');
+      logger.info('Relay mode disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply relay mode effect:', error);
+    logger.warn('Failed to apply relay mode effect:', error);
   }
 }
 
@@ -615,13 +616,13 @@ async function applyPowerSavingEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable power saving
-      console.log('Power saving enabled');
+      logger.info('Power saving enabled');
     } else {
       // Disable power saving
-      console.log('Power saving disabled');
+      logger.info('Power saving disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply power saving effect:', error);
+    logger.warn('Failed to apply power saving effect:', error);
   }
 }
 
@@ -629,13 +630,13 @@ async function applyMeshEncryptionEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable mesh encryption
-      console.log('Mesh encryption enabled');
+      logger.info('Mesh encryption enabled');
     } else {
       // Disable mesh encryption
-      console.log('Mesh encryption disabled');
+      logger.info('Mesh encryption disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply mesh encryption effect:', error);
+    logger.warn('Failed to apply mesh encryption effect:', error);
   }
 }
 
@@ -643,13 +644,13 @@ async function applyAutoConnectEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable auto connect
-      console.log('Auto connect enabled');
+      logger.info('Auto connect enabled');
     } else {
       // Disable auto connect
-      console.log('Auto connect disabled');
+      logger.info('Auto connect disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply auto connect effect:', error);
+    logger.warn('Failed to apply auto connect effect:', error);
   }
 }
 
@@ -657,13 +658,13 @@ async function applyBiometricEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable biometric authentication
-      console.log('Biometric authentication enabled');
+      logger.info('Biometric authentication enabled');
     } else {
       // Disable biometric authentication
-      console.log('Biometric authentication disabled');
+      logger.info('Biometric authentication disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply biometric effect:', error);
+    logger.warn('Failed to apply biometric effect:', error);
   }
 }
 
@@ -671,13 +672,13 @@ async function applyEncryptionEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable encryption
-      console.log('Encryption enabled');
+      logger.info('Encryption enabled');
     } else {
       // Disable encryption
-      console.log('Encryption disabled');
+      logger.info('Encryption disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply encryption effect:', error);
+    logger.warn('Failed to apply encryption effect:', error);
   }
 }
 
@@ -685,13 +686,13 @@ async function applyScreenLockEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable screen lock
-      console.log('Screen lock enabled');
+      logger.info('Screen lock enabled');
     } else {
       // Disable screen lock
-      console.log('Screen lock disabled');
+      logger.info('Screen lock disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply screen lock effect:', error);
+    logger.warn('Failed to apply screen lock effect:', error);
   }
 }
 
@@ -699,13 +700,13 @@ async function applyAppLockEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable app lock
-      console.log('App lock enabled');
+      logger.info('App lock enabled');
     } else {
       // Disable app lock
-      console.log('App lock disabled');
+      logger.info('App lock disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply app lock effect:', error);
+    logger.warn('Failed to apply app lock effect:', error);
   }
 }
 
@@ -713,13 +714,13 @@ async function applyTwoFactorAuthEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable two-factor authentication
-      console.log('Two-factor authentication enabled');
+      logger.info('Two-factor authentication enabled');
     } else {
       // Disable two-factor authentication
-      console.log('Two-factor authentication disabled');
+      logger.info('Two-factor authentication disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply two-factor auth effect:', error);
+    logger.warn('Failed to apply two-factor auth effect:', error);
   }
 }
 
@@ -727,13 +728,13 @@ async function applyLoginNotificationsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable login notifications
-      console.log('Login notifications enabled');
+      logger.info('Login notifications enabled');
     } else {
       // Disable login notifications
-      console.log('Login notifications disabled');
+      logger.info('Login notifications disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply login notifications effect:', error);
+    logger.warn('Failed to apply login notifications effect:', error);
   }
 }
 
@@ -741,13 +742,13 @@ async function applySuspiciousActivityEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable suspicious activity alerts
-      console.log('Suspicious activity alerts enabled');
+      logger.info('Suspicious activity alerts enabled');
     } else {
       // Disable suspicious activity alerts
-      console.log('Suspicious activity alerts disabled');
+      logger.info('Suspicious activity alerts disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply suspicious activity effect:', error);
+    logger.warn('Failed to apply suspicious activity effect:', error);
   }
 }
 
@@ -755,13 +756,13 @@ async function applyAutoBackupEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable auto backup
-      console.log('Auto backup enabled');
+      logger.info('Auto backup enabled');
     } else {
       // Disable auto backup
-      console.log('Auto backup disabled');
+      logger.info('Auto backup disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply auto backup effect:', error);
+    logger.warn('Failed to apply auto backup effect:', error);
   }
 }
 
@@ -769,13 +770,13 @@ async function applyCloudSyncEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable cloud sync
-      console.log('Cloud sync enabled');
+      logger.info('Cloud sync enabled');
     } else {
       // Disable cloud sync
-      console.log('Cloud sync disabled');
+      logger.info('Cloud sync disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply cloud sync effect:', error);
+    logger.warn('Failed to apply cloud sync effect:', error);
   }
 }
 
@@ -783,13 +784,13 @@ async function applySyncWifiOnlyEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable WiFi-only sync
-      console.log('WiFi-only sync enabled');
+      logger.info('WiFi-only sync enabled');
     } else {
       // Disable WiFi-only sync
-      console.log('WiFi-only sync disabled');
+      logger.info('WiFi-only sync disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply sync WiFi-only effect:', error);
+    logger.warn('Failed to apply sync WiFi-only effect:', error);
   }
 }
 
@@ -797,13 +798,13 @@ async function applyDebugModeEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable debug mode
-      console.log('Debug mode enabled');
+      logger.info('Debug mode enabled');
     } else {
       // Disable debug mode
-      console.log('Debug mode disabled');
+      logger.info('Debug mode disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply debug mode effect:', error);
+    logger.warn('Failed to apply debug mode effect:', error);
   }
 }
 
@@ -811,13 +812,13 @@ async function applyErrorReportsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable error reports
-      console.log('Error reports enabled');
+      logger.info('Error reports enabled');
     } else {
       // Disable error reports
-      console.log('Error reports disabled');
+      logger.info('Error reports disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply error reports effect:', error);
+    logger.warn('Failed to apply error reports effect:', error);
   }
 }
 
@@ -825,13 +826,13 @@ async function applyAnalyticsDataEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable analytics data
-      console.log('Analytics data enabled');
+      logger.info('Analytics data enabled');
     } else {
       // Disable analytics data
-      console.log('Analytics data disabled');
+      logger.info('Analytics data disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply analytics data effect:', error);
+    logger.warn('Failed to apply analytics data effect:', error);
   }
 }
 
@@ -839,13 +840,13 @@ async function applyUsageStatisticsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable usage statistics
-      console.log('Usage statistics enabled');
+      logger.info('Usage statistics enabled');
     } else {
       // Disable usage statistics
-      console.log('Usage statistics disabled');
+      logger.info('Usage statistics disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply usage statistics effect:', error);
+    logger.warn('Failed to apply usage statistics effect:', error);
   }
 }
 
@@ -853,13 +854,13 @@ async function applyCrashReportsEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable crash reports
-      console.log('Crash reports enabled');
+      logger.info('Crash reports enabled');
     } else {
       // Disable crash reports
-      console.log('Crash reports disabled');
+      logger.info('Crash reports disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply crash reports effect:', error);
+    logger.warn('Failed to apply crash reports effect:', error);
   }
 }
 
@@ -867,13 +868,13 @@ async function applyLiveModeEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable live mode
-      console.log('Live mode enabled');
+      logger.info('Live mode enabled');
     } else {
       // Disable live mode
-      console.log('Live mode disabled');
+      logger.info('Live mode disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply live mode effect:', error);
+    logger.warn('Failed to apply live mode effect:', error);
   }
 }
 
@@ -881,13 +882,13 @@ async function applyExperimentalPWaveEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable experimental P-wave detection
-      console.log('Experimental P-wave detection enabled');
+      logger.info('Experimental P-wave detection enabled');
     } else {
       // Disable experimental P-wave detection
-      console.log('Experimental P-wave detection disabled');
+      logger.info('Experimental P-wave detection disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply experimental P-wave effect:', error);
+    logger.warn('Failed to apply experimental P-wave effect:', error);
   }
 }
 
@@ -895,12 +896,12 @@ async function applyAutoUpdateEffect(enabled: boolean): Promise<void> {
   try {
     if (enabled) {
       // Enable auto update
-      console.log('Auto update enabled');
+      logger.info('Auto update enabled');
     } else {
       // Disable auto update
-      console.log('Auto update disabled');
+      logger.info('Auto update disabled');
     }
   } catch (error) {
-    console.warn('Failed to apply auto update effect:', error);
+    logger.warn('Failed to apply auto update effect:', error);
   }
 }

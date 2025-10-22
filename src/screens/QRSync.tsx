@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState } from 'react';
 import { logger } from '../utils/productionLogger';
-import { Alert, View, Text, StyleSheet } from "react-native";
-import { useFamily } from "../store/family";
-import { useQueue } from "../store/queue";
-import Card from "../ui/Card";
-import Button from "../ui/Button";
-import { palette, spacing } from "../ui/theme";
+import { Alert, View, Text, StyleSheet } from 'react-native';
+import { useFamily } from '../store/family';
+import { useQueue } from '../store/queue';
+import Card from '../ui/Card';
+import Button from '../ui/Button';
+import { palette, spacing } from '../ui/theme';
 
 // Safe QRCode import with fallback for Expo Go
 let QRCode: any = null;
@@ -13,17 +13,17 @@ let isExpoGo = false;
 
 // Detect Expo Go environment FIRST
 try {
-  const Constants = require('expo-constants');
+  const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient';
-} catch (e) {
+} catch {
   // Ignore
 }
 
 // Only try to import QRCode if NOT in Expo Go
 if (!isExpoGo) {
   try {
-    QRCode = require('react-native-qrcode-svg').default;
-  } catch (e) {
+    QRCode = (globalThis as any).require('react-native-qrcode-svg').default;
+  } catch {
     logger.warn('react-native-qrcode-svg not available, using fallback');
     isExpoGo = true;
   }
@@ -37,9 +37,9 @@ let BarCodeScanner: any = null;
 // Only try to import barcode scanner if NOT in Expo Go
 if (!isExpoGo) {
   try {
-    const barcodeScanner = require('expo-barcode-scanner');
+    const barcodeScanner = (globalThis as any).require('expo-barcode-scanner');
     BarCodeScanner = barcodeScanner.BarCodeScanner;
-  } catch (e) {
+  } catch {
     logger.warn('expo-barcode-scanner not available, using fallback');
     isExpoGo = true;
   }
@@ -57,7 +57,7 @@ export default function QRSyncScreen() {
     <View style={{ flex: 1, backgroundColor: palette.bg, padding: spacing(2), gap: spacing(2) }}>
       <Card title="Paylaş (QR)">
         <Text style={s.dim}>Aile üyeleri + ilk 10 kuyruk ögesi</Text>
-        <View style={{ alignItems: "center", padding: spacing(2) }}>
+        <View style={{ alignItems: 'center', padding: spacing(2) }}>
           {QRCode && !isExpoGo ? (
             <QRCode value={payload} size={220} />
           ) : (
@@ -80,19 +80,19 @@ export default function QRSyncScreen() {
                   const obj = JSON.parse(String(data));
                   if (Array.isArray(obj?.fam)) {
                     obj.fam.forEach((m: any) => fam.add({ 
-                      name: m.name ?? "Kişi", 
-                      emoji: m.emoji ?? "🧑", 
-                      status: "unknown",
+                      name: m.name ?? 'Kişi', 
+                      emoji: m.emoji ?? '🧑', 
+                      status: 'unknown',
                       isVerified: false,
                       addedAt: Date.now(),
-                      connectionMethod: 'qr'
+                      connectionMethod: 'qr',
                     }));
                   }
                   // kuyrukları etik olarak doğrudan birleştirmiyoruz; sadece göster/gerekiyorsa kullanıcı ekler → basit tut
                   setScan(false);
-                  Alert.alert("Başarılı", "Veri alındı");
+                  Alert.alert('Başarılı', 'Veri alındı');
                 } catch {
-                  Alert.alert("Hata", "Geçersiz QR");
+                  Alert.alert('Hata', 'Geçersiz QR');
                   setScan(false);
                 }
               }}

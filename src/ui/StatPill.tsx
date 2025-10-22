@@ -1,5 +1,5 @@
-import { StyleSheet, Text, View } from "react-native";
-import { palette, radius, spacing } from "./theme";
+import { StyleSheet, Text, View } from 'react-native';
+import { palette, radius, spacing } from './theme';
 
 type Props = { label: string; value: string | number };
 
@@ -15,7 +15,7 @@ export default function StatPill({ label, value }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "center", gap: spacing(1) },
+  wrap: { flexDirection: 'row', alignItems: 'center', gap: spacing(1) },
   label: { color: palette.textDim, fontSize: 13 },
   valueBox: {
     backgroundColor: palette.surface,
@@ -25,5 +25,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: palette.border,
   },
-  value: { color: palette.text.primary, fontWeight: "700" },
+  value: { color: palette.text.primary, fontWeight: '700' },
 });

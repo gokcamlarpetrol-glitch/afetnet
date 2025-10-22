@@ -9,7 +9,7 @@ import NetInfo from '@react-native-community/netinfo';
 class MapMarkerSync {
   private syncQueue: Pin[] = [];
   private isOnline: boolean = true;
-  private syncInterval: NodeJS.Timeout | null = null;
+  private syncInterval: any = null;
   private isSyncing: boolean = false;
 
   constructor() {
@@ -180,7 +180,7 @@ class MapMarkerSync {
       this.stopAutoSync();
     }
 
-    this.syncInterval = setInterval(() => {
+    this.syncInterval = (globalThis as any).setInterval(() => {
       if (this.isOnline && this.syncQueue.length > 0) {
         this.syncAll();
       }
@@ -194,7 +194,7 @@ class MapMarkerSync {
    */
   stopAutoSync() {
     if (this.syncInterval) {
-      clearInterval(this.syncInterval);
+      (globalThis as any).clearInterval(this.syncInterval);
       this.syncInterval = null;
       logger.info('Auto-sync stopped');
     }
@@ -216,7 +216,7 @@ class MapMarkerSync {
    */
   private async simulateBackendSync(pin: Pin): Promise<void> {
     return new Promise((resolve) => {
-      setTimeout(() => {
+      (globalThis as any).setTimeout(() => {
         logger.info('Backend sync simulated for:', pin.id);
         resolve();
       }, 500);
@@ -228,7 +228,7 @@ class MapMarkerSync {
    */
   private async simulateBackendDeletion(id: string): Promise<void> {
     return new Promise((resolve) => {
-      setTimeout(() => {
+      (globalThis as any).setTimeout(() => {
         logger.info('Backend deletion simulated for:', id);
         resolve();
       }, 500);

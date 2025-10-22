@@ -6,7 +6,7 @@ export type RoadEdge = {
   id: EdgeId;
   a: NodeId; b: NodeId;
   distM: number;           // metre
-  kind?: "primary"|"secondary"|"residential"|"service"|"track";
+  kind?: 'primary'|'secondary'|'residential'|'service'|'track';
   oneway?: boolean;
 };
 
@@ -20,7 +20,7 @@ export type RoadGraph = {
 export type Closure = {
   id: string;             // edgeId or synthetic
   edgeId: EdgeId;
-  reason: "rubble"|"flood"|"police"|"unknown";
+  reason: 'rubble'|'flood'|'police'|'unknown';
   ts: number;
   ttlSec?: number;        // otomatik düşüş
   note?: string;

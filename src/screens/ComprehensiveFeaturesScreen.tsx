@@ -43,7 +43,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'sosSoundEnabled', title: 'SOS Sesi', description: 'SOS sesli uyarı', type: 'boolean' },
       { key: 'sosVibrationEnabled', title: 'SOS Titreşim', description: 'SOS titreşim uyarısı', type: 'boolean' },
       { key: 'sosFlashEnabled', title: 'SOS Flaş', description: 'SOS flaş uyarısı', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'mapping',
@@ -60,13 +60,13 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
         { label: 'Yüksek', value: 'high' },
-        { label: 'En Yüksek', value: 'highest' }
-      ]},
+        { label: 'En Yüksek', value: 'highest' },
+      ] },
       { key: 'routePlanningEnabled', title: 'Rota Planlama', description: 'Rota planlama özelliği', type: 'boolean' },
       { key: 'navigationEnabled', title: 'Navigasyon', description: 'Yön tarifi özelliği', type: 'boolean' },
       { key: 'compassEnabled', title: 'Pusula', description: 'Dijital pusula', type: 'boolean' },
       { key: 'pdrEnabled', title: 'PDR', description: 'Pedestrian Dead Reckoning', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'mesh',
@@ -84,7 +84,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'meshRange', title: 'Mesh Menzil', description: 'Mesh ağ menzili (metre)', type: 'number', min: 10, max: 1000, step: 10 },
       { key: 'meshPowerSavingEnabled', title: 'Güç Tasarrufu', description: 'Mesh güç tasarrufu', type: 'boolean' },
       { key: 'bridgeModeEnabled', title: 'Köprü Modu', description: 'Köprü modu özelliği', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'communication',
@@ -105,7 +105,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'nearbyChatEnabled', title: 'Yakın Sohbet', description: 'Yakındaki kişilerle sohbet', type: 'boolean' },
       { key: 'familyChatEnabled', title: 'Aile Sohbeti', description: 'Aile üyeleriyle sohbet', type: 'boolean' },
       { key: 'groupChatEnabled', title: 'Grup Sohbeti', description: 'Grup sohbet özelliği', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'earthquake',
@@ -121,13 +121,13 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'dataSource', title: 'Veri Kaynağı', description: 'Deprem veri sağlayıcısı', type: 'select', options: [
         { label: 'AFAD', value: 'AFAD' },
         { label: 'Kandilli', value: 'KANDILLI' },
-        { label: 'USGS', value: 'USGS' }
-      ]},
+        { label: 'USGS', value: 'USGS' },
+      ] },
       { key: 'eewAlarmEnabled', title: 'EEW Alarm', description: 'Erken uyarı alarmı', type: 'boolean' },
       { key: 'quakeNotificationsEnabled', title: 'Deprem Bildirimleri', description: 'Deprem bildirimleri', type: 'boolean' },
       { key: 'quakeSoundEnabled', title: 'Deprem Sesi', description: 'Deprem sesli uyarı', type: 'boolean' },
       { key: 'quakeVibrationEnabled', title: 'Deprem Titreşim', description: 'Deprem titreşim uyarısı', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'family',
@@ -146,7 +146,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'familyEmergencyAlertsEnabled', title: 'Acil Uyarılar', description: 'Aile acil uyarıları', type: 'boolean' },
       { key: 'familyHealthMonitoringEnabled', title: 'Sağlık Takibi', description: 'Aile sağlık takibi', type: 'boolean' },
       { key: 'familySafetyCheckEnabled', title: 'Güvenlik Kontrolü', description: 'Aile güvenlik kontrolü', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'health',
@@ -165,7 +165,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'healthReportEnabled', title: 'Sağlık Raporu', description: 'Sağlık raporu oluşturma', type: 'boolean' },
       { key: 'vitalSignsMonitoringEnabled', title: 'Vital Takip', description: 'Vital bulgular takibi', type: 'boolean' },
       { key: 'medicationReminderEnabled', title: 'İlaç Hatırlatıcısı', description: 'İlaç hatırlatma sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'rescue',
@@ -187,7 +187,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'sonarEnabled', title: 'Sonar', description: 'Sonar algılama sistemi', type: 'boolean' },
       { key: 'audioBeaconEnabled', title: 'Ses İşareti', description: 'Ses işareti sistemi', type: 'boolean' },
       { key: 'audioDetectEnabled', title: 'Ses Algılama', description: 'Ses algılama sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'power',
@@ -204,7 +204,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'powerMonitoringEnabled', title: 'Güç İzleme', description: 'Güç tüketimi izleme', type: 'boolean' },
       { key: 'chargingOptimizationEnabled', title: 'Şarj Optimizasyonu', description: 'Şarj optimizasyon sistemi', type: 'boolean' },
       { key: 'backgroundTaskOptimizationEnabled', title: 'Arka Plan Optimizasyonu', description: 'Arka plan görev optimizasyonu', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'security',
@@ -224,12 +224,12 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'passwordComplexity', title: 'Şifre Karmaşıklığı', description: 'Şifre karmaşıklık seviyesi', type: 'select', options: [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
-        { label: 'Yüksek', value: 'high' }
-      ]},
+        { label: 'Yüksek', value: 'high' },
+      ] },
       { key: 'dataEncryptionEnabled', title: 'Veri Şifreleme', description: 'Veri şifreleme sistemi', type: 'boolean' },
       { key: 'secureStorageEnabled', title: 'Güvenli Depolama', description: 'Güvenli veri depolama', type: 'boolean' },
       { key: 'privacyAuditEnabled', title: 'Gizlilik Denetimi', description: 'Gizlilik denetim sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'data',
@@ -246,25 +246,25 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'compressionLevel', title: 'Sıkıştırma Seviyesi', description: 'Veri sıkıştırma seviyesi', type: 'select', options: [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
-        { label: 'Yüksek', value: 'high' }
-      ]},
+        { label: 'Yüksek', value: 'high' },
+      ] },
       { key: 'encryptionLevel', title: 'Şifreleme Seviyesi', description: 'Veri şifreleme seviyesi', type: 'select', options: [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
-        { label: 'Yüksek', value: 'high' }
-      ]},
+        { label: 'Yüksek', value: 'high' },
+      ] },
       { key: 'dataUsageLimit', title: 'Veri Kullanım Limiti', description: 'Veri kullanım limiti (MB)', type: 'number', min: 100, max: 2048, step: 100 },
       { key: 'cacheSize', title: 'Önbellek Boyutu', description: 'Önbellek boyutu (MB)', type: 'number', min: 50, max: 500, step: 50 },
       { key: 'logLevel', title: 'Log Seviyesi', description: 'Log kayıt seviyesi', type: 'select', options: [
         { label: 'Debug', value: 'debug' },
         { label: 'Info', value: 'info' },
         { label: 'Warning', value: 'warn' },
-        { label: 'Error', value: 'error' }
-      ]},
+        { label: 'Error', value: 'error' },
+      ] },
       { key: 'debugModeEnabled', title: 'Debug Modu', description: 'Geliştirici debug modu', type: 'boolean' },
       { key: 'analyticsEnabled', title: 'Analitik', description: 'Kullanım analitikleri', type: 'boolean' },
       { key: 'crashReportsEnabled', title: 'Çökme Raporları', description: 'Uygulama çökme raporları', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'audio',
@@ -283,14 +283,14 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'audioQuality', title: 'Ses Kalitesi', description: 'Ses kalite seviyesi', type: 'select', options: [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
-        { label: 'Yüksek', value: 'high' }
-      ]},
+        { label: 'Yüksek', value: 'high' },
+      ] },
       { key: 'audioLatency', title: 'Ses Gecikmesi', description: 'Ses gecikme seviyesi', type: 'select', options: [
         { label: 'Düşük', value: 'low' },
         { label: 'Orta', value: 'medium' },
-        { label: 'Yüksek', value: 'high' }
-      ]},
-    ]
+        { label: 'Yüksek', value: 'high' },
+      ] },
+    ],
   },
   {
     id: 'sensors',
@@ -310,7 +310,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'sensorFusionEnabled', title: 'Sensör Füzyonu', description: 'Sensör füzyon sistemi', type: 'boolean' },
       { key: 'sensorCalibrationEnabled', title: 'Sensör Kalibrasyonu', description: 'Sensör kalibrasyon sistemi', type: 'boolean' },
       { key: 'sensorDataLoggingEnabled', title: 'Sensör Veri Kaydı', description: 'Sensör veri kayıt sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'ai',
@@ -328,7 +328,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'aiPredictiveAnalysisEnabled', title: 'AI Tahmin Analizi', description: 'AI tahmin analiz sistemi', type: 'boolean' },
       { key: 'aiLearningEnabled', title: 'AI Öğrenme', description: 'AI öğrenme sistemi', type: 'boolean' },
       { key: 'aiPersonalizationEnabled', title: 'AI Kişiselleştirme', description: 'AI kişiselleştirme sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'drones',
@@ -345,7 +345,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'droneSurveillanceEnabled', title: 'Drone Gözetleme', description: 'Drone gözetleme sistemi', type: 'boolean' },
       { key: 'droneAutopilotEnabled', title: 'Drone Otopilot', description: 'Drone otopilot sistemi', type: 'boolean' },
       { key: 'droneEmergencyModeEnabled', title: 'Drone Acil Mod', description: 'Drone acil durum modu', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'logistics',
@@ -361,7 +361,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'logisticsOptimizationEnabled', title: 'Lojistik Optimizasyonu', description: 'Lojistik optimizasyon sistemi', type: 'boolean' },
       { key: 'logisticsReportingEnabled', title: 'Lojistik Raporlama', description: 'Lojistik raporlama sistemi', type: 'boolean' },
       { key: 'logisticsAnalyticsEnabled', title: 'Lojistik Analitik', description: 'Lojistik analitik sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'training',
@@ -377,7 +377,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'skillAssessmentEnabled', title: 'Beceri Değerlendirmesi', description: 'Beceri değerlendirme sistemi', type: 'boolean' },
       { key: 'progressTrackingEnabled', title: 'İlerleme Takibi', description: 'İlerleme takip sistemi', type: 'boolean' },
       { key: 'certificationEnabled', title: 'Sertifikasyon', description: 'Sertifikasyon sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'reporting',
@@ -394,7 +394,7 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'dashboardEnabled', title: 'Dashboard', description: 'Dashboard sistemi', type: 'boolean' },
       { key: 'riskDashboardEnabled', title: 'Risk Dashboard', description: 'Risk dashboard sistemi', type: 'boolean' },
       { key: 'performanceMonitoringEnabled', title: 'Performans İzleme', description: 'Performans izleme sistemi', type: 'boolean' },
-    ]
+    ],
   },
   {
     id: 'accessibility',
@@ -411,17 +411,16 @@ const FEATURE_CATEGORIES: FeatureCategory[] = [
       { key: 'hapticNavigationEnabled', title: 'Haptic Navigasyon', description: 'Haptic navigasyon sistemi', type: 'boolean' },
       { key: 'audioDescriptionEnabled', title: 'Ses Açıklaması', description: 'Ses açıklama sistemi', type: 'boolean' },
       { key: 'gestureNavigationEnabled', title: 'Jest Navigasyonu', description: 'Jest navigasyon sistemi', type: 'boolean' },
-    ]
+    ],
   },
 ];
 
 export default function ComprehensiveFeaturesScreen() {
   const [activeCategory, setActiveCategory] = useState<string>('emergency');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   
   const {
     updateFeatureSetting,
-    updateCategorySettings,
     resetCategoryToDefaults,
     resetAllToDefaults,
     initializeSettings,
@@ -454,9 +453,9 @@ export default function ComprehensiveFeaturesScreen() {
           onPress: async () => {
             await resetCategoryToDefaults(category as any);
             Alert.alert('✅ Sıfırlandı', 'Kategori varsayılan ayarlara sıfırlandı.');
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -472,15 +471,15 @@ export default function ComprehensiveFeaturesScreen() {
           onPress: async () => {
             await resetAllToDefaults();
             Alert.alert('✅ Sıfırlandı', 'Tüm özellikler varsayılan ayarlara sıfırlandı.');
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
   const filteredCategories = FEATURE_CATEGORIES.filter(category =>
     category.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    category.description.toLowerCase().includes(searchQuery.toLowerCase())
+    category.description.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   const renderFeatureItem = (category: string, feature: FeatureItem) => {
@@ -531,8 +530,8 @@ export default function ComprehensiveFeaturesScreen() {
                   'Seçenek seçin:',
                   feature.options?.map(option => ({
                     text: option.label,
-                    onPress: () => handleFeatureChange(category, feature.key, option.value)
-                  })) || []
+                    onPress: () => handleFeatureChange(category, feature.key, option.value),
+                  })) || [],
                 );
               }}
             >
@@ -596,7 +595,7 @@ export default function ComprehensiveFeaturesScreen() {
               style={[
                 styles.categoryTab,
                 activeCategory === category.id && styles.activeCategoryTab,
-                { borderLeftColor: category.color }
+                { borderLeftColor: category.color },
               ]}
               onPress={() => setActiveCategory(category.id)}
             >
@@ -607,7 +606,7 @@ export default function ComprehensiveFeaturesScreen() {
               />
               <Text style={[
                 styles.categoryTabText,
-                activeCategory === category.id && { color: category.color }
+                activeCategory === category.id && { color: category.color },
               ]}>
                 {category.title}
               </Text>

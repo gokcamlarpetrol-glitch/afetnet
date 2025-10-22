@@ -13,7 +13,6 @@ import { palette, spacing } from '../ui/theme';
 
 const GroupsListScene = () => {
   const { items } = useGroups();
-  const navigation = useNavigation();
 
   return (
     <ScrollView style={styles.scene}>

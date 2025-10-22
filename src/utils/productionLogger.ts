@@ -38,7 +38,7 @@ class ProductionLogger {
     
     const sensitiveKeys = [
       'password', 'token', 'apiKey', 'secret', 'ssn', 
-      'creditCard', 'cvv', 'pin', 'privateKey', 'jwt'
+      'creditCard', 'cvv', 'pin', 'privateKey', 'jwt',
     ];
     
     if (typeof data === 'string') {
@@ -70,7 +70,7 @@ class ProductionLogger {
   private formatMessage(
     level: LogLevel,
     message: string,
-    context?: LogContext
+    context?: LogContext,
   ): string {
     const timestamp = new Date().toISOString();
     const component = context?.component || 'Unknown';

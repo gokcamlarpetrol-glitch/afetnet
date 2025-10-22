@@ -28,6 +28,7 @@ export class PaymentService {
   }
 
   // DISABLED: Payment intent creation removed for Apple Store compliance
+   
   async createPaymentIntent(planId: PremiumPlan['id'], amount: number): Promise<{
     clientSecret: string;
     error?: string;
@@ -35,14 +36,15 @@ export class PaymentService {
     // Payment disabled - will be replaced with Apple IAP
     return {
       clientSecret: '',
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 
   // DISABLED: Stripe payment processing removed for Apple Store compliance
+   
   async processStripePayment(
     clientSecret: string, 
-    paymentMethodId: string
+    paymentMethodId: string,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -51,11 +53,12 @@ export class PaymentService {
     // Payment disabled - will be replaced with Apple IAP
     return {
       success: false,
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 
   // DISABLED: Will be replaced with Apple In-App Purchase
+   
   async processApplePay(planId: PremiumPlan['id']): Promise<{
     success: boolean;
     error?: string;
@@ -64,7 +67,7 @@ export class PaymentService {
     // Payment disabled - will be replaced with Apple IAP
     return {
       success: false,
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 
@@ -77,7 +80,7 @@ export class PaymentService {
     // Payment disabled
     return {
       success: false,
-      error: 'Premium features coming soon'
+      error: 'Premium features coming soon',
     };
   }
 
@@ -91,37 +94,39 @@ export class PaymentService {
       const pricing = this.getPlanPricing(planId);
       
       switch (paymentMethod) {
-        case 'card':
-          // Create payment intent and process with Stripe
-          const paymentIntent = await this.createPaymentIntent(planId, pricing.price);
-          if (paymentIntent.error) {
-            return {
-              success: false,
-              error: paymentIntent.error
-            };
-          }
-          
-          // In a real app, you would get the payment method ID from Stripe
-          const paymentMethodId = `pm_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-          
-          return await this.processStripePayment(paymentIntent.clientSecret, paymentMethodId);
-          
-        case 'apple':
-          return await this.processApplePay(planId);
-          
-        case 'google':
-          return await this.processGooglePay(planId);
-          
-        default:
+      case 'card': {
+        // Create payment intent and process with Stripe
+        const paymentIntent = await this.createPaymentIntent(planId, pricing.price);
+        if (paymentIntent.error) {
           return {
             success: false,
-            error: 'Unsupported payment method'
+            error: paymentIntent.error,
           };
+        }
+          
+        // In a real app, you would get the payment method ID from Stripe
+        const paymentMethodId = `pm_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+          
+        return await this.processStripePayment(paymentIntent.clientSecret, paymentMethodId);
+      }
+          
+      case 'apple': {
+        return await this.processApplePay(planId);
+      }
+          
+      case 'google':
+        return await this.processGooglePay(planId);
+          
+      default:
+        return {
+          success: false,
+          error: 'Unsupported payment method',
+        };
       }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Payment processing failed'
+        error: error instanceof Error ? error.message : 'Payment processing failed',
       };
     }
   }
@@ -157,20 +162,20 @@ export class PaymentService {
         price: 49.99,
         currency: 'TRY',
         period: 'month',
-        description: 'Aylık premium abonelik'
+        description: 'Aylık premium abonelik',
       },
       yearly: {
         price: 349.99,
         currency: 'TRY',
         period: 'year',
-        description: 'Yıllık premium abonelik (2 ay ücretsiz)'
+        description: 'Yıllık premium abonelik (2 ay ücretsiz)',
       },
       lifetime: {
         price: 599.99,
         currency: 'TRY',
         period: 'lifetime',
-        description: 'Yaşam boyu premium erişim'
-      }
+        description: 'Yaşam boyu premium erişim',
+      },
     };
 
     return pricing[planId];
@@ -186,7 +191,7 @@ export class PaymentService {
       logger.debug(`Cancelling ${planId} subscription...`);
       
       // Simulate cancellation process
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1000));
       
       return true;
     } catch (error) {
@@ -205,7 +210,7 @@ export class PaymentService {
       logger.debug('Restoring purchases...');
       
       // Simulate restore process
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1500));
       
       // In real implementation, check with Apple/Google servers
       // For demo, randomly restore a plan
@@ -214,12 +219,12 @@ export class PaymentService {
       
       return {
         success: true,
-        restoredPlan: randomPlan
+        restoredPlan: randomPlan,
       };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Restore failed'
+        error: error instanceof Error ? error.message : 'Restore failed',
       };
     }
   }
@@ -236,12 +241,12 @@ export class PaymentService {
       // For demo, return mock data
       return {
         isActive: false,
-        autoRenew: false
+        autoRenew: false,
       };
     } catch (error) {
       logger.error('Status check error:', error);
       return {
-        isActive: false
+        isActive: false,
       };
     }
   }
@@ -254,22 +259,22 @@ export const PAYMENT_METHODS = [
     name: 'Kredi Kartı',
     icon: 'card',
     description: 'Visa, Mastercard, American Express',
-    available: true
+    available: true,
   },
   {
     id: 'apple',
     name: 'Apple Pay',
     icon: 'logo-apple',
     description: 'Apple Pay ile güvenli ödeme',
-    available: true // Check platform in real implementation
+    available: true, // Check platform in real implementation
   },
   {
     id: 'google',
     name: 'Google Pay',
     icon: 'logo-google',
     description: 'Google Pay ile güvenli ödeme',
-    available: true // Check platform in real implementation
-  }
+    available: true, // Check platform in real implementation
+  },
 ] as const;
 
 // Export singleton instance

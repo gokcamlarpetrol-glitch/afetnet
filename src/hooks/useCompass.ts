@@ -21,7 +21,7 @@ export function useCompass() {
         Sensors.Magnetometer.setUpdateInterval(100);
         
         // Subscribe to magnetometer updates
-        const subscription = Sensors.Magnetometer.addListener(({ x, y, z }) => {
+        const subscription = Sensors.Magnetometer.addListener(({ x, y }) => {
           // Calculate heading from magnetometer data
           let heading = Math.atan2(y, x) * (180 / Math.PI);
           
@@ -38,7 +38,7 @@ export function useCompass() {
           
           setCompassData({
             heading,
-            accuracy: null // Expo Sensors doesn't provide accuracy
+            accuracy: null, // Expo Sensors doesn't provide accuracy
           });
         });
         
@@ -58,6 +58,6 @@ export function useCompass() {
   return {
     heading: compassData?.heading || 0,
     accuracy: compassData?.accuracy,
-    isAvailable
+    isAvailable,
   };
 }

@@ -25,7 +25,7 @@ export default function TrackScreen() {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
           }]);
-        }
+        },
       );
     }
 

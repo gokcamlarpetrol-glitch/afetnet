@@ -7,7 +7,7 @@ import {
   ScrollView,
   Alert,
   Modal,
-  Pressable
+  Pressable,
 } from 'react-native';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -18,7 +18,7 @@ import * as Location from 'expo-location';
 interface TilePrefetchProps {
   visible: boolean;
   onClose: () => void;
-  onComplete?: (packId: string) => void;
+  onComplete?: () => void;
 }
 
 export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefetchProps) {
@@ -46,7 +46,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         Alert.alert(
           'Hata',
           'Konum izni gerekli',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
         return;
       }
@@ -54,14 +54,14 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
       const location = await Location.getCurrentPositionAsync({});
       setCenter({
         lat: location.coords.latitude,
-        lon: location.coords.longitude
+        lon: location.coords.longitude,
       });
     } catch (error) {
       logger.error('Failed to get location:', error);
       Alert.alert(
         'Hata',
         'Konum alınamadı',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -74,7 +74,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         north: center.lat + (radiusKm / 111.32),
         south: center.lat - (radiusKm / 111.32),
         east: center.lon + (radiusKm / (111.32 * Math.cos(center.lat * Math.PI / 180))),
-        west: center.lon - (radiusKm / (111.32 * Math.cos(center.lat * Math.PI / 180)))
+        west: center.lon - (radiusKm / (111.32 * Math.cos(center.lat * Math.PI / 180))),
       };
 
       const size = await tileManager.estimatePrefetchSize(bbox, { min: minZoom, max: maxZoom });
@@ -98,7 +98,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
       Alert.alert(
         'Hata',
         'Konum gerekli',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
       return;
     }
@@ -110,8 +110,8 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         'Yeterli depolama alanı yok',
         [
           { text: 'İptal', style: 'cancel' },
-          { text: 'Yine de İndir', onPress: () => startDownload() }
-        ]
+          { text: 'Yine de İndir', onPress: () => startDownload() },
+        ],
       );
       return;
     }
@@ -131,10 +131,10 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
         radiusKm,
         minZoom,
         maxZoom,
-        packId: `prefetch_${Date.now()}`
+        packId: `prefetch_${Date.now()}`,
       };
 
-      const packId = await tileManager.prefetchTiles(options, (progress) => {
+      await tileManager.prefetchTiles(options, (progress) => {
         setProgress(progress);
       });
 
@@ -147,16 +147,16 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
             onPress: () => {
               onComplete?.(options.packId || '');
               onClose();
-            }
-          }
-        ]
+            },
+          },
+        ],
       );
     } catch (error) {
       logger.error('Download failed:', error);
       Alert.alert(
         'İndirme Hatası',
         error instanceof Error ? error.message : 'İndirme başarısız',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     } finally {
       setIsDownloading(false);
@@ -305,7 +305,7 @@ export default function TilePrefetch({ visible, onClose, onComplete }: TilePrefe
                   <View 
                     style={[
                       styles.progressFill, 
-                      { width: `${getProgressPercentage()}%` }
+                      { width: `${getProgressPercentage()}%` },
                     ]} 
                   />
                 </View>

@@ -1,8 +1,8 @@
-import * as TaskManager from "expo-task-manager";
-import * as BackgroundFetch from "expo-background-fetch";
-import { pollQuakes } from "./fetchers";
+import * as TaskManager from 'expo-task-manager';
+import * as BackgroundFetch from 'expo-background-fetch';
+import { pollQuakes } from './fetchers';
 
-export const QUAKE_TASK = "AFN_QUAKE_POLL";
+export const QUAKE_TASK = 'AFN_QUAKE_POLL';
 
 TaskManager.defineTask(QUAKE_TASK, async()=>{
   try{ await pollQuakes(); return BackgroundFetch.BackgroundFetchResult.NewData; }

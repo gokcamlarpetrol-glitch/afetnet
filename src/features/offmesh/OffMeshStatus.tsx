@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { offMeshRouter } from '../../offmesh/router';
-import { meshStore } from '../../offmesh/store';
+// import { meshStore } from '../../offmesh/store'; // Not used
 import { qosManager } from '../../offmesh/qos';
 import { PeerInfo, MeshStats } from '../../offmesh/types';
 import * as Sim from '../../offmesh/transport/Sim';
@@ -32,13 +32,13 @@ export default function OffMeshStatus({ onPress }: OffMeshStatusProps) {
     updateStats();
 
     // Update every 5 seconds
-    const interval = setInterval(updateStats, 5000);
+    const interval = (globalThis as any).setInterval(updateStats, 5000);
 
     // Subscribe to peer changes
     const unsubscribePeers = offMeshRouter.subscribeToPeers(setPeers);
 
     return () => {
-      clearInterval(interval);
+      (globalThis as any).clearInterval(interval);
       unsubscribePeers();
     };
   }, []);
@@ -86,12 +86,12 @@ export default function OffMeshStatus({ onPress }: OffMeshStatusProps) {
     const transportInfo = Object.entries(transportCounts)
       .map(([transport, count]) => {
         switch (transport) {
-          case 'sim': return `sim:${count}`;
-          case 'mciOS': return `mpeer:${count}`;
-          case 'bleiOS': return `ble:${count}`;
-          case 'wifiP2P': return `wifi:${count}`;
-          case 'bleAndroid': return `ble:${count}`;
-          default: return `${transport}:${count}`;
+        case 'sim': return `sim:${count}`;
+        case 'mciOS': return `mpeer:${count}`;
+        case 'bleiOS': return `ble:${count}`;
+        case 'wifiP2P': return `wifi:${count}`;
+        case 'bleAndroid': return `ble:${count}`;
+        default: return `${transport}:${count}`;
         }
       })
       .join(' ');

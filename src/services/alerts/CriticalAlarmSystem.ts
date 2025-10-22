@@ -121,7 +121,7 @@ class CriticalAlarmSystem {
             location: quake.place,
             source: quake.source,
             isEarlyWarning,
-            timestamp: quake.time
+            timestamp: quake.time,
           },
           sound: true, // CRITICAL: Always play sound
           priority: Notifications.AndroidNotificationPriority.MAX,
@@ -190,13 +190,13 @@ class CriticalAlarmSystem {
       // Use system default alarm sound
       await this.sound.loadAsync(
         { uri: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav' },
-        { shouldPlay: true, volume: 1.0, isLooping: true }
+        { shouldPlay: true, volume: 1.0, isLooping: true },
       );
 
       this.isPlaying = true;
       
       // Auto-stop after 30 seconds
-      setTimeout(async () => {
+      (globalThis as any).setTimeout(async () => {
         await this.stopAlarmSound();
       }, 30000);
 
@@ -237,7 +237,7 @@ class CriticalAlarmSystem {
       const vibratePattern = async () => {
         for (let i = 0; i < 10; i++) {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => (globalThis as any).setTimeout(resolve, 200));
         }
       };
       
@@ -255,7 +255,6 @@ class CriticalAlarmSystem {
   private async showVisualAlert(quake: QuakeItem): Promise<void> {
     try {
       const magnitude = quake.mag || 0;
-      const isCritical = magnitude >= 5.0;
       
       // Visual alert is handled by the notification system
       // Additional visual feedback can be added here
@@ -273,7 +272,7 @@ class CriticalAlarmSystem {
   async triggerEarlyWarningAlarm(
     estimatedArrivalSeconds: number,
     magnitude: number,
-    location: string
+    location: string,
   ): Promise<void> {
     try {
       logger.debug(`⚠️ EARLY WARNING ALARM: ${magnitude} ML earthquake in ${estimatedArrivalSeconds}s`);
@@ -294,7 +293,7 @@ class CriticalAlarmSystem {
             estimatedArrivalSeconds,
             magnitude,
             location,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           },
           sound: true,
           priority: Notifications.AndroidNotificationPriority.MAX,
@@ -332,7 +331,7 @@ class CriticalAlarmSystem {
         lat: 41.0082,
         lon: 28.9784,
         depth: 10,
-        source: 'TEST'
+        source: 'TEST',
       };
 
       await this.triggerEarthquakeAlarm(testQuake, false);

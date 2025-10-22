@@ -38,7 +38,7 @@ export async function pickContacts(): Promise<ContactInfo[]> {
           if (normalizedPhone) {
             contacts.push({
               name,
-              phoneE164: normalizedPhone
+              phoneE164: normalizedPhone,
             });
           }
         }
@@ -47,7 +47,7 @@ export async function pickContacts(): Promise<ContactInfo[]> {
 
     // Remove duplicates based on phone number
     const uniqueContacts = contacts.filter((contact, index, self) =>
-      index === self.findIndex(c => c.phoneE164 === contact.phoneE164)
+      index === self.findIndex(c => c.phoneE164 === contact.phoneE164),
     );
 
     return uniqueContacts;

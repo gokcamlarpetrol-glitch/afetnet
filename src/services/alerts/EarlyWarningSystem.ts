@@ -77,8 +77,8 @@ class EarlyWarningSystem extends SimpleEventEmitter {
   private safetyZones = new Map<string, SafetyZone>();
   private userLocation: { lat: number; lon: number } | null = null;
   private isMonitoring = false;
-  private monitoringInterval: NodeJS.Timeout | null = null;
-  private alertCheckInterval: NodeJS.Timeout | null = null;
+  private monitoringInterval: any = null;
+  private alertCheckInterval: any = null;
 
   constructor() {
     super();
@@ -149,12 +149,12 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       this.userLocation = await this.getCurrentLocation();
 
       // Start monitoring for earthquake warnings
-      this.monitoringInterval = setInterval(async () => {
+      this.monitoringInterval = (globalThis as any).setInterval(async () => {
         await this.checkForEarthquakeWarnings();
       }, 10000); // Check every 10 seconds
 
       // Start monitoring for emergency alerts
-      this.alertCheckInterval = setInterval(async () => {
+      this.alertCheckInterval = (globalThis as any).setInterval(async () => {
         await this.checkForEmergencyAlerts();
       }, 30000); // Check every 30 seconds
 
@@ -178,12 +178,12 @@ class EarlyWarningSystem extends SimpleEventEmitter {
       logger.debug('🛑 Stopping early warning monitoring...');
 
       if (this.monitoringInterval) {
-        clearInterval(this.monitoringInterval);
+        (globalThis as any).clearInterval(this.monitoringInterval);
         this.monitoringInterval = null;
       }
 
       if (this.alertCheckInterval) {
-        clearInterval(this.alertCheckInterval);
+        (globalThis as any).clearInterval(this.alertCheckInterval);
         this.alertCheckInterval = null;
       }
 

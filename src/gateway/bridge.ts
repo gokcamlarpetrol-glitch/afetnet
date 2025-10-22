@@ -1,16 +1,16 @@
-import * as Power from "expo-battery";
-import NetInfo from "@react-native-community/netinfo";
-import { pollQuakes } from "../quake/fetchers";
-import { listBulletins, addBulletin } from "../ops/bulletinStore";
-import { broadcastBulletin } from "../ops/bulletinMesh";
-import { applyTileDiff } from "../map/tilediff";
+import * as Power from 'expo-battery';
+import NetInfo from '@react-native-community/netinfo';
+import { pollQuakes } from '../quake/fetchers';
+import { listBulletins } from '../ops/bulletinStore';
+import { broadcastBulletin } from '../ops/bulletinMesh';
+// import { applyTileDiff } from '../map/tilediff'; // Not used
 
 let on=false; let t:any=null;
 
 export async function startGateway(){
   on=true;
-  if(t) {clearInterval(t);}
-  t=setInterval(async()=>{
+  if(t) {(globalThis as any).clearInterval(t);}
+  t=(globalThis as any).setInterval(async()=>{
     if(!on) {return;}
     try{
       const p = await Power.getPowerStateAsync(); const net = await NetInfo.fetch();
@@ -24,8 +24,10 @@ export async function startGateway(){
 
       // 3) Karo güncelleme (opsiyonel diff URL biliniyorsa)
       // await applyTileDiff("https://example.com/tiles/diff.json");
-    }catch{}
+    }catch{
+      // Ignore gateway errors
+    }
   }, 60_000);
 }
 
-export function stopGateway(){ on=false; if(t){ clearInterval(t); t=null; } }
+export function stopGateway(){ on=false; if(t){ (globalThis as any).clearInterval(t); t=null; } }

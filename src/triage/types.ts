@@ -1,7 +1,7 @@
 export type Triage = {
   id: string;
   ts: number;
-  cat: "RED"|"YELLOW"|"GREEN"|"BLACK";
+  cat: 'RED'|'YELLOW'|'GREEN'|'BLACK';
   pulse?: number;
   resp?: number;
   conscious?: boolean;

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useAppSettings } from '../store/appSettings';
 
 // Initialize app settings on app startup

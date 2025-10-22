@@ -1,17 +1,18 @@
-import { PermissionsAndroid } from "react-native";
-import { encodeSOSWithStatus as codecSOSWithStatus, encodeTextV2 as codecTextV2, encodeLoc, encodeTextChunk } from "./codec";
-import { SafeBLE } from "./SafeBLE";
+import { PermissionsAndroid } from 'react-native';
+import { encodeSOSWithStatus as codecSOSWithStatus, encodeTextV2 as codecTextV2, encodeLoc, encodeTextChunk } from './codec';
+import { SafeBLE } from './SafeBLE';
 
 async function perm(){
   const perms = [
     PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
     PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
     PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
   ];
   for (const p of perms){ await PermissionsAndroid.request(p); }
 }
 
+ 
 export async function startScan(onFrame:(from:string, frame:any)=>void){
   await perm();
   return SafeBLE.startScan(onFrame);

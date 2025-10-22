@@ -1,6 +1,6 @@
-import Constants from "expo-constants";
-import { load, KEYS } from "./secure";
-import { loadActivation } from "../store/activation";
+import Constants from 'expo-constants';
+import { load, KEYS } from './secure';
+import { loadActivation } from '../store/activation';
 
 export async function getApiBase(): Promise<string>{
   // First try activation store
@@ -10,7 +10,7 @@ export async function getApiBase(): Promise<string>{
   }
   
   // Fallback to secure store
-  return (await load(KEYS.api)) || (Constants.expoConfig?.extra as any)?.apiBase || "";
+  return (await load(KEYS.api)) || (Constants.expoConfig?.extra as any)?.apiBase || '';
 }
 
 export async function getSecret(): Promise<string|undefined>{

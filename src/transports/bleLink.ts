@@ -1,7 +1,7 @@
-import { Link, LinkMetrics } from "./types";
+import { Link, LinkMetrics } from './types';
 
 export class BleLink implements Link {
-  id="ble0"; kind:"ble"="ble";
+  id='ble0'; kind:'ble'='ble';
   private met: LinkMetrics = { up:false, tx:0, rx:0, errors:0 };
   private unsub: (()=>void)|null=null;
   async up(){ 

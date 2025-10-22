@@ -62,7 +62,7 @@ class NotificationManager extends SimpleEventEmitter {
         ...notification,
         id: notificationId,
         timestamp: Date.now(),
-        read: false
+        read: false,
       };
 
       this.notifications.set(notificationId, fullNotification);
@@ -72,7 +72,7 @@ class NotificationManager extends SimpleEventEmitter {
 
       // Auto-remove low priority notifications after 5 minutes
       if (notification.priority === 'low') {
-        setTimeout(() => {
+        (globalThis as any).setTimeout(() => {
           this.removeNotification(notificationId);
         }, 300000);
       }
@@ -80,7 +80,7 @@ class NotificationManager extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Notification shown', {
         notificationId,
         type: notification.type,
-        priority: notification.priority
+        priority: notification.priority,
       });
 
       logger.debug(`🔔 Notification shown: ${notification.title}`);
@@ -102,7 +102,7 @@ class NotificationManager extends SimpleEventEmitter {
       sound: true,
       vibration: true,
       persistent: true,
-      actions
+      actions,
     });
   }
 
@@ -113,8 +113,8 @@ class NotificationManager extends SimpleEventEmitter {
       `Konum: ${sosData.location.lat}, ${sosData.location.lon}\nKişi sayısı: ${sosData.peopleCount}\nÖncelik: ${sosData.priority.toUpperCase()}`,
       [
         { id: 'acknowledge', label: 'Onayla', action: 'acknowledge_sos', style: 'default' },
-        { id: 'respond', label: 'Yanıtla', action: 'respond_sos', style: 'default' }
-      ]
+        { id: 'respond', label: 'Yanıtla', action: 'respond_sos', style: 'default' },
+      ],
     );
   }
 
@@ -125,8 +125,8 @@ class NotificationManager extends SimpleEventEmitter {
       `Enkaz altında mağdur tespit edildi!\nKonum: ${detection.location.lat}, ${detection.location.lon}\nÖncelik: ${detection.priority.toUpperCase()}`,
       [
         { id: 'acknowledge', label: 'Onayla', action: 'acknowledge_detection', style: 'default' },
-        { id: 'rescue', label: 'Kurtarma Başlat', action: 'start_rescue', style: 'default' }
-      ]
+        { id: 'rescue', label: 'Kurtarma Başlat', action: 'start_rescue', style: 'default' },
+      ],
     );
   }
 
@@ -141,7 +141,7 @@ class NotificationManager extends SimpleEventEmitter {
       priority,
       sound: warning.severity === 'critical',
       vibration: warning.severity === 'critical',
-      persistent: warning.severity === 'critical'
+      persistent: warning.severity === 'critical',
     });
   }
 
@@ -206,14 +206,14 @@ class NotificationManager extends SimpleEventEmitter {
     totalNotifications: number;
     unreadNotifications: number;
     criticalNotifications: number;
-  } {
+    } {
     const allNotifications = Array.from(this.notifications.values());
     
     return {
       isActive: this.isActive,
       totalNotifications: allNotifications.length,
       unreadNotifications: allNotifications.filter(n => !n.read).length,
-      criticalNotifications: allNotifications.filter(n => n.priority === 'critical').length
+      criticalNotifications: allNotifications.filter(n => n.priority === 'critical').length,
     };
   }
 }
@@ -221,6 +221,7 @@ class NotificationManager extends SimpleEventEmitter {
 // Export singleton instance
 export const notificationManager = new NotificationManager();
 export default NotificationManager;
+
 
 
 

@@ -1,6 +1,6 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 
-export type ResilienceProfile = "normal" | "low_power" | "silent";
+export type ResilienceProfile = 'normal' | 'low_power' | 'silent';
 
 type S = {
   profile: ResilienceProfile;
@@ -8,8 +8,8 @@ type S = {
 };
 
 export const useProfile = create<S>((set)=>({
-  profile: "normal",
-  setProfile: (p)=>set({ profile: p })
+  profile: 'normal',
+  setProfile: (p)=>set({ profile: p }),
 }));
 
 

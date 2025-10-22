@@ -1,4 +1,4 @@
-import { Audio } from "expo-av";
+import { Audio } from 'expo-av';
 
 let sound: Audio.Sound | null = null;
 let on = false;
@@ -41,18 +41,24 @@ export async function startAudioBeacon(){
     { 
       // We'll feed a generated buffer via `createAsync` using an in-memory file approach in Expo is limited.
       // Workaround: use looped synthetic 'tone' asset from dataURI.
-      uri: "data:audio/wav;base64," + await makeWavBase64() 
+      uri: 'data:audio/wav;base64,' + await makeWavBase64(), 
     },
-    { isLooping: true, volume: 1.0, shouldPlay: true }
+    { isLooping: true, volume: 1.0, shouldPlay: true },
   );
   sound = s;
-  try { await s.playAsync(); } catch {}
+  try { await s.playAsync(); } catch {
+    // Ignore play errors
+  }
 }
 
 export async function stopAudioBeacon(){
   on = false;
-  try { await sound?.stopAsync(); } catch {}
-  try { await sound?.unloadAsync(); } catch {}
+  try { await sound?.stopAsync(); } catch {
+    // Ignore stop errors
+  }
+  try { await sound?.unloadAsync(); } catch {
+    // Ignore unload errors
+  }
   sound = null;
 }
 
@@ -69,10 +75,10 @@ async function makeWavBase64(){
   const v = new DataView(buf);
   function W(off:number, s:string){ for(let i=0;i<s.length;i++) {v.setUint8(off+i, s.charCodeAt(i));} }
   let o=0;
-  W(o,"RIFF"); o+=4;
+  W(o,'RIFF'); o+=4;
   v.setUint32(o, 36 + dataLen, true); o+=4;
-  W(o,"WAVE"); o+=4;
-  W(o,"fmt "); o+=4;
+  W(o,'WAVE'); o+=4;
+  W(o,'fmt '); o+=4;
   v.setUint32(o,16,true); o+=4;
   v.setUint16(o,1,true); o+=2; // PCM
   v.setUint16(o,1,true); o+=2; // mono
@@ -80,7 +86,7 @@ async function makeWavBase64(){
   v.setUint32(o,byteRate,true); o+=4;
   v.setUint16(o,blockAlign,true); o+=2;
   v.setUint16(o,16,true); o+=2; // bits/sample
-  W(o,"data"); o+=4;
+  W(o,'data'); o+=4;
   v.setUint32(o,dataLen,true); o+=4;
   // write samples
   let k=o;
@@ -94,15 +100,18 @@ async function makeWavBase64(){
   }
   // to base64
   const u8 = new Uint8Array(buf);
-  let b64=""; const CHUNK=0x8000;
+  let b64=''; const CHUNK=0x8000;
   for (let i=0;i<u8.length;i+=CHUNK){ b64 += String.fromCharCode.apply(null, Array.from(u8.subarray(i, i+CHUNK))); }
   return b64toa(b64);
 }
 
 // Simple base64 from binary string
-function b64toa(bin:string){ if (typeof btoa!=="undefined") {return btoa(bin);} /* RN polyfill */ 
-  // @ts-ignore
-  return Buffer.from(bin, "binary").toString("base64");
+function b64toa(bin:string){ 
+  if (typeof (globalThis as any).btoa !== 'undefined') {
+    return (globalThis as any).btoa(bin);
+  }
+  // RN polyfill
+  return (globalThis as any).Buffer.from(bin, 'binary').toString('base64');
 }
 
 

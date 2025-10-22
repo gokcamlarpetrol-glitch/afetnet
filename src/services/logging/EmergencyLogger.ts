@@ -218,21 +218,21 @@ class EmergencyLogger {
     const message = `${prefix} ${logEntry.message}`;
 
     switch (logEntry.level) {
-      case 'debug':
-        console.debug(message, logEntry.details);
-        break;
-      case 'info':
-        logger.info(message, logEntry.details);
-        break;
-      case 'warn':
-        logger.warn(message, logEntry.details);
-        break;
-      case 'error':
-        logger.error(message, logEntry.details);
-        break;
-      case 'critical':
-        logger.error(`🚨 CRITICAL: ${message}`, logEntry.details);
-        break;
+    case 'debug':
+      console.debug(message, logEntry.details);
+      break;
+    case 'info':
+      logger.info(message, logEntry.details);
+      break;
+    case 'warn':
+      logger.warn(message, logEntry.details);
+      break;
+    case 'error':
+      logger.error(message, logEntry.details);
+      break;
+    case 'critical':
+      logger.error(`🚨 CRITICAL: ${message}`, logEntry.details);
+      break;
     }
   }
 
@@ -247,7 +247,7 @@ class EmergencyLogger {
   private scheduleStorage(): void {
     // Debounced storage to avoid too frequent writes
     if (!this.storageTimeout) {
-      this.storageTimeout = setTimeout(() => {
+      this.storageTimeout = (globalThis as any).setTimeout(() => {
         this.storeLogs();
         this.storageTimeout = null;
       }, 5000); // Store every 5 seconds
@@ -291,7 +291,7 @@ class EmergencyLogger {
 
   private setupLogRotation(): void {
     // Clean up old logs every hour
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.cleanupOldLogs();
     }, 60 * 60 * 1000);
   }
@@ -302,7 +302,7 @@ class EmergencyLogger {
       
       // Remove logs older than 24 hours (except critical logs)
       this.logs = this.logs.filter(log => 
-        log.timestamp > oneDayAgo || log.level === 'critical'
+        log.timestamp > oneDayAgo || log.level === 'critical',
       );
 
       // Clean up stored critical logs older than 7 days
@@ -355,7 +355,7 @@ class EmergencyLogger {
         const searchLower = filter.searchText.toLowerCase();
         filteredLogs = filteredLogs.filter(log => 
           log.message.toLowerCase().includes(searchLower) ||
-          (log.details && JSON.stringify(log.details).toLowerCase().includes(searchLower))
+          (log.details && JSON.stringify(log.details).toLowerCase().includes(searchLower)),
         );
       }
 

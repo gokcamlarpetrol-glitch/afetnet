@@ -20,7 +20,7 @@ export function computeSuggestions(ctx: {
       title: 'Harita Karo Ön Yükleme',
       why: 'Uçak modunda görünürlük zayıf',
       how: 'Daha geniş yarıçap ve zoom setini güvenli aralıklarla indir',
-      impact: 'high'
+      impact: 'high',
     });
   }
 
@@ -30,7 +30,7 @@ export function computeSuggestions(ctx: {
       title: 'Arka Plan Deprem Çekimi',
       why: 'Kritik uyarılar kaçabilir',
       how: 'BackgroundFetch interval 5–15dk, izin kontrolleri',
-      impact: 'high'
+      impact: 'high',
     });
   }
 
@@ -40,7 +40,7 @@ export function computeSuggestions(ctx: {
       title: 'Bildirim İzin Akışı',
       why: 'Uyarıların kullanıcıya ulaşması',
       how: 'İlk açılışta açıklamalı izin sihirbazı',
-      impact: 'high'
+      impact: 'high',
     });
   }
 
@@ -50,7 +50,7 @@ export function computeSuggestions(ctx: {
       title: 'Konum İzin Akışı',
       why: 'PDR ve harita özellikleri çalışmaz',
       how: 'Kullanıcı dostu izin açıklaması ve ret durumunda yönlendirme',
-      impact: 'high'
+      impact: 'high',
     });
   }
 
@@ -60,7 +60,7 @@ export function computeSuggestions(ctx: {
       title: 'Batarya Optimizasyonu',
       why: 'Arka plan işlemler bataryayı tüketiyor',
       how: 'Adaptif tarama sıklığı ve güç yönetimi',
-      impact: 'med'
+      impact: 'med',
     });
   }
 
@@ -70,7 +70,7 @@ export function computeSuggestions(ctx: {
       title: 'Sensör Kalibrasyonu',
       why: 'PDR ve pusula doğruluğu düşük',
       how: 'Sensör kalibrasyon rehberi ve doğrulama',
-      impact: 'med'
+      impact: 'med',
     });
   }
 

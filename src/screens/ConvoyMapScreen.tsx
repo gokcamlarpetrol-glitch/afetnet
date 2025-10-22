@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { logger } from "../utils/productionLogger";
 import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
@@ -11,13 +12,13 @@ let Marker: any = null;
 let Polyline: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Marker = maps.Marker;
   Polyline = maps.Polyline;
 } catch (e) {
-  console.warn('expo-maps not available:', e);
+  logger.warn('expo-maps not available:', e);
 }
 
 interface ConvoyVehicle {
@@ -36,7 +37,6 @@ export default function ConvoyMapScreen() {
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState<ConvoyVehicle | null>(null);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
@@ -76,7 +76,7 @@ export default function ConvoyMapScreen() {
         }
       }
     } catch (error) {
-      console.error('Failed to load current location:', error);
+      logger.error('Failed to load current location:', error);
     }
   };
 
@@ -138,7 +138,7 @@ export default function ConvoyMapScreen() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -173,19 +173,19 @@ export default function ConvoyMapScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'green';
-      case 'stopped': return 'red';
-      case 'warning': return 'orange';
-      default: return 'blue';
+    case 'active': return 'green';
+    case 'stopped': return 'red';
+    case 'warning': return 'orange';
+    default: return 'blue';
     }
   };
 
   const getStatusEmoji = (status: string) => {
     switch (status) {
-      case 'active': return '🟢';
-      case 'stopped': return '🔴';
-      case 'warning': return '🟠';
-      default: return '🔵';
+    case 'active': return '🟢';
+    case 'stopped': return '🔴';
+    case 'warning': return '🟠';
+    default: return '🔵';
     }
   };
 

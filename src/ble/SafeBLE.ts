@@ -5,15 +5,15 @@ let BlePeripheral: any = null;
 
 try {
   // Try to import BLE modules
-  const blePlx = require('react-native-ble-plx');
+  const blePlx = (globalThis as any).require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
-} catch (e) {
+} catch {
   logger.warn('react-native-ble-plx not available');
 }
 
 try {
-  BlePeripheral = require('react-native-ble-peripheral').default;
-} catch (e) {
+  BlePeripheral = (globalThis as any).require('react-native-ble-peripheral').default;
+} catch {
   logger.warn('react-native-ble-peripheral not available');
 }
 
@@ -22,7 +22,7 @@ let manager: any = null;
 if (BleManager) {
   try {
     manager = new BleManager();
-  } catch (e) {
+  } catch {
     logger.warn('Failed to create BleManager instance');
   }
 }
@@ -30,6 +30,7 @@ if (BleManager) {
 export const SafeBLE = {
   isAvailable: () => BleManager !== null && BlePeripheral !== null,
   
+   
   startScan: async (onFrame: (from: string, frame: any) => void) => {
     if (!manager) {
       logger.warn('BLE not available, scan not started');
@@ -41,14 +42,16 @@ export const SafeBLE = {
         const data = (device.serviceData && device.serviceData['0000ffff-0000-1000-8000-00805f9b34fb']) || device.manufacturerData;
         if (!data) {return;}
         try {
-          const buf = Buffer.from(data, "base64");
+          const buf = (globalThis as any).Buffer.from(data, 'base64');
           // Simple frame decode - you can implement your own logic here
           const frame = { data: buf.toString() };
           if (frame) {onFrame(device.id, frame);}
-        } catch {}
+        } catch {
+          // Ignore frame decode errors
+        }
       });
-    } catch (e) {
-      logger.warn('BLE scan failed:', e);
+    } catch {
+      logger.warn('BLE scan failed');
     }
   },
 
@@ -56,8 +59,8 @@ export const SafeBLE = {
     if (!manager) {return;}
     try {
       manager.stopDeviceScan();
-    } catch (e) {
-      logger.warn('BLE stop scan failed:', e);
+    } catch {
+      logger.warn('BLE stop scan failed');
     }
   },
 
@@ -67,18 +70,18 @@ export const SafeBLE = {
       return;
     }
     try {
-      await BlePeripheral.setName("AfetNet");
+      await BlePeripheral.setName('AfetNet');
       await BlePeripheral.addService('0000ffff-0000-1000-8000-00805f9b34fb', true);
       await BlePeripheral.addCharacteristicToService(
-        '0000ffff-0000-1000-8000-00805f9b34fb', "AF02",
-        BlePeripheral.properties.READ, BlePeripheral.permissions.READABLE, []
+        '0000ffff-0000-1000-8000-00805f9b34fb', 'AF02',
+        BlePeripheral.properties.READ, BlePeripheral.permissions.READABLE, [],
       );
       await BlePeripheral.startAdvertising({
         serviceUuids: ['0000ffff-0000-1000-8000-00805f9b34fb'],
-        manufacturerData: { companyId: 0xffff, bytes: Array.from(data) }
+        manufacturerData: { companyId: 0xffff, bytes: Array.from(data) },
       });
-    } catch (e) {
-      logger.warn('BLE advertising failed:', e);
+    } catch (error) {
+      logger.warn('BLE advertising failed:', error);
     }
   },
 
@@ -86,10 +89,10 @@ export const SafeBLE = {
     if (!BlePeripheral) {return;}
     try {
       await BlePeripheral.stopAdvertising();
-    } catch (e) {
-      logger.warn('BLE stop advertising failed:', e);
+    } catch (error) {
+      logger.warn('BLE stop advertising failed:', error);
     }
-  }
+  },
 };
 
 

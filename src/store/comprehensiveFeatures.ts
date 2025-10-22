@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from "../utils/productionLogger";
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -542,21 +543,26 @@ const defaultComprehensiveSettings: ComprehensiveFeatureSettings = {
 };
 
 type ComprehensiveFeatureState = ComprehensiveFeatureSettings & {
+   
   updateFeatureSetting: <K extends keyof ComprehensiveFeatureSettings>(
     category: K,
     key: keyof ComprehensiveFeatureSettings[K],
     value: any
   ) => Promise<void>;
+   
   updateCategorySettings: <K extends keyof ComprehensiveFeatureSettings>(
     category: K,
     updates: Partial<ComprehensiveFeatureSettings[K]>
   ) => Promise<void>;
+   
   resetCategoryToDefaults: <K extends keyof ComprehensiveFeatureSettings>(
     category: K
   ) => Promise<void>;
   resetAllToDefaults: () => Promise<void>;
   initializeSettings: () => Promise<void>;
+   
   getFeatureStatus: (category: keyof ComprehensiveFeatureSettings, key: string) => boolean;
+   
   getFeatureValue: (category: keyof ComprehensiveFeatureSettings, key: string) => any;
 };
 
@@ -586,7 +592,7 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
         try {
           await AsyncStorage.setItem('afn/comprehensive-features/v1', JSON.stringify(newSettings));
         } catch (error) {
-          console.warn('Failed to save comprehensive feature settings:', error);
+          logger.warn('Failed to save comprehensive feature settings:', error);
         }
       },
       
@@ -612,7 +618,7 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
         try {
           await AsyncStorage.setItem('afn/comprehensive-features/v1', JSON.stringify(newSettings));
         } catch (error) {
-          console.warn('Failed to save comprehensive feature settings:', error);
+          logger.warn('Failed to save comprehensive feature settings:', error);
         }
       },
       
@@ -634,7 +640,7 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
         try {
           await AsyncStorage.setItem('afn/comprehensive-features/v1', JSON.stringify(newSettings));
         } catch (error) {
-          console.warn('Failed to save comprehensive feature settings:', error);
+          logger.warn('Failed to save comprehensive feature settings:', error);
         }
       },
       
@@ -652,7 +658,7 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
         try {
           await AsyncStorage.setItem('afn/comprehensive-features/v1', JSON.stringify(defaultComprehensiveSettings));
         } catch (error) {
-          console.warn('Failed to save comprehensive feature settings:', error);
+          logger.warn('Failed to save comprehensive feature settings:', error);
         }
       },
       
@@ -664,15 +670,15 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
             const mergedSettings = { ...defaultComprehensiveSettings, ...parsedSettings };
             set(mergedSettings);
             
-        // Apply saved settings effects
-        for (const [category, categorySettings] of Object.entries(mergedSettings)) {
-          for (const [key, value] of Object.entries(categorySettings as any)) {
-            await applyFeatureEffect(category as any, key, value, mergedSettings);
-          }
-        }
+            // Apply saved settings effects
+            for (const [category, categorySettings] of Object.entries(mergedSettings)) {
+              for (const [key, value] of Object.entries(categorySettings as any)) {
+                await applyFeatureEffect(category as any, key, value, mergedSettings);
+              }
+            }
           }
         } catch (error) {
-          console.warn('Failed to initialize comprehensive feature settings:', error);
+          logger.warn('Failed to initialize comprehensive feature settings:', error);
         }
       },
       
@@ -690,11 +696,12 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
       name: 'afn/comprehensive-features/v1',
       storage: createJSONStorage(() => AsyncStorage),
       version: 1,
+       
       migrate: (persistedState: any, version: number) => {
         return { ...defaultComprehensiveSettings, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );
 
 // Apply real-time effects for feature changes
@@ -702,168 +709,187 @@ async function applyFeatureEffect(
   category: keyof ComprehensiveFeatureSettings,
   key: string,
   value: any,
-  allSettings: ComprehensiveFeatureSettings
+  allSettings: ComprehensiveFeatureSettings,
 ): Promise<void> {
   try {
-    console.log(`🔧 Applying feature effect: ${category}.${key} = ${value}`);
+    logger.info(`🔧 Applying feature effect: ${category}.${key} = ${value}`);
     
     // Category-specific effects
     switch (category) {
-      case 'emergency':
-        await applyEmergencyEffect(key, value, allSettings);
-        break;
-      case 'mapping':
-        await applyMappingEffect(key, value, allSettings);
-        break;
-      case 'mesh':
-        await applyMeshEffect(key, value, allSettings);
-        break;
-      case 'communication':
-        await applyCommunicationEffect(key, value, allSettings);
-        break;
-      case 'earthquake':
-        await applyEarthquakeEffect(key, value, allSettings);
-        break;
-      case 'family':
-        await applyFamilyEffect(key, value, allSettings);
-        break;
-      case 'health':
-        await applyHealthEffect(key, value, allSettings);
-        break;
-      case 'rescue':
-        await applyRescueEffect(key, value, allSettings);
-        break;
-      case 'power':
-        await applyPowerEffect(key, value, allSettings);
-        break;
-      case 'security':
-        await applySecurityEffect(key, value, allSettings);
-        break;
-      case 'data':
-        await applyDataEffect(key, value, allSettings);
-        break;
-      case 'audio':
-        await applyAudioEffect(key, value, allSettings);
-        break;
-      case 'sensors':
-        await applySensorsEffect(key, value, allSettings);
-        break;
-      case 'ai':
-        await applyAIEffect(key, value, allSettings);
-        break;
-      case 'drones':
-        await applyDronesEffect(key, value, allSettings);
-        break;
-      case 'logistics':
-        await applyLogisticsEffect(key, value, allSettings);
-        break;
-      case 'training':
-        await applyTrainingEffect(key, value, allSettings);
-        break;
-      case 'reporting':
-        await applyReportingEffect(key, value, allSettings);
-        break;
-      case 'accessibility':
-        await applyAccessibilityEffect(key, value, allSettings);
-        break;
+    case 'emergency':
+      await applyEmergencyEffect(key, value, allSettings);
+      break;
+    case 'mapping':
+      await applyMappingEffect(key, value, allSettings);
+      break;
+    case 'mesh':
+      await applyMeshEffect(key, value, allSettings);
+      break;
+    case 'communication':
+      await applyCommunicationEffect(key, value, allSettings);
+      break;
+    case 'earthquake':
+      await applyEarthquakeEffect(key, value, allSettings);
+      break;
+    case 'family':
+      await applyFamilyEffect(key, value, allSettings);
+      break;
+    case 'health':
+      await applyHealthEffect(key, value, allSettings);
+      break;
+    case 'rescue':
+      await applyRescueEffect(key, value, allSettings);
+      break;
+    case 'power':
+      await applyPowerEffect(key, value, allSettings);
+      break;
+    case 'security':
+      await applySecurityEffect(key, value, allSettings);
+      break;
+    case 'data':
+      await applyDataEffect(key, value, allSettings);
+      break;
+    case 'audio':
+      await applyAudioEffect(key, value, allSettings);
+      break;
+    case 'sensors':
+      await applySensorsEffect(key, value, allSettings);
+      break;
+    case 'ai':
+      await applyAIEffect(key, value, allSettings);
+      break;
+    case 'drones':
+      await applyDronesEffect(key, value, allSettings);
+      break;
+    case 'logistics':
+      await applyLogisticsEffect(key, value, allSettings);
+      break;
+    case 'training':
+      await applyTrainingEffect(key, value, allSettings);
+      break;
+    case 'reporting':
+      await applyReportingEffect(key, value, allSettings);
+      break;
+    case 'accessibility':
+      await applyAccessibilityEffect(key, value, allSettings);
+      break;
     }
   } catch (error) {
-    console.warn(`Failed to apply feature effect for ${category}.${key}:`, error);
+    logger.warn(`Failed to apply feature effect for ${category}.${key}:`, error);
   }
 }
 
 // Individual category effect functions
+ 
 async function applyEmergencyEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🚨 Emergency effect: ${key} = ${value}`);
+  logger.info(`🚨 Emergency effect: ${key} = ${value}`);
   // Emergency-specific effects implementation
 }
 
+ 
 async function applyMappingEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🗺️ Mapping effect: ${key} = ${value}`);
+  logger.info(`🗺️ Mapping effect: ${key} = ${value}`);
   // Mapping-specific effects implementation
 }
 
+ 
 async function applyMeshEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🕸️ Mesh effect: ${key} = ${value}`);
+  logger.info(`🕸️ Mesh effect: ${key} = ${value}`);
   // Mesh-specific effects implementation
 }
 
+ 
 async function applyCommunicationEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`📡 Communication effect: ${key} = ${value}`);
+  logger.info(`📡 Communication effect: ${key} = ${value}`);
   // Communication-specific effects implementation
 }
 
+ 
 async function applyEarthquakeEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🌍 Earthquake effect: ${key} = ${value}`);
+  logger.info(`🌍 Earthquake effect: ${key} = ${value}`);
   // Earthquake-specific effects implementation
 }
 
+ 
 async function applyFamilyEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`👨‍👩‍👧‍👦 Family effect: ${key} = ${value}`);
+  logger.info(`👨‍👩‍👧‍👦 Family effect: ${key} = ${value}`);
   // Family-specific effects implementation
 }
 
+ 
 async function applyHealthEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🏥 Health effect: ${key} = ${value}`);
+  logger.info(`🏥 Health effect: ${key} = ${value}`);
   // Health-specific effects implementation
 }
 
+ 
 async function applyRescueEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🚁 Rescue effect: ${key} = ${value}`);
+  logger.info(`🚁 Rescue effect: ${key} = ${value}`);
   // Rescue-specific effects implementation
 }
 
+ 
 async function applyPowerEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🔋 Power effect: ${key} = ${value}`);
+  logger.info(`🔋 Power effect: ${key} = ${value}`);
   // Power-specific effects implementation
 }
 
+ 
 async function applySecurityEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🔒 Security effect: ${key} = ${value}`);
+  logger.info(`🔒 Security effect: ${key} = ${value}`);
   // Security-specific effects implementation
 }
 
+ 
 async function applyDataEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`💾 Data effect: ${key} = ${value}`);
+  logger.info(`💾 Data effect: ${key} = ${value}`);
   // Data-specific effects implementation
 }
 
+ 
 async function applyAudioEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🎵 Audio effect: ${key} = ${value}`);
+  logger.info(`🎵 Audio effect: ${key} = ${value}`);
   // Audio-specific effects implementation
 }
 
+ 
 async function applySensorsEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`📊 Sensors effect: ${key} = ${value}`);
+  logger.info(`📊 Sensors effect: ${key} = ${value}`);
   // Sensors-specific effects implementation
 }
 
+ 
 async function applyAIEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🤖 AI effect: ${key} = ${value}`);
+  logger.info(`🤖 AI effect: ${key} = ${value}`);
   // AI-specific effects implementation
 }
 
+ 
 async function applyDronesEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🚁 Drones effect: ${key} = ${value}`);
+  logger.info(`🚁 Drones effect: ${key} = ${value}`);
   // Drones-specific effects implementation
 }
 
+ 
 async function applyLogisticsEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`📦 Logistics effect: ${key} = ${value}`);
+  logger.info(`📦 Logistics effect: ${key} = ${value}`);
   // Logistics-specific effects implementation
 }
 
+ 
 async function applyTrainingEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`🎓 Training effect: ${key} = ${value}`);
+  logger.info(`🎓 Training effect: ${key} = ${value}`);
   // Training-specific effects implementation
 }
 
+ 
 async function applyReportingEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`📊 Reporting effect: ${key} = ${value}`);
+  logger.info(`📊 Reporting effect: ${key} = ${value}`);
   // Reporting-specific effects implementation
 }
 
+ 
 async function applyAccessibilityEffect(key: string, value: any, settings: ComprehensiveFeatureSettings): Promise<void> {
-  console.log(`♿ Accessibility effect: ${key} = ${value}`);
+  logger.info(`♿ Accessibility effect: ${key} = ${value}`);
   // Accessibility-specific effects implementation
 }

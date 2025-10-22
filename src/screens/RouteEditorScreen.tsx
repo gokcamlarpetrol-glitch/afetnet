@@ -10,12 +10,12 @@ let Polyline: any = null;
 let Marker: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Polyline = maps.Polyline;
   Marker = maps.Marker;
-} catch (e) {
+} catch {
   // expo-maps not available - fallback to alternative map solution
 }
 
@@ -98,7 +98,7 @@ export default function RouteEditorScreen() {
     const updatedPoints = routePoints.map(point =>
       point.id === selectedPoint.id
         ? { ...point, name: pointName, notes: pointNotes }
-        : point
+        : point,
     );
     
     setRoutePoints(updatedPoints);
@@ -124,7 +124,7 @@ export default function RouteEditorScreen() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -143,7 +143,7 @@ export default function RouteEditorScreen() {
             setIsEditing(false);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -156,7 +156,7 @@ export default function RouteEditorScreen() {
     setIsLoading(true);
     try {
       // Simulate save operation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1000));
       Alert.alert('Başarılı', 'Rota kaydedildi');
     } catch (error) {
       Alert.alert('Hata', 'Rota kaydedilemedi');

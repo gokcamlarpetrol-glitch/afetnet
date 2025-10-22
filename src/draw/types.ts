@@ -1,4 +1,4 @@
-export type DrawKind = "rubble"|"flood"|"blocked"|"hazard"|"note";
+export type DrawKind = 'rubble'|'flood'|'blocked'|'hazard'|'note';
 export type DrawGeom = { lat:number; lng:number };
 export type DrawShape = {
   id: string;

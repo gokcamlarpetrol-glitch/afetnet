@@ -33,7 +33,7 @@ class ConnectivityWatcher {
   }
 
   private async checkSMSAvailability(netInfo: {isConnected: boolean, isInternetReachable: boolean}) {
-    const { queue, getNextQueued, markSent } = useIce.getState();
+    const { getNextQueued } = useIce.getState();
     
     // Check if we have queued messages
     const nextQueued = getNextQueued();
@@ -70,13 +70,13 @@ class ConnectivityWatcher {
       [
         {
           text: 'Daha Sonra',
-          style: 'cancel'
+          style: 'cancel',
         },
         {
           text: 'Gönder',
-          onPress: () => this.sendQueuedSMS(queueItem)
-        }
-      ]
+          onPress: () => this.sendQueuedSMS(queueItem),
+        },
+      ],
     );
   }
 
@@ -94,7 +94,7 @@ class ConnectivityWatcher {
         [
           {
             text: 'Hayır',
-            style: 'cancel'
+            style: 'cancel',
           },
           {
             text: 'Evet',
@@ -104,13 +104,13 @@ class ConnectivityWatcher {
               // Check for next queued item
               const nextQueued = getNextQueued();
               if (nextQueued) {
-                setTimeout(() => {
+                (globalThis as any).setTimeout(() => {
                   this.showSMSBanner(nextQueued);
                 }, 2000);
               }
-            }
-          }
-        ]
+            },
+          },
+        ],
       );
 
     } catch (error) {

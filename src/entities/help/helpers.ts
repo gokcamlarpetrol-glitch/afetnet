@@ -1,4 +1,4 @@
-import type { HelpPayload, QueueItem } from "./types";
+import type { HelpPayload, QueueItem } from './types';
 
 export const newItem = (payload: HelpPayload): QueueItem => ({
   id: String(Date.now()),

@@ -45,12 +45,12 @@ export default function GroupChatScreen() {
   useEffect(() => {
     // Auto-disable emergency mode after 60 seconds
     if (emergencyMode && emergencyEndTime > 0) {
-      const timer = setTimeout(() => {
+      const timer = (globalThis as any).setTimeout(() => {
         setEmergencyMode(false);
         setEmergencyEndTime(0);
       }, emergencyEndTime - Date.now());
       
-      return () => clearTimeout(timer);
+      return () => (globalThis as any).clearTimeout(timer);
     }
   }, [emergencyMode, emergencyEndTime]);
 

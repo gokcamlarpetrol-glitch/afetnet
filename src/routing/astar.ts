@@ -1,20 +1,20 @@
-import { RoadGraph, RiskFn, RoutePath, haversineM } from "./types";
-import { listShapes } from "../draw/store";
+import { RoadGraph, RiskFn, RoutePath, haversineM } from './types';
+import { listShapes } from '../draw/store';
 
 type PQ<T> = { push:(item:T,pri:number)=>void; pop:()=>T|undefined; size:()=>number };
 function makePQ<T>(): PQ<T>{
   const a: {i:T; p:number}[] = [];
   return {
-    push(i,p){ a.push({i,p}); a.sort((x,y)=> x.p-y.p); },
+    push(i,p){ a.push({ i,p }); a.sort((x,y)=> x.p-y.p); },
     pop(){ return a.shift()?.i; },
-    size(){ return a.length; }
+    size(){ return a.length; },
   };
 }
 
 export function nearestNode(g:RoadGraph, p:{lat:number;lng:number}){
   let best: any=null; let bestD=Number.POSITIVE_INFINITY;
   for(const n of Object.values(g.nodes)){
-    const d = haversineM(p, {lat:n.lat,lng:n.lng});
+    const d = haversineM(p, { lat:n.lat,lng:n.lng });
     if(d<bestD){ bestD=d; best=n; }
   }
   return best as typeof g.nodes[keyof typeof g.nodes];
@@ -59,7 +59,7 @@ export async function routeAStar(g:RoadGraph, closures:Set<string>, risk: RiskFn
       const base = e.distM || haversineM(a,b);
       const riskC = risk(mid.lat, mid.lng);
       const closeC = closed? 1e6 : 0; // kapanmışsa çok büyük ceza
-      const kindC = e.kind==="primary" ? 0.9 : e.kind==="secondary" ? 1.0 : 1.1;
+      const kindC = e.kind==='primary' ? 0.9 : e.kind==='secondary' ? 1.0 : 1.1;
       let drawC = 0;
       // lightweight sampling: penalize if near any drawing segment (<40m)
       try{
@@ -69,7 +69,9 @@ export async function routeAStar(g:RoadGraph, closures:Set<string>, risk: RiskFn
             if(distToSegmentM(mid, d.coords[i], d.coords[i+1])<40){ drawC += 600; break outer; }
           }
         }
-      }catch{}
+      }catch{
+        // Ignore drawing shape errors
+      }
       const cost = base*kindC*(1 + riskC) + closeC + drawC + penaltyAlt;
 
       const prev = gCost.get(cur)!;
@@ -109,5 +111,5 @@ export async function routeAStar(g:RoadGraph, closures:Set<string>, risk: RiskFn
   }
   coords.push({ lat: g.nodes[ path[path.length-1] ].lat, lng: g.nodes[ path[path.length-1] ].lng });
 
-  return { id: "route_"+Date.now()+"_"+altIndex, from, to, edges: edges as any, coords, distM: dist, riskCost: rsum, altIndex };
+  return { id: 'route_'+Date.now()+'_'+altIndex, from, to, edges: edges as any, coords, distM: dist, riskCost: rsum, altIndex };
 }

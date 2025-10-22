@@ -10,7 +10,7 @@ export class KandilliProvider implements QuakeProvider {
       const endpoints = [
         'https://www.koeri.boun.edu.tr/scripts/lst0.asp',
         'https://www.koeri.boun.edu.tr/scripts/lst1.asp',
-        'https://deprem.koeri.boun.edu.tr/sismo/2/latest.txt'
+        'https://deprem.koeri.boun.edu.tr/sismo/2/latest.txt',
       ];
 
       for (const endpoint of endpoints) {
@@ -18,8 +18,8 @@ export class KandilliProvider implements QuakeProvider {
           const response = await fetch(endpoint, {
             headers: {
               'Accept': 'text/plain, application/json, */*',
-              'User-Agent': 'AfetNet/1.0'
-            }
+              'User-Agent': 'AfetNet/1.0',
+            },
           });
 
           if (response.ok) {
@@ -103,7 +103,7 @@ export class KandilliProvider implements QuakeProvider {
           lat: lat > 0 ? lat : undefined,
           lon: lon > 0 ? lon : undefined,
           depth: depth > 0 ? depth : undefined,
-          source: 'Kandilli'
+          source: 'Kandilli',
         };
       }
     } catch (error) {
@@ -139,7 +139,7 @@ export class KandilliProvider implements QuakeProvider {
           lat: lat > 0 ? lat : undefined,
           lon: lon > 0 ? lon : undefined,
           depth: depth > 0 ? depth : undefined,
-          source: 'Kandilli'
+          source: 'Kandilli',
         };
       }
     } catch (error) {
@@ -161,7 +161,7 @@ export class KandilliProvider implements QuakeProvider {
         'YYYY.MM.DD HH:mm:ss',
         'YYYY-MM-DD HH:mm:ss',
         'DD.MM.YYYY HH:mm:ss',
-        'DD/MM/YYYY HH:mm:ss'
+        'DD/MM/YYYY HH:mm:ss',
       ];
 
       for (const format of formats) {
@@ -205,7 +205,7 @@ export class KandilliProvider implements QuakeProvider {
         lat: 40.7128,
         lon: 29.0060,
         depth: 12.8,
-        source: 'Kandilli'
+        source: 'Kandilli',
       },
       {
         id: 'kandilli_mock_2',
@@ -215,7 +215,7 @@ export class KandilliProvider implements QuakeProvider {
         lat: 36.8969,
         lon: 30.7133,
         depth: 7.2,
-        source: 'Kandilli'
+        source: 'Kandilli',
       },
       {
         id: 'kandilli_mock_3',
@@ -225,8 +225,8 @@ export class KandilliProvider implements QuakeProvider {
         lat: 41.0015,
         lon: 39.7178,
         depth: 18.5,
-        source: 'Kandilli'
-      }
+        source: 'Kandilli',
+      },
     ];
   }
 }

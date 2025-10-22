@@ -18,7 +18,7 @@ import { Pressable, Text, View } from 'react-native';
  */
 export const StatusIndicator = memo(({ 
   status, 
-  label 
+  label, 
 }: { 
   status: 'online' | 'offline' | 'connecting';
   label: string;
@@ -60,6 +60,7 @@ export const FamilyMemberCard = memo(({
     batteryLevel?: number;
     lastSeen?: number;
   };
+   
   onPress: (afnId: string) => void;
 }) => {
   return (
@@ -113,6 +114,7 @@ export const QueueItemCard = memo(({
     status: 'pending' | 'sending' | 'failed';
     timestamp: number;
   };
+   
   onRetry: (id: string) => void;
 }) => {
   const statusColors = {

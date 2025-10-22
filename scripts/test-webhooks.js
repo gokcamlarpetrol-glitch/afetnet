@@ -20,9 +20,9 @@ const webhookTests = [
         transactionId: 'test_renewal_123',
         expiresDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnet1.premium.monthly'
-      }
-    }
+        productId: 'org.afetnet1.premium.monthly',
+      },
+    },
   },
   {
     name: 'DID_CHANGE_RENEWAL_STATUS Event',
@@ -32,9 +32,9 @@ const webhookTests = [
         transactionId: 'test_status_change_123',
         originalTransactionId: 'test_original_123',
         productId: 'org.afetnet1.premium.yearly',
-        autoRenewStatus: 'true'
-      }
-    }
+        autoRenewStatus: 'true',
+      },
+    },
   },
   {
     name: 'EXPIRED Event',
@@ -43,9 +43,9 @@ const webhookTests = [
       data: {
         transactionId: 'test_expired_123',
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnet1.premium.monthly'
-      }
-    }
+        productId: 'org.afetnet1.premium.monthly',
+      },
+    },
   },
   {
     name: 'REFUND Event',
@@ -54,10 +54,10 @@ const webhookTests = [
       data: {
         transactionId: 'test_refund_123',
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnet1.premium.lifetime'
-      }
-    }
-  }
+        productId: 'org.afetnet1.premium.lifetime',
+      },
+    },
+  },
 ];
 
 async function testWebhook(testCase) {
@@ -69,7 +69,7 @@ async function testWebhook(testCase) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(testCase.payload)
+      body: JSON.stringify(testCase.payload),
     });
     
     if (response.ok) {

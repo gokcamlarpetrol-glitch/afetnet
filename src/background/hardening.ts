@@ -222,8 +222,8 @@ class BackgroundHardeningManager {
           { text: 'Ayarlara Git', onPress: () => {
             // This would open device settings
             logger.debug('Opening battery optimization settings', null, { component: 'BackgroundHardening' });
-          }},
-        ]
+          } },
+        ],
       );
     } else if (Platform.OS === 'ios') {
       Alert.alert(
@@ -233,7 +233,7 @@ class BackgroundHardeningManager {
         '2. AfetNet\'i etkinleştirin\n' +
         '3. Uygulamayı açık tutmaya çalışın\n\n' +
         'Acil durumlarda uygulamayı açık tutmak önemlidir.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   }

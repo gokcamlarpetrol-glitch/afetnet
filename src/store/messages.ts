@@ -46,18 +46,27 @@ interface MessagesState {
   activeContactId: string | null;
   
   // Contact actions
+   
   addContact: (contact: Contact) => void;
+   
   updateContact: (contactId: string, updates: Partial<Contact>) => void;
+   
   removeContact: (contactId: string) => void;
+   
   getContact: (contactId: string) => Contact | undefined;
   getNearbyContacts: () => Contact[];
   getOnlineContacts: () => Contact[];
   
   // Message actions
+   
   sendMessage: (contactId: string, content: string, type?: Message['type'], lat?: number, lon?: number) => Message;
+   
   receiveMessage: (message: Omit<Message, 'id' | 'timestamp' | 'unread'>) => void;
+   
   markAsRead: (contactId: string, messageId?: string) => void;
+   
   deleteMessage: (contactId: string, messageId: string) => void;
+   
   deleteConversation: (contactId: string) => void;
   
   // Conversation actions
@@ -91,7 +100,7 @@ export const useMessages = create<MessagesState>()(
       updateContact: (contactId: string, updates: Partial<Contact>) => {
         set((state) => ({
           contacts: state.contacts.map(c =>
-            c.id === contactId ? { ...c, ...updates, lastSeen: Date.now() } : c
+            c.id === contactId ? { ...c, ...updates, lastSeen: Date.now() } : c,
           ),
         }));
       },
@@ -190,7 +199,7 @@ export const useMessages = create<MessagesState>()(
             if (messageId) {
               // Mark specific message as read
               conversation.messages = conversation.messages.map(m =>
-                m.id === messageId ? { ...m, unread: false } : m
+                m.id === messageId ? { ...m, unread: false } : m,
               );
             } else {
               // Mark all messages as read
@@ -246,7 +255,7 @@ export const useMessages = create<MessagesState>()(
       getUnreadCount: () => {
         return Array.from(get().conversations.values()).reduce(
           (sum, conv) => sum + conv.unreadCount,
-          0
+          0,
         );
       },
 
@@ -273,8 +282,8 @@ export const useMessages = create<MessagesState>()(
           state.conversations = new Map(state.conversations);
         }
       },
-    }
-  )
+    },
+  ),
 );
 
 

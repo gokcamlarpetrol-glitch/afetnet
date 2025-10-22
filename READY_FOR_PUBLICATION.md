@@ -292,3 +292,5 @@ AfetNet uygulaması App Store yayınlama için **%100 HAZIR**.
 **SON KARAR**: YAYINLANMAYA HAZIR! 🎊
 
 
+
+

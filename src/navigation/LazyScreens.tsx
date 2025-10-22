@@ -54,7 +54,7 @@ export const PermissionsScreen = lazy(() => import('../onboarding/PermissionsScr
  */
 export function withSuspense<P extends object>(
   Component: React.LazyExoticComponent<React.ComponentType<P>>,
-  fallback?: React.ReactNode
+  fallback?: React.ReactNode,
 ) {
   return (props: P) => (
     <Suspense fallback={fallback || <LoadingScreen />}>
@@ -67,7 +67,7 @@ export function withSuspense<P extends object>(
  * Preload screen for faster navigation
  */
 export function preloadScreen(
-  Component: React.LazyExoticComponent<React.ComponentType<any>>
+  Component: React.LazyExoticComponent<React.ComponentType<any>>,
 ) {
   // Trigger dynamic import
   (Component as any)._payload?._result;

@@ -1,11 +1,11 @@
-import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
-import * as Location from "expo-location";
-import { whisper } from "../family/whisper";
-import { quantizeLatLng } from "../geo/coarse";
-import { addTicket } from "../help/store";
-import { now } from "../relief/util";
-import { writeAudit } from "../safety/audit";
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
+import { whisper } from '../family/whisper';
+import { quantizeLatLng } from '../geo/coarse';
+import { addTicket } from '../help/store';
+import { now } from '../relief/util';
+import { writeAudit } from '../safety/audit';
 
 let rec: Audio.Recording | null = null;
 let on=false;
@@ -48,21 +48,23 @@ export async function startAudioDetect(){
     } as any);
     await rec.startAsync();
     loop().catch(()=>{});
-    writeAudit("system","audio.detect.start",{});
-  }catch(e){ on=false; }
+    writeAudit('system','audio.detect.start',{});
+  }catch{ on=false; }
 }
 
 export async function stopAudioDetect(){
   on=false;
-  try{ await rec?.stopAndUnloadAsync(); }catch{}
+  try{ await rec?.stopAndUnloadAsync(); }catch{
+    // Ignore stop errors
+  }
   rec=null;
-  writeAudit("system","audio.detect.stop",{});
+  writeAudit('system','audio.detect.stop',{});
 }
 
 async function loop(){
   // NOTE: Expo Recording metering is limited; use time-slice approach: stop→read file→restart.
   while(on){
-    await new Promise(r=>setTimeout(r, 4000));
+    await new Promise(r=>(globalThis as any).setTimeout(r, 4000));
     try{
       await rec?.stopAndUnloadAsync();
       const uri = rec?.getURI(); // we won't store; just inspect metadata size for heuristics
@@ -72,7 +74,7 @@ async function loop(){
         // crude entropy/energy proxy
         const big = ((info as any).size||0) > 90000; // ~few seconds loud
         if(big){
-          await triggerSOS("audio-energy");
+          await triggerSOS('audio-energy');
         }
         await FileSystem.deleteAsync(uri, { idempotent:true });
       }
@@ -103,7 +105,9 @@ async function loop(){
         },
       } as any);
       await rec.startAsync();
-    }catch{}
+    }catch{
+      // Ignore recording restart errors
+    }
   }
 }
 
@@ -112,17 +116,19 @@ async function triggerSOS(reason:string){
   if(nowTs - lastSOS < 60_000) {return;} // debounce 60s
   lastSOS = nowTs;
   let q:{lat?:number;lng?:number}|undefined;
-  try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ q = quantizeLatLng(p.coords.latitude,p.coords.longitude); } }catch{}
+  try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ q = quantizeLatLng(p.coords.latitude,p.coords.longitude); } }catch{
+    // Ignore location errors
+  }
   await addTicket({
-    id: "h_sos_"+now(),
+    id: 'h_sos_'+now(),
     ts: now(),
-    kind: "rescue",
-    title: "Ses Algılandı (Yardım Sinyali)",
-    detail: "Enerji yüksek/keskin tepe — olası düdük/panlama",
-    prio: "life",
-    status: "new",
-    qlat: q?.lat ?? 0, qlng: q?.lng ?? 0
+    kind: 'rescue',
+    title: 'Ses Algılandı (Yardım Sinyali)',
+    detail: 'Enerji yüksek/keskin tepe — olası düdük/panlama',
+    prio: 'life',
+    status: 'new',
+    qlat: q?.lat ?? 0, qlng: q?.lng ?? 0,
   });
-  await whisper("s o s ses yardim"); // ULB kısa
-  await writeAudit("system","audio.detect.sos",{ reason, q });
+  await whisper('s o s ses yardim'); // ULB kısa
+  await writeAudit('system','audio.detect.sos',{ reason, q });
 }

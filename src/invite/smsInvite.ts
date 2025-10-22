@@ -40,7 +40,7 @@ Yakınken QR ile de eşleşebiliriz.`;
 
 export async function sendInviteToMultipleContacts(
   contacts: Array<{ phoneE164: string; name?: string }>, 
-  myAfnId: string
+  myAfnId: string,
 ): Promise<{ sent: number; failed: number }> {
   let sent = 0;
   let failed = 0;

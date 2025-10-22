@@ -53,8 +53,8 @@ class EmergencyMeshManager extends SimpleEventEmitter {
   private connectedNodes = new Map<string, MeshNode>();
   private messageQueue = new Map<string, MeshMessage[]>();
   private pendingMessages = new Map<string, MeshMessage>();
-  private meshInterval: NodeJS.Timeout | null = null;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private meshInterval: any = null;
+  private heartbeatInterval: any = null;
   private nodeId: string;
   private maxHops = 5;
   private messageTimeout = 30000; // 30 seconds
@@ -77,12 +77,12 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start mesh operations
-      this.meshInterval = setInterval(() => {
+      this.meshInterval = (globalThis as any).setInterval(() => {
         this.processMeshOperations();
       }, 2000); // Every 2 seconds
 
       // Start heartbeat
-      this.heartbeatInterval = setInterval(() => {
+      this.heartbeatInterval = (globalThis as any).setInterval(() => {
         this.sendHeartbeat();
       }, 10000); // Every 10 seconds
 
@@ -112,12 +112,12 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       this.isActive = false;
 
       if (this.meshInterval) {
-        clearInterval(this.meshInterval);
+        (globalThis as any).clearInterval(this.meshInterval);
         this.meshInterval = null;
       }
 
       if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
+        (globalThis as any).clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = null;
       }
 
@@ -156,7 +156,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
         timestamp: Date.now(),
         encrypted: true,
         hops: 0,
-        maxHops: this.maxHops
+        maxHops: this.maxHops,
       };
 
       // Send with multiple delivery attempts
@@ -167,7 +167,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
           if (deliverySuccess) break;
           
           // Wait before retry
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          await new Promise(resolve => (globalThis as any).setTimeout(resolve, 1000 * attempt));
         } catch (error) {
           emergencyLogger.logMesh('error', `SOS delivery attempt ${attempt} failed`, { error: String(error) });
         }
@@ -182,7 +182,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       emergencyLogger.logMesh('info', 'Emergency SOS sent', { 
         sosId: sosData.id, 
         success: deliverySuccess,
-        attempts: 3
+        attempts: 3,
       });
 
       logger.debug(`🚨 Emergency SOS ${deliverySuccess ? 'sent successfully' : 'sent via backup methods'}`);
@@ -231,7 +231,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       this.pendingMessages.set(message.id, message);
 
       // Set timeout for message
-      setTimeout(() => {
+      (globalThis as any).setTimeout(() => {
         this.pendingMessages.delete(message.id);
       }, this.messageTimeout);
 
@@ -354,7 +354,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
     const availableNodes = Array.from(this.connectedNodes.values()).filter(node => 
       node.isActive && 
       node.id !== message.from && 
-      node.id !== this.nodeId
+      node.id !== this.nodeId,
     );
 
     // Simple routing: forward to nodes with better signal strength
@@ -393,12 +393,12 @@ class EmergencyMeshManager extends SimpleEventEmitter {
         payload: {
           nodeId: this.nodeId,
           timestamp: Date.now(),
-          status: 'active'
+          status: 'active',
         },
         timestamp: Date.now(),
         encrypted: false,
         hops: 0,
-        maxHops: 1
+        maxHops: 1,
       };
 
       await this.sendMessage(heartbeat);
@@ -415,7 +415,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
     connectedNodes: number;
     activeNodes: number;
     pendingMessages: number;
-  } {
+    } {
     const connectedNodes = Array.from(this.connectedNodes.values());
     const activeNodes = connectedNodes.filter(node => node.isActive);
 
@@ -424,7 +424,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       nodeId: this.nodeId,
       connectedNodes: connectedNodes.length,
       activeNodes: activeNodes.length,
-      pendingMessages: this.pendingMessages.size
+      pendingMessages: this.pendingMessages.size,
     };
   }
 
@@ -449,14 +449,14 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       location: {
         lat: 41.0082 + (Math.random() - 0.5) * 0.01,
         lon: 28.9784 + (Math.random() - 0.5) * 0.01,
-        accuracy: Math.floor(Math.random() * 50) + 5
+        accuracy: Math.floor(Math.random() * 50) + 5,
       },
       lastSeen: Date.now(),
       signalStrength: Math.floor(Math.random() * 100) + 20,
       batteryLevel: Math.floor(Math.random() * 100) + 10,
       isActive: true,
       capabilities: ['sos', 'alert', 'data'],
-      encrypted: true
+      encrypted: true,
     };
   }
 
@@ -500,7 +500,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       const backupRecord = {
         ...sosData,
         backupTimestamp: Date.now(),
-        deliveryMethods: ['mesh_failed', 'wifi_direct', 'bluetooth', 'audio', 'visual']
+        deliveryMethods: ['mesh_failed', 'wifi_direct', 'bluetooth', 'audio', 'visual'],
       };
 
       await AsyncStorage.setItem(`emergency_backup_${sosData.id}`, JSON.stringify(backupRecord));
@@ -514,7 +514,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
     try {
       const meshData = {
         nodes: Array.from(this.connectedNodes.values()),
-        messages: Array.from(this.pendingMessages.values())
+        messages: Array.from(this.pendingMessages.values()),
       };
 
       await AsyncStorage.setItem('mesh_data', JSON.stringify(meshData));
@@ -554,7 +554,7 @@ class EmergencyMeshManager extends SimpleEventEmitter {
       networkHealth: this.calculateNetworkHealth(),
       averageSignalStrength: Array.from(this.connectedNodes.values()).reduce((sum, node) => sum + node.signalStrength, 0) / this.connectedNodes.size || 0,
       batteryLevel: this.batteryLevel,
-      lastActivity: this.lastActivity
+      lastActivity: this.lastActivity,
     };
   }
 

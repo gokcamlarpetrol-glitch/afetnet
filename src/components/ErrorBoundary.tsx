@@ -104,7 +104,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                   Hata ID: {this.state.errorId}
                 </Text>
                 
-                {__DEV__ && this.state.error && (
+                {(globalThis as any).__DEV__ && this.state.error && (
                   <View style={styles.debugInfo}>
                     <Text style={styles.debugTitle}>Geliştirici Bilgileri:</Text>
                     <Text style={styles.debugText}>

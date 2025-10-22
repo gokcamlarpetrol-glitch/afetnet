@@ -1,6 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = "afn:ice:v1";
+const KEY = 'afn:ice:v1';
 export type ICE = {
   name: string;
   blood?: string;

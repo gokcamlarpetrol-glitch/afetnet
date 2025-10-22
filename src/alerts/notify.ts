@@ -48,11 +48,11 @@ export async function notifyQuake(quake: QuakeItem, tag: 'live' | 'bg'): Promise
           location: quake.place,
           source: quake.source,
           tag,
-          timestamp: quake.time
+          timestamp: quake.time,
         },
         sound: true,
         priority: Notifications.AndroidNotificationPriority.HIGH,
-        categoryIdentifier: 'quake-alert'
+        categoryIdentifier: 'quake-alert',
       },
       trigger: null, // Send immediately
     });
@@ -104,11 +104,11 @@ export async function notifyPWaveAlert(): Promise<void> {
         body,
         data: {
           type: 'pwave-experimental',
-          timestamp: Date.now()
+          timestamp: Date.now(),
         },
         sound: true,
         priority: Notifications.AndroidNotificationPriority.DEFAULT,
-        categoryIdentifier: 'pwave-alert'
+        categoryIdentifier: 'pwave-alert',
       },
       trigger: null,
     });
@@ -132,7 +132,7 @@ export async function notifyTestAlert(): Promise<void> {
         body,
         data: {
           type: 'test',
-          timestamp: Date.now()
+          timestamp: Date.now(),
         },
         sound: true,
         priority: Notifications.AndroidNotificationPriority.DEFAULT,

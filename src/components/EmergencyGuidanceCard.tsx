@@ -5,7 +5,9 @@ import { EmergencyGuidance, GuidanceStep } from '../services/guidance/EmergencyG
 
 interface EmergencyGuidanceCardProps {
   guidance: EmergencyGuidance;
+   
   onStepComplete: (guidanceId: string, stepId: string) => void;
+   
   onGuidanceComplete: (guidanceId: string) => void;
 }
 
@@ -28,7 +30,7 @@ export default function EmergencyGuidanceCard({ guidance, onStepComplete, onGuid
             duration: 1000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
       pulse.start();
       return () => pulse.stop();
@@ -37,19 +39,19 @@ export default function EmergencyGuidanceCard({ guidance, onStepComplete, onGuid
 
   const getSeverityColor = (severity: EmergencyGuidance['severity']) => {
     switch (severity) {
-      case 'critical': return '#ef4444';
-      case 'high': return '#f59e0b';
-      case 'medium': return '#3b82f6';
-      case 'low': return '#10b981';
+    case 'critical': return '#ef4444';
+    case 'high': return '#f59e0b';
+    case 'medium': return '#3b82f6';
+    case 'low': return '#10b981';
     }
   };
 
   const getSeverityBg = (severity: EmergencyGuidance['severity']) => {
     switch (severity) {
-      case 'critical': return '#7f1d1d';
-      case 'high': return '#78350f';
-      case 'medium': return '#1e3a8a';
-      case 'low': return '#064e3b';
+    case 'critical': return '#7f1d1d';
+    case 'high': return '#78350f';
+    case 'medium': return '#1e3a8a';
+    case 'low': return '#064e3b';
     }
   };
 

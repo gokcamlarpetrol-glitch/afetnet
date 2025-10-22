@@ -1,11 +1,11 @@
-import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
-import { p2pLocalSend } from "../p2p/send";
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
+import { p2pLocalSend } from '../p2p/send';
 
-const DIR="/tmp/voice/";
+const DIR='/tmp/voice/';
 
 export async function recordVoice(id:string){
-  await FileSystem.makeDirectoryAsync(DIR,{intermediates:true}).catch(()=>{});
+  await FileSystem.makeDirectoryAsync(DIR,{ intermediates:true }).catch(()=>{});
   const rec=new Audio.Recording();
   await rec.prepareToRecordAsync({
     android: {
@@ -39,8 +39,8 @@ export async function stopVoice(){
   const rec=(recordVoice as any)._rec; if(!rec) {return;}
   await rec.stopAndUnloadAsync();
   const uri=rec.getURI(); const id=(recordVoice as any)._id;
-  const b64=await FileSystem.readAsStringAsync(uri,{encoding:"base64" as any});
-  const chunk={ id:"voice_"+id, kind:"voice_note", ts:Date.now(), data:b64.slice(0,4000) }; // trimmed demo
+  const b64=await FileSystem.readAsStringAsync(uri,{ encoding:'base64' as any });
+  const chunk={ id:'voice_'+id, kind:'voice_note', ts:Date.now(), data:b64.slice(0,4000) }; // trimmed demo
   await p2pLocalSend(chunk);
   (recordVoice as any)._rec=null;
 }

@@ -25,7 +25,7 @@ class EmergencyPowerManager extends SimpleEventEmitter {
       name: 'Emergency Power Mode',
       batteryThreshold: 20,
       features: ['sos_only', 'location_tracking', 'mesh_network'],
-      enabled: true
+      enabled: true,
     });
   }
 
@@ -82,7 +82,7 @@ class EmergencyPowerManager extends SimpleEventEmitter {
       currentMode: this.currentMode?.name || 'normal',
       batteryLevel: 85, // Mock battery level
       isOptimized: true,
-      availableModes: this.getPowerModes()
+      availableModes: this.getPowerModes(),
     };
   }
 

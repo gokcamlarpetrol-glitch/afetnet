@@ -2,14 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import {
-    Alert,
-    Modal,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { FamilyMember, useFamily } from '../store/family';
 
@@ -23,10 +23,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
     update,
     remove,
     addByAfnId,
-    addByQR,
-    verifyMember,
     generateMyAfnId,
-    exportMemberQR,
     getOnlineMembers,
     getNeedHelpMembers,
   } = useFamily();
@@ -44,7 +41,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
   const filteredMembers = list.filter(m =>
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.afnId?.toLowerCase().includes(searchQuery.toLowerCase())
+    m.afnId?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   const handleAddMember = () => {
@@ -79,15 +76,15 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                     } else {
                       Alert.alert('Hata', result.error || 'Kişi eklenemedi');
                     }
-                  }
-                }
+                  },
+                },
               ],
-              'plain-text'
+              'plain-text',
             );
-          }
-        }
+          },
+        },
       ],
-      'plain-text'
+      'plain-text',
     );
   };
 
@@ -111,10 +108,10 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
             });
             Alert.alert('Başarılı', `${name} eklendi!`);
             setAddModalVisible(false);
-          }
-        }
+          },
+        },
       ],
-      'plain-text'
+      'plain-text',
     );
   };
 
@@ -130,9 +127,9 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
             // TODO: QR Scanner açılacak
             Alert.alert('Geliştiriliyor', 'QR tarayıcı yakında eklenecek');
             setAddModalVisible(false);
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -151,16 +148,16 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
           text: 'WhatsApp ile Paylaş',
           onPress: () => {
             Alert.alert('WhatsApp', `"Benim AfetNet ID'm: ${myId}" mesajını WhatsApp'ta paylaşın`);
-          }
+          },
         },
         {
           text: 'SMS ile Paylaş',
           onPress: () => {
             Alert.alert('SMS', `"Benim AfetNet ID'm: ${myId}" mesajını SMS ile gönderin`);
-          }
+          },
         },
-        { text: 'Tamam' }
-      ]
+        { text: 'Tamam' },
+      ],
     );
   };
 
@@ -181,17 +178,17 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
   const getStatusColor = (status: FamilyMember['status']) => {
     switch (status) {
-      case 'ok': return '#10b981';
-      case 'need': return '#ef4444';
-      default: return '#f59e0b';
+    case 'ok': return '#10b981';
+    case 'need': return '#ef4444';
+    default: return '#f59e0b';
     }
   };
 
   const getStatusIcon = (status: FamilyMember['status']) => {
     switch (status) {
-      case 'ok': return 'checkmark-circle';
-      case 'need': return 'alert-circle';
-      default: return 'help-circle';
+    case 'ok': return 'checkmark-circle';
+    case 'need': return 'alert-circle';
+    default: return 'help-circle';
     }
   };
 
@@ -209,7 +206,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
       {/* Premium Header */}
       <View style={{ paddingTop: 20, paddingHorizontal: 20, paddingBottom: 20 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }}>
             <Text style={{ color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: -0.5 }}>
               Aile & Yakınlar
             </Text>
@@ -220,7 +217,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
           
           {/* QR Button */}
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleAddByQR}
             style={{
               backgroundColor: '#8b5cf6',
@@ -241,7 +238,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
           
           {/* Add Button */}
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleAddMember}
             style={{
               backgroundColor: '#3b82f6',
@@ -296,7 +293,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
             <Pressable onPress={handleShareMyId}>
               <Ionicons name="copy-outline" size={24} color="#3b82f6" />
             </Pressable>
-      </View>
+          </View>
           <Text style={{ color: '#64748b', fontSize: 12 }}>
             Bu ID'yi paylaşarak insanlar sizi ekleyebilir
           </Text>
@@ -315,7 +312,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
         }}>
           <Ionicons name="search" size={20} color="#64748b" />
           <TextInput
-          accessibilityRole="text"
+            accessibilityRole="text"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Kişi ara..."
@@ -367,7 +364,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
           {filteredMembers.map((member) => (
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               key={member.id}
               onPress={() => handleMemberPress(member)}
               style={{
@@ -426,7 +423,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                   {/* Quick Actions */}
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <Pressable accessible={true}
-          accessibilityRole="button"
+                      accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'ok')}
                       style={{
                         flex: 1,
@@ -440,7 +437,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                     </Pressable>
 
                     <Pressable accessible={true}
-          accessibilityRole="button"
+                      accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'unknown')}
                       style={{
                         flex: 1,
@@ -454,7 +451,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                     </Pressable>
 
                     <Pressable accessible={true}
-          accessibilityRole="button"
+                      accessibilityRole="button"
                       onPress={() => handleStatusUpdate(member, 'need')}
                       style={{
                         flex: 1,
@@ -490,7 +487,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
               </Text>
               {!searchQuery && (
                 <Pressable accessible={true}
-          accessibilityRole="button"
+                  accessibilityRole="button"
                   onPress={handleAddMember}
                   style={{
                     backgroundColor: '#3b82f6',
@@ -511,8 +508,8 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
       {/* Add Member Modal */}
       <Modal
-          accessible={true}
-          accessibilityViewIsModal={true}
+        accessible={true}
+        accessibilityViewIsModal={true}
         visible={addModalVisible}
         transparent
         animationType="slide"
@@ -536,7 +533,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
             {/* Add Options */}
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={handleAddByAfnId}
               style={{
                 backgroundColor: '#334155',
@@ -570,7 +567,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
             </Pressable>
 
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={handleAddByQR}
               style={{
                 backgroundColor: '#334155',
@@ -604,7 +601,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
             </Pressable>
 
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={handleAddManual}
               style={{
                 backgroundColor: '#334155',
@@ -642,8 +639,8 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
 
       {/* Member Detail Modal */}
       <Modal
-          accessible={true}
-          accessibilityViewIsModal={true}
+        accessible={true}
+        accessibilityViewIsModal={true}
         visible={detailModalVisible}
         transparent
         animationType="slide"
@@ -701,7 +698,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                       <Text style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Bağlantı Yöntemi</Text>
                       <Text style={{ color: '#ffffff', fontSize: 16 }}>
                         {selectedMember.connectionMethod === 'qr' ? '📱 QR Kod' : 
-                         selectedMember.connectionMethod === 'id' ? '🆔 AFN-ID' : '✍️ Manuel'}
+                          selectedMember.connectionMethod === 'id' ? '🆔 AFN-ID' : '✍️ Manuel'}
                       </Text>
                     </View>
                   )}
@@ -711,12 +708,12 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                 <View style={{ marginTop: 24, gap: 12 }}>
                   {selectedMember.afnId && (
                     <Pressable accessible={true}
-          accessibilityRole="button"
+                      accessibilityRole="button"
                       onPress={async () => {
                         await Clipboard.setStringAsync(selectedMember.afnId!);
                         Alert.alert(
                           '✅ AFN-ID Kopyalandı!',
-                          `${selectedMember.name}'ın AFN-ID'si:\n\n${selectedMember.afnId}\n\nBu ID'yi başkalarıyla paylaşarak onların da bu kişiyi eklemesini sağlayabilirsiniz!`
+                          `${selectedMember.name}'ın AFN-ID'si:\n\n${selectedMember.afnId}\n\nBu ID'yi başkalarıyla paylaşarak onların da bu kişiyi eklemesini sağlayabilirsiniz!`,
                         );
                       }}
                       style={{
@@ -737,7 +734,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                   )}
 
                   <Pressable accessible={true}
-          accessibilityRole="button"
+                    accessibilityRole="button"
                     onPress={() => {
                       setDetailModalVisible(false);
                       Alert.alert('Mesaj', `${selectedMember.name} ile mesajlaşma özelliği yakında eklenecek`);
@@ -755,7 +752,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                   </Pressable>
 
                   <Pressable accessible={true}
-          accessibilityRole="button"
+                    accessibilityRole="button"
                     onPress={() => {
                       Alert.alert(
                         'Sil',
@@ -769,9 +766,9 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                               remove(selectedMember.id);
                               setDetailModalVisible(false);
                               Alert.alert('Silindi', `${selectedMember.name} silindi`);
-                            }
-                          }
-                        ]
+                            },
+                          },
+                        ],
                       );
                     }}
                     style={{

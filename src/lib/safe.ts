@@ -4,6 +4,7 @@ import { logger } from '../utils/productionLogger';
 export interface SafeCallOptions {
   timeout?: number;
   retries?: number;
+   
   onError?: (error: Error) => void;
   fallback?: any;
 }
@@ -11,11 +12,12 @@ export interface SafeCallOptions {
 export interface WatchdogOptions {
   name: string;
   timeout: number;
+   
   onTimeout?: (name: string, duration: number) => void;
 }
 
 class WatchdogManager {
-  private timers: Map<string, NodeJS.Timeout> = new Map();
+  private timers: Map<string, any> = new Map();
   private startTimes: Map<string, number> = new Map();
 
   start(name: string, timeout: number, onTimeout?: (name: string, duration: number) => void): void {
@@ -23,7 +25,7 @@ class WatchdogManager {
     
     this.startTimes.set(name, Date.now());
     
-    const timer = setTimeout(() => {
+    const timer = (globalThis as any).setTimeout(() => {
       const duration = Date.now() - (this.startTimes.get(name) || Date.now());
       
       logEvent('WATCHDOG_TIMEOUT', {
@@ -47,7 +49,7 @@ class WatchdogManager {
   stop(name: string): void {
     const timer = this.timers.get(name);
     if (timer) {
-      clearTimeout(timer);
+      (globalThis as any).clearTimeout(timer);
       this.cleanup(name);
     }
   }
@@ -79,25 +81,23 @@ export function withWatchdog<T>(
   name: string,
   timeout: number,
   fn: () => Promise<T>,
-  onTimeout?: (name: string, duration: number) => void
+  onTimeout?: (name: string, duration: number) => void,
 ): Promise<T> {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     watchdogManager.start(name, timeout, onTimeout);
     
-    try {
-      const result = await fn();
-      watchdogManager.stop(name);
-      resolve(result);
-    } catch (error) {
-      watchdogManager.stop(name);
-      reject(error);
-    }
+    fn()
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        watchdogManager.stop(name);
+      });
   });
 }
 
 export function safeCall<T>(
   fn: () => T | Promise<T>,
-  options: SafeCallOptions = {}
+  options: SafeCallOptions = {},
 ): Promise<T | undefined> {
   const {
     timeout = 8000,
@@ -106,7 +106,7 @@ export function safeCall<T>(
     fallback,
   } = options;
 
-  return new Promise(async (resolve) => {
+  return new Promise((resolve) => {
     let lastError: Error | undefined;
     
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -127,7 +127,7 @@ export function safeCall<T>(
               timeout,
               attempt,
             });
-          }
+          },
         );
         
         if (attempt > 0) {
@@ -154,7 +154,7 @@ export function safeCall<T>(
         
         if (attempt < retries) {
           // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+          await new Promise(resolve => (globalThis as any).setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
       }
     }
@@ -171,15 +171,15 @@ export function safeCall<T>(
 
 export function safeAwait<T>(
   promise: Promise<T>,
-  options: SafeCallOptions = {}
+  options: SafeCallOptions = {},
 ): Promise<T | undefined> {
   return safeCall(() => promise, options);
 }
 
 export function createGlobalErrorHandler() {
-  const originalHandler = ErrorUtils.getGlobalHandler();
+  const originalHandler = (globalThis as any).ErrorUtils?.getGlobalHandler();
   
-  ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+  (globalThis as any).ErrorUtils?.setGlobalHandler((error: Error, isFatal?: boolean) => {
     logEvent('GLOBAL_ERROR', {
       message: error.message,
       stack: error.stack,
@@ -204,8 +204,8 @@ export function setupCrashGuards(): void {
   createGlobalErrorHandler();
   
   // Set up unhandled promise rejection handler
-  const originalUnhandledRejection = global.addEventListener;
-  global.addEventListener = function(type: string, listener: any, options?: any) {
+  const originalUnhandledRejection = (globalThis as any).addEventListener;
+  (globalThis as any).addEventListener = function(type: string, listener: any, options?: any) {
     if (type === 'unhandledrejection') {
       const wrappedListener = (event: any) => {
         logEvent('UNHANDLED_PROMISE_REJECTION', {
@@ -229,7 +229,7 @@ export function setupCrashGuards(): void {
 
 export function createSafeAsyncFunction<T extends any[], R>(
   fn: (...args: T) => Promise<R>,
-  options: SafeCallOptions = {}
+  options: SafeCallOptions = {},
 ) {
   return async (...args: T): Promise<R | undefined> => {
     return safeCall(() => fn(...args), options);
@@ -238,7 +238,7 @@ export function createSafeAsyncFunction<T extends any[], R>(
 
 export function createSafeSyncFunction<T extends any[], R>(
   fn: (...args: T) => R,
-  options: SafeCallOptions = {}
+  options: SafeCallOptions = {},
 ) {
   return (...args: T): R | undefined => {
     try {

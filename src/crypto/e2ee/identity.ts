@@ -1,17 +1,17 @@
 // Safe import for react-native-get-random-values
 import { logger } from '../../utils/productionLogger';
 try {
-  require("react-native-get-random-values");
-} catch (e) {
-  logger.warn("react-native-get-random-values not available");
+  (globalThis as any).require('react-native-get-random-values');
+} catch {
+  logger.warn('react-native-get-random-values not available');
 }
-import * as SecureStore from "expo-secure-store";
-import nacl from "tweetnacl";
+import * as SecureStore from 'expo-secure-store';
+import nacl from 'tweetnacl';
 
-const IK_SK = "afn:e2ee:ik:sk"; // identity key (X25519)
-const IK_PK = "afn:e2ee:ik:pk";
-const PRE_SK = "afn:e2ee:pre:sk";
-const PRE_PK = "afn:e2ee:pre:pk";
+const IK_SK = 'afn:e2ee:ik:sk'; // identity key (X25519)
+const IK_PK = 'afn:e2ee:ik:pk';
+const PRE_SK = 'afn:e2ee:pre:sk';
+const PRE_PK = 'afn:e2ee:pre:pk';
 
 export type PreKeyBundle = {
   v:1;
@@ -20,8 +20,8 @@ export type PreKeyBundle = {
   sig_b64: string;      // sig over spk_pub by ik
 };
 
-function b64(u8:Uint8Array){ return Buffer.from(u8).toString("base64"); }
-function db64(s:string){ return new Uint8Array(Buffer.from(s, "base64")); }
+function b64(u8:Uint8Array){ return (globalThis as any).Buffer.from(u8).toString('base64'); }
+function db64(s:string){ return new Uint8Array((globalThis as any).Buffer.from(s, 'base64')); }
 
 export async function ensureIdentity(){
   let ik_sk = await SecureStore.getItemAsync(IK_SK);

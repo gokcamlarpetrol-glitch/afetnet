@@ -38,13 +38,13 @@ export default function BlackBox() {
         await Sharing.shareAsync(exportResult.filePath, {
           mimeType: 'application/octet-stream',
           dialogTitle: 'Kara Kutu Günlükleri Dışa Aktar',
-          UTI: 'com.afetnet.blackbox'
+          UTI: 'com.afetnet.blackbox',
         });
         
         Alert.alert(
           'Dışa Aktarım Tamamlandı',
           `Günlükler şifrelenerek dışa aktarıldı.\n\nDosya: ${exportResult.fileName}\nOturum Anahtarı: ${exportResult.sessionKey.slice(0, 16)}...`,
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
       } else {
         Alert.alert('Hata', 'Paylaşım özelliği kullanılamıyor');
@@ -63,7 +63,7 @@ export default function BlackBox() {
     { key: 'SOS', label: 'SOS' },
     { key: 'RELAY', label: 'Relay' },
     { key: 'MISSION', label: 'Görev' },
-    { key: 'ERROR', label: 'Hata' }
+    { key: 'ERROR', label: 'Hata' },
   ];
 
   const formatTimestamp = (ts: number) => {
@@ -73,7 +73,7 @@ export default function BlackBox() {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit'
+      second: '2-digit',
     });
   };
 
@@ -110,17 +110,17 @@ export default function BlackBox() {
       <View style={styles.filterContainer}>
         {getFilterButtons().map((button) => (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             key={button.key}
             onPress={() => setFilter(button.key)}
             style={[
               styles.filterButton,
-              filter === button.key && styles.filterButtonActive
+              filter === button.key && styles.filterButtonActive,
             ]}
           >
             <Text style={[
               styles.filterButtonText,
-              filter === button.key && styles.filterButtonTextActive
+              filter === button.key && styles.filterButtonTextActive,
             ]}>
               {button.label}
             </Text>
@@ -151,7 +151,7 @@ export default function BlackBox() {
           disabled={isExporting || events.length === 0}
           style={[
             styles.exportButton,
-            (isExporting || events.length === 0) && styles.exportButtonDisabled
+            (isExporting || events.length === 0) && styles.exportButtonDisabled,
           ]}
         >
           <Text style={styles.exportButtonText}>

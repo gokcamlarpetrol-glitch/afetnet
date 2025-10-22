@@ -34,21 +34,21 @@
 export async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeout: number = 10000
+  timeout: number = 10000,
 ): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const controller = new (globalThis as any).AbortController();
+  const timeoutId = (globalThis as any).setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, {
+    const response = await (globalThis as any).fetch(url, {
       ...options,
       signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
+    (globalThis as any).clearTimeout(timeoutId);
     return response;
   } catch (error) {
-    clearTimeout(timeoutId);
+    (globalThis as any).clearTimeout(timeoutId);
     
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`Request timeout after ${timeout}ms`);
@@ -82,7 +82,7 @@ export async function fetchWithRetry(
   url: string,
   options: RequestInit = {},
   maxRetries: number = 3,
-  timeout: number = 10000
+  timeout: number = 10000,
 ): Promise<Response> {
   let lastError: Error | null = null;
 
@@ -110,7 +110,7 @@ export async function fetchWithRetry(
     // Wait before retry (exponential backoff)
     if (attempt < maxRetries) {
       const backoff = Math.min(1000 * Math.pow(2, attempt), 10000);
-      await new Promise(resolve => setTimeout(resolve, backoff));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, backoff));
     }
   }
 
@@ -136,7 +136,7 @@ export async function fetchWithRetry(
 export async function fetchJSON<T = any>(
   url: string,
   options: RequestInit = {},
-  timeout: number = 10000
+  timeout: number = 10000,
 ): Promise<T> {
   const response = await fetchWithTimeout(url, options, timeout);
 
@@ -164,7 +164,7 @@ export async function fetchJSON<T = any>(
 export async function postJSON<T = any>(
   url: string,
   data: any,
-  timeout: number = 10000
+  timeout: number = 10000,
 ): Promise<T> {
   return fetchJSON<T>(url, {
     method: 'POST',

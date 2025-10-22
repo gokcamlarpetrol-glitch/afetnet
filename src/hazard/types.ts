@@ -1,4 +1,4 @@
-export type HazardType = "aftershock"|"collapse"|"gas"|"flood"|"other";
+export type HazardType = 'aftershock'|'collapse'|'gas'|'flood'|'other';
 export type HazardZone = {
   id: string;
   t: HazardType;

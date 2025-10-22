@@ -27,13 +27,13 @@ class RescueGuidanceSystem extends SimpleEventEmitter {
   // CRITICAL: Create Rescue Mission
   async createRescueMission(mission: Omit<RescueMission, 'id' | 'status' | 'createdAt'>): Promise<string> {
     try {
-    const missionId = `mission_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const missionId = `mission_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     
       const rescueMission: RescueMission = {
         ...mission,
-      id: missionId,
+        id: missionId,
         status: 'pending',
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
 
       this.rescueMissions.set(missionId, rescueMission);

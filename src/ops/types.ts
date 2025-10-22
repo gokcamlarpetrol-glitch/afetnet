@@ -4,7 +4,7 @@ export type Iso = string;
 export type InvItem = {
   id: UUID;
   name: string;
-  kind: "medical"|"tool"|"food"|"water"|"comm"|"other";
+  kind: 'medical'|'tool'|'food'|'water'|'comm'|'other';
   qty: number;
   unit?: string;
   note?: string;
@@ -16,7 +16,7 @@ export type TeamMember = {
   id: UUID;
   name: string;
   callsign?: string;
-  role?: "medic"|"search"|"coord"|"driver"|"log"|"vol";
+  role?: 'medic'|'search'|'coord'|'driver'|'log'|'vol';
   reachable?: boolean;
 };
 
@@ -27,12 +27,12 @@ export type Team = {
   updated: number;
 };
 
-export type TaskStatus = "new"|"assigned"|"enroute"|"onsite"|"complete"|"cancelled";
+export type TaskStatus = 'new'|'assigned'|'enroute'|'onsite'|'complete'|'cancelled';
 export type Task = {
   id: UUID;
   title: string;
   detail?: string;
-  prio: "life"|"urgent"|"normal";
+  prio: 'life'|'urgent'|'normal';
   assignees: UUID[];        // team member ids
   waypoints?: { lat:number; lng:number; label?:string }[];
   status: TaskStatus;
@@ -52,14 +52,14 @@ export type Bulletin = {
   id: UUID;
   title: string;
   body: string;
-  cat: "shelter"|"health"|"safety"|"logistics"|"general";
-  prio: "high"|"med"|"low";
+  cat: 'shelter'|'health'|'safety'|'logistics'|'general';
+  prio: 'high'|'med'|'low';
   expires?: number;
   ts: number;
   sig?: string;  // optional signature hash (light)
 };
 
-export function makeId(prefix="id"){ return prefix+"_"+Math.random().toString(36).slice(2,10); }
+export function makeId(prefix='id'){ return prefix+'_'+Math.random().toString(36).slice(2,10); }
 
 
 

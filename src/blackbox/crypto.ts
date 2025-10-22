@@ -40,13 +40,13 @@ export async function encryptAndExportLogs(events: LogEvent[]): Promise<Encrypte
 
     // Write encrypted file
     await FileSystem.writeAsStringAsync(filePath, encryptedContent, {
-      encoding: 'utf8'
+      encoding: 'utf8',
     });
 
     return {
       sessionKey: sessionKeyB64,
       fileName,
-      filePath
+      filePath,
     };
 
   } catch (error) {
@@ -63,7 +63,7 @@ export async function decryptLogs(encryptedContent: string, sessionKey: string):
     return lines.map(line => {
       try {
         return JSON.parse(line) as LogEvent;
-      } catch (error) {
+      } catch {
         logger.warn('Failed to parse log line:', line);
         return null;
       }
@@ -82,13 +82,13 @@ function xorEncrypt(text: string, key: string): string {
     const keyChar = key.charCodeAt(i % key.length);
     result += String.fromCharCode(textChar ^ keyChar);
   }
-  return encodeBase64(new TextEncoder().encode(result));
+  return encodeBase64(new (globalThis as any).TextEncoder().encode(result));
 }
 
 function xorDecrypt(encryptedB64: string, key: string): string {
   try {
-    const encrypted = new TextDecoder().decode(
-      new Uint8Array(Array.from(atob(encryptedB64)).map(c => c.charCodeAt(0)))
+    const encrypted = new (globalThis as any).TextDecoder().decode(
+      new Uint8Array(Array.from((typeof (globalThis as any).atob !== 'undefined' ? (globalThis as any).atob(encryptedB64) : (globalThis as any).Buffer.from(encryptedB64, 'base64').toString('binary'))).map(c => c.charCodeAt(0))),
     );
     
     let result = '';
@@ -129,9 +129,9 @@ export async function getExportableLogs(): Promise<LogEvent[]> {
           fileName: file,
           filePath,
           size: fileInfo.exists ? fileInfo.size : 0,
-          uri: filePath
+          uri: filePath,
         };
-      })
+      }),
     );
 
     return fileInfos as any;

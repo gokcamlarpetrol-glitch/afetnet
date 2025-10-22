@@ -20,7 +20,7 @@ interface LiveFeedCallbacks {
 }
 
 class LiveFeedManager {
-  private intervalId: NodeJS.Timeout | null = null;
+  private intervalId: any = null;
   private isRunning = false;
   private burstMode = false;
   private burstEndTime = 0;
@@ -30,7 +30,7 @@ class LiveFeedManager {
 
   constructor(
     private initialSettings: EewSettings,
-    private callbacks: LiveFeedCallbacks
+    private callbacks: LiveFeedCallbacks,
   ) {
     this.settings = initialSettings;
     this.setupAppStateListener();
@@ -49,7 +49,7 @@ class LiveFeedManager {
           pollSlowMs: parsed.state?.pollSlowMs || this.initialSettings.pollSlowMs,
           selectedProvinces: parsed.state?.selectedProvinces || [],
           region: parsed.state?.region || this.initialSettings.region,
-          experimentalPWave: parsed.state?.experimentalPWave !== undefined ? parsed.state.experimentalPWave : this.initialSettings.experimentalPWave
+          experimentalPWave: parsed.state?.experimentalPWave !== undefined ? parsed.state.experimentalPWave : this.initialSettings.experimentalPWave,
         };
       }
     } catch (error) {
@@ -105,12 +105,12 @@ class LiveFeedManager {
 
       // Filter by magnitude threshold
       const filteredByMag = rawQuakes.filter(quake => 
-        quake.mag >= settings.magThreshold
+        quake.mag >= settings.magThreshold,
       );
 
       // Filter by region
       const filteredByRegion = filteredByMag.filter(quake =>
-        matchesRegionFilter(quake, settings.region)
+        matchesRegionFilter(quake, settings.region),
       );
 
       // Check for new events
@@ -134,7 +134,7 @@ class LiveFeedManager {
         this.callbacks.onEvents(newQuakes, {
           source: settings.quakeProvider,
           latencyMs,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
       }
 
@@ -177,13 +177,13 @@ class LiveFeedManager {
         const quakes = JSON.parse(cached);
         const filtered = quakes.filter((quake: QuakeItem) =>
           quake.mag >= this.settings.magThreshold &&
-          matchesRegionFilter(quake, this.settings.region)
+          matchesRegionFilter(quake, this.settings.region),
         );
 
         this.callbacks.onEvents(filtered, {
           source: 'cache',
           latencyMs: 0,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
       }
     } catch (error) {
@@ -222,7 +222,7 @@ class LiveFeedManager {
 
     const interval = this.getCurrentPollInterval();
     
-    this.intervalId = setTimeout(() => {
+    this.intervalId = (globalThis as any).setTimeout(() => {
       this.fetchAndProcessEvents();
       this.scheduleNextPoll();
     }, interval);
@@ -237,7 +237,7 @@ class LiveFeedManager {
     this.isRunning = false;
     
     if (this.intervalId) {
-      clearTimeout(this.intervalId);
+      (globalThis as any).clearTimeout(this.intervalId);
       this.intervalId = null;
     }
     
@@ -257,13 +257,13 @@ class LiveFeedManager {
 
 export function startLiveFeed(
   settings: EewSettings,
-  callbacks: LiveFeedCallbacks
+  callbacks: LiveFeedCallbacks,
 ): { stop: () => void } {
   const manager = new LiveFeedManager(settings, callbacks);
   manager.start();
   
   return {
-    stop: () => manager.stop()
+    stop: () => manager.stop(),
   };
 }
 

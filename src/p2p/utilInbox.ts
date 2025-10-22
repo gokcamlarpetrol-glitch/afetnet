@@ -1,9 +1,7 @@
-import * as FileSystem from "expo-file-system";
-import { list } from "../queue/v2";
-import { CourierBundle } from "./types";
-import * as Crypto from "expo-crypto";
-
-const DIR = "/tmp/";
+import * as FileSystem from 'expo-file-system';
+import { list } from '../queue/v2';
+import { CourierBundle } from './types';
+import * as Crypto from 'expo-crypto';
 
 async function shortId(){
   const h = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, Date.now().toString());

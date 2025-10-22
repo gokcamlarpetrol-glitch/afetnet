@@ -1,4 +1,4 @@
-import { EtaResult, haversineKm } from "./types";
+import { EtaResult, haversineKm } from './types';
 
 /** Simple ETA & intensity estimate (heuristic; not official GMPE) */
 export function estimateETAAndMMI(epi:{lat:number;lng:number;depthKm?:number}, me:{lat:number;lng:number}, mag:number): EtaResult {
@@ -15,10 +15,10 @@ export function estimateETAAndMMI(epi:{lat:number;lng:number;depthKm?:number}, m
   let mmi = 3 + 2.5*(pgaLog10);
   mmi = Math.max(1, Math.min(10, mmi));
 
-  let label:"Severe"|"Strong"|"Light"|"Weak" = "Weak";
-  if(mmi>=7.5) {label="Severe";}
-  else if(mmi>=6) {label="Strong";}
-  else if(mmi>=4.5) {label="Light";}
+  let label:'Severe'|'Strong'|'Light'|'Weak' = 'Weak';
+  if(mmi>=7.5) {label='Severe';}
+  else if(mmi>=6) {label='Strong';}
+  else if(mmi>=4.5) {label='Light';}
 
   return { distKm, etaSec, pEtaSec, mmi, label };
 }

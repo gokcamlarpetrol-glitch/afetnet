@@ -1,19 +1,19 @@
-export type CapSeverity = "Extreme"|"Severe"|"Moderate"|"Minor"|"Unknown";
-export type CapCategory = "Rescue"|"Fire"|"Medical"|"Weather"|"Infrastructure"|"Other";
+export type CapSeverity = 'Extreme'|'Severe'|'Moderate'|'Minor'|'Unknown';
+export type CapCategory = 'Rescue'|'Fire'|'Medical'|'Weather'|'Infrastructure'|'Other';
 
 export type CapLite = {
   identifier: string;      // unique id
   sender: string;          // device id or team
   sent: string;            // ISO
-  status: "Actual"|"Exercise"|"System"|"Test"|"Draft";
-  msgType: "Alert"|"Update"|"Cancel";
-  scope: "Public"|"Restricted"|"Private";
+  status: 'Actual'|'Exercise'|'System'|'Test'|'Draft';
+  msgType: 'Alert'|'Update'|'Cancel';
+  scope: 'Public'|'Restricted'|'Private';
   info: {
     category: CapCategory[];
     event: string;         // summary
-    urgency: "Immediate"|"Expected"|"Future"|"Past"|"Unknown";
+    urgency: 'Immediate'|'Expected'|'Future'|'Past'|'Unknown';
     severity: CapSeverity;
-    certainty: "Observed"|"Likely"|"Possible"|"Unlikely"|"Unknown";
+    certainty: 'Observed'|'Likely'|'Possible'|'Unlikely'|'Unknown';
     headline?: string;
     description?: string;
     contact?: string;

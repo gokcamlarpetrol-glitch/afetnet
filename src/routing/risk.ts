@@ -1,4 +1,4 @@
-import { GridBundle, loadGrid } from "../risk/grid";
+import { GridBundle, loadGrid } from '../risk/grid';
 
 /** MMI→ceza (0..1) kaba eşleme */
 export function riskFromMMI(mmi:number){
@@ -11,7 +11,6 @@ export function riskFromMMI(mmi:number){
 export async function makeRiskFn(){
   const g = await loadGrid();
   if(!g) {return (lat:number,lng:number)=> 0.05;}
-  const step = g.stepDeg || 0.2;
   return (lat:number,lng:number)=>{
     // en yakın hücre
     let best = 0.05; let bestD = 1e9;

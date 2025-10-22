@@ -1,15 +1,15 @@
-import type { MeshDriver } from "./iface";
+import type { MeshDriver } from './iface';
 
-const listeners: ((d: Uint8Array) => void)[] = [];
+const listeners: ((_d: Uint8Array) => void)[] = [];
 
 export const simDriver: MeshDriver = {
   supported: true,
   async start() {},
   async stop() {},
   async broadcast(data) {
-    setTimeout(() => listeners.forEach(l => l(data)), 200);
+    (globalThis as any).setTimeout(() => listeners.forEach(l => l(data)), 200);
   },
   onMessage(cb) {
     listeners.push(cb);
-  }
+  },
 };

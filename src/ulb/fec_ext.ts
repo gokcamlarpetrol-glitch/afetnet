@@ -1,9 +1,9 @@
-import { encodeULB } from "./codec";
-import { broadcastULB } from "./p2p";
-import { fecSplit, FECFrame } from "./fec";
+import { encodeULB } from './codec';
+import { broadcastULB } from './p2p';
+import { fecSplit, FECFrame } from './fec';
 
 export async function fecBroadcastX(text:string, N=3, retries=1, interleaveMs=120){
-  const gid = "fec_"+Date.now().toString(36).slice(2,8);
+  const gid = 'fec_'+Date.now().toString(36).slice(2,8);
   const { chunks, parity } = fecSplit(text, N);
   const seq = [...chunks, parity]; // last is parity (idx=N)
   const total = N;
@@ -22,7 +22,7 @@ export async function fecBroadcastX(text:string, N=3, retries=1, interleaveMs=12
       const body = JSON.stringify({ gid, idx: isParity? total : i, total, parity: isParity, payload });
       const enc = await encodeULB(body);
       await broadcastULB(enc);
-      await new Promise(r=>setTimeout(r, interleaveMs));
+      await new Promise(r=>(globalThis as any).setTimeout(r, interleaveMs));
     }
   }
 
@@ -30,8 +30,8 @@ export async function fecBroadcastX(text:string, N=3, retries=1, interleaveMs=12
   for(let r=0;r<retries;r++){
     // wait for NAK
     const wait = await new Promise<number[]>((resolve)=>{ 
-      const t=setTimeout(()=>resolve([]), 1200);
-      (global as typeof globalThis).__AFN_ULB_NAK__ = (gidIn:string, missing:number[])=>{ if(gidIn===gid){ clearTimeout(t); resolve(missing); } };
+      const t=(globalThis as any).setTimeout(()=>resolve([]), 1200);
+      (globalThis as any).__AFN_ULB_NAK__ = (gidIn:string, missing:number[])=>{ if(gidIn===gid){ (globalThis as any).clearTimeout(t); resolve(missing); } };
     });
     if(wait.length===0) {break;}
     await sendRound(wait);

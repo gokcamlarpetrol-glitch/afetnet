@@ -94,7 +94,7 @@ export function verifySignature(message: string, signatureBase64: string, public
     const publicKey = decodeBase64(publicKeyBase64);
     // @ts-expect-error - nacl.sign.detached.verify type mismatch
     return nacl.sign.detached.verify(msg, signature, publicKey);
-  } catch (error) {
+  } catch {
     return false;
   }
 }

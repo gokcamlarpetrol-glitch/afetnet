@@ -483,3 +483,5 @@ AfetNet uygulaması production-ready durumda. Kritik offline özellikler (mesajl
 **Yayına Hazır**: ✅
 
 
+
+

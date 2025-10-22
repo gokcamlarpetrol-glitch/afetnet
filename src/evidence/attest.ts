@@ -1,7 +1,7 @@
-import * as FileSystem from "expo-file-system";
-import * as Crypto from "expo-crypto";
-import { attestFolder } from "./paths";
-import { getPublicKeyB64, sign as edSign, verify as edVerify } from "../crypto/keys";
+import * as FileSystem from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+import { attestFolder } from './paths';
+import { getPublicKeyB64, sign as edSign, verify as edVerify } from '../crypto/keys';
 
 export type Attest = {
   v: 1;
@@ -29,8 +29,8 @@ export async function makeAttest(packId:string, packSha:string): Promise<Attest>
 
 export async function saveAttest(a:Attest){
   const folder = await ensureFolder(a.packId);
-  const short = a.signerPubB64.slice(0,16).replace(/[+/=]/g,"_");
-  await FileSystem.writeAsStringAsync(folder + short + ".json", JSON.stringify(a, null, 2));
+  const short = a.signerPubB64.slice(0,16).replace(/[+/=]/g,'_');
+  await FileSystem.writeAsStringAsync(folder + short + '.json', JSON.stringify(a, null, 2));
 }
 
 export async function loadAttests(packId:string): Promise<Attest[]>{
@@ -44,7 +44,9 @@ export async function loadAttests(packId:string): Promise<Attest[]>{
       const txt = await FileSystem.readAsStringAsync(folder+f);
       const a = JSON.parse(txt);
       out.push(a);
-    }catch{}
+    }catch{
+      // Ignore file read errors
+    }
   }
   return out;
 }

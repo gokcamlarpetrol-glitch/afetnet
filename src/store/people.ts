@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { logger } from '../utils/productionLogger';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { pubKeyToAfnId } from '../identity/afnId';
 
 export type Person = {
   id: string;              // internal UUID
@@ -18,11 +17,17 @@ export type Person = {
 export type PeopleState = {
   meAfnId: string;
   items: Person[];
+   
   addOrUpdate: (p: Partial<Person> & { id?: string }) => string; // returns id
+   
   remove: (id: string) => void;
+   
   markPaired: (id: string, pubKeyB64: string, afnId: string) => void;
+   
   findByAfnId: (afnId: string) => Person | undefined;
+   
   findByPhone: (phoneE164: string) => Person | undefined;
+   
   updateMyAfnId: (afnId: string) => void;
   getPairedCount: () => number;
   getTotalCount: () => number;
@@ -51,7 +56,7 @@ export const usePeople = create<PeopleState>()(
             updatedItems[existingIndex] = {
               ...updatedItems[existingIndex],
               ...data,
-              id: existingId
+              id: existingId,
             };
             return { items: updatedItems };
           } else {
@@ -64,7 +69,7 @@ export const usePeople = create<PeopleState>()(
               phoneE164: data.phoneE164,
               relation: data.relation,
               paired: data.paired || false,
-              lastSeen: data.lastSeen
+              lastSeen: data.lastSeen,
             };
             return { items: [...state.items, newPerson] };
           }
@@ -75,7 +80,7 @@ export const usePeople = create<PeopleState>()(
 
       remove: (id) => {
         set((state) => ({
-          items: state.items.filter(p => p.id !== id)
+          items: state.items.filter(p => p.id !== id),
         }));
       },
 
@@ -84,14 +89,14 @@ export const usePeople = create<PeopleState>()(
           items: state.items.map(p => 
             p.id === id 
               ? { 
-                  ...p, 
-                  pubKeyB64, 
-                  afnId, 
-                  paired: true,
-                  lastSeen: Date.now()
-                }
-              : p
-          )
+                ...p, 
+                pubKeyB64, 
+                afnId, 
+                paired: true,
+                lastSeen: Date.now(),
+              }
+              : p,
+          ),
         }));
       },
 
@@ -117,7 +122,7 @@ export const usePeople = create<PeopleState>()(
       getTotalCount: () => {
         const state = get();
         return state.items.length;
-      }
+      },
     }),
     {
       name: 'afn/people/v1',
@@ -133,9 +138,9 @@ export const usePeople = create<PeopleState>()(
         }
         
         return state;
-      }
-    }
-  )
+      },
+    },
+  ),
 );
 
 // Initialize AFN-ID when keypair is available

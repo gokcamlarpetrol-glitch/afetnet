@@ -31,7 +31,7 @@ class OfflineMessageManager extends SimpleEventEmitter {
         ...message,
         id: messageId,
         timestamp: Date.now(),
-        delivered: false
+        delivered: false,
       };
 
       this.messages.set(messageId, offlineMessage);
@@ -60,7 +60,7 @@ class OfflineMessageManager extends SimpleEventEmitter {
       pendingMessages: messages.filter(m => !m.delivered).length,
       deliveredMessages: messages.filter(m => m.delivered).length,
       criticalMessages: messages.filter(m => m.priority === 'critical').length,
-      lastMessageTime: messages.length > 0 ? Math.max(...messages.map(m => m.timestamp)) : 0
+      lastMessageTime: messages.length > 0 ? Math.max(...messages.map(m => m.timestamp)) : 0,
     };
   }
 
@@ -72,7 +72,7 @@ class OfflineMessageManager extends SimpleEventEmitter {
       type: 'text',
       content,
       priority,
-      encrypted: false
+      encrypted: false,
     });
   }
 

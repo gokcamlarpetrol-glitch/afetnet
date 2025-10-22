@@ -4,25 +4,21 @@ import { Platform } from 'react-native';
 
 // Safe BLE imports with fallbacks for Expo Go
 let BleManager: any = null;
-let Device: any = null;
-let Characteristic: any = null;
 let State: any = null;
 let isExpoGo = false;
 
 try {
-  const blePlx = require('react-native-ble-plx');
+  const blePlx = (globalThis as any).require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
-  Device = blePlx.Device;
-  Characteristic = blePlx.Characteristic;
   State = blePlx.State;
-} catch (e) {
+} catch {
   logger.warn('react-native-ble-plx not available, using fallback');
   isExpoGo = true;
 }
 
 // Detect Expo Go environment
 try {
-  const Constants = require('expo-constants');
+  const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient' || isExpoGo;
 } catch (e) {
   // Ignore
@@ -44,15 +40,7 @@ export interface BleMessage {
 
 // BLE service configuration
 const SERVICE_UUID = '12345678-1234-1234-1234-123456789ABC';
-const CHARACTERISTIC_UUID = '87654321-4321-4321-4321-CBA987654321';
 const DEVICE_NAME_PREFIX = 'AfetNet';
-
-// iOS background limitations
-const IOS_BACKGROUND_LIMITS = {
-  maxAdvertiseTime: 30, // seconds
-  maxScanTime: 10,      // seconds
-  cooldownTime: 300     // 5 minutes between background cycles
-};
 
 class BlePeerService {
   private manager: any = null;
@@ -193,14 +181,6 @@ class BlePeerService {
       }
 
       // Create minimal advertisement payload (just presence + short ID)
-      const shortId = this.identityPublicKey.slice(0, 8);
-      const advertiseData = {
-        name: this.deviceName,
-        serviceUUIDs: [SERVICE_UUID],
-        // iOS: Limited to 28 bytes total
-        // Android: More flexible but still limited
-        manufacturerData: Buffer.from(shortId, 'base64').toString('hex')
-      };
 
       await this.manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: true });
       this.isAdvertising = true;
@@ -233,7 +213,7 @@ class BlePeerService {
 
   // Start scanning for nearby devices
   // @ts-expect-error - Device type from react-native-ble-plx
-  async startScanning(onDeviceFound?: (device: Device) => void): Promise<void> {
+  async startScanning(onDeviceFound?: (device: any) => void): Promise<void> {
     if (this.isScanning) return;
     
     if (!this.manager) {
@@ -325,7 +305,7 @@ class BlePeerService {
       ...message,
       id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       fromPub: this.identityPublicKey,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // Add to seen messages to prevent loops
@@ -356,7 +336,7 @@ class BlePeerService {
       
       if (characteristic?.[0]) {
         const messageData = JSON.stringify(message);
-        const base64Data = Buffer.from(messageData).toString('base64');
+        const base64Data = (globalThis as any).Buffer.from(messageData).toString('base64');
         
         await characteristic[0].writeWithResponse(base64Data);
       }
@@ -375,7 +355,7 @@ class BlePeerService {
   // Handle received message
   private handleReceivedMessage(base64Data: string): void {
     try {
-      const messageData = Buffer.from(base64Data, 'base64').toString('utf8');
+      const messageData = (globalThis as any).Buffer.from(base64Data, 'base64').toString('utf8');
       const message: BleMessage = JSON.parse(messageData);
       
       // Validate message signature (placeholder - implement with tweetnacl)
@@ -425,7 +405,7 @@ class BlePeerService {
 
   // Start relay timer for periodic message forwarding
   private startRelayTimer(): void {
-    this.relayTimer = setInterval(async () => {
+    this.relayTimer = (globalThis as any).setInterval(async () => {
       await this.processRelayQueue();
     }, 5000); // Relay every 5 seconds
   }
@@ -439,7 +419,7 @@ class BlePeerService {
 
     for (const message of messagesToRelay) {
       // Attempt to send to connected devices
-      for (const [deviceId, device] of this.connectedDevices) {
+      for (const [deviceId] of this.connectedDevices) {
         try {
           await this.sendDirectMessage(message, deviceId);
         } catch (error) {
@@ -457,7 +437,7 @@ class BlePeerService {
     await this.stopScanning();
     
     if (this.relayTimer) {
-      clearInterval(this.relayTimer);
+      (globalThis as any).clearInterval(this.relayTimer);
       this.relayTimer = null;
     }
 

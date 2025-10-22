@@ -4,23 +4,21 @@ import { Platform } from 'react-native';
 
 // Safe BLE imports with fallbacks for Expo Go
 let BleManager: any = null;
-let Device: any = null;
 let State: any = null;
 let isExpoGo = false;
 
 try {
-  const blePlx = require('react-native-ble-plx');
+  const blePlx = (globalThis as any).require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
-  Device = blePlx.Device;
   State = blePlx.State;
-} catch (e) {
+} catch {
   logger.warn('react-native-ble-plx not available, using fallback');
   isExpoGo = true;
 }
 
 // Detect Expo Go environment
 try {
-  const Constants = require('expo-constants');
+  const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient' || isExpoGo;
 } catch (e) {
   // Ignore
@@ -83,7 +81,7 @@ export class BLERelay {
   private rssiSamples: RSSISample[] = [];
   private maxSeenIds = 1000;
   private maxRssiSamples = 200;
-  private scanInterval?: NodeJS.Timeout;
+  private scanInterval?: any;
   private adaptiveMode = false;
 
   constructor() {
@@ -176,7 +174,7 @@ export class BLERelay {
       if (!this.isSimulator && !isExpoGo && this.manager) {
         this.manager.stopDeviceScan();
         if (this.scanInterval) {
-          clearInterval(this.scanInterval);
+          (globalThis as any).clearInterval(this.scanInterval);
           this.scanInterval = undefined;
         }
       }
@@ -205,7 +203,7 @@ export class BLERelay {
             }
             if (char?.value) {
               try {
-                const messageData = Buffer.from(char.value, 'base64').toString('utf8');
+                const messageData = (globalThis as any).Buffer.from(char.value, 'base64').toString('utf8');
                 const message: RelayMessage = JSON.parse(messageData);
                 this.handleReceivedMessage(message);
               } catch (parseError) {
@@ -250,7 +248,7 @@ export class BLERelay {
         
         // Add small jitter before re-broadcasting
         const jitter = 200 + Math.random() * 600; // 200-800ms
-        setTimeout(() => {
+        (globalThis as any).setTimeout(() => {
           try {
             this.broadcastMessage(relayMessage);
           } catch (broadcastError) {
@@ -342,7 +340,7 @@ export class BLERelay {
 
           if (device?.name?.startsWith('AfetNet')) {
             this.handleDiscoveredDevice(device).catch(err => 
-              logger.warn('Device handling error:', err)
+              logger.warn('Device handling error:', err),
             );
             
             // Record RSSI sample
@@ -355,7 +353,7 @@ export class BLERelay {
         });
 
         // Stop scanning after duration
-        setTimeout(() => {
+        (globalThis as any).setTimeout(() => {
           if (this.isActive) {
             try {
               this.manager.stopDeviceScan();
@@ -375,7 +373,7 @@ export class BLERelay {
     performScan();
 
     // Schedule periodic scans
-    this.scanInterval = setInterval(performScan, scanDuration + idleDuration);
+    this.scanInterval = (globalThis as any).setInterval(performScan, scanDuration + idleDuration);
   }
 
   // @ts-expect-error - Device type from react-native-ble-plx
@@ -383,7 +381,7 @@ export class BLERelay {
     const sample: RSSISample = {
       deviceId: device.id,
       rssi: device.rssi || -100,
-      ts: Date.now()
+      ts: Date.now(),
     };
 
     this.rssiSamples.push(sample);
@@ -404,7 +402,7 @@ export class BLERelay {
       .slice(0, count)
       .map(msg => ({
         ...msg,
-        hopCount: 5 - msg.ttl // Calculate hop count from TTL
+        hopCount: 5 - msg.ttl, // Calculate hop count from TTL
       }));
   }
 
@@ -418,7 +416,7 @@ export class BLERelay {
       // Restart scanning with new parameters
       this.manager.stopDeviceScan();
       if (this.scanInterval) {
-        clearInterval(this.scanInterval);
+        (globalThis as any).clearInterval(this.scanInterval);
         this.scanInterval = undefined;
       }
       this.startAdaptiveScanning();

@@ -17,7 +17,7 @@ export default function Training() {
     setEnabled, 
     setScenario, 
     setCount,
-    clearActiveIncidents 
+    clearActiveIncidents, 
   } = useTraining();
   
   const { upsertFromSOS, removeIncident } = useIncidents();
@@ -42,21 +42,21 @@ export default function Training() {
       const incidents: Array<{ id: string; lat: number; lon: number; statuses: string[]; ts: number }> = [];
       
       switch (scenario) {
-        case 'single':
-          incidents.push(generateSingleIncident(currentPos));
-          break;
+      case 'single':
+        incidents.push(generateSingleIncident(currentPos));
+        break;
           
-        case 'multi':
-          for (let i = 0; i < count; i++) {
-            incidents.push(generateMultiIncident(currentPos, i));
-          }
-          break;
+      case 'multi':
+        for (let i = 0; i < count; i++) {
+          incidents.push(generateMultiIncident(currentPos, i));
+        }
+        break;
           
-        case 'triangulate':
-          for (let i = 0; i < Math.min(count, 3); i++) {
-            incidents.push(generateTriangulateIncident(currentPos, i));
-          }
-          break;
+      case 'triangulate':
+        for (let i = 0; i < Math.min(count, 3); i++) {
+          incidents.push(generateTriangulateIncident(currentPos, i));
+        }
+        break;
       }
 
       // Add incidents to store
@@ -68,7 +68,7 @@ export default function Training() {
 
       Alert.alert(
         'Eğitim Verisi Oluşturuldu',
-        `${incidents.length} sahte SOS olayı oluşturuldu`
+        `${incidents.length} sahte SOS olayı oluşturuldu`,
       );
 
     } catch (error) {
@@ -86,7 +86,7 @@ export default function Training() {
       lat: pos.lat + (Math.random() - 0.5) * 0.001, // ~50m radius
       lon: pos.lon + (Math.random() - 0.5) * 0.001,
       statuses: ['Yaralı Var', 'Kat: -1'],
-      ts: Date.now()
+      ts: Date.now(),
     };
   };
 
@@ -103,7 +103,7 @@ export default function Training() {
       ['Yaralı Var'],
       ['Kat: -1'],
       ['Acil Nefes Darlığı'],
-      ['Sesimi Duyuyorsanız']
+      ['Sesimi Duyuyorsanız'],
     ];
     
     return {
@@ -111,7 +111,7 @@ export default function Training() {
       lat,
       lon,
       statuses: statusOptions[Math.floor(Math.random() * statusOptions.length)],
-      ts: Date.now()
+      ts: Date.now(),
     };
   };
 
@@ -122,7 +122,7 @@ export default function Training() {
     const trianglePoints = [
       { lat: pos.lat + 0.002, lon: pos.lon }, // North
       { lat: pos.lat - 0.001, lon: pos.lon + 0.0017 }, // Southeast
-      { lat: pos.lat - 0.001, lon: pos.lon - 0.0017 } // Southwest
+      { lat: pos.lat - 0.001, lon: pos.lon - 0.0017 }, // Southwest
     ];
     
     const point = trianglePoints[index % trianglePoints.length];
@@ -132,7 +132,7 @@ export default function Training() {
       lat: point.lat + (Math.random() - 0.5) * 0.0005, // Small random offset
       lon: point.lon + (Math.random() - 0.5) * 0.0005,
       statuses: ['Triangulation Test'],
-      ts: Date.now()
+      ts: Date.now(),
     };
   };
 
@@ -143,7 +143,7 @@ export default function Training() {
     } else {
       Alert.alert(
         'Eğitim Modu Zaten Aktif',
-        'Yeni veri oluşturmak için önce mevcut verileri temizleyin'
+        'Yeni veri oluşturmak için önce mevcut verileri temizleyin',
       );
     }
   };
@@ -165,22 +165,22 @@ export default function Training() {
             setEnabled(false);
             logEvent('TRAINING', 'Training data cleared');
             Alert.alert('Temizlendi', 'Eğitim verileri silindi');
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
   const getScenarioDescription = (scenario: TrainingScenario): string => {
     switch (scenario) {
-      case 'single':
-        return 'Tek olay testi - yakın mesafede bir SOS';
-      case 'multi':
-        return `Çoklu olay testi - ${count} farklı konumda SOS`;
-      case 'triangulate':
-        return 'Triangulation testi - üçgen düzeninde konumlandırma';
-      default:
-        return '';
+    case 'single':
+      return 'Tek olay testi - yakın mesafede bir SOS';
+    case 'multi':
+      return `Çoklu olay testi - ${count} farklı konumda SOS`;
+    case 'triangulate':
+      return 'Triangulation testi - üçgen düzeninde konumlandırma';
+    default:
+      return '';
     }
   };
 
@@ -202,17 +202,17 @@ export default function Training() {
         <Text style={styles.sectionTitle}>Senaryo Seçimi</Text>
         {(['single', 'multi', 'triangulate'] as TrainingScenario[]).map((scenarioOption) => (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             key={scenarioOption}
             onPress={() => setScenario(scenarioOption)}
             style={[
               styles.scenarioButton,
-              scenario === scenarioOption && styles.scenarioButtonActive
+              scenario === scenarioOption && styles.scenarioButtonActive,
             ]}
           >
             <Text style={[
               styles.scenarioButtonText,
-              scenario === scenarioOption && styles.scenarioButtonTextActive
+              scenario === scenarioOption && styles.scenarioButtonTextActive,
             ]}>
               {scenarioOption === 'single' && 'Tek Olay'}
               {scenarioOption === 'multi' && 'Çoklu Olay'}
@@ -232,7 +232,7 @@ export default function Training() {
           <Text style={styles.sectionTitle}>Olay Sayısı: {count}</Text>
           <View style={styles.countControls}>
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => setCount(Math.max(1, count - 1))}
               style={styles.countButton}
             >
@@ -240,7 +240,7 @@ export default function Training() {
             </Pressable>
             <Text style={styles.countText}>{count}</Text>
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => setCount(Math.min(10, count + 1))}
               style={styles.countButton}
             >
@@ -265,12 +265,12 @@ export default function Training() {
       <View style={styles.actionContainer}>
         {!enabled ? (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleStartTraining}
             disabled={isGenerating}
             style={[
               styles.startButton,
-              isGenerating && styles.startButtonDisabled
+              isGenerating && styles.startButtonDisabled,
             ]}
           >
             <Text style={styles.startButtonText}>
@@ -279,7 +279,7 @@ export default function Training() {
           </Pressable>
         ) : (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleClearTraining}
             style={styles.clearButton}
           >

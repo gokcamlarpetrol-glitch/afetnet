@@ -1,11 +1,11 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { HelpPayload, QueueItem, MeshEnvelope } from "../entities/help/types";
-import { postJSON } from "../lib/http";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { HelpPayload, QueueItem, MeshEnvelope } from '../entities/help/types';
+import { postJSON } from '../lib/http';
 // import { encObj, decObj } from "../lib/crypto"; // Not available - would need implementation
 
-const SEEN_KEY = "mesh_seen_hashes_v1";
+const SEEN_KEY = 'mesh_seen_hashes_v1';
 
 type AppState = {
   queue: QueueItem[];
@@ -21,7 +21,7 @@ export const useApp = create<AppState>()(
       queue: [],
       enqueue: (payload) => {
         const item: QueueItem = {
-          id: String(Date.now()) + "-" + Math.random().toString(36).slice(2),
+          id: String(Date.now()) + '-' + Math.random().toString(36).slice(2),
           payload,
           attempts: 0,
           lastError: null,
@@ -42,7 +42,7 @@ export const useApp = create<AppState>()(
           // Skip items not yet eligible
           if (it.nextAt && it.nextAt > now && !opts?.manual) { next.push(it); continue; }
           try {
-            await postJSON("/ingest", it.payload);
+            await postJSON('/ingest', it.payload);
             ok++;
             continue; // do NOT push to next (removed)
           } catch (e: any) {
@@ -54,7 +54,7 @@ export const useApp = create<AppState>()(
             next.push({
               ...it,
               attempts,
-              lastError: String(e?.message || "network"),
+              lastError: String(e?.message || 'network'),
               nextAt: now + delay,
             });
           }
@@ -72,11 +72,11 @@ export const useApp = create<AppState>()(
       },
     }),
     {
-      name: "afetnet:v1",
+      name: 'afetnet:v1',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ queue: s.queue }),
-    }
-  )
+    },
+  ),
 );
 
 /** Add minimal mesh helpers; do not break existing API */
@@ -88,7 +88,7 @@ export async function getQueueSnapshot(limit: number): Promise<MeshEnvelope[]> {
   for (const it of items) {
     const p = it.payload;
     const hash = p.hash ?? String(it.id);
-    out.push({ t: "help", hash, createdAt: Date.now(), payload: { ...p, hash } });
+    out.push({ t: 'help', hash, createdAt: Date.now(), payload: { ...p, hash } });
   }
   return out;
 }

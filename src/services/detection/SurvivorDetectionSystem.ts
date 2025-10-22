@@ -49,7 +49,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
   private survivorSignals = new Map<string, SurvivorSignal[]>();
   private isMonitoring = false;
   private detectionPatterns = new Map<string, any>();
-  private monitoringInterval: NodeJS.Timeout | null = null;
+  private monitoringInterval: any = null;
 
   constructor() {
     super();
@@ -64,21 +64,21 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       frequencyRange: [85, 3400], // Human voice frequency range
       duration: [100, 10000],
       strength: [20, 100],
-      confidence: 85
+      confidence: 85,
     });
 
     this.detectionPatterns.set('help_screams', {
       frequencyRange: [200, 3000],
       duration: [500, 3000],
       strength: [40, 100],
-      confidence: 90
+      confidence: 90,
     });
 
     this.detectionPatterns.set('tapping', {
       frequencyRange: [100, 2000],
       duration: [50, 500],
       strength: [10, 80],
-      confidence: 75
+      confidence: 75,
     });
 
     // Vibration patterns
@@ -86,14 +86,14 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       frequencyRange: [10, 100],
       duration: [200, 1000],
       strength: [30, 90],
-      confidence: 70
+      confidence: 70,
     });
 
     this.detectionPatterns.set('heartbeat', {
       frequencyRange: [1, 3],
       duration: [800, 1200],
       strength: [5, 30],
-      confidence: 60
+      confidence: 60,
     });
 
     // Electronic signals
@@ -101,14 +101,14 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       frequencyRange: [800, 2500],
       duration: [100, 5000],
       strength: [20, 100],
-      confidence: 95
+      confidence: 95,
     });
 
     this.detectionPatterns.set('watch_alarm', {
       frequencyRange: [1000, 4000],
       duration: [100, 1000],
       strength: [15, 60],
-      confidence: 80
+      confidence: 80,
     });
 
     logger.debug('✅ Survivor detection patterns initialized');
@@ -124,7 +124,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       this.isMonitoring = true;
 
       // Start continuous monitoring
-      this.monitoringInterval = setInterval(() => {
+      this.monitoringInterval = (globalThis as any).setInterval(() => {
         this.performDetectionCycle();
       }, 2000); // Check every 2 seconds
 
@@ -154,7 +154,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       this.isMonitoring = false;
 
       if (this.monitoringInterval) {
-        clearInterval(this.monitoringInterval);
+        (globalThis as any).clearInterval(this.monitoringInterval);
         this.monitoringInterval = null;
       }
 
@@ -253,7 +253,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
         emergencyLogger.logSystem('info', 'New survivor detected', { 
           detectionId: detection.id, 
           signalType: signal.type,
-          location: signal.location 
+          location: signal.location, 
         });
         logger.debug(`👥 New survivor detected: ${detection.id}`);
 
@@ -283,7 +283,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
         location: detection.location,
         priority: detection.priority,
         estimatedVictims: detection.estimatedSurvivors,
-        notes: [`CRITICAL: Survivor detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`]
+        notes: [`CRITICAL: Survivor detected under debris at ${detection.location.lat}, ${detection.location.lon}. Signals: ${detection.signals.length}`],
       } as any);
 
       detection.rescueTeam = missionId;
@@ -337,7 +337,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       const recentStrongSignals = detection.signals.filter(signal => 
         signal.timestamp > Date.now() - 300000 && // Last 5 minutes
         signal.strength > 70 &&
-        signal.confidence > 80
+        signal.confidence > 80,
       );
 
       if (recentStrongSignals.length >= 3 && detection.status === 'detected') {
@@ -490,9 +490,9 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
         lat: 41.0082 + (Math.random() - 0.5) * 0.01,
         lon: 28.9784 + (Math.random() - 0.5) * 0.01,
         accuracy: Math.floor(Math.random() * 50) + 5,
-        depth: Math.floor(Math.random() * 10)
+        depth: Math.floor(Math.random() * 10),
       },
-      confidence: Math.floor(Math.random() * 40) + 60
+      confidence: Math.floor(Math.random() * 40) + 60,
     };
   }
 
@@ -536,7 +536,7 @@ class SurvivorDetectionSystem extends SimpleEventEmitter {
       await this.saveActiveDetections();
       
       emergencyLogger.logSystem('info', 'Updated existing survivor detections', { 
-        totalDetections: this.activeDetections.size 
+        totalDetections: this.activeDetections.size, 
       });
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to update existing detections', { error: String(error) });

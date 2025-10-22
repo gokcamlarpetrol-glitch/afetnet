@@ -48,9 +48,8 @@ export default function ActivationGate({ onReady }: ActivationGateProps) {
           setServerUrl(defaultAct.serverUrl);
           setSecret(defaultAct.secret || '');
         }
-      } catch (error) {
-        console.warn('Activation initialization failed:', error);
-        // Fallback to zero-touch mode
+      } catch {
+        // Activation initialization failed - fallback to zero-touch mode
         await saveActivation(defaultActivation());
         onReady();
       } finally {
@@ -79,7 +78,7 @@ export default function ActivationGate({ onReady }: ActivationGateProps) {
 
       await saveActivation(activation);
       onReady();
-    } catch (error) {
+    } catch {
       Alert.alert('Hata', 'Aktivasyon kaydedilemedi');
     }
   };
@@ -88,7 +87,7 @@ export default function ActivationGate({ onReady }: ActivationGateProps) {
     try {
       await saveActivation(defaultActivation());
       onReady();
-    } catch (error) {
+    } catch {
       Alert.alert('Hata', 'Varsayılan ayarlar kaydedilemedi');
     }
   };

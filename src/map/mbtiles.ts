@@ -1,4 +1,4 @@
-import { SafeSQLite } from "../db/SafeSQLite";
+import { SafeSQLite } from '../db/SafeSQLite';
 
 export type TileReq = { z:number; x:number; y:number };
 
@@ -9,9 +9,9 @@ export class MBTiles {
   async getTile(req:TileReq): Promise<Uint8Array|null>{
     return new Promise((resolve)=>{
       this.db.readTransaction((tx:any)=>{
-        tx.executeSql("SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?", 
+        tx.executeSql('SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?', 
           [req.z, req.x, (1<<req.z)-1-req.y], // TMS vs XYZ flip
-          (_:any,rs:any)=>{ if(rs.rows.length){ const b=rs.rows.item(0).tile_data as string; resolve(decode(b)); } else {resolve(null);} }
+          (_:any,rs:any)=>{ if(rs.rows.length){ const b=rs.rows.item(0).tile_data as string; resolve(decode(b)); } else {resolve(null);} },
         );
       });
     });

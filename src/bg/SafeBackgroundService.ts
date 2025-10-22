@@ -3,8 +3,8 @@ import { logger } from '../utils/productionLogger';
 let BackgroundService: any = null;
 
 try {
-  BackgroundService = require('react-native-background-actions');
-} catch (e) {
+  BackgroundService = (globalThis as any).require('react-native-background-actions');
+} catch {
   logger.warn('react-native-background-actions not available');
 }
 
@@ -18,8 +18,8 @@ export const SafeBackgroundService = {
     }
     try {
       await BackgroundService.start(task, options);
-    } catch (e) {
-      logger.warn('Failed to start background service:', e);
+    } catch {
+      logger.warn('Failed to start background service');
     }
   },
   
@@ -33,7 +33,7 @@ export const SafeBackgroundService = {
     } catch (e) {
       logger.warn('Failed to stop background service:', e);
     }
-  }
+  },
 };
 
 

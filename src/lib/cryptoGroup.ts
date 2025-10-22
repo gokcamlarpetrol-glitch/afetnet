@@ -8,7 +8,7 @@ import { Group } from '../store/groups';
 export function deriveSharedKey(
   group: Group,
   mySecKey?: Uint8Array,
-  allMemberPubKeysB64?: string[]
+  allMemberPubKeysB64?: string[],
 ): string {
   // If we have a seed (creator), use seed-based derivation
   if (group.seed && allMemberPubKeysB64) {
@@ -18,7 +18,7 @@ export function deriveSharedKey(
   // If we don't have a seed but have member public keys, derive from public keys only
   if (allMemberPubKeysB64) {
     // Create a synthetic seed from the group's GID for consistency
-    const gidBytes = new TextEncoder().encode(group.gid);
+    const gidBytes = new (globalThis as any).TextEncoder().encode(group.gid);
     const syntheticSeed = new Uint8Array(16);
     syntheticSeed.set(gidBytes.subarray(0, Math.min(16, gidBytes.length)), 0);
     
@@ -53,7 +53,7 @@ export function gSeal(sharedKeyB64: string, plaintext: Uint8Array): { nonceB64: 
 export function gOpen(
   sharedKeyB64: string,
   boxB64: string,
-  nonceB64: string
+  nonceB64: string,
 ): Uint8Array | null {
   try {
     const sharedKey = decodeBase64(sharedKeyB64);
@@ -73,7 +73,7 @@ export async function generateVerificationPhrase(sharedKeyB64: string): Promise<
   const keyHash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     sharedKeyB64,
-    { encoding: Crypto.CryptoEncoding.BASE64 }
+    { encoding: Crypto.CryptoEncoding.BASE64 },
   );
   
   const hashBytes = decodeBase64(keyHash);
@@ -135,7 +135,7 @@ export async function generateVerificationPhrase(sharedKeyB64: string): Promise<
     'yarı', 'yasak', 'yaş', 'yaşam', 'yatak', 'yavaş', 'yaz', 'yazı', 'yemek', 'yeni',
     'yer', 'yeşil', 'yıldız', 'yıl', 'yine', 'yol', 'yorum', 'yuva', 'yüz', 'zaman',
     'zarar', 'zaten', 'zayıf', 'zebra', 'zeka', 'zemin', 'zengin', 'zeytin', 'zil', 'zincir',
-    'zirve', 'zombi', 'zor', 'zorunlu', 'zulüm', 'zurna', 'züppe', 'zürafa', 'zürih', 'zümre'
+    'zirve', 'zombi', 'zor', 'zorunlu', 'zulüm', 'zurna', 'züppe', 'zürafa', 'zürih', 'zümre',
   ];
 
   // Use hash bytes to select 5 words

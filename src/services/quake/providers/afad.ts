@@ -17,16 +17,16 @@ export class AFADProvider implements QuakeProvider {
           EventSearchFilterList: [
             {
               FilterType: 9,
-              FilterValue: 7 // Last 7 days
-            }
+              FilterValue: 7, // Last 7 days
+            },
           ],
           Skip: 0,
           Take: 100,
           SortDescriptor: {
             field: 'EventDate',
-            dir: 'desc'
-          }
-        })
+            dir: 'desc',
+          },
+        }),
       });
 
       if (!response.ok) {
@@ -73,7 +73,7 @@ export class AFADProvider implements QuakeProvider {
               lat: lat > 0 ? lat : undefined,
               lon: lon > 0 ? lon : undefined,
               depth: depth > 0 ? depth : undefined,
-              source: 'AFAD'
+              source: 'AFAD',
             });
           }
         } catch (parseError) {
@@ -105,10 +105,10 @@ export class AFADProvider implements QuakeProvider {
         'YYYY-MM-DD HH:mm:ss',
         'YYYY-MM-DDTHH:mm:ss',
         'DD.MM.YYYY HH:mm:ss',
-        'DD/MM/YYYY HH:mm:ss'
+        'DD/MM/YYYY HH:mm:ss',
       ];
 
-      for (const format of formats) {
+      for (let i = 0; i < formats.length; i++) {
         try {
           // Simple date parsing - in production, use a proper date library
           const date = new Date(dateTimeStr.replace(/(\d{2})\.(\d{2})\.(\d{4})/, '$3-$2-$1'));
@@ -122,7 +122,7 @@ export class AFADProvider implements QuakeProvider {
 
       // Fallback to current time
       return Date.now();
-    } catch (error) {
+    } catch {
       return Date.now();
     }
   }
@@ -143,7 +143,7 @@ export class AFADProvider implements QuakeProvider {
         lat: 38.4192,
         lon: 27.1287,
         depth: 10.5,
-        source: 'AFAD'
+        source: 'AFAD',
       },
       {
         id: 'afad_mock_2',
@@ -153,7 +153,7 @@ export class AFADProvider implements QuakeProvider {
         lat: 39.9334,
         lon: 32.8597,
         depth: 8.2,
-        source: 'AFAD'
+        source: 'AFAD',
       },
       {
         id: 'afad_mock_3',
@@ -163,8 +163,8 @@ export class AFADProvider implements QuakeProvider {
         lat: 41.0082,
         lon: 28.9784,
         depth: 15.3,
-        source: 'AFAD'
-      }
+        source: 'AFAD',
+      },
     ];
   }
 }

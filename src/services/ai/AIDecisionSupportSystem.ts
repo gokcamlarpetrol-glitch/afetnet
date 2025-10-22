@@ -198,14 +198,14 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         severity: 0.4,
         timeConstraints: 0.3,
         availableResources: 0.2,
-        environmentalConditions: 0.1
+        environmentalConditions: 0.1,
       },
       thresholds: {
         critical: 80,
         high: 60,
         medium: 40,
-        low: 20
-      }
+        low: 20,
+      },
     });
 
     // Resource Allocation Model
@@ -214,9 +214,9 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         urgency: 0.3,
         efficiency: 0.3,
         proximity: 0.2,
-        capability: 0.2
+        capability: 0.2,
       },
-      algorithms: ['hungarian', 'genetic', 'simulated_annealing']
+      algorithms: ['hungarian', 'genetic', 'simulated_annealing'],
     });
 
     // Evacuation Planning Model
@@ -225,9 +225,9 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         populationDensity: 0.25,
         exitRoutes: 0.25,
         timeConstraints: 0.25,
-        safetyFactors: 0.25
+        safetyFactors: 0.25,
       },
-      algorithms: ['dijkstra', 'a_star', 'flow_network']
+      algorithms: ['dijkstra', 'a_star', 'flow_network'],
     });
 
     logger.debug('✅ AI decision models initialized');
@@ -270,23 +270,23 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
       // Generate decision based on context type
       let decision: AIDecision;
       switch (context.type) {
-        case 'emergency_response':
-          decision = await this.generateEmergencyResponseDecision(context, analysis);
-          break;
-        case 'resource_allocation':
-          decision = await this.generateResourceAllocationDecision(context, analysis);
-          break;
-        case 'evacuation_planning':
-          decision = await this.generateEvacuationPlanningDecision(context, analysis);
-          break;
-        case 'medical_triage':
-          decision = await this.generateMedicalTriageDecision(context, analysis);
-          break;
-        case 'communication_strategy':
-          decision = await this.generateCommunicationStrategyDecision(context, analysis);
-          break;
-        default:
-          decision = await this.generateGenericDecision(context, analysis);
+      case 'emergency_response':
+        decision = await this.generateEmergencyResponseDecision(context, analysis);
+        break;
+      case 'resource_allocation':
+        decision = await this.generateResourceAllocationDecision(context, analysis);
+        break;
+      case 'evacuation_planning':
+        decision = await this.generateEvacuationPlanningDecision(context, analysis);
+        break;
+      case 'medical_triage':
+        decision = await this.generateMedicalTriageDecision(context, analysis);
+        break;
+      case 'communication_strategy':
+        decision = await this.generateCommunicationStrategyDecision(context, analysis);
+        break;
+      default:
+        decision = await this.generateGenericDecision(context, analysis);
       }
 
       // Add to history
@@ -297,7 +297,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         decisionId: decision.id,
         contextType: context.type,
         confidence: decision.confidence,
-        priority: decision.priority
+        priority: decision.priority,
       });
 
       logger.debug(`🧠 AI decision generated: ${decision.decision} (${decision.confidence}% confidence)`);
@@ -320,7 +320,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         resourceAvailability: this.assessResourceAvailability(context),
         environmentalRisk: this.assessEnvironmentalRisk(context),
         timePressure: this.assessTimePressure(context),
-        historicalPrecedent: this.findHistoricalPrecedent(context)
+        historicalPrecedent: this.findHistoricalPrecedent(context),
       };
 
       return analysis;
@@ -331,6 +331,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Emergency Response Decision
+   
   private async generateEmergencyResponseDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -350,7 +351,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 1,
             estimatedDuration: 5,
             requiredResources: ['firefighters', 'paramedics', 'police'],
-            expectedResult: 'Rapid response team on scene within 5 minutes'
+            expectedResult: 'Rapid response team on scene within 5 minutes',
           },
           {
             id: `action_${Date.now()}_2`,
@@ -359,7 +360,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 2,
             estimatedDuration: 10,
             requiredResources: ['communication_equipment', 'satellite_link'],
-            expectedResult: 'Reliable communication established'
+            expectedResult: 'Reliable communication established',
           },
           {
             id: `action_${Date.now()}_3`,
@@ -368,8 +369,8 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 3,
             estimatedDuration: 15,
             requiredResources: ['coordination_center'],
-            expectedResult: 'Additional resources mobilized'
-          }
+            expectedResult: 'Additional resources mobilized',
+          },
         ];
         confidence = 95;
       } else if (context.severity === 'high') {
@@ -382,8 +383,8 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 1,
             estimatedDuration: 10,
             requiredResources: ['specialized_personnel'],
-            expectedResult: 'Specialized teams deployed'
-          }
+            expectedResult: 'Specialized teams deployed',
+          },
         ];
         confidence = 85;
       } else {
@@ -396,8 +397,8 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 1,
             estimatedDuration: 15,
             requiredResources: ['standard_personnel'],
-            expectedResult: 'Standard response initiated'
-          }
+            expectedResult: 'Standard response initiated',
+          },
         ];
         confidence = 75;
       }
@@ -413,7 +414,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         expectedOutcome: 'Effective emergency response with minimized casualties',
         riskAssessment: await this.assessDecisionRisks(context, actions),
         alternatives: await this.generateAlternatives(context, 'emergency_response'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -425,6 +426,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Resource Allocation Decision
+   
   private async generateResourceAllocationDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -443,7 +445,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         expectedOutcome: 'Maximum efficiency with available resources',
         riskAssessment: await this.assessDecisionRisks(context, optimizedAllocation.actions),
         alternatives: await this.generateAlternatives(context, 'resource_allocation'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -455,6 +457,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Evacuation Planning Decision
+   
   private async generateEvacuationPlanningDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -466,14 +469,14 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         id: decisionId,
         contextId: context.id,
         decision: `Evacuation plan for ${context.affectedPopulation} people: ${evacuationPlan.strategy}`,
-        rationale: `Pathfinding algorithm identified optimal evacuation routes considering population density, exit capacity, and time constraints.`,
+        rationale: 'Pathfinding algorithm identified optimal evacuation routes considering population density, exit capacity, and time constraints.',
         confidence: evacuationPlan.confidence,
         priority: 'critical',
         actions: evacuationPlan.actions,
         expectedOutcome: 'Safe and efficient evacuation of all affected people',
         riskAssessment: await this.assessDecisionRisks(context, evacuationPlan.actions),
         alternatives: await this.generateAlternatives(context, 'evacuation_planning'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -485,6 +488,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Medical Triage Decision
+   
   private async generateMedicalTriageDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -496,14 +500,14 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         id: decisionId,
         contextId: context.id,
         decision: `Medical triage strategy: ${triageStrategy.strategy}`,
-        rationale: `AI medical triage algorithm prioritizes patients based on injury severity, survival probability, and available medical resources.`,
+        rationale: 'AI medical triage algorithm prioritizes patients based on injury severity, survival probability, and available medical resources.',
         confidence: triageStrategy.confidence,
         priority: 'critical',
         actions: triageStrategy.actions,
         expectedOutcome: 'Optimal medical care delivery with maximum survival rate',
         riskAssessment: await this.assessDecisionRisks(context, triageStrategy.actions),
         alternatives: await this.generateAlternatives(context, 'medical_triage'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -515,6 +519,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Communication Strategy Decision
+   
   private async generateCommunicationStrategyDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -526,14 +531,14 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         id: decisionId,
         contextId: context.id,
         decision: `Communication strategy: ${commStrategy.strategy}`,
-        rationale: `AI communication optimization ensures reliable information flow considering network status, coverage, and capacity.`,
+        rationale: 'AI communication optimization ensures reliable information flow considering network status, coverage, and capacity.',
         confidence: commStrategy.confidence,
         priority: 'high',
         actions: commStrategy.actions,
         expectedOutcome: 'Reliable communication network established',
         riskAssessment: await this.assessDecisionRisks(context, commStrategy.actions),
         alternatives: await this.generateAlternatives(context, 'communication_strategy'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -545,6 +550,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
   }
 
   // CRITICAL: Generate Generic Decision
+   
   private async generateGenericDecision(context: DecisionContext, analysis: any): Promise<AIDecision> {
     try {
       const decisionId = `decision_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -564,13 +570,13 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
             priority: 1,
             estimatedDuration: 20,
             requiredResources: ['standard_resources'],
-            expectedResult: 'Standard response initiated'
-          }
+            expectedResult: 'Standard response initiated',
+          },
         ],
         expectedOutcome: 'Effective emergency response',
         riskAssessment: await this.assessDecisionRisks(context, []),
         alternatives: await this.generateAlternatives(context, 'generic'),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       return decision;
@@ -604,19 +610,22 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
     return Math.min(100, hazardCount * 20);
   }
 
+   
   private assessTimePressure(context: DecisionContext): number {
     return Math.min(100, 100 - context.timeConstraints.immediate);
   }
 
+   
   private findHistoricalPrecedent(context: DecisionContext): any {
     // Simplified historical analysis
     return {
       similarEvents: Math.floor(Math.random() * 10),
       averageResponseTime: 15 + Math.random() * 30,
-      successRate: 70 + Math.random() * 25
+      successRate: 70 + Math.random() * 25,
     };
   }
 
+   
   private optimizeResourceAllocation(context: DecisionContext): any {
     // Simplified optimization algorithm
     return {
@@ -630,12 +639,13 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
           priority: 1,
           estimatedDuration: 10,
           requiredResources: ['all_available'],
-          expectedResult: 'Optimal resource distribution'
-        }
-      ]
+          expectedResult: 'Optimal resource distribution',
+        },
+      ],
     };
   }
 
+   
   private generateEvacuationPlan(context: DecisionContext): any {
     // Simplified evacuation planning
     return {
@@ -649,12 +659,13 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
           priority: 1,
           estimatedDuration: 60,
           requiredResources: ['evacuation_teams', 'transportation'],
-          expectedResult: 'Safe evacuation completed'
-        }
-      ]
+          expectedResult: 'Safe evacuation completed',
+        },
+      ],
     };
   }
 
+   
   private generateTriageStrategy(context: DecisionContext): any {
     // Simplified triage strategy
     return {
@@ -668,12 +679,13 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
           priority: 1,
           estimatedDuration: 5,
           requiredResources: ['medical_personnel', 'triage_equipment'],
-          expectedResult: 'Medical triage established'
-        }
-      ]
+          expectedResult: 'Medical triage established',
+        },
+      ],
     };
   }
 
+   
   private generateCommunicationStrategy(context: DecisionContext): any {
     // Simplified communication strategy
     return {
@@ -687,9 +699,9 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
           priority: 1,
           estimatedDuration: 15,
           requiredResources: ['communication_equipment'],
-          expectedResult: 'Reliable communication established'
-        }
-      ]
+          expectedResult: 'Reliable communication established',
+        },
+      ],
     };
   }
 
@@ -701,22 +713,22 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         description: 'Resource shortage',
         probability: 30,
         impact: 70,
-        severity: 'medium'
+        severity: 'medium',
       },
       {
         id: 'risk_2',
         description: 'Time constraints',
         probability: 60,
         impact: 50,
-        severity: 'medium'
-      }
+        severity: 'medium',
+      },
     ];
 
     return {
       overallRisk: context.severity === 'critical' ? 'high' : 'medium',
       risks,
       mitigation: ['Resource pooling', 'Time optimization'],
-      contingency: ['Alternative resources', 'Extended timeline']
+      contingency: ['Alternative resources', 'Extended timeline'],
     };
   }
 
@@ -729,7 +741,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         pros: ['Lower risk', 'Resource efficient'],
         cons: ['Slower response', 'May miss critical window'],
         confidence: 75,
-        expectedOutcome: 'Safe but potentially slower response'
+        expectedOutcome: 'Safe but potentially slower response',
       },
       {
         id: `alt_${Date.now()}_2`,
@@ -737,8 +749,8 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
         pros: ['Fastest response', 'Maximum capability'],
         cons: ['High resource usage', 'Potential overkill'],
         confidence: 80,
-        expectedOutcome: 'Fastest response with resource overhead'
-      }
+        expectedOutcome: 'Fastest response with resource overhead',
+      },
     ];
   }
 
@@ -754,7 +766,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
     totalDecisions: number;
     averageConfidence: number;
     lastDecisionTime: number;
-  } {
+    } {
     const totalDecisions = this.decisionHistory.length;
     const averageConfidence = totalDecisions > 0 
       ? this.decisionHistory.reduce((sum, decision) => sum + decision.confidence, 0) / totalDecisions
@@ -766,7 +778,7 @@ class AIDecisionSupportSystem extends SimpleEventEmitter {
       isProcessing: this.isProcessing,
       totalDecisions,
       averageConfidence,
-      lastDecisionTime
+      lastDecisionTime,
     };
   }
 }

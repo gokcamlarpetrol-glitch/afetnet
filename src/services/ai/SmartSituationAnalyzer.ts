@@ -53,7 +53,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
   private currentAnalysis: SituationAnalysis | null = null;
   private analysisHistory: SituationAnalysis[] = [];
   private riskThresholds = new Map<string, any>();
-  private analysisInterval: NodeJS.Timeout | null = null;
+  private analysisInterval: any = null;
 
   constructor() {
     super();
@@ -69,21 +69,21 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       low: { min: 0, max: 35, risk: 'low' },
       medium: { min: 35, max: 45, risk: 'medium' },
       high: { min: 45, max: 60, risk: 'high' },
-      critical: { min: 60, max: 100, risk: 'critical' }
+      critical: { min: 60, max: 100, risk: 'critical' },
     });
 
     this.riskThresholds.set('airQuality', {
       low: { min: 0, max: 50, risk: 'low' },
       medium: { min: 50, max: 100, risk: 'medium' },
       high: { min: 100, max: 200, risk: 'high' },
-      critical: { min: 200, max: 500, risk: 'critical' }
+      critical: { min: 200, max: 500, risk: 'critical' },
     });
 
     this.riskThresholds.set('vibration', {
       low: { min: 0, max: 0.1, risk: 'low' },
       medium: { min: 0.1, max: 0.5, risk: 'medium' },
       high: { min: 0.5, max: 2.0, risk: 'high' },
-      critical: { min: 2.0, max: 10.0, risk: 'critical' }
+      critical: { min: 2.0, max: 10.0, risk: 'critical' },
     });
 
     // Structural thresholds
@@ -91,7 +91,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       low: { min: 80, max: 100, risk: 'low' },
       medium: { min: 60, max: 80, risk: 'medium' },
       high: { min: 40, max: 60, risk: 'high' },
-      critical: { min: 0, max: 40, risk: 'critical' }
+      critical: { min: 0, max: 40, risk: 'critical' },
     });
 
     logger.debug('✅ Risk thresholds initialized');
@@ -106,7 +106,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start continuous analysis
-      this.analysisInterval = setInterval(() => {
+      this.analysisInterval = (globalThis as any).setInterval(() => {
         this.performSituationAnalysis();
       }, 30000); // Every 30 seconds
 
@@ -151,7 +151,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Situation analysis completed', {
         riskLevel: analysis.riskLevel,
         confidence: analysis.confidence,
-        riskFactors: analysis.riskFactors.length
+        riskFactors: analysis.riskFactors.length,
       });
 
       logger.debug(`🧠 Situation analysis: ${analysis.riskLevel.toUpperCase()} risk (${analysis.confidence}% confidence)`);
@@ -165,7 +165,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
   private async analyzeSituation(
     environmental: EnvironmentalData,
     structural: StructuralData,
-    user: UserContext
+    user: UserContext,
   ): Promise<SituationAnalysis> {
     try {
       const riskFactors: RiskFactor[] = [];
@@ -208,7 +208,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         recommendations,
         confidence,
         predictedOutcome,
-        estimatedTimeToResolution: estimatedTime
+        estimatedTimeToResolution: estimatedTime,
       };
 
       return analysis;
@@ -235,8 +235,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Serin yere geçin',
           'Su tüketimini artırın',
-          'Güneşten korunun'
-        ]
+          'Güneşten korunun',
+        ],
       });
     }
 
@@ -252,8 +252,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Maske kullanın',
           'İç mekana geçin',
-          'Havalandırma açın'
-        ]
+          'Havalandırma açın',
+        ],
       });
     }
 
@@ -269,8 +269,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Güvenli yere geçin',
           'Artçı sarsıntılara hazır olun',
-          'Açık alana çıkın'
-        ]
+          'Açık alana çıkın',
+        ],
       });
     }
 
@@ -293,8 +293,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Binayı terk edin',
           'Güvenli çıkış yolunu kullanın',
-          'Açık alana geçin'
-        ]
+          'Açık alana geçin',
+        ],
       });
     }
 
@@ -316,8 +316,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Enerji tasarrufu modu',
           'Gereksiz uygulamaları kapatın',
-          'Güç bankası kullanın'
-        ]
+          'Güç bankası kullanın',
+        ],
       });
     }
 
@@ -332,8 +332,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Offline özellikleri kullanın',
           'Mesh ağını aktifleştirin',
-          'SMS ile haberleşin'
-        ]
+          'SMS ile haberleşin',
+        ],
       });
     }
 
@@ -348,8 +348,8 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
         mitigation: [
           'Acil tıbbi yardım çağırın',
           'İlk yardım uygulayın',
-          'Sakin kalın'
-        ]
+          'Sakin kalın',
+        ],
       });
     }
 
@@ -408,22 +408,22 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
 
     // Add general recommendations based on risk level
     switch (riskLevel) {
-      case 'critical':
-        recommendations.push('ACİL DURUM: Hemen güvenli yere geçin');
-        recommendations.push('Acil durum ekiplerini arayın');
-        recommendations.push('Panik modunu aktifleştirin');
-        break;
-      case 'high':
-        recommendations.push('Dikkatli olun ve güvenlik önlemlerini alın');
-        recommendations.push('Acil durum planınızı gözden geçirin');
-        break;
-      case 'medium':
-        recommendations.push('Durumu izlemeye devam edin');
-        recommendations.push('Hazırlıklı olun');
-        break;
-      case 'low':
-        recommendations.push('Normal güvenlik önlemlerini alın');
-        break;
+    case 'critical':
+      recommendations.push('ACİL DURUM: Hemen güvenli yere geçin');
+      recommendations.push('Acil durum ekiplerini arayın');
+      recommendations.push('Panik modunu aktifleştirin');
+      break;
+    case 'high':
+      recommendations.push('Dikkatli olun ve güvenlik önlemlerini alın');
+      recommendations.push('Acil durum planınızı gözden geçirin');
+      break;
+    case 'medium':
+      recommendations.push('Durumu izlemeye devam edin');
+      recommendations.push('Hazırlıklı olun');
+      break;
+    case 'low':
+      recommendations.push('Normal güvenlik önlemlerini alın');
+      break;
     }
 
     // Add specific recommendations from risk factors
@@ -442,7 +442,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       'critical': 'Kritik durum - Acil müdahale gerekli',
       'high': 'Yüksek risk - Dikkatli olunmalı',
       'medium': 'Orta risk - İzlenmeli',
-      'low': 'Düşük risk - Normal önlemler yeterli'
+      'low': 'Düşük risk - Normal önlemler yeterli',
     };
 
     return outcomes[riskLevel];
@@ -454,7 +454,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       'critical': 60,
       'high': 30,
       'medium': 15,
-      'low': 5
+      'low': 5,
     };
 
     let estimatedTime = baseTimes[riskLevel];
@@ -489,7 +489,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       airQuality: 20 + Math.random() * 80,
       noiseLevel: 30 + Math.random() * 70,
       vibration: Math.random() * 2,
-      lightLevel: 100 + Math.random() * 900
+      lightLevel: 100 + Math.random() * 900,
     };
   }
 
@@ -501,7 +501,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       debrisLevel: Math.random() * 100,
       accessibility: 60 + Math.random() * 40,
       exitRoutes: 50 + Math.random() * 50,
-      structuralIntegrity: 80 + Math.random() * 20
+      structuralIntegrity: 80 + Math.random() * 20,
     };
   }
 
@@ -514,7 +514,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       networkStatus: Math.random() > 0.3 ? 'online' : 'offline',
       timeOfDay: ['morning', 'afternoon', 'evening', 'night'][Math.floor(Math.random() * 4)] as any,
       userHealth: Math.random() > 0.8 ? 'critical' : 'good',
-      availableResources: ['water', 'food', 'first_aid']
+      availableResources: ['water', 'food', 'first_aid'],
     };
   }
 
@@ -534,7 +534,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
     currentRiskLevel: string | null;
     totalAnalyses: number;
     averageConfidence: number;
-  } {
+    } {
     const totalAnalyses = this.analysisHistory.length;
     const averageConfidence = totalAnalyses > 0 
       ? this.analysisHistory.reduce((sum, analysis) => sum + analysis.confidence, 0) / totalAnalyses
@@ -544,7 +544,7 @@ class SmartSituationAnalyzer extends SimpleEventEmitter {
       isActive: this.isActive,
       currentRiskLevel: this.currentAnalysis?.riskLevel || null,
       totalAnalyses,
-      averageConfidence
+      averageConfidence,
     };
   }
 }

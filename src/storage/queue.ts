@@ -1,9 +1,9 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '../utils/productionLogger';
-import { postJSON } from "../lib/http";
+import { postJSON } from '../lib/http';
 
 export type HelpItem = { id: string; createdAt: number; payload: any; attempts?: number };
-const KEY = "helpQueue:v1";
+const KEY = 'helpQueue:v1';
 
 export async function readQueue(): Promise<HelpItem[]> {
   try { 
@@ -18,17 +18,17 @@ export async function writeQueue(items: HelpItem[]) {
   try { 
     await AsyncStorage.setItem(KEY, JSON.stringify(items)); 
   } catch (error) {
-    logger.error("AfetNet: Queue yazılamadı:", error);
+    logger.error('AfetNet: Queue yazılamadı:', error);
   }
 }
 
 export async function enqueue(payload: any) {
   const q = await readQueue();
   q.unshift({ 
-    id: String(Date.now()) + "-" + Math.random().toString(36).slice(2), 
+    id: String(Date.now()) + '-' + Math.random().toString(36).slice(2), 
     createdAt: Date.now(), 
     payload,
-    attempts: 0
+    attempts: 0,
   });
   await writeQueue(q);
   logger.debug(`AfetNet: Queue'ya eklendi (${q.length} item)`);
@@ -51,10 +51,10 @@ export async function flush(): Promise<number> {
   for (const item of q) {
     try {
       // Backend'e gönder
-      await postJSON("/ingest", {
+      await postJSON('/ingest', {
         id: item.id,
         timestamp: item.createdAt,
-        data: item.payload
+        data: item.payload,
       });
       
       sent++;

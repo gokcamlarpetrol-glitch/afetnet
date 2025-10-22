@@ -3,13 +3,13 @@ import { logger } from '../utils/productionLogger';
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { useFamily } from '../store/family';
 import { Contact, useMessages } from '../store/messages';
@@ -26,13 +26,11 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
   // Gerçek message store'u kullan
   const {
     contacts,
-    conversations,
     addContact,
     updateContact,
     sendMessage,
     receiveMessage,
     getAllConversations,
-    getUnreadCount,
     getNearbyContacts,
     setActiveContact,
   } = useMessages();
@@ -113,7 +111,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                 location.coords.latitude,
                 location.coords.longitude,
                 contact.lat,
-                contact.lon
+                contact.lon,
               );
               updateContact(contact.id, { distance });
             }
@@ -124,10 +122,10 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
       }
     };
 
-    const interval = setInterval(updateNearbyContacts, 10000); // Her 10 saniyede
+    const interval = (globalThis as any).setInterval(updateNearbyContacts, 10000); // Her 10 saniyede
     updateNearbyContacts();
 
-    return () => clearInterval(interval);
+    return () => (globalThis as any).clearInterval(interval);
   }, [contacts, updateContact]);
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -162,7 +160,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
             } else {
               Alert.alert('Yakındaki Kişiler', `${nearbyCount} kişi bulundu. Kişi seçin.`);
             }
-          }
+          },
         },
         {
           text: `Aile Üyeleri (${familyCount})`,
@@ -173,7 +171,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
               // Aile üyelerine mesaj gönderme ekranı
               Alert.alert('Aile Mesajı', 'Aile üyelerine mesaj gönderiliyor...');
             }
-          }
+          },
         },
         {
           text: 'Grup Oluştur',
@@ -194,20 +192,20 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                       lastSeen: Date.now(),
                     });
                     Alert.alert('Başarılı', 'Grup oluşturuldu!');
-                  }
-                }
-              ]
+                  },
+                },
+              ],
             );
-          }
+          },
         },
-      ]
+      ],
     );
   };
 
   const handleContactPress = async (contact: Contact) => {
     const statusText = contact.status === 'online' ? '🟢 Çevrimiçi' : 
-                      contact.status === 'emergency' ? '🆘 Acil Durum' : 
-                      '⚫ Çevrimdışı';
+      contact.status === 'emergency' ? '🆘 Acil Durum' : 
+        '⚫ Çevrimdışı';
     
     const distanceText = contact.distance ? `${contact.distance}m` : 'Bilinmiyor';
     const lastSeenText = formatTimestamp(contact.lastSeen);
@@ -238,7 +236,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                         text.trim(),
                         'normal',
                         location.coords.latitude,
-                        location.coords.longitude
+                        location.coords.longitude,
                       );
 
                       // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
@@ -246,12 +244,12 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
 
                       Alert.alert('Başarılı', 'Mesaj gönderildi ve kaydedildi!');
                     }
-                  }
-                }
+                  },
+                },
               ],
-              'plain-text'
+              'plain-text',
             );
-          }
+          },
         },
         {
           text: 'Konum Paylaş',
@@ -263,7 +261,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                 `📍 Konum: ${location.coords.latitude.toFixed(6)}, ${location.coords.longitude.toFixed(6)}`,
                 'normal',
                 location.coords.latitude,
-                location.coords.longitude
+                location.coords.longitude,
               );
 
               // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
@@ -273,9 +271,9 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
             } catch (error) {
               Alert.alert('Hata', 'Konum alınamadı');
             }
-          }
+          },
         },
-      ]
+      ],
     );
   };
 
@@ -297,19 +295,19 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
               } else {
                 Alert.alert('Hata', 'Konum bilgisi bulunamadı');
               }
-            }
+            },
           },
           {
             text: 'Yardım Ekibine Bildir',
             onPress: () => {
               Alert.alert(
                 'Bildirim Gönderildi',
-                'Kurtarma ekibi bilgilendirildi.\nSOS konumu iletildi.'
+                'Kurtarma ekibi bilgilendirildi.\nSOS konumu iletildi.',
               );
               // Gerçekte backend'e POST edilecek
-            }
+            },
           },
-        ]
+        ],
       );
     } else {
       // Normal sohbet ekranına git
@@ -340,7 +338,6 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
   // Yakındaki kişiler
   const nearbyContacts = getNearbyContacts().slice(0, 10); // İlk 10 kişi
 
-  const unreadCount = getUnreadCount();
   const sosCount = allConversations.filter(c => c.type === 'sos').length;
   const groupCount = allConversations.filter(c => c.type === 'group').length;
 
@@ -367,7 +364,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
             </Text>
           </View>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleNewMessage}
             style={{
               backgroundColor: '#3b82f6',
@@ -399,7 +396,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
         }}>
           <Ionicons name="search" size={20} color="#64748b" />
           <TextInput
-          accessibilityRole="text"
+            accessibilityRole="text"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Kişi veya mesaj ara..."
@@ -421,7 +418,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
         {/* Tabs */}
         <View style={{ flexDirection: 'row', marginTop: 16, gap: 8 }}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => setSelectedTab('all')}
             style={{
               flex: 1,
@@ -441,7 +438,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
           </Pressable>
 
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => setSelectedTab('sos')}
             style={{
               flex: 1,
@@ -461,7 +458,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
           </Pressable>
 
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => setSelectedTab('groups')}
             style={{
               flex: 1,
@@ -499,7 +496,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 {nearbyContacts.map((contact) => (
                   <Pressable accessible={true}
-          accessibilityRole="button"
+                    accessibilityRole="button"
                     key={contact.id}
                     onPress={() => handleContactPress(contact)}
                     style={{
@@ -557,13 +554,13 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
             if (!lastMessage) return null;
 
             const typeColor = conversation.type === 'sos' ? '#ef4444' : 
-                            conversation.type === 'group' ? '#8b5cf6' : '#3b82f6';
+              conversation.type === 'group' ? '#8b5cf6' : '#3b82f6';
             const typeIcon = conversation.type === 'sos' ? 'alert-circle' : 
-                           conversation.type === 'group' ? 'people' : 'person';
+              conversation.type === 'group' ? 'people' : 'person';
 
             return (
               <Pressable accessible={true}
-          accessibilityRole="button"
+                accessibilityRole="button"
                 key={conversation.contactId}
                 onPress={() => handleConversationPress(conversation)}
                 style={{
@@ -658,7 +655,7 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
               </Text>
               {!searchQuery && (
                 <Pressable accessible={true}
-          accessibilityRole="button"
+                  accessibilityRole="button"
                   onPress={handleNewMessage}
                   style={{
                     backgroundColor: '#3b82f6',

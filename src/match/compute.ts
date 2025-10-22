@@ -1,12 +1,12 @@
-import * as FileSystem from "expo-file-system";
-import { haversine } from "../geo/haversine";
-import { cellFor } from "../geo/grid";
-import { listHazards } from "../hazard/store";
-import { hungarian } from "./hungarian";
+import * as FileSystem from 'expo-file-system';
+import { haversine } from '../geo/haversine';
+import { cellFor } from '../geo/grid';
+import { listHazards } from '../hazard/store';
+import { hungarian } from './hungarian';
 
-const DIR = "/tmp/";
-const MSG = DIR + "msg.inbox.jsonl";
-const PEERS = DIR + "peers.volunteers.json";
+const DIR = '/tmp/';
+const MSG = DIR + 'msg.inbox.jsonl';
+const PEERS = DIR + 'peers.volunteers.json';
 
 type POS = { id:string; lat:number; lng:number };
 
@@ -14,15 +14,17 @@ export async function readSOS(): Promise<POS[]>{
   const ex = await FileSystem.getInfoAsync(MSG);
   if(!ex.exists) {return [];}
   const txt = await FileSystem.readAsStringAsync(MSG);
-  const lines = txt.split("\n").filter(Boolean).slice(-3000);
+  const lines = txt.split('\n').filter(Boolean).slice(-3000);
   const out: POS[] = [];
   for(const ln of lines){
     try{
       const m = JSON.parse(ln);
-      if(m.kind==="sos" && typeof m.qlat==="number" && typeof m.qlng==="number"){
-        out.push({ id: m.id||("sos_"+m.ts), lat: m.qlat, lng: m.qlng });
+      if(m.kind==='sos' && typeof m.qlat==='number' && typeof m.qlng==='number'){
+        out.push({ id: m.id||('sos_'+m.ts), lat: m.qlat, lng: m.qlng });
       }
-    }catch{}
+    }catch{
+      // Ignore JSON parse errors
+    }
   }
   // unique by id (last wins)
   const map = new Map(out.map(o=>[o.id,o]));
@@ -50,7 +52,7 @@ function hazardPenaltyAt(lat:number, lng:number, hz:any[]): number{
 export async function computeMatching(){
   const [S, V, hz] = await Promise.all([readSOS(), readVolunteers(), listHazards()]);
   const cost: number[][] = S.map(s=> V.map(v=>{
-    const d = haversine({lat:v.lat,lng:v.lng},{lat:s.lat,lng:s.lng});
+    const d = haversine({ lat:v.lat,lng:v.lng },{ lat:s.lat,lng:s.lng });
     const pen = hazardPenaltyAt(s.lat,s.lng,hz);
     return d*(1+pen);
   }));

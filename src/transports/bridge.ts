@@ -1,13 +1,13 @@
-import { LinkMux } from "./link";
-import { BleLink } from "./bleLink";
-import { WfdLink } from "./wfd";
-import { LoRaLink } from "./lora";
-import { unwrap } from "./frame";
-import { p2pLocalSend } from "../p2p/send";
+import { LinkMux } from './link';
+import { BleLink } from './bleLink';
+import { WfdLink } from './wfd';
+import { LoRaLink } from './lora';
+import { unwrap } from './frame';
+import { p2pLocalSend } from '../p2p/send';
 
 let mux: LinkMux | null = null;
 
-export async function startBridge(roomId="AFN_DEFAULT"){
+export async function startBridge(roomId='AFN_DEFAULT'){
   if(mux) {return mux;}
   mux = new LinkMux();
   mux.add(new LoRaLink());
@@ -17,10 +17,12 @@ export async function startBridge(roomId="AFN_DEFAULT"){
   mux.onMessage(async(bytes)=>{
     const f = unwrap(bytes); if(!f) {return;}
     try{
-      const payload = JSON.parse(Buffer.from(f.payloadB64,"base64").toString());
+      const payload = JSON.parse((globalThis as any).Buffer.from(f.payloadB64,'base64').toString());
       // route into existing side-channel pipeline
       await p2pLocalSend(payload);
-    }catch{}
+    }catch{
+      // Ignore errors
+    }
   });
 
   await mux.upAll();
@@ -29,7 +31,7 @@ export async function startBridge(roomId="AFN_DEFAULT"){
 
 export async function stopBridge(){ await mux?.downAll(); mux=null; }
 export function bridgeMetrics(){ return mux?.metrics() || []; }
-export async function bridgeSend(bytes:Uint8Array, critical=false){ return mux?.send(bytes, {critical}) ?? false; }
+export async function bridgeSend(bytes:Uint8Array, critical=false){ return mux?.send(bytes, { critical }) ?? false; }
 
 
 

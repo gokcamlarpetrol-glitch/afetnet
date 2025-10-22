@@ -3,8 +3,8 @@ import { View } from 'react-native';
 
 let QR: any;
 try {
-  QR = require('react-native-qrcode-svg').default || require('react-native-qrcode-svg');
-} catch (e) {
+  QR = (globalThis as any).require('react-native-qrcode-svg').default || require('react-native-qrcode-svg');
+} catch {
   QR = null;
 }
 

@@ -14,19 +14,16 @@ import { validateAfnId } from '../identity/afnId';
 export default function People() {
   const [activeTab, setActiveTab] = useState<'identity' | 'add' | 'contacts'>('identity');
   const [manualAfnId, setManualAfnId] = useState('');
-  const [newContactName, setNewContactName] = useState('');
-  const [newContactPhone, setNewContactPhone] = useState('');
   const [myAfnId, setMyAfnId] = useState('');
   const [qrData, setQrData] = useState('');
 
   const { 
     items: people, 
-    meAfnId, 
     addOrUpdate, 
     remove, 
     findByAfnId,
     getPairedCount,
-    getTotalCount 
+    getTotalCount, 
   } = usePeople();
 
   useEffect(() => {
@@ -44,7 +41,7 @@ export default function People() {
         type: 'AFN_PAIR',
         afnId,
         pubKey,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
       setQrData(JSON.stringify(qrPayload));
     } catch (error) {
@@ -56,7 +53,7 @@ export default function People() {
     try {
       await Clipboard.setString(myAfnId);
       Alert.alert('Kopyalandı', 'AFN-ID panoya kopyalandı');
-    } catch (error) {
+    } catch {
       Alert.alert('Hata', 'Kopyalama başarısız');
     }
   };
@@ -74,7 +71,7 @@ export default function People() {
         await Clipboard.setString(shareText);
         Alert.alert('Kopyalandı', 'Paylaşım bilgileri panoya kopyalandı');
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Hata', 'Paylaşım başarısız');
     }
   };
@@ -89,14 +86,14 @@ export default function People() {
       }
 
       // Show contact selection
-      const contactItems = contacts.map((contact, index) => ({
+      const contactItems = contacts.map((contact) => ({
         text: `${contact.name} - ${formatPhoneForDisplay(contact.phoneE164)}`,
-        onPress: () => addContactFromPhonebook(contact)
+        onPress: () => addContactFromPhonebook(contact),
       }));
 
       Alert.alert('Kişi Seç', 'Eklenecek kişiyi seçin:', [
         ...contactItems,
-        { text: 'İptal', style: 'cancel' }
+        { text: 'İptal', style: 'cancel' },
       ]);
     } catch (error) {
       logger.error('Failed to pick contacts:', error);
@@ -109,7 +106,7 @@ export default function People() {
       const personId = addOrUpdate({
         displayName: contact.name,
         phoneE164: contact.phoneE164,
-        paired: false
+        paired: false,
       });
 
       Alert.alert(
@@ -119,9 +116,9 @@ export default function People() {
           { text: 'Tamam' },
           {
             text: 'Davet Gönder',
-            onPress: () => sendInviteToPerson(personId, contact.phoneE164)
-          }
-        ]
+            onPress: () => sendInviteToPerson(personId, contact.phoneE164),
+          },
+        ],
       );
     } catch (error) {
       logger.error('Failed to add contact:', error);
@@ -160,7 +157,7 @@ export default function People() {
     const personId = addOrUpdate({
       displayName: `AFN-${manualAfnId.slice(-4)}`,
       afnId: manualAfnId.trim(),
-      paired: false
+      paired: false,
     });
 
     Alert.alert(
@@ -170,9 +167,9 @@ export default function People() {
         { text: 'Tamam' },
         {
           text: 'Eşleşmeyi Başlat',
-          onPress: () => initiatePairing(personId, manualAfnId.trim())
-        }
-      ]
+          onPress: () => initiatePairing(personId, manualAfnId.trim()),
+        },
+      ],
     );
 
     setManualAfnId('');
@@ -180,13 +177,13 @@ export default function People() {
 
   const initiatePairing = async (personId: string, targetAfnId: string) => {
     try {
-      const requestId = await idHandshakeManager.initiatePairing(targetAfnId);
+      await idHandshakeManager.initiatePairing(targetAfnId);
       Alert.alert(
         'Eşleşme Başlatıldı',
         `Eşleşme isteği gönderildi. AFN-ID: ${targetAfnId}`,
         [
-          { text: 'Tamam' }
-        ]
+          { text: 'Tamam' },
+        ],
       );
     } catch (error) {
       logger.error('Failed to initiate pairing:', error);
@@ -203,9 +200,9 @@ export default function People() {
         {
           text: 'Sil',
           style: 'destructive',
-          onPress: () => remove(personId)
-        }
-      ]
+          onPress: () => remove(personId),
+        },
+      ],
     );
   };
 
@@ -237,7 +234,7 @@ export default function People() {
 
         <View style={styles.identityActions}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleCopyAfnId}
             style={styles.actionButton}
           >
@@ -245,7 +242,7 @@ export default function People() {
           </Pressable>
 
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleShareAfnId}
             style={styles.actionButton}
           >
@@ -272,7 +269,7 @@ export default function People() {
         <View style={styles.manualAddContainer}>
           <Text style={styles.manualAddLabel}>AFN-ID ile Ekle:</Text>
           <TextInput
-          accessibilityRole="text"
+            accessibilityRole="text"
             style={styles.afnIdInput}
             placeholder="AFN-XXXX-XXXX-XXXX"
             value={manualAfnId}
@@ -281,7 +278,7 @@ export default function People() {
             placeholderTextColor="#94a3b8"
           />
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleAddByAfnId}
             style={[styles.addButton, styles.addButtonSecondary]}
           >
@@ -346,7 +343,7 @@ export default function People() {
               <View style={styles.contactActions}>
                 {!person.paired && person.afnId && (
                   <Pressable accessible={true}
-          accessibilityRole="button"
+                    accessibilityRole="button"
                     onPress={() => initiatePairing(person.id, person.afnId!)}
                     style={[styles.contactActionButton, styles.primaryButton]}
                   >
@@ -358,7 +355,7 @@ export default function People() {
 
                 {person.phoneE164 && (
                   <Pressable accessible={true}
-          accessibilityRole="button"
+                    accessibilityRole="button"
                     onPress={() => sendInviteToPerson(person.id, person.phoneE164!)}
                     style={styles.contactActionButton}
                   >
@@ -369,7 +366,7 @@ export default function People() {
                 )}
 
                 <Pressable accessible={true}
-          accessibilityRole="button"
+                  accessibilityRole="button"
                   onPress={() => handleRemovePerson(person.id, person.displayName)}
                   style={[styles.contactActionButton, styles.dangerButton]}
                 >

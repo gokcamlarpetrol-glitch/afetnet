@@ -12,12 +12,10 @@ export default function ICE() {
     addContact,
     removeContact,
     updateContact,
-    reorder,
     addTemplate,
     updateTemplate,
     removeTemplate,
     clearQueue,
-    getNextQueued
   } = useIce();
 
   const [activeTab, setActiveTab] = useState<'contacts' | 'templates' | 'queue'>('contacts');
@@ -40,7 +38,7 @@ export default function ICE() {
       name: editingContact.name,
       phone: editingContact.phone,
       relation: editingContact.relation || '',
-      priority: editingContact.priority || contacts.length + 1
+      priority: editingContact.priority || contacts.length + 1,
     };
 
     if (editingContact.id) {
@@ -62,7 +60,7 @@ export default function ICE() {
     const template: SmsTemplate = {
       id: editingTemplate.id || `template_${Date.now()}`,
       label: editingTemplate.label,
-      text: editingTemplate.text
+      text: editingTemplate.text,
     };
 
     if (editingTemplate.id) {
@@ -128,7 +126,7 @@ export default function ICE() {
         <Text style={styles.templateLabel}>{item.label}</Text>
         <View style={styles.templateActions}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => setEditingTemplate(item)}
             style={styles.actionButton}
           >
@@ -136,7 +134,7 @@ export default function ICE() {
           </Pressable>
           {!item.id.startsWith('default_') && (
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => removeTemplate(item.id)}
               style={[styles.actionButton, styles.dangerButton]}
             >
@@ -205,7 +203,7 @@ export default function ICE() {
       {activeTab === 'contacts' && (
         <View style={styles.tabContent}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => {
               setEditingContact({ priority: contacts.length + 1 });
               setShowAddContact(true);
@@ -227,7 +225,7 @@ export default function ICE() {
       {activeTab === 'templates' && (
         <View style={styles.tabContent}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => {
               setEditingTemplate({});
               setShowAddTemplate(true);
@@ -250,7 +248,7 @@ export default function ICE() {
         <View style={styles.tabContent}>
           {pendingQueue.length > 0 && (
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={handleSendQueued}
               style={[styles.addButton, styles.sendButton]}
             >
@@ -275,15 +273,15 @@ export default function ICE() {
 
           {queue.length > 0 && (
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => {
                 Alert.alert(
                   'Sırayı Temizle',
                   'Tüm bekleyen SMS\'leri silmek istediğinizden emin misiniz?',
                   [
                     { text: 'İptal', style: 'cancel' },
-                    { text: 'Temizle', onPress: clearQueue }
-                  ]
+                    { text: 'Temizle', onPress: clearQueue },
+                  ],
                 );
               }}
               style={[styles.actionButton, styles.dangerButton]}
@@ -305,7 +303,7 @@ export default function ICE() {
             </Text>
 
             <TextInput
-          accessibilityRole="text"
+              accessibilityRole="text"
               style={styles.input}
               placeholder="Ad Soyad"
               value={editingContact?.name || ''}
@@ -313,7 +311,7 @@ export default function ICE() {
             />
 
             <TextInput
-          accessibilityRole="text"
+              accessibilityRole="text"
               style={styles.input}
               placeholder="Telefon Numarası"
               value={editingContact?.phone || ''}
@@ -322,7 +320,7 @@ export default function ICE() {
             />
 
             <TextInput
-          accessibilityRole="text"
+              accessibilityRole="text"
               style={styles.input}
               placeholder="İlişki (opsiyonel)"
               value={editingContact?.relation || ''}
@@ -331,7 +329,7 @@ export default function ICE() {
 
             <View style={styles.modalActions}>
               <Pressable accessible={true}
-          accessibilityRole="button"
+                accessibilityRole="button"
                 onPress={() => {
                   setEditingContact(null);
                   setShowAddContact(false);
@@ -341,7 +339,7 @@ export default function ICE() {
                 <Text style={styles.modalButtonText}>İptal</Text>
               </Pressable>
               <Pressable accessible={true}
-          accessibilityRole="button"
+                accessibilityRole="button"
                 onPress={handleAddContact}
                 style={[styles.modalButton, styles.primaryButton]}
               >
@@ -363,7 +361,7 @@ export default function ICE() {
             </Text>
 
             <TextInput
-          accessibilityRole="text"
+              accessibilityRole="text"
               style={styles.input}
               placeholder="Şablon Etiketi"
               value={editingTemplate?.label || ''}
@@ -371,7 +369,7 @@ export default function ICE() {
             />
 
             <TextInput
-          accessibilityRole="text"
+              accessibilityRole="text"
               style={[styles.input, styles.textArea]}
               placeholder="SMS Metni ({Konum}, {Durum}, {KişiSayısı} kullanabilirsiniz)"
               value={editingTemplate?.text || ''}
@@ -382,7 +380,7 @@ export default function ICE() {
 
             <View style={styles.modalActions}>
               <Pressable accessible={true}
-          accessibilityRole="button"
+                accessibilityRole="button"
                 onPress={() => {
                   setEditingTemplate(null);
                   setShowAddTemplate(false);
@@ -392,7 +390,7 @@ export default function ICE() {
                 <Text style={styles.modalButtonText}>İptal</Text>
               </Pressable>
               <Pressable accessible={true}
-          accessibilityRole="button"
+                accessibilityRole="button"
                 onPress={handleAddTemplate}
                 style={[styles.modalButton, styles.primaryButton]}
               >

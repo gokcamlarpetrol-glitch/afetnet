@@ -1,5 +1,5 @@
-import { encodeULB, decodeULB } from "./codec";
-import { broadcastULB } from "./p2p";
+import { encodeULB, decodeULB } from './codec';
+import { broadcastULB } from './p2p';
 
 export type FECFrame = { gid:string; idx:number; total:number; parity:boolean; payload:string };
 
@@ -23,7 +23,7 @@ function xorStrings(arr:string[]){
 }
 
 export async function fecBroadcast(text:string, N=3){
-  const gid = "fec_"+Date.now().toString(36).slice(2,8);
+  const gid = 'fec_'+Date.now().toString(36).slice(2,8);
   const { chunks, parity } = fecSplit(text, N);
   for(let i=0;i<chunks.length;i++){
     const enc = await encodeULB(JSON.stringify({ gid, idx:i, total:N, parity:false, payload: chunks[i] }));
@@ -40,11 +40,11 @@ export function fecRecover(frames: FECFrame[]): string | null{
   let p:string|undefined;
   for(const f of frames){ if(f.parity) {p=f.payload;} else {datas[f.idx]=f.payload;} }
   const miss = datas.map((v,i)=> v? null: i).filter(v=>v!=null) as number[];
-  if(miss.length===0){ return datas.join(""); }
+  if(miss.length===0){ return datas.join(''); }
   if(miss.length===1 && p){
-    const rec = xorStrings( datas.map(s=> s||"") .concat([p]) ); // data XOR ... XOR parity = missing
+    const rec = xorStrings( datas.map(s=> s||'') .concat([p]) ); // data XOR ... XOR parity = missing
     datas[miss[0]] = rec;
-    return datas.join("");
+    return datas.join('');
   }
   return null;
 }

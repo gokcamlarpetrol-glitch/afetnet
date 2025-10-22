@@ -39,7 +39,7 @@ class EmergencyMedicalSystem extends SimpleEventEmitter {
         ...emergency,
         id: emergencyId,
         timestamp: Date.now(),
-        status: 'active'
+        status: 'active',
       };
 
       this.medicalEmergencies.set(emergencyId, medicalEmergency);

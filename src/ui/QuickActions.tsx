@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
   h: { color: '#b0bbd6', fontSize: 14, fontWeight: '700', marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   item: { backgroundColor: '#0d1122', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#1b2140' },
-  txt: { color: '#c6d3ef', fontWeight: '700' }
+  txt: { color: '#c6d3ef', fontWeight: '700' },
 });
 
 

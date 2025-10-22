@@ -9,7 +9,7 @@
  * 0x04 = Encrypted LOC v2 (team location)
  * 0x05 = SOS with statuses (lat/lon + batt + statuses)
  */
-export const SERVICE_UUID = "AF01";
+export const SERVICE_UUID = 'AF01';
 
 function toInt32(n: number){ return Math.max(Math.min(Math.round(n), 0x7fffffff), -0x80000000); }
 function crc8(buf: Uint8Array){
@@ -25,6 +25,7 @@ function crc8(buf: Uint8Array){
 }
 
 /** encode SOS+Location: lat/lon scaled by 1e6 */
+ 
 export function encodeLoc(lat: number, lon: number, battPct: number, _seq: number){
   const b = new Uint8Array(1+1+4+4+1+1); // ver, type, lat, lon, batt, crc
   b[0]=1; b[1]=0x01;
@@ -60,7 +61,7 @@ export function encodeTextV2(msgId16: number, ttl: number, hops: number, idx:num
 export function encodeSOSWithStatus(lat: number, lon: number, battPct: number, statuses: string[]){
   // Create status string and encode as bytes
   const statusString = statuses.join('|');
-  const statusBytes = new TextEncoder().encode(statusString);
+  const statusBytes = new (globalThis as any).TextEncoder().encode(statusString);
   
   // Calculate total length: ver(1) + type(1) + lat(4) + lon(4) + batt(1) + statusLen(1) + statusBytes + crc(1)
   const totalLen = 1 + 1 + 4 + 4 + 1 + 1 + statusBytes.length + 1;
@@ -94,12 +95,12 @@ export function decode(data: Uint8Array){
     const batt = data[10];
     const ok = data[11]===crc8(data.subarray(0,11));
     if(!ok) {return null;}
-    return { t:"loc", lat, lon, batt };
+    return { t:'loc', lat, lon, batt };
   }
   if (type===0x02 && data.length>=5){
     const seq = data[2], idx = data[3], total = data[4];
     if (seq !== undefined && idx !== undefined && total !== undefined) {
-      return { t:"txt", seq, idx, total, payload: data.subarray(5) };
+      return { t:'txt', seq, idx, total, payload: data.subarray(5) };
     }
     return null;
   }
@@ -109,7 +110,7 @@ export function decode(data: Uint8Array){
       const id16=(data[4]<<8)|data[5];
       const idx=data[6], total=data[7];
       if (idx !== undefined && total !== undefined) {
-        return { t:"txt2", ttl, hops, id16, idx, total, payload: data.subarray(8) };
+        return { t:'txt2', ttl, hops, id16, idx, total, payload: data.subarray(8) };
       }
     }
     return null;
@@ -117,7 +118,7 @@ export function decode(data: Uint8Array){
   if (type===0x04 && data.length>=4){
     // Encrypted LOC v2: payload = nonce|secretbox
     // Decoding will be handled at bridge layer since we need group key.
-    return { t:"loc2", payload: data.subarray(2) };
+    return { t:'loc2', payload: data.subarray(2) };
   }
   if (type===0x05 && data.length>=13){
     // SOS with statuses: ver(1) + type(1) + lat(4) + lon(4) + batt(1) + statusLen(1) + statusBytes + crc(1)
@@ -131,7 +132,7 @@ export function decode(data: Uint8Array){
     if (data.length < 12 + statusLen + 1) return null; // Not enough data
     
     const statusBytes = data.subarray(12, 12 + statusLen);
-    const statusString = new TextDecoder().decode(statusBytes);
+    const statusString = new (globalThis as any).TextDecoder().decode(statusBytes);
     const statuses = statusString ? statusString.split('|') : [];
     
     // Verify CRC
@@ -140,7 +141,7 @@ export function decode(data: Uint8Array){
     const actualCrc = crc8(data.subarray(0, 12 + statusLen));
     if (expectedCrc !== actualCrc) return null;
     
-    return { t:"sos", lat, lon, batt, statuses };
+    return { t:'sos', lat, lon, batt, statuses };
   }
   return null;
 }

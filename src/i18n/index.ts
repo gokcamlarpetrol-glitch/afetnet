@@ -6,11 +6,11 @@ import enTranslations from './en.json';
 
 const resources = {
   tr: {
-    translation: trTranslations
+    translation: trTranslations,
   },
   en: {
-    translation: enTranslations
-  }
+    translation: enTranslations,
+  },
 };
 
 i18n
@@ -21,13 +21,13 @@ i18n
     fallbackLng: 'tr',
     
     interpolation: {
-      escapeValue: false // React already escapes values
+      escapeValue: false, // React already escapes values
     },
     
     // React i18next options
     react: {
-      useSuspense: false
-    }
+      useSuspense: false,
+    },
   });
 
 export default i18n;

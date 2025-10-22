@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
-import Svg, { Circle } from "react-native-svg";
-import { addHit, decay, makeGrid, normalize } from "../map/heat";
+import { useEffect, useRef, useState } from 'react';
+import { View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import { addHit, decay, makeGrid, normalize } from '../map/heat';
 
 type Pt = { x:number; y:number; v:number };
 
@@ -23,8 +23,8 @@ export default function HeatOverlay({ width, height, samples }:{width:number;hei
       }
     }
     setPts(out);
-    const t = setTimeout(()=>setPts([...out]), 2000);
-    return ()=>clearTimeout(t);
+    const t = (globalThis as any).setTimeout(()=>setPts([...out]), 2000);
+    return ()=>(globalThis as any).clearTimeout(t);
   },[samples,width,height]);
 
   // CRITICAL: Cleanup on unmount to prevent memory leaks
@@ -37,7 +37,7 @@ export default function HeatOverlay({ width, height, samples }:{width:number;hei
   }, []);
 
   return (
-    <View pointerEvents="none" style={{position:"absolute", left:0, top:0, width, height}}>
+    <View pointerEvents="none" style={{ position:'absolute', left:0, top:0, width, height }}>
       <Svg width={width} height={height}>
         {pts.map((p,idx)=>(
           <Circle key={idx} cx={p.x} cy={p.y} r={28 + p.v*28} fill={`rgba(239,68,68,${0.08 + p.v*0.22})`}/>

@@ -9,7 +9,7 @@ export function cellFor(lat:number, lng:number){
   return { glat, glng, key: `${glat.toFixed(3)},${glng.toFixed(3)}` };
 }
 export function centerOfCell(key:string){
-  const [a,b] = key.split(",").map(parseFloat);
+  const [a,b] = key.split(',').map(parseFloat);
   return { lat: a, lng: b };
 }
 

@@ -24,7 +24,6 @@ import { meshRelay } from '../services/mesh/relay';
 import { startLiveFeed } from '../services/quake/realtime';
 import { cacheGet } from '../services/quake/storage';
 import { useQuakes } from '../services/quake/useQuakes';
-import { useAccessibility } from '../store/accessibility';
 import { useDevLog } from '../store/devlog';
 import { useEmergency } from '../store/emergency';
 import { useGroups } from '../store/groups';
@@ -46,7 +45,6 @@ type Row = {
 };
 
 export default function Diagnostics() {
-  const [rows, setRows] = useState<{ key: string; label: string; ok?: boolean; note?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [cacheMB, setCacheMB] = useState(0);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -62,14 +60,13 @@ export default function Diagnostics() {
     pollSlowMs, 
     region, 
     experimentalPWave,
-    selectedProvinces
+    selectedProvinces,
   } = useSettings();
   
   const { pairedContacts, groups } = usePairing();
   const { getAllIncidents } = useIncidents();
-  const { enabled: emergencyEnabled, deadManEnabled, deadManIntervalMin, ultra, pulseMs } = useEmergency();
+  const { enabled: emergencyEnabled, ultra, pulseMs } = useEmergency();
   const { enabled: trainingEnabled, scenario, activeIncidents } = useTraining();
-  const { highContrast, bigText, hapticsStrong } = useAccessibility();
   const { getEvents } = useDevLog();
   
   const [liveFeedActive, setLiveFeedActive] = useState(false);
@@ -89,8 +86,8 @@ export default function Diagnostics() {
       } else {
         Alert.alert('Test Başarısız', 'Worker tick başarısız');
       }
-    } catch (error) {
-      logger.error('Test tick error:', error);
+    } catch {
+      logger.error('Test tick error');
       Alert.alert('Test Hatası', 'Worker tick sırasında hata oluştu');
     }
   };
@@ -102,7 +99,7 @@ export default function Diagnostics() {
       run: async () => {
         const n = await NetInfo.fetch();
         return { ok: !!n.isConnected, note: n.isConnected ? 'online' : 'offline' };
-      }
+      },
     },
     {
       key: 'storage',
@@ -112,7 +109,7 @@ export default function Diagnostics() {
         await AsyncStorage.setItem(k, '1');
         const v = await AsyncStorage.getItem(k);
         return { ok: v === '1' };
-      }
+      },
     },
     {
       key: 'notif',
@@ -120,7 +117,7 @@ export default function Diagnostics() {
       run: async () => {
         const s: any = await Notifications.getPermissionsAsync();
         return { ok: !!(s.granted || (s.ios?.status as any) === 'granted'), note: JSON.stringify(s) };
-      }
+      },
     },
     {
       key: 'bgfetch',
@@ -128,7 +125,7 @@ export default function Diagnostics() {
       run: async () => {
         const t = await BackgroundFetch.getStatusAsync();
         return { ok: t !== BackgroundFetch.BackgroundFetchStatus.Restricted, note: String(t) };
-      }
+      },
     },
     {
       key: 'location',
@@ -136,7 +133,7 @@ export default function Diagnostics() {
       run: async () => {
         const s = await Location.getForegroundPermissionsAsync();
         return { ok: s.granted, note: s.granted ? 'granted' : 'denied' };
-      }
+      },
     },
     {
       key: 'sensors',
@@ -150,7 +147,7 @@ export default function Diagnostics() {
           ok = false;
         }
         return { ok };
-      }
+      },
     },
     {
       key: 'quake',
@@ -161,7 +158,7 @@ export default function Diagnostics() {
         }
         const latest = quakes[0];
         return { ok: !!latest, note: latest ? `M${latest.mag.toFixed(1)} • ${timeAgo(latest.time)}` : 'yok' };
-      }
+      },
     },
     {
       key: 'quakeCache',
@@ -169,7 +166,7 @@ export default function Diagnostics() {
       run: async () => {
         const c = await cacheGet();
         return { ok: Array.isArray(c) || c === null, note: c && c[0] ? `M${c[0].mag}` : '—' };
-      }
+      },
     },
     {
       key: 'tiles',
@@ -178,12 +175,12 @@ export default function Diagnostics() {
         const b = await cacheSizeBytes();
         setCacheMB(b / 1_000_000);
         return { ok: b >= 0, note: `${(b / 1_000_000).toFixed(1)} MB` };
-      }
+      },
     },
     {
       key: 'compass',
       label: 'Pusula heading',
-      run: async () => ({ ok: typeof heading === 'number', note: `${Math.round(heading)}°` })
+      run: async () => ({ ok: typeof heading === 'number', note: `${Math.round(heading)}°` }),
     },
     {
       key: 'bleRelay',
@@ -193,609 +190,609 @@ export default function Diagnostics() {
         const lastMessages = bleRelay.getLastMessages(5);
         return { 
           ok: true, 
-          note: `${seenCount} mesaj, ${lastMessages.length} son` 
+          note: `${seenCount} mesaj, ${lastMessages.length} son`, 
         };
-      }
+      },
     },
-        {
-          key: 'pdrFuse',
-          label: 'PDR Fusion',
-          run: async () => {
-            const hasPosition = !!currentPos;
-            const source = (currentPos as any)?.source || 'yok';
-            const accuracy = currentPos ? Math.round(currentPos.accuracy || 0) : 0;
+    {
+      key: 'pdrFuse',
+      label: 'PDR Fusion',
+      run: async () => {
+        const hasPosition = !!currentPos;
+        const source = (currentPos as any)?.source || 'yok';
+        const accuracy = currentPos ? Math.round(currentPos.accuracy || 0) : 0;
+        return {
+          ok: hasPosition,
+          note: hasPosition ? `${source} ±${accuracy}m` : 'konum yok',
+        };
+      },
+    },
+    {
+      key: 'satellitePacks',
+      label: 'Satellite Packs',
+      run: async () => {
+        try {
+          const packs = await tileManager.listAvailableTilePacks();
+          const satellitePacks = packs.filter(pack => 
+            pack.name?.toLowerCase().includes('satellite') || 
+                pack.name?.toLowerCase().includes('uydu'),
+          );
+          return {
+            ok: satellitePacks.length > 0,
+            note: `${satellitePacks.length} paket, toplam ${packs.length} tile paketi`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'TileManager hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'autoReadyMap',
+      label: 'Auto-Ready Map',
+      run: async () => {
+        try {
+          const packs = await tileManager.listAvailableTilePacks();
+          const starterPack = packs.find(pack => pack.id === 'sentinel-starter');
+          const autoPack = packs.find(pack => pack.id === 'sentinel-auto');
+          const rasterPacks = packs.filter(pack => pack.kind === 'raster');
+              
+          let status = 'Vector-only';
+          if (starterPack) status = 'Starter';
+          if (autoPack) status = 'Auto-prefetch';
+          if (starterPack && autoPack) status = 'Starter+Auto';
+              
+          const totalSize = rasterPacks.reduce((sum, pack) => sum + pack.sizeBytes, 0);
+          const sizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+              
+          return {
+            ok: true,
+            note: `${status} (${rasterPacks.length} paket, ${sizeMB}MB)`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Auto-Ready hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'vectorSupport',
+      label: 'Vector Support',
+      run: async () => {
+        try {
+          const supported = hasVectorSupport();
+          return {
+            ok: supported,
+            note: supported ? 'MapLibre aktif' : 'Dev Build gerekli',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Vector support hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'quakeProvider',
+      label: 'Sağlayıcı seçimi',
+      run: async () => {
+        try {
+          return {
+            ok: true,
+            note: `${quakeProvider} (eşik: M${magThreshold})`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Sağlayıcı hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'lastFetch',
+      label: 'Son çekim',
+      run: async () => {
+        try {
+          if (quakesLoading) {
             return {
-              ok: hasPosition,
-              note: hasPosition ? `${source} ±${accuracy}m` : 'konum yok'
+              ok: false,
+              note: 'Yükleniyor...',
             };
           }
-        },
-        {
-          key: 'satellitePacks',
-          label: 'Satellite Packs',
-          run: async () => {
-            try {
-              const packs = await tileManager.listAvailableTilePacks();
-              const satellitePacks = packs.filter(pack => 
-                pack.name?.toLowerCase().includes('satellite') || 
-                pack.name?.toLowerCase().includes('uydu')
-              );
-              return {
-                ok: satellitePacks.length > 0,
-                note: `${satellitePacks.length} paket, toplam ${packs.length} tile paketi`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'TileManager hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'autoReadyMap',
-          label: 'Auto-Ready Map',
-          run: async () => {
-            try {
-              const packs = await tileManager.listAvailableTilePacks();
-              const starterPack = packs.find(pack => pack.id === 'sentinel-starter');
-              const autoPack = packs.find(pack => pack.id === 'sentinel-auto');
-              const rasterPacks = packs.filter(pack => pack.kind === 'raster');
               
-              let status = 'Vector-only';
-              if (starterPack) status = 'Starter';
-              if (autoPack) status = 'Auto-prefetch';
-              if (starterPack && autoPack) status = 'Starter+Auto';
+          if (quakesError) {
+            return {
+              ok: false,
+              note: `Hata: ${quakesError}`,
+            };
+          }
               
-              const totalSize = rasterPacks.reduce((sum, pack) => sum + pack.sizeBytes, 0);
-              const sizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+          if (quakes.length === 0) {
+            return {
+              ok: false,
+              note: 'Önbellek bulunamadı',
+            };
+          }
               
-              return {
-                ok: true,
-                note: `${status} (${rasterPacks.length} paket, ${sizeMB}MB)`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Auto-Ready hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'vectorSupport',
-          label: 'Vector Support',
-          run: async () => {
-            try {
-              const supported = hasVectorSupport();
-              return {
-                ok: supported,
-                note: supported ? 'MapLibre aktif' : 'Dev Build gerekli'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Vector support hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'quakeProvider',
-          label: 'Sağlayıcı seçimi',
-          run: async () => {
-            try {
-              return {
-                ok: true,
-                note: `${quakeProvider} (eşik: M${magThreshold})`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Sağlayıcı hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'lastFetch',
-          label: 'Son çekim',
-          run: async () => {
-            try {
-              if (quakesLoading) {
-                return {
-                  ok: false,
-                  note: 'Yükleniyor...'
-                };
-              }
+          const latest = quakes[0];
+          const timeAgo = latest.time ? new Date(latest.time).toLocaleString('tr-TR') : 'bilinmiyor';
+          const summary = `M${latest.mag} • ${latest.place} • ${timeAgo}`;
+          const sourceNote = fallbackUsed ? ` (fallback: ${source})` : ` (${source})`;
               
-              if (quakesError) {
-                return {
-                  ok: false,
-                  note: `Hata: ${quakesError}`
-                };
-              }
+          return {
+            ok: true,
+            note: summary + sourceNote,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Çekim hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'quakeCache',
+      label: 'Deprem cache',
+      run: async () => {
+        try {
+          if (quakes.length === 0) {
+            return {
+              ok: false,
+              note: 'Cache boş',
+            };
+          }
               
-              if (quakes.length === 0) {
-                return {
-                  ok: false,
-                  note: 'Önbellek bulunamadı'
-                };
-              }
+          const latest = quakes[0];
+          const timeAgo = latest.time ? new Date(latest.time).toLocaleString('tr-TR') : 'bilinmiyor';
               
-              const latest = quakes[0];
-              const timeAgo = latest.time ? new Date(latest.time).toLocaleString('tr-TR') : 'bilinmiyor';
-              const summary = `M${latest.mag} • ${latest.place} • ${timeAgo}`;
-              const sourceNote = fallbackUsed ? ` (fallback: ${source})` : ` (${source})`;
+          return {
+            ok: true,
+            note: `${quakes.length} öğe, son: ${latest.id} (${timeAgo})`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Cache hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'liveMode',
+      label: 'Canlı mod',
+      run: async () => {
+        try {
+          return {
+            ok: liveMode,
+            note: liveMode ? `Aktif (${pollFastMs/1000}s/${pollSlowMs/1000}s)` : 'Pasif',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Canlı mod hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'lastLiveQuake',
+      label: 'Son canlı deprem',
+      run: async () => {
+        try {
+          if (!lastLiveQuake) {
+            return {
+              ok: false,
+              note: 'Henüz canlı veri yok',
+            };
+          }
               
-              return {
-                ok: true,
-                note: summary + sourceNote
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Çekim hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'quakeCache',
-          label: 'Deprem cache',
-          run: async () => {
-            try {
-              if (quakes.length === 0) {
-                return {
-                  ok: false,
-                  note: 'Cache boş'
-                };
-              }
+          const timeAgo = new Date(lastLiveQuake.time).toLocaleString('tr-TR');
+          const summary = `M${lastLiveQuake.mag} • ${lastLiveQuake.place} • ${timeAgo}`;
+          const latencyNote = liveLatency > 0 ? ` (${liveLatency}ms gecikme)` : '';
               
-              const latest = quakes[0];
-              const timeAgo = latest.time ? new Date(latest.time).toLocaleString('tr-TR') : 'bilinmiyor';
+          return {
+            ok: true,
+            note: summary + latencyNote,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Canlı deprem hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'regionFilter',
+      label: 'Bölge filtresi',
+      run: async () => {
+        try {
+          return {
+            ok: true,
+            note: getRegionDisplayName(region),
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Bölge filtresi hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'pWaveExperimental',
+      label: 'P-dalgası deneme',
+      run: async () => {
+        try {
+          if (!experimentalPWave) {
+            return {
+              ok: true,
+              note: 'Devre dışı',
+            };
+          }
               
-              return {
-                ok: true,
-                note: `${quakes.length} öğe, son: ${latest.id} (${timeAgo})`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Cache hatası'
-              };
-            }
+          // This would be populated by the P-wave hook in a real implementation
+          return {
+            ok: true,
+            note: 'Aktif (deneysel)',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'P-dalgası hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'magThreshold',
+      label: 'Büyüklük eşiği (M)',
+      run: async () => {
+        try {
+          return {
+            ok: true,
+            note: `M${magThreshold.toFixed(1)} (varsayılan: M3.5)`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Eşik hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'thresholdClamp',
+      label: 'Threshold clamp',
+      run: async () => {
+        try {
+          const isValid = magThreshold >= 2.0 && magThreshold <= 7.5;
+          return {
+            ok: isValid,
+            note: isValid ? `Geçerli (M${magThreshold.toFixed(1)})` : `Geçersiz (M${magThreshold.toFixed(1)}) - M3.5'e zorlanacak`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Threshold kontrol hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'fcmToken',
+      label: 'FCM token (Android)',
+      run: async () => {
+        try {
+          const token = await getFcmToken();
+          if (!token) {
+            return {
+              ok: false,
+              note: 'FCM token yok (iOS/hatalı)',
+            };
           }
-        },
-        {
-          key: 'liveMode',
-          label: 'Canlı mod',
-          run: async () => {
-            try {
-              return {
-                ok: liveMode,
-                note: liveMode ? `Aktif (${pollFastMs/1000}s/${pollSlowMs/1000}s)` : 'Pasif'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Canlı mod hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'lastLiveQuake',
-          label: 'Son canlı deprem',
-          run: async () => {
-            try {
-              if (!lastLiveQuake) {
-                return {
-                  ok: false,
-                  note: 'Henüz canlı veri yok'
-                };
-              }
               
-              const timeAgo = new Date(lastLiveQuake.time).toLocaleString('tr-TR');
-              const summary = `M${lastLiveQuake.mag} • ${lastLiveQuake.place} • ${timeAgo}`;
-              const latencyNote = liveLatency > 0 ? ` (${liveLatency}ms gecikme)` : '';
+          return {
+            ok: true,
+            note: `${token.substring(token.length - 6)}... (son 6 hane)`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'FCM token hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'workerHealth',
+      label: 'Worker bağlantısı',
+      run: async () => {
+        try {
+          if (!isWorkerConfigured()) {
+            return {
+              ok: false,
+              note: 'Worker yapılandırılmamış',
+            };
+          }
               
-              return {
-                ok: true,
-                note: summary + latencyNote
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Canlı deprem hatası'
-              };
-            }
+          const isHealthy = await testWorkerHealth();
+          return {
+            ok: isHealthy,
+            note: isHealthy ? 'Bağlantı OK' : 'Bağlantı hatası',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Worker health hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'fcmSubscriptions',
+      label: 'Abonelik (İller)',
+      run: async () => {
+        try {
+          const count = selectedProvinces.length;
+          if (count === 0) {
+            return {
+              ok: true,
+              note: 'Abonelik yok',
+            };
           }
-        },
-        {
-          key: 'regionFilter',
-          label: 'Bölge filtresi',
-          run: async () => {
-            try {
-              return {
-                ok: true,
-                note: getRegionDisplayName(region)
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Bölge filtresi hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'pWaveExperimental',
-          label: 'P-dalgası deneme',
-          run: async () => {
-            try {
-              if (!experimentalPWave) {
-                return {
-                  ok: true,
-                  note: 'Devre dışı'
-                };
-              }
               
-              // This would be populated by the P-wave hook in a real implementation
-              return {
-                ok: true,
-                note: 'Aktif (deneysel)'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'P-dalgası hatası'
-              };
-            }
+          return {
+            ok: true,
+            note: `${count} il: ${selectedProvinces.join(', ')}`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Abonelik hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'lastPushReceived',
+      label: 'Son itme alındı',
+      run: async () => {
+        try {
+          // This would be populated by notification listener in a real implementation
+          return {
+            ok: true,
+            note: 'Bildirim dinleyici aktif',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Bildirim dinleyici hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'meshQueue',
+      label: 'Mesh Kuyruk (H/N/L)',
+      run: async () => {
+        try {
+          const stats = meshRelay.getQueueStats();
+          return {
+            ok: true,
+            note: `H:${stats.high} N:${stats.normal} L:${stats.low}`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Mesh kuyruk hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'lastDMEncrypted',
+      label: 'Son DM şifreli',
+      run: async () => {
+        try {
+          // This would track the last DM encryption status
+          return {
+            ok: true,
+            note: 'Evet (eşleşmiş kişiler)',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'DM şifreleme hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'relayDutyCycle',
+      label: 'Relay duty-cycle',
+      run: async () => {
+        try {
+          // This would show current BLE relay duty cycle
+          return {
+            ok: true,
+            note: emergencyEnabled ? 'Agresif (2dk)' : 'Normal',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Duty cycle hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'missionCoverage',
+      label: 'Mission Coverage',
+      run: async () => {
+        try {
+          const incidents = getAllIncidents();
+          const totalCoverage = incidents.reduce((sum, inc) => sum + inc.helpers.length, 0);
+          return {
+            ok: true,
+            note: `${incidents.length} olay, ${totalCoverage} kapsam`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Coverage hesaplama hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'voicePingStatus',
+      label: 'Voice ping devre dışı/içinde',
+      run: async () => {
+        try {
+          // Voice ping is near-only by design
+          return {
+            ok: true,
+            note: 'Yakın mesafe (near-only)',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Voice ping hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'deadManSwitch',
+      label: 'Dead man switch',
+      run: async () => {
+        try {
+          const status = deadManSwitch.getStatus();
+          return {
+            ok: status.enabled,
+            note: status.enabled ? `${status.intervalMinutes}dk aralık` : 'Devre dışı',
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Dead man switch hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'pairedContacts',
+      label: 'Eşleşmiş kişiler',
+      run: async () => {
+        try {
+          return {
+            ok: true,
+            note: `${pairedContacts.length} kişi, ${groups.length} grup`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Eşleşme hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'ultraBatteryCycle',
+      label: 'Ultra Pil Döngüsü',
+      run: async () => {
+        try {
+          if (!ultra) {
+            return { ok: true, note: 'Devre dışı' };
           }
-        },
-        {
-          key: 'magThreshold',
-          label: 'Büyüklük eşiği (M)',
-          run: async () => {
-            try {
-              return {
-                ok: true,
-                note: `M${magThreshold.toFixed(1)} (varsayılan: M3.5)`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Eşik hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'thresholdClamp',
-          label: 'Threshold clamp',
-          run: async () => {
-            try {
-              const isValid = magThreshold >= 2.0 && magThreshold <= 7.5;
-              return {
-                ok: isValid,
-                note: isValid ? `Geçerli (M${magThreshold.toFixed(1)})` : `Geçersiz (M${magThreshold.toFixed(1)}) - M3.5'e zorlanacak`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Threshold kontrol hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'fcmToken',
-          label: 'FCM token (Android)',
-          run: async () => {
-            try {
-              const token = await getFcmToken();
-              if (!token) {
-                return {
-                  ok: false,
-                  note: 'FCM token yok (iOS/hatalı)'
-                };
-              }
               
-              return {
-                ok: true,
-                note: `${token.substring(token.length - 6)}... (son 6 hane)`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'FCM token hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'workerHealth',
-          label: 'Worker bağlantısı',
-          run: async () => {
-            try {
-              if (!isWorkerConfigured()) {
-                return {
-                  ok: false,
-                  note: 'Worker yapılandırılmamış'
-                };
-              }
+          const nextTick = Date.now() + pulseMs;
+          const eta = Math.round((nextTick - Date.now()) / 1000);
+          return {
+            ok: true,
+            note: `${pulseMs}ms aralık, sonraki ${eta}s`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Pil döngüsü hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'blackBoxSize',
+      label: 'BlackBox Boyutu',
+      run: async () => {
+        try {
+          const events = getEvents();
+          const sosEvents = events.filter(e => e.tag.includes('SOS')).length;
+          const relayEvents = events.filter(e => e.tag.includes('RELAY')).length;
+          const missionEvents = events.filter(e => e.tag.includes('MISSION')).length;
+          const errorEvents = events.filter(e => e.tag.includes('ERROR')).length;
               
-              const isHealthy = await testWorkerHealth();
-              return {
-                ok: isHealthy,
-                note: isHealthy ? 'Bağlantı OK' : 'Bağlantı hatası'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Worker health hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'fcmSubscriptions',
-          label: 'Abonelik (İller)',
-          run: async () => {
-            try {
-              const count = selectedProvinces.length;
-              if (count === 0) {
-                return {
-                  ok: true,
-                  note: 'Abonelik yok'
-                };
-              }
+          return {
+            ok: true,
+            note: `${events.length} olay (S:${sosEvents} R:${relayEvents} M:${missionEvents} E:${errorEvents})`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'BlackBox hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'incidentBoard',
+      label: 'Olay Panosu',
+      run: async () => {
+        try {
+          const incidents = getAllIncidents();
+          const openIncidents = incidents.filter(i => i.status === 'open');
+          const topPriority = incidents.length > 0 ? Math.max(...incidents.map(i => i.priority)) : 0;
               
-              return {
-                ok: true,
-                note: `${count} il: ${selectedProvinces.join(', ')}`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Abonelik hatası'
-              };
-            }
+          return {
+            ok: true,
+            note: `${incidents.length} olay, ${openIncidents.length} açık, max öncelik ${topPriority.toFixed(1)}`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Olay panosu hatası',
+          };
+        }
+      },
+    },
+    {
+      key: 'trainingMode',
+      label: 'Eğitim Modu',
+      run: async () => {
+        try {
+          if (!trainingEnabled) {
+            return { ok: true, note: 'Devre dışı' };
           }
-        },
-        {
-          key: 'lastPushReceived',
-          label: 'Son itme alındı',
-          run: async () => {
-            try {
-              // This would be populated by notification listener in a real implementation
-              return {
-                ok: true,
-                note: 'Bildirim dinleyici aktif'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Bildirim dinleyici hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'meshQueue',
-          label: 'Mesh Kuyruk (H/N/L)',
-          run: async () => {
-            try {
-              const stats = meshRelay.getQueueStats();
-              return {
-                ok: true,
-                note: `H:${stats.high} N:${stats.normal} L:${stats.low}`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Mesh kuyruk hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'lastDMEncrypted',
-          label: 'Son DM şifreli',
-          run: async () => {
-            try {
-              // This would track the last DM encryption status
-              return {
-                ok: true,
-                note: 'Evet (eşleşmiş kişiler)'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'DM şifreleme hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'relayDutyCycle',
-          label: 'Relay duty-cycle',
-          run: async () => {
-            try {
-              // This would show current BLE relay duty cycle
-              return {
-                ok: true,
-                note: emergencyEnabled ? 'Agresif (2dk)' : 'Normal'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Duty cycle hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'missionCoverage',
-          label: 'Mission Coverage',
-          run: async () => {
-            try {
-              const incidents = getAllIncidents();
-              const totalCoverage = incidents.reduce((sum, inc) => sum + inc.helpers.length, 0);
-              return {
-                ok: true,
-                note: `${incidents.length} olay, ${totalCoverage} kapsam`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Coverage hesaplama hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'voicePingStatus',
-          label: 'Voice ping devre dışı/içinde',
-          run: async () => {
-            try {
-              // Voice ping is near-only by design
-              return {
-                ok: true,
-                note: 'Yakın mesafe (near-only)'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Voice ping hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'deadManSwitch',
-          label: 'Dead man switch',
-          run: async () => {
-            try {
-              const status = deadManSwitch.getStatus();
-              return {
-                ok: status.enabled,
-                note: status.enabled ? `${status.intervalMinutes}dk aralık` : 'Devre dışı'
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Dead man switch hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'pairedContacts',
-          label: 'Eşleşmiş kişiler',
-          run: async () => {
-            try {
-              return {
-                ok: true,
-                note: `${pairedContacts.length} kişi, ${groups.length} grup`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Eşleşme hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'ultraBatteryCycle',
-          label: 'Ultra Pil Döngüsü',
-          run: async () => {
-            try {
-              if (!ultra) {
-                return { ok: true, note: 'Devre dışı' };
-              }
               
-              const nextTick = Date.now() + pulseMs;
-              const eta = Math.round((nextTick - Date.now()) / 1000);
-              return {
-                ok: true,
-                note: `${pulseMs}ms aralık, sonraki ${eta}s`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Pil döngüsü hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'blackBoxSize',
-          label: 'BlackBox Boyutu',
-          run: async () => {
-            try {
-              const events = getEvents();
-              const sosEvents = events.filter(e => e.tag.includes('SOS')).length;
-              const relayEvents = events.filter(e => e.tag.includes('RELAY')).length;
-              const missionEvents = events.filter(e => e.tag.includes('MISSION')).length;
-              const errorEvents = events.filter(e => e.tag.includes('ERROR')).length;
-              
-              return {
-                ok: true,
-                note: `${events.length} olay (S:${sosEvents} R:${relayEvents} M:${missionEvents} E:${errorEvents})`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'BlackBox hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'incidentBoard',
-          label: 'Olay Panosu',
-          run: async () => {
-            try {
-              const incidents = getAllIncidents();
-              const openIncidents = incidents.filter(i => i.status === 'open');
-              const topPriority = incidents.length > 0 ? Math.max(...incidents.map(i => i.priority)) : 0;
-              
-              return {
-                ok: true,
-                note: `${incidents.length} olay, ${openIncidents.length} açık, max öncelik ${topPriority.toFixed(1)}`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Olay panosu hatası'
-              };
-            }
-          }
-        },
-        {
-          key: 'trainingMode',
-          label: 'Eğitim Modu',
-          run: async () => {
-            try {
-              if (!trainingEnabled) {
-                return { ok: true, note: 'Devre dışı' };
-              }
-              
-              return {
-                ok: true,
-                note: `${scenario} senaryosu, ${activeIncidents.length} aktif`
-              };
-            } catch (error) {
-              return {
-                ok: false,
-                note: 'Eğitim modu hatası'
-              };
-            }
-          }
-        },
+          return {
+            ok: true,
+            note: `${scenario} senaryosu, ${activeIncidents.length} aktif`,
+          };
+        } catch {
+          return {
+            ok: false,
+            note: 'Eğitim modu hatası',
+          };
+        }
+      },
+    },
     {
       key: 'assemblyData',
       label: 'Assembly veri',
@@ -804,12 +801,12 @@ export default function Diagnostics() {
           const points = await listAssembly();
           return {
             ok: points.length > 0,
-            note: `${points.length} kayıt yüklü (${points.filter(p => p.source === 'bundled').length} bundled, ${points.filter(p => p.source === 'imported').length} imported)`
+            note: `${points.length} kayıt yüklü (${points.filter(p => p.source === 'bundled').length} bundled, ${points.filter(p => p.source === 'imported').length} imported)`,
           };
-        } catch (error) {
+        } catch {
           return { ok: false, note: 'Yüklenemedi' };
         }
-      }
+      },
     },
     {
       key: 'iceStatus',
@@ -820,12 +817,12 @@ export default function Diagnostics() {
           const pendingQueue = queue.filter(item => !item.sent);
           return {
             ok: contacts.length > 0 || templates.length > 0,
-            note: `${contacts.length} kişi, ${templates.length} şablon, ${pendingQueue.length} kuyruk`
+            note: `${contacts.length} kişi, ${templates.length} şablon, ${pendingQueue.length} kuyruk`,
           };
-        } catch (error) {
+        } catch {
           return { ok: false, note: 'Hata' };
         }
-      }
+      },
     },
     {
       key: 'smsComposer',
@@ -835,12 +832,12 @@ export default function Diagnostics() {
           const isAvailable = await import('expo-sms').then(sms => sms.isAvailableAsync());
           return {
             ok: isAvailable,
-            note: isAvailable ? 'available' : 'unavailable'
+            note: isAvailable ? 'available' : 'unavailable',
           };
-        } catch (error) {
+        } catch {
           return { ok: false, note: 'unavailable (platform)' };
         }
-      }
+      },
     },
     {
       key: 'connectivity',
@@ -851,12 +848,12 @@ export default function Diagnostics() {
           const lastBanner = connectivityWatcher.getLastBannerTime();
           return {
             ok: !!netInfo.isConnected,
-            note: `cell ${netInfo.isConnected ? 'on' : 'off'}, last banner ${lastBanner > 0 ? new Date(lastBanner).toLocaleTimeString() : 'never'}`
+            note: `cell ${netInfo.isConnected ? 'on' : 'off'}, last banner ${lastBanner > 0 ? new Date(lastBanner).toLocaleTimeString() : 'never'}`,
           };
-        } catch (error) {
+        } catch {
           return { ok: false, note: 'Error' };
         }
-      }
+      },
     },
     {
       key: 'groups',
@@ -867,156 +864,156 @@ export default function Diagnostics() {
           const groupNames = items.map(g => g.name).join(', ');
           return {
             ok: true,
-            note: `${items.length} grup: ${groupNames || 'yok'}`
+            note: `${items.length} grup: ${groupNames || 'yok'}`,
           };
-        } catch (error) {
+        } catch {
           return { ok: false, note: 'Grup hatası' };
         }
-      }
+      },
     },
-      {
-        key: 'gidKeyStatus',
-        label: 'GID anahtar durumu',
-        run: async () => {
-          try {
-            const { items } = useGroups.getState();
-            const groupsWithKeys = items.filter(g => g.sharedKeyB64).length;
-            return {
-              ok: groupsWithKeys > 0,
-              note: `${groupsWithKeys}/${items.length} grup anahtarlı`
-            };
-          } catch (error) {
-            return { ok: false, note: 'GID anahtar hatası' };
-          }
+    {
+      key: 'gidKeyStatus',
+      label: 'GID anahtar durumu',
+      run: async () => {
+        try {
+          const { items } = useGroups.getState();
+          const groupsWithKeys = items.filter(g => g.sharedKeyB64).length;
+          return {
+            ok: groupsWithKeys > 0,
+            note: `${groupsWithKeys}/${items.length} grup anahtarlı`,
+          };
+        } catch {
+          return { ok: false, note: 'GID anahtar hatası' };
         }
       },
-      {
-        key: 'verifiedMembers',
-        label: 'Üyeler (doğrulanmış)',
-        run: async () => {
-          try {
-            const { items } = useGroups.getState();
-            const totalMembers = items.reduce((sum, g) => sum + g.members.length, 0);
-            const verifiedMembers = items.reduce((sum, g) => sum + g.members.filter(m => m.verified).length, 0);
-            return {
-              ok: true,
-              note: `${verifiedMembers}/${totalMembers} doğrulanmış`
-            };
-          } catch (error) {
-            return { ok: false, note: 'Üye doğrulama hatası' };
-          }
+    },
+    {
+      key: 'verifiedMembers',
+      label: 'Üyeler (doğrulanmış)',
+      run: async () => {
+        try {
+          const { items } = useGroups.getState();
+          const totalMembers = items.reduce((sum, g) => sum + g.members.length, 0);
+          const verifiedMembers = items.reduce((sum, g) => sum + g.members.filter(m => m.verified).length, 0);
+          return {
+            ok: true,
+            note: `${verifiedMembers}/${totalMembers} doğrulanmış`,
+          };
+        } catch {
+          return { ok: false, note: 'Üye doğrulama hatası' };
         }
       },
-      {
-        key: 'meshFloodGuard',
-        label: 'Mesh flood guard',
-        run: async () => {
-          try {
-            // This would track actual flood guard tokens
-            return {
-              ok: true,
-              note: 'GMSG token: 3/3 (simüle)'
-            };
-          } catch (error) {
-            return { ok: false, note: 'Flood guard hatası' };
-          }
+    },
+    {
+      key: 'meshFloodGuard',
+      label: 'Mesh flood guard',
+      run: async () => {
+        try {
+          // This would track actual flood guard tokens
+          return {
+            ok: true,
+            note: 'GMSG token: 3/3 (simüle)',
+          };
+        } catch {
+          return { ok: false, note: 'Flood guard hatası' };
         }
       },
-      {
-        key: 'safetyPin',
-        label: 'Güvenlik PIN\'i',
-        run: async () => {
-          try {
-            const { pinEnabled, requireFor } = useSafety.getState();
-            const requiredActions = Object.entries(requireFor).filter(([_, required]) => required).length;
-            return {
-              ok: pinEnabled,
-              note: pinEnabled ? `${requiredActions} eylem korumalı` : 'devre dışı'
-            };
-          } catch (error) {
-            return { ok: false, note: 'PIN hatası' };
-          }
+    },
+    {
+      key: 'safetyPin',
+      label: 'Güvenlik PIN\'i',
+      run: async () => {
+        try {
+          const { pinEnabled, requireFor } = useSafety.getState();
+          const requiredActions = Object.entries(requireFor).filter(([_, required]) => required).length;
+          return {
+            ok: pinEnabled,
+            note: pinEnabled ? `${requiredActions} eylem korumalı` : 'devre dışı',
+          };
+        } catch {
+          return { ok: false, note: 'PIN hatası' };
         }
       },
-      {
-        key: 'onboardingStatus',
-        label: 'Onboarding durumu',
-        run: async () => {
-          try {
-            const { permissionsManager } = await import('../onboarding/PermissionsFlow');
-            const isComplete = await permissionsManager.isOnboardingComplete();
-            const hasPermissions = permissionsManager.hasRequiredPermissions();
-            return {
-              ok: isComplete && hasPermissions,
-              note: `${isComplete ? 'Tamamlandı' : 'Bekliyor'}, ${hasPermissions ? 'İzinler OK' : 'İzinler eksik'}`
-            };
-          } catch (error) {
-            return { ok: false, note: 'Onboarding hatası' };
-          }
+    },
+    {
+      key: 'onboardingStatus',
+      label: 'Onboarding durumu',
+      run: async () => {
+        try {
+          const { permissionsManager } = await import('../onboarding/PermissionsFlow');
+          const isComplete = await permissionsManager.isOnboardingComplete();
+          const hasPermissions = permissionsManager.hasRequiredPermissions();
+          return {
+            ok: isComplete && hasPermissions,
+            note: `${isComplete ? 'Tamamlandı' : 'Bekliyor'}, ${hasPermissions ? 'İzinler OK' : 'İzinler eksik'}`,
+          };
+        } catch {
+          return { ok: false, note: 'Onboarding hatası' };
         }
       },
-      {
-        key: 'remoteConfigStatus',
-        label: 'Uzak yapılandırma',
-        run: async () => {
-          try {
-            const { remoteConfigManager } = await import('../config/remote');
-            const config = remoteConfigManager.getConfig();
-            const killActive = remoteConfigManager.isKillSwitchActive();
-            return {
-              ok: !killActive,
-              note: `v${config.version}, Kill: ${killActive ? 'Aktif' : 'Pasif'}`
-            };
-          } catch (error) {
-            return { ok: false, note: 'Remote config hatası' };
-          }
+    },
+    {
+      key: 'remoteConfigStatus',
+      label: 'Uzak yapılandırma',
+      run: async () => {
+        try {
+          const { remoteConfigManager } = await import('../config/remote');
+          const config = remoteConfigManager.getConfig();
+          const killActive = remoteConfigManager.isKillSwitchActive();
+          return {
+            ok: !killActive,
+            note: `v${config.version}, Kill: ${killActive ? 'Aktif' : 'Pasif'}`,
+          };
+        } catch {
+          return { ok: false, note: 'Remote config hatası' };
         }
       },
-      {
-        key: 'crashGuardsStatus',
-        label: 'Çökme koruması',
-        run: async () => {
-          try {
-            // Check if crash guards are active
-            return {
-              ok: true,
-              note: 'Global error handler aktif'
-            };
-          } catch (error) {
-            return { ok: false, note: 'Crash guard hatası' };
-          }
+    },
+    {
+      key: 'crashGuardsStatus',
+      label: 'Çökme koruması',
+      run: async () => {
+        try {
+          // Check if crash guards are active
+          return {
+            ok: true,
+            note: 'Global error handler aktif',
+          };
+        } catch {
+          return { ok: false, note: 'Crash guard hatası' };
         }
       },
-        {
-          key: 'backgroundHardening',
-          label: 'Arka plan güçlendirme',
-          run: async () => {
-            try {
-              const { backgroundHardeningManager } = await import('../background/hardening');
-              const status = backgroundHardeningManager.getStatus();
-              return {
-                ok: status.isEnabled,
-                note: `${status.isEnabled ? 'Aktif' : 'Pasif'}, ${status.runCount} çalışma, ${status.errorCount} hata`
-              };
-            } catch (error) {
-              return { ok: false, note: 'Background hardening hatası' };
-            }
-          }
-        },
-        {
-          key: 'bleManager',
-          label: 'BLE Manager Test',
-          run: async () => {
-            try {
-              return {
-                ok: true,
-                note: 'BLE Manager aktif'
-              };
-            } catch (error) {
-              return { ok: false, note: 'BLE test hatası' };
-            }
-          }
+    },
+    {
+      key: 'backgroundHardening',
+      label: 'Arka plan güçlendirme',
+      run: async () => {
+        try {
+          const { backgroundHardeningManager } = await import('../background/hardening');
+          const status = backgroundHardeningManager.getStatus();
+          return {
+            ok: status.isEnabled,
+            note: `${status.isEnabled ? 'Aktif' : 'Pasif'}, ${status.runCount} çalışma, ${status.errorCount} hata`,
+          };
+        } catch {
+          return { ok: false, note: 'Background hardening hatası' };
         }
+      },
+    },
+    {
+      key: 'bleManager',
+      label: 'BLE Manager Test',
+      run: async () => {
+        try {
+          return {
+            ok: true,
+            note: 'BLE Manager aktif',
+          };
+        } catch {
+          return { ok: false, note: 'BLE test hatası' };
+        }
+      },
+    },
   ], [quakes, quakesLoading, quakesError, source, fallbackUsed, quakeProvider, magThreshold, liveMode, pollFastMs, pollSlowMs, region, experimentalPWave, lastLiveQuake, liveLatency, heading, currentPos, selectedProvinces]);
 
   const runAll = async () => {
@@ -1041,7 +1038,7 @@ export default function Diagnostics() {
       tests: testResults,
       batteryRisk: false, // TODO: implement battery monitoring
       ios: true, // TODO: detect platform
-      android: false
+      android: false,
     });
     setSuggestions(newSuggestions);
 
@@ -1077,14 +1074,14 @@ export default function Diagnostics() {
           style={{ marginTop: 8 }}
         />
         <Button
-          label={liveFeedActive ? "Canlıyı Durdur" : "Canlıyı Başlat"}
+          label={liveFeedActive ? 'Canlıyı Durdur' : 'Canlıyı Başlat'}
           onPress={() => {
             if (liveFeedActive) {
               // Stop live feed
               setLiveFeedActive(false);
             } else {
               // Start live feed
-              const liveFeed = startLiveFeed(
+              startLiveFeed(
                 {
                   quakeProvider,
                   magThreshold,
@@ -1093,7 +1090,7 @@ export default function Diagnostics() {
                   pollSlowMs,
                   region,
                   experimentalPWave,
-                  selectedProvinces: []
+                  selectedProvinces: [],
                 },
                 {
                   onEvents: (items, meta) => {
@@ -1104,13 +1101,13 @@ export default function Diagnostics() {
                   },
                   onError: (error) => {
                     logger.warn('Live feed error:', error);
-                  }
-                }
+                  },
+                },
               );
               setLiveFeedActive(true);
             }
           }}
-          variant={liveFeedActive ? "danger" : "primary"}
+          variant={liveFeedActive ? 'danger' : 'primary'}
           style={{ marginTop: 8 }}
         />
       </Card>
@@ -1318,7 +1315,7 @@ export default function Diagnostics() {
           {
             key: 'OPS-5',
             label: 'Erişilebilirlik profili dev metin ve yüksek kontrast uygular',
-          }
+          },
         ].map(test => (
           <View key={test.key} style={styles.acceptanceItem}>
             <Text style={styles.acceptanceKey}>{test.key}:</Text>
@@ -1349,20 +1346,20 @@ export default function Diagnostics() {
 
 function suggest(key: string) {
   switch (key) {
-    case 'notif':
-      return 'Ayarlar > Bildirim iznini verin. iOS\'ta uygulama bildirimlerine izin gerekli.';
-    case 'bgfetch':
-      return 'Arka plan görevlerini etkinleştir (expo-background-fetch kayıt). Fiziksel cihazda test et.';
-    case 'location':
-      return 'Konum iznini verin. Reddedilmişse tekrar isteme diyalogunu açın.';
-    case 'quake':
-      return 'Ağ yoksa cache\'den gösterilir. Online iken USGS/AFAD sağlayıcısı ulaşılabilir olmalı.';
-    case 'tiles':
-      return 'Harita > "Ön Belleğe Al (2km)" ile karo indirin. Uçak modunda görünür olmalı.';
-    case 'compass':
-      return 'Pusula simülatörde sınırlı; gerçek cihazda deneyin.';
-    default:
-      return 'Detaylı loglara bakın (Settings > Geliştirici Günlükleri).';
+  case 'notif':
+    return 'Ayarlar > Bildirim iznini verin. iOS\'ta uygulama bildirimlerine izin gerekli.';
+  case 'bgfetch':
+    return 'Arka plan görevlerini etkinleştir (expo-background-fetch kayıt). Fiziksel cihazda test et.';
+  case 'location':
+    return 'Konum iznini verin. Reddedilmişse tekrar isteme diyalogunu açın.';
+  case 'quake':
+    return 'Ağ yoksa cache\'den gösterilir. Online iken USGS/AFAD sağlayıcısı ulaşılabilir olmalı.';
+  case 'tiles':
+    return 'Harita > "Ön Belleğe Al (2km)" ile karo indirin. Uçak modunda görünür olmalı.';
+  case 'compass':
+    return 'Pusula simülatörde sınırlı; gerçek cihazda deneyin.';
+  default:
+    return 'Detaylı loglara bakın (Settings > Geliştirici Günlükleri).';
   }
 }
 

@@ -48,7 +48,7 @@ export function usePDRFuse() {
               timestamp: location.timestamp,
             });
             setError(null);
-          }
+          },
         );
 
         setIsTracking(true);

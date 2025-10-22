@@ -17,7 +17,7 @@ export async function getOrCreateKey(): Promise<string> {
     const key = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       `afetnet-${Date.now()}-${Math.random()}`,
-      { encoding: Crypto.CryptoEncoding.BASE64 }
+      { encoding: Crypto.CryptoEncoding.BASE64 },
     );
     
     await AsyncStorage.setItem(KEY_STORAGE_KEY, key);
@@ -53,7 +53,7 @@ export async function hmacSign(envelope: Omit<Envelope, 'sig'>, key: string): Pr
     const signature = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       payload + key,
-      { encoding: Crypto.CryptoEncoding.BASE64 }
+      { encoding: Crypto.CryptoEncoding.BASE64 },
     );
     
     return signature;
@@ -85,19 +85,19 @@ export async function encrypt(payloadJson: string, key: string): Promise<{ ciphe
   try {
     // Generate random IV
     const iv = await Crypto.getRandomBytesAsync(12);
-    const ivBase64 = Buffer.from(iv).toString('base64');
+    const ivBase64 = (globalThis as any).Buffer.from(iv).toString('base64');
     
     // For now, we'll use a simple XOR cipher as expo-crypto doesn't have AES-GCM
     // In production, you'd want to use a proper AES-GCM implementation
-    const keyBytes = new TextEncoder().encode(key.slice(0, 32));
-    const payloadBytes = new TextEncoder().encode(payloadJson);
+    const keyBytes = new (globalThis as any).TextEncoder().encode(key.slice(0, 32));
+    const payloadBytes = new (globalThis as any).TextEncoder().encode(payloadJson);
     
     const ciphertext = new Uint8Array(payloadBytes.length);
     for (let i = 0; i < payloadBytes.length; i++) {
       ciphertext[i] = payloadBytes[i] ^ keyBytes[i % keyBytes.length];
     }
     
-    const ciphertextBase64 = Buffer.from(ciphertext).toString('base64');
+    const ciphertextBase64 = (globalThis as any).Buffer.from(ciphertext).toString('base64');
     
     return {
       ciphertext: ciphertextBase64,
@@ -113,8 +113,8 @@ export async function encrypt(payloadJson: string, key: string): Promise<{ ciphe
 export async function decrypt(ciphertext: string, iv: string, key: string): Promise<string> {
   try {
     // Decode base64
-    const ciphertextBytes = Buffer.from(ciphertext, 'base64');
-    const keyBytes = new TextEncoder().encode(key.slice(0, 32));
+    const ciphertextBytes = (globalThis as any).Buffer.from(ciphertext, 'base64');
+    const keyBytes = new (globalThis as any).TextEncoder().encode(key.slice(0, 32));
     
     // Simple XOR decryption (same as encryption for XOR)
     const plaintext = new Uint8Array(ciphertextBytes.length);
@@ -122,7 +122,7 @@ export async function decrypt(ciphertext: string, iv: string, key: string): Prom
       plaintext[i] = ciphertextBytes[i] ^ keyBytes[i % keyBytes.length];
     }
     
-    return new TextDecoder().decode(plaintext);
+    return new (globalThis as any).TextDecoder().decode(plaintext);
   } catch (error) {
     logger.warn('Decryption failed:', error);
     throw error;

@@ -5,7 +5,7 @@ export function haversineLatLng(a:{lat:number;lng:number}, b:{lat:number;lng:num
   return 2*R*Math.asin(Math.sqrt(s));
 }
 export function gridKey(qlat?:number, qlng?:number){
-  if(typeof qlat!=="number" || typeof qlng!=="number") {return undefined;}
+  if(typeof qlat!=='number' || typeof qlng!=='number') {return undefined;}
   return `${qlat.toFixed(3)},${qlng.toFixed(3)}`;
 }
 

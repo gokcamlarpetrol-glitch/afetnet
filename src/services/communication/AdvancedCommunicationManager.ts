@@ -87,7 +87,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       nodes: new Map(),
       channels: new Map(),
       routes: new Map(),
-      networkHealth: 100
+      networkHealth: 100,
     };
 
     this.communicationStats = {
@@ -98,7 +98,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       networkUptime: 100,
       totalDataTransferred: 0,
       energyEfficiency: 100,
-      reliabilityScore: 100
+      reliabilityScore: 100,
     };
 
     this.initializeCommunicationChannels();
@@ -122,7 +122,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 100, // 100ms
       encryption: true,
       batteryUsage: 15, // 15% per hour
-      reliability: 85
+      reliability: 85,
     };
 
     // Bluetooth Channel
@@ -136,7 +136,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 50, // 50ms
       encryption: true,
       batteryUsage: 5, // 5% per hour
-      reliability: 90
+      reliability: 90,
     };
 
     // WiFi Direct Channel
@@ -150,7 +150,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 20, // 20ms
       encryption: true,
       batteryUsage: 25, // 25% per hour
-      reliability: 80
+      reliability: 80,
     };
 
     // Audio Channel (for emergency situations)
@@ -164,7 +164,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 0, // real-time
       encryption: false,
       batteryUsage: 10, // 10% per hour
-      reliability: 95
+      reliability: 95,
     };
 
     // Visual Channel (LED, screen flash)
@@ -178,7 +178,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 0, // real-time
       encryption: false,
       batteryUsage: 3, // 3% per hour
-      reliability: 70
+      reliability: 70,
     };
 
     // Satellite Channel (if available)
@@ -192,7 +192,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       latency: 500, // 500ms
       encryption: true,
       batteryUsage: 40, // 40% per hour
-      reliability: 95
+      reliability: 95,
     };
 
     // Add channels to network
@@ -248,7 +248,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
         timestamp: Date.now(),
         status: 'pending',
         deliveryAttempts: 0,
-        channels: []
+        channels: [],
       };
 
       // Add to queue
@@ -260,7 +260,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
 
       // Send via selected channels
       const deliveryPromises = optimalChannels.map(channelId => 
-        this.sendViaChannel(fullMessage, channelId)
+        this.sendViaChannel(fullMessage, channelId),
       );
 
       // Wait for at least one successful delivery
@@ -276,7 +276,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
         emergencyLogger.logSystem('info', 'Message sent successfully', { 
           messageId, 
           channels: optimalChannels,
-          successfulDeliveries 
+          successfulDeliveries, 
         });
       } else {
         fullMessage.status = 'failed';
@@ -302,29 +302,29 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
     // Sort channels by suitability score
     const scoredChannels = availableChannels.map(channel => ({
       channel,
-      score: this.calculateChannelScore(channel, message)
+      score: this.calculateChannelScore(channel, message),
     })).sort((a, b) => b.score - a.score);
 
     // Select top channels based on message priority and requirements
     let selectedChannels: string[] = [];
 
     switch (message.priority) {
-      case 'critical':
-        // Use all available channels for critical messages
-        selectedChannels = scoredChannels.slice(0, 4).map(sc => sc.channel.id);
-        break;
-      case 'high':
-        // Use top 3 channels
-        selectedChannels = scoredChannels.slice(0, 3).map(sc => sc.channel.id);
-        break;
-      case 'medium':
-        // Use top 2 channels
-        selectedChannels = scoredChannels.slice(0, 2).map(sc => sc.channel.id);
-        break;
-      case 'low':
-        // Use best channel only
-        selectedChannels = scoredChannels.slice(0, 1).map(sc => sc.channel.id);
-        break;
+    case 'critical':
+      // Use all available channels for critical messages
+      selectedChannels = scoredChannels.slice(0, 4).map(sc => sc.channel.id);
+      break;
+    case 'high':
+      // Use top 3 channels
+      selectedChannels = scoredChannels.slice(0, 3).map(sc => sc.channel.id);
+      break;
+    case 'medium':
+      // Use top 2 channels
+      selectedChannels = scoredChannels.slice(0, 2).map(sc => sc.channel.id);
+      break;
+    case 'low':
+      // Use best channel only
+      selectedChannels = scoredChannels.slice(0, 1).map(sc => sc.channel.id);
+      break;
     }
 
     return selectedChannels;
@@ -373,27 +373,27 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
 
       // Simulate channel-specific sending
       switch (channel.type) {
-        case 'mesh':
-          return await this.sendViaMesh(message, channel);
-        case 'bluetooth':
-          return await this.sendViaBluetooth(message, channel);
-        case 'wifi_direct':
-          return await this.sendViaWiFiDirect(message, channel);
-        case 'audio':
-          return await this.sendViaAudio(message, channel);
-        case 'visual':
-          return await this.sendViaVisual(message, channel);
-        case 'satellite':
-          return await this.sendViaSatellite(message, channel);
-        default:
-          throw new Error(`Unsupported channel type: ${channel.type}`);
+      case 'mesh':
+        return await this.sendViaMesh(message, channel);
+      case 'bluetooth':
+        return await this.sendViaBluetooth(message, channel);
+      case 'wifi_direct':
+        return await this.sendViaWiFiDirect(message, channel);
+      case 'audio':
+        return await this.sendViaAudio(message, channel);
+      case 'visual':
+        return await this.sendViaVisual(message, channel);
+      case 'satellite':
+        return await this.sendViaSatellite(message, channel);
+      default:
+        throw new Error(`Unsupported channel type: ${channel.type}`);
       }
 
     } catch (error) {
       emergencyLogger.logSystem('error', 'Failed to send via channel', { 
         messageId: message.id, 
         channelId, 
-        error: String(error) 
+        error: String(error), 
       });
       return false;
     }
@@ -448,14 +448,14 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
         sender: {
           id: this.nodeId,
           name: this.nodeName,
-          location: await this.getCurrentLocation()
+          location: await this.getCurrentLocation(),
         },
         ttl: 3600, // 1 hour
         hops: 0,
         maxHops: 20, // Allow many hops for emergency
         encryption: true,
         compression: true,
-        size: JSON.stringify(content).length
+        size: JSON.stringify(content).length,
       };
 
       const messageId = await this.sendMessage(message);
@@ -483,25 +483,25 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
 
   // Network management methods
   private startChannelMonitoring(): void {
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.updateChannelStatus();
     }, 5000); // Check every 5 seconds
   }
 
   private startNetworkDiscovery(): void {
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.discoverNearbyNodes();
     }, 10000); // Discover every 10 seconds
   }
 
   private startMessageProcessing(): void {
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.processMessageQueue();
     }, 1000); // Process every second
   }
 
   private startRouteOptimization(): void {
-    setInterval(() => {
+    (globalThis as any).setInterval(() => {
       this.optimizeRoutes();
     }, 30000); // Optimize every 30 seconds
   }
@@ -527,12 +527,12 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       location: {
         lat: 41.0082 + (Math.random() - 0.5) * 0.01,
         lon: 28.9784 + (Math.random() - 0.5) * 0.01,
-        accuracy: 10
+        accuracy: 10,
       },
       lastSeen: Date.now(),
       capabilities: ['mesh', 'bluetooth'],
       signalStrength: Math.floor(Math.random() * 100),
-      batteryLevel: Math.floor(Math.random() * 100)
+      batteryLevel: Math.floor(Math.random() * 100),
     });
   }
 
@@ -557,7 +557,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
         this.sendMessage(message).catch(error => {
           emergencyLogger.logSystem('error', 'Message retry failed', { 
             messageId: message.id, 
-            error: String(error) 
+            error: String(error), 
           });
         });
       }
@@ -575,7 +575,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
     return Promise.resolve({
       lat: 41.0082,
       lon: 28.9784,
-      accuracy: 10
+      accuracy: 10,
     });
   }
 
@@ -626,7 +626,7 @@ class AdvancedCommunicationManager extends SimpleEventEmitter {
       const state = {
         network: this.network,
         stats: this.communicationStats,
-        messageQueue: this.messageQueue.slice(-100) // Save last 100 messages
+        messageQueue: this.messageQueue.slice(-100), // Save last 100 messages
       };
 
       await AsyncStorage.setItem('communication_state', JSON.stringify(state));

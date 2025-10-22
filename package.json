@@ -1,11 +1,12 @@
 {
   "name": "afetnet",
   "version": "1.0.0",
+  "type": "module",
   "description": "AfetNet - Emergency Communication App",
-  "main": "index.ts",
+  "main": "index.js",
   "packageManager": "npm@10.7.0",
   "engines": {
-    "node": ">=18.18.2 <19"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "start": "expo start",
@@ -21,6 +22,9 @@
     "test:iap": "node scripts/test-iap.js",
     "verify:iap": "node scripts/verify-iap-system.js",
     "validate:production": "node scripts/validate-production.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "postinstall": "if [ \"$EAS_BUILD\" != \"true\" ]; then echo 'Local postinstall complete'; else echo 'Skipping postinstall on EAS'; fi",
     "eas-build-pre-install": "echo 'Node:' $(node -v) && echo 'NPM:' $(npm -v)"
   },
@@ -46,7 +50,7 @@
     "crc-32": "^1.2.2",
     "crypto-js": "^4.2.0",
     "events": "^3.3.0",
-    "expo": "~54.0.13",
+    "expo": "54.0.17",
     "expo-av": "~16.0.7",
     "expo-background-fetch": "~14.0.7",
     "expo-barcode-scanner": "13.0.1",
@@ -55,10 +59,10 @@
     "expo-build-properties": "~1.0.9",
     "expo-camera": "~17.0.8",
     "expo-clipboard": "~8.0.7",
-    "expo-constants": "~18.0.9",
-    "expo-contacts": "~15.0.9",
+    "expo-constants": "~18.0.10",
+    "expo-contacts": "~15.0.10",
     "expo-crypto": "~15.0.7",
-    "expo-dev-client": "~6.0.15",
+    "expo-dev-client": "~6.0.16",
     "expo-device": "~8.0.9",
     "expo-document-picker": "~14.0.7",
     "expo-file-system": "~19.0.17",
@@ -76,7 +80,7 @@
     "expo-sharing": "~14.0.7",
     "expo-sms": "~14.0.7",
     "expo-speech": "~14.0.7",
-    "expo-task-manager": "~14.0.7",
+    "expo-task-manager": "~14.0.8",
     "firebase": "^12.4.0",
     "i18next": "^25.6.0",
     "jszip": "^3.10.1",
@@ -84,7 +88,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-i18next": "^16.0.0",
-    "react-native": "0.81.4",
+    "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-get-random-values": "^1.11.0",
     "react-native-pager-view": "6.9.1",
@@ -108,12 +112,22 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@eslint/js": "^9.38.0",
     "@expo/ngrok": "^4.1.0",
     "@types/node": "^24.7.1",
     "@types/react": "~19.1.10",
+    "@types/react-navigation": "^3.0.8",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
     "babel-preset-expo": "^54.0.4",
+    "eslint": "^9.38.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "eslint-plugin-react-native": "^5.0.0",
+    "jest": "~29.7.0",
     "metro-minify-terser": "^0.83.3",
     "sharp": "^0.33.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2"
   }
 }

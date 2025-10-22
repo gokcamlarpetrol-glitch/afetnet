@@ -1,5 +1,5 @@
-import { Audio } from "expo-av";
-import { AUDIO_FREQ_HZ, AUDIO_PATTERN_MS } from "./constants";
+import { Audio } from 'expo-av';
+import { AUDIO_FREQ_HZ, AUDIO_PATTERN_MS } from './constants';
 
 /** PLAY: generates an 1800Hz tone with SOS cadence */
 export async function startAudioBeacon() {
@@ -7,7 +7,7 @@ export async function startAudioBeacon() {
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
     staysActiveInBackground: true,
-    shouldDuckAndroid: true
+    shouldDuckAndroid: true,
   });
 
   const sampleRate = 44100;
@@ -22,7 +22,7 @@ export async function startAudioBeacon() {
   const sound = new Audio.Sound();
   // We can't feed PCM directly; use a silent asset loop + setVolumeAsync. As expo-av cannot stream PCM,
   // emulate SOS by toggling volume on a loop.
-  await sound.loadAsync(require("../../assets/silence-2s.mp3")); // add 2s silent asset in /assets
+  await sound.loadAsync((globalThis as any).require('../../assets/silence-2s.mp3')); // add 2s silent asset in /assets
   await sound.setIsLoopingAsync(true);
   await sound.playAsync();
 
@@ -32,9 +32,9 @@ export async function startAudioBeacon() {
     while(!cancel){
       for (const ms of AUDIO_PATTERN_MS){
         await sound.setVolumeAsync(1.0);
-        await new Promise(r=>setTimeout(r, ms));
+        await new Promise(r=>(globalThis as any).setTimeout(r, ms));
         await sound.setVolumeAsync(0.0);
-        await new Promise(r=>setTimeout(r, 120));
+        await new Promise(r=>(globalThis as any).setTimeout(r, 120));
         if (cancel) {break;}
       }
     }
@@ -43,24 +43,22 @@ export async function startAudioBeacon() {
   return {
     stop: async () => {
       cancel = true;
-      try { await sound.stopAsync(); } catch {}
-      try { await sound.unloadAsync(); } catch {}
-    }
+      try { await sound.stopAsync(); } catch {
+        // Ignore stop errors
+      }
+      try { await sound.unloadAsync(); } catch {
+        // Ignore unload errors
+      }
+    },
   };
 }
 
 /** LISTEN: Goertzel energy at target freq; returns energy 0..1 */
 export function createAudioDetector() {
-  const sampleRate = 44100;
-  const N = 1024;
-  const targetK = Math.round((AUDIO_FREQ_HZ / sampleRate) * N);
-  const omega = (2*Math.PI*targetK)/N;
-  const sine = Math.sin(omega);
-  const cosine = Math.cos(omega);
-  const coeff = 2*cosine;
 
   let recording: Audio.Recording | null = null;
-  let onLevel: (level:number)=>void = ()=>{};
+   
+  let onLevel: (_level:number)=>void = ()=>{};
 
   async function start() {
     await Audio.requestPermissionsAsync();
@@ -78,9 +76,9 @@ export function createAudioDetector() {
         // We can't read raw PCM with expo-av; approximate level via meter if available
         // Fallback: use metering if supported; else map averagePower to 0..1
         // @ts-ignore
-        const level = typeof status.metering === "number" ? Math.min(1, Math.max(0, (status.metering+160)/90)) : 0.3;
+        const level = typeof status.metering === 'number' ? Math.min(1, Math.max(0, (status.metering+160)/90)) : 0.3;
         onLevel(level);
-        await new Promise(r=>setTimeout(r, 150));
+        await new Promise(r=>(globalThis as any).setTimeout(r, 150));
       }
     })();
   }
@@ -89,13 +87,16 @@ export function createAudioDetector() {
     const rec = recording;
     recording = null;
     if (rec){
-      try { await rec.stopAndUnloadAsync(); } catch {}
+      try { await rec.stopAndUnloadAsync(); } catch {
+        // Ignore stop errors
+      }
     }
   }
 
   return {
     start, stop,
-    onLevel: (fn:(l:number)=>void)=>{ onLevel = fn; }
+     
+    onLevel: (fn:(_l:number)=>void)=>{ onLevel = fn; },
   };
 }
 

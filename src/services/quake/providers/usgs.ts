@@ -12,9 +12,9 @@ export class USGSProvider implements QuakeProvider {
         {
           headers: {
             'Accept': 'application/json',
-            'User-Agent': 'AfetNet/1.0'
-          }
-        }
+            'User-Agent': 'AfetNet/1.0',
+          },
+        },
       );
 
       if (!response.ok) {
@@ -61,7 +61,7 @@ export class USGSProvider implements QuakeProvider {
               lat,
               lon,
               depth,
-              source: 'USGS'
+              source: 'USGS',
             });
           }
         } catch (parseError) {
@@ -91,7 +91,7 @@ export class USGSProvider implements QuakeProvider {
         lat: 37.0662,
         lon: 37.3833,
         depth: 9.7,
-        source: 'USGS'
+        source: 'USGS',
       },
       {
         id: 'usgs_mock_2',
@@ -101,7 +101,7 @@ export class USGSProvider implements QuakeProvider {
         lat: 39.9334,
         lon: 32.8597,
         depth: 11.2,
-        source: 'USGS'
+        source: 'USGS',
       },
       {
         id: 'usgs_mock_3',
@@ -111,8 +111,8 @@ export class USGSProvider implements QuakeProvider {
         lat: 41.0082,
         lon: 28.9784,
         depth: 14.8,
-        source: 'USGS'
-      }
+        source: 'USGS',
+      },
     ];
   }
 }

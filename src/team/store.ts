@@ -1,9 +1,9 @@
-import * as FileSystem from "expo-file-system";
-import { Team, Approval } from "./types";
+import * as FileSystem from 'expo-file-system';
+import { Team, Approval } from './types';
 
-const DIR = "/tmp/";
-const TEAMS = DIR + "teams.json";
-const APPROVALS = DIR + "approvals.json";
+const DIR = '/tmp/';
+const TEAMS = DIR + 'teams.json';
+const APPROVALS = DIR + 'approvals.json';
 
 export async function listTeams(): Promise<Team[]>{
   const ex = await FileSystem.getInfoAsync(TEAMS);
@@ -40,7 +40,7 @@ export async function upsertApproval(a: Approval, teams?: Team[]){
     const uniq = Array.from(new Set(a.signers));
     const valid = uniq.filter(s => team.members.some(m=>m.didShort===s));
     a.signers = valid;
-    if(valid.length >= team.quorum.m) {a.status="approved";}
+    if(valid.length >= team.quorum.m) {a.status='approved';}
   }
   await saveApprovals(list);
   return a;
