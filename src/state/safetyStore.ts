@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 
 type S = {
   sensorDetect: boolean;     // sensör tabanlı tespit aktif
@@ -11,7 +11,7 @@ export const useSafety = create<S>((set)=>({
   sensorDetect: true,
   unconsciousMode: false,
   setSensorDetect: (v)=>set({ sensorDetect: v }),
-  setUnconsciousMode: (v)=>set({ unconsciousMode: v })
+  setUnconsciousMode: (v)=>set({ unconsciousMode: v }),
 }));
 
 

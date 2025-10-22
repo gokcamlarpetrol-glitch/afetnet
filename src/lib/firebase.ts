@@ -4,12 +4,12 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 // Firebase configuration with fallbacks
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "demo-api-key",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "afetnet-app.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "afetnet-app",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "afetnet-app.appspot.com",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:123456789:ios:abcdef123456",
+  apiKey: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_API_KEY || 'demo-api-key',
+  authDomain: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'afetnet-app.firebaseapp.com',
+  projectId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'afetnet-app',
+  storageBucket: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'afetnet-app.appspot.com',
+  messagingSenderId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '123456789',
+  appId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_APP_ID || '1:123456789:ios:abcdef123456',
 };
 
 // Initialize Firebase with error handling
@@ -34,7 +34,7 @@ export const getFCMToken = async (): Promise<string | null> => {
   
   try {
     const token = await getToken(messaging, {
-      vapidKey: process.env.EXPO_PUBLIC_FIREBASE_VAPID_KEY || "demo-vapid-key",
+      vapidKey: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_VAPID_KEY || 'demo-vapid-key',
     });
     return token;
   } catch (error) {

@@ -11,7 +11,7 @@ export type Fusion = {
 
 export class Complementary {
   k: number; // weight of beacon correction (0..1)
-  state: Fusion = { pos:{x:0,y:0}, pdrBias:{x:0,y:0} };
+  state: Fusion = { pos:{ x:0,y:0 }, pdrBias:{ x:0,y:0 } };
 
   constructor(k=0.1){ this.k = k; }
 

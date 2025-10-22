@@ -31,28 +31,28 @@ export default function PremiumComingSoonScreen() {
             {
               icon: 'people',
               title: 'Gelişmiş Aile Takibi',
-              description: 'Sınırsız aile üyesi, gerçek zamanlı konum takibi'
+              description: 'Sınırsız aile üyesi, gerçek zamanlı konum takibi',
             },
             {
               icon: 'notifications',
               title: 'Öncelikli Deprem Uyarıları',
-              description: 'En hızlı bildirimler, özelleştirilebilir filtreler'
+              description: 'En hızlı bildirimler, özelleştirilebilir filtreler',
             },
             {
               icon: 'map',
               title: 'Offline Haritalar',
-              description: 'İnternet olmadan tüm harita özellikleri'
+              description: 'İnternet olmadan tüm harita özellikleri',
             },
             {
               icon: 'chatbubbles',
               title: 'Grup Mesajlaşma',
-              description: 'Sınırsız grup ve mesaj'
+              description: 'Sınırsız grup ve mesaj',
             },
             {
               icon: 'shield-checkmark',
               title: 'Öncelikli Destek',
-              description: '7/24 teknik destek, hızlı yanıt'
-            }
+              description: '7/24 teknik destek, hızlı yanıt',
+            },
           ].map((feature, index) => (
             <Card key={index} style={styles.featureCard}>
               <Ionicons name={feature.icon as any} size={32} color={palette.primary.main} />

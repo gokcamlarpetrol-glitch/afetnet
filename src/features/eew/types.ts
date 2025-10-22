@@ -1,4 +1,4 @@
-export type QuakeProvider = "kandilli" | "afad" | "usgs" | "synthetic";
+export type QuakeProvider = 'kandilli' | 'afad' | 'usgs' | 'synthetic';
 
 export interface EewRegion {
   nw: [number, number];

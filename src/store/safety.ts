@@ -41,7 +41,7 @@ export const useSafety = create<SafetyState>()(
             16384, // N - CPU/memory cost parameter (reduced for mobile)
             8,     // r - block size
             1,     // p - parallelization parameter
-            32     // dkLen - derived key length
+            32,     // dkLen - derived key length
           );
           
           // Combine salt and hash for storage
@@ -75,7 +75,7 @@ export const useSafety = create<SafetyState>()(
         try {
           // Extract salt and stored hash
           const combined = new Uint8Array(
-            pinHash.match(/.{2}/g)!.map(hex => parseInt(hex, 16))
+            pinHash.match(/.{2}/g)!.map(hex => parseInt(hex, 16)),
           );
           
           const salt = combined.subarray(0, 16);
@@ -88,7 +88,7 @@ export const useSafety = create<SafetyState>()(
             16384, // Same parameters as setPin
             8,
             1,
-            32
+            32,
           );
           
           // Compare hashes
@@ -123,13 +123,13 @@ export const useSafety = create<SafetyState>()(
     {
       name: 'afn/safety/v1',
       storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    },
+  ),
 );
 
 // Helper function for UI components
 export async function requestPinIfNeeded(action: keyof SafetyState['requireFor']): Promise<boolean> {
-  const { pinEnabled, requireFor, verifyPin } = useSafety.getState();
+  const { pinEnabled, requireFor } = useSafety.getState();
   
   if (!pinEnabled || !requireFor[action]) {
     return true; // PIN not required

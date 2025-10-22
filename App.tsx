@@ -17,7 +17,7 @@ export default function App() {
   useEffect(() => {
     try { 
       LogBox.ignoreAllLogs(true); 
-    } catch (e) {
+    } catch {
       console.warn('Could not disable logs');
     }
     

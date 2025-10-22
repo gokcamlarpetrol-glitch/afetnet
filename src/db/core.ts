@@ -1,9 +1,11 @@
-import { SafeSQLite } from "./SafeSQLite";
+import { SafeSQLite } from './SafeSQLite';
 
 // Type definitions for SQLite
 declare namespace SQLite {
   interface SQLiteDatabase {
+     
     executeSql: (sql: string, params?: unknown[]) => Promise<any[]>;
+     
     transaction: (fn: (tx: any) => void) => Promise<void>;
     close: () => Promise<void>;
   }
@@ -13,7 +15,7 @@ let db: any = null;
 
 export async function openDB(){
   if (db) {return db;}
-  db = await SafeSQLite.openDatabase({ name: "afetnet.db", location: "default" });
+  db = await SafeSQLite.openDatabase({ name: 'afetnet.db', location: 'default' });
   await db.executeSql(`
     PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS loc_points(
@@ -44,6 +46,7 @@ export async function openDB(){
   return db!;
 }
 
+ 
 export async function tx<T>(fn:(db:SQLite.SQLiteDatabase)=>Promise<T>):Promise<T>{
   const d = await openDB();
   return fn(d);
@@ -53,12 +56,12 @@ export async function prune(){
   const d = await openDB();
   // 48 saatten eskiyi veya 10k sınırını aşanları sil
   const twoDaysAgo = Date.now() - 48*3600*1000;
-  await d.executeSql(`DELETE FROM loc_points WHERE ts < ?`, [twoDaysAgo]);
-  const cnt = await d.executeSql(`SELECT COUNT(1) c FROM loc_points`);
+  await d.executeSql('DELETE FROM loc_points WHERE ts < ?', [twoDaysAgo]);
+  const cnt = await d.executeSql('SELECT COUNT(1) c FROM loc_points');
   const n = cnt[0].rows.item(0).c as number;
   if (n > 10000){
     const delta = n - 10000;
-    await d.executeSql(`DELETE FROM loc_points WHERE id IN (SELECT id FROM loc_points ORDER BY ts ASC LIMIT ?)`, [delta]);
+    await d.executeSql('DELETE FROM loc_points WHERE id IN (SELECT id FROM loc_points ORDER BY ts ASC LIMIT ?)', [delta]);
   }
 }
 

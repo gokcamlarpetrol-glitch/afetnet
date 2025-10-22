@@ -77,24 +77,24 @@ export class NotificationService {
         showBadge: false,
       });
 
-      console.log('✅ Notification channels initialized');
-    } catch (error) {
-      console.warn('Failed to initialize notification channels:', error);
+      
+    } catch {
+      // Ignore channel initialization errors
     }
   }
 
   // Create notification channel
   private async createChannel(
     id: string, 
-    config: Notifications.NotificationChannelInput
+    config: Notifications.NotificationChannelInput,
   ): Promise<void> {
     try {
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync(id, config);
         this.notificationChannels.set(id, config as any);
       }
-    } catch (error) {
-      console.warn(`Failed to create channel ${id}:`, error);
+    } catch {
+      // Ignore channel creation errors
     }
   }
 
@@ -102,7 +102,7 @@ export class NotificationService {
   async sendEmergencyNotification(
     title: string, 
     body: string, 
-    data?: any
+    data?: any,
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
@@ -120,9 +120,8 @@ export class NotificationService {
       // Trigger haptic feedback
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       
-      console.log('🚨 Emergency notification sent:', title);
-    } catch (error) {
-      console.warn('Failed to send emergency notification:', error);
+    } catch {
+      // Ignore emergency notification errors
     }
   }
 
@@ -130,7 +129,7 @@ export class NotificationService {
   async sendFamilyNotification(
     title: string, 
     body: string, 
-    data?: any
+    data?: any,
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
@@ -148,9 +147,8 @@ export class NotificationService {
       // Trigger haptic feedback
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       
-      console.log('👨‍👩‍👧‍👦 Family notification sent:', title);
-    } catch (error) {
-      console.warn('Failed to send family notification:', error);
+    } catch {
+      // Ignore family notification errors
     }
   }
 
@@ -158,7 +156,7 @@ export class NotificationService {
   async sendMessageNotification(
     title: string, 
     body: string, 
-    data?: any
+    data?: any,
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
@@ -176,9 +174,8 @@ export class NotificationService {
       // Trigger haptic feedback
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
-      console.log('💬 Message notification sent:', title);
-    } catch (error) {
-      console.warn('Failed to send message notification:', error);
+    } catch {
+      // Ignore message notification errors
     }
   }
 
@@ -186,7 +183,7 @@ export class NotificationService {
   async sendSystemNotification(
     title: string, 
     body: string, 
-    data?: any
+    data?: any,
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
@@ -201,9 +198,8 @@ export class NotificationService {
         trigger: null,
       });
       
-      console.log('⚙️ System notification sent:', title);
-    } catch (error) {
-      console.warn('Failed to send system notification:', error);
+    } catch {
+      // Ignore system notification errors
     }
   }
 
@@ -211,7 +207,7 @@ export class NotificationService {
   async sendMarketingNotification(
     title: string, 
     body: string, 
-    data?: any
+    data?: any,
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
@@ -226,9 +222,8 @@ export class NotificationService {
         trigger: null,
       });
       
-      console.log('📢 Marketing notification sent:', title);
-    } catch (error) {
-      console.warn('Failed to send marketing notification:', error);
+    } catch {
+      // Ignore marketing notification errors
     }
   }
 
@@ -237,8 +232,8 @@ export class NotificationService {
     try {
       const { status } = await Notifications.requestPermissionsAsync();
       return status === 'granted';
-    } catch (error) {
-      console.warn('Failed to request notification permissions:', error);
+    } catch {
+      // Ignore permission request errors
       return false;
     }
   }
@@ -247,13 +242,13 @@ export class NotificationService {
   async getPermissionsStatus(): Promise<Notifications.NotificationPermissionsStatus> {
     try {
       return await Notifications.getPermissionsAsync();
-    } catch (error) {
-      console.warn('Failed to get notification permissions:', error);
+    } catch {
+      // Ignore permission status errors
       return { 
         status: 'undetermined' as Notifications.PermissionStatus,
         expires: 'never',
         granted: false,
-        canAskAgain: true
+        canAskAgain: true,
       };
     }
   }
@@ -262,9 +257,9 @@ export class NotificationService {
   async clearAllNotifications(): Promise<void> {
     try {
       await Notifications.dismissAllNotificationsAsync();
-      console.log('✅ All notifications cleared');
-    } catch (error) {
-      console.warn('Failed to clear notifications:', error);
+      
+    } catch {
+      // Ignore clear notifications errors
     }
   }
 
@@ -272,16 +267,16 @@ export class NotificationService {
   async setBadgeCount(count: number): Promise<void> {
     try {
       await Notifications.setBadgeCountAsync(count);
-      console.log(`✅ Badge count set to ${count}`);
-    } catch (error) {
-      console.warn('Failed to set badge count:', error);
+      
+    } catch {
+      // Ignore badge count errors
     }
   }
 
   // Configure notification handler
   async configureNotificationHandler(
     soundEnabled: boolean,
-    vibrationEnabled: boolean
+    vibrationEnabled: boolean,  
   ): Promise<void> {
     try {
       await Notifications.setNotificationHandler({
@@ -292,9 +287,8 @@ export class NotificationService {
         } as Notifications.NotificationBehavior),
       });
       
-      console.log('✅ Notification handler configured');
-    } catch (error) {
-      console.warn('Failed to configure notification handler:', error);
+    } catch {
+      // Ignore notification handler errors
     }
   }
 
@@ -311,21 +305,21 @@ export class NotificationService {
     const data = testData[type];
     
     switch (type) {
-      case 'emergency':
-        await this.sendEmergencyNotification(data.title, data.body);
-        break;
-      case 'family':
-        await this.sendFamilyNotification(data.title, data.body);
-        break;
-      case 'messages':
-        await this.sendMessageNotification(data.title, data.body);
-        break;
-      case 'system':
-        await this.sendSystemNotification(data.title, data.body);
-        break;
-      case 'marketing':
-        await this.sendMarketingNotification(data.title, data.body);
-        break;
+    case 'emergency':
+      await this.sendEmergencyNotification(data.title, data.body);
+      break;
+    case 'family':
+      await this.sendFamilyNotification(data.title, data.body);
+      break;
+    case 'messages':
+      await this.sendMessageNotification(data.title, data.body);
+      break;
+    case 'system':
+      await this.sendSystemNotification(data.title, data.body);
+      break;
+    case 'marketing':
+      await this.sendMarketingNotification(data.title, data.body);
+      break;
     }
   }
 }

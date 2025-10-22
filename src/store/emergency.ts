@@ -25,7 +25,9 @@ export interface EmergencyState {
 type EmergencyActions = {
   enable: () => void;
   disable: () => void;
+   
   updateSettings: (settings: Partial<EmergencyState>) => void;
+   
   updateSOSStatus: (statuses: string[]) => void;
   isActive: () => boolean;
   getRemainingTime: () => number; // milliseconds
@@ -54,7 +56,7 @@ export const useEmergency = create<EmergencyState & EmergencyActions>()(
         const now = Date.now();
         set({
           enabled: true,
-          activatedAt: now
+          activatedAt: now,
         });
         
         // Integrate with ICE contacts for SMS fallback
@@ -68,7 +70,7 @@ export const useEmergency = create<EmergencyState & EmergencyActions>()(
       disable: () => {
         set({
           enabled: false,
-          activatedAt: undefined
+          activatedAt: undefined,
         });
       },
       
@@ -104,12 +106,12 @@ export const useEmergency = create<EmergencyState & EmergencyActions>()(
         const elapsed = Date.now() - state.activatedAt;
         const duration = state.duration || 2 * 60 * 1000;
         return Math.max(0, duration - elapsed);
-      }
+      },
     }),
     {
       name: 'afn/emergency/v1',
       storage: createJSONStorage(() => AsyncStorage),
-      version: 1
-    }
-  )
+      version: 1,
+    },
+  ),
 );

@@ -1,5 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-const KEY="afn:heat:grid:v1";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+const KEY='afn:heat:grid:v1';
 export type Cell = { k: string; v: number; ts: number };
 let grid: Record<string, Cell> = {};
 
@@ -36,7 +36,7 @@ export function snapshot(decayHalfMs=30*60*1000){
 }
 
 export function cellCenter(k:string){
-  const [gy,gx] = k.split(":").map(Number);
+  const [gy,gx] = k.split(':').map(Number);
   const dy = 0.00225, dx = 0.00225;
   const lat = (gy+0.5)*dy, lon = (gx+0.5)*dx;
   return { lat, lon };

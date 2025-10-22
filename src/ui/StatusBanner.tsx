@@ -36,15 +36,15 @@ export default function StatusBanner({
 
   const getDefaultIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (type) {
-      case 'critical':
-        return 'warning';
-      case 'warning':
-        return 'alert-circle';
-      case 'success':
-        return 'checkmark-circle';
-      case 'info':
-      default:
-        return 'information-circle';
+    case 'critical':
+      return 'warning';
+    case 'warning':
+      return 'alert-circle';
+    case 'success':
+      return 'checkmark-circle';
+    case 'info':
+    default:
+      return 'information-circle';
     }
   };
 
@@ -65,15 +65,15 @@ export default function StatusBanner({
 
 function getIconColor(type: BannerType): string {
   switch (type) {
-    case 'critical':
-      return brandPalette.text.onPrimary;
-    case 'warning':
-      return brandPalette.text.onPrimary;
-    case 'success':
-      return brandPalette.text.onPrimary;
-    case 'info':
-    default:
-      return brandPalette.text.onSecondary;
+  case 'critical':
+    return brandPalette.text.onPrimary;
+  case 'warning':
+    return brandPalette.text.onPrimary;
+  case 'success':
+    return brandPalette.text.onPrimary;
+  case 'info':
+  default:
+    return brandPalette.text.onSecondary;
   }
 }
 

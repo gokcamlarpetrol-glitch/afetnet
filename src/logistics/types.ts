@@ -1,5 +1,5 @@
-export type LCategory = "shelter"|"water"|"food"|"medicine"|"equipment";
-export type LMode = "request"|"offer";
+export type LCategory = 'shelter'|'water'|'food'|'medicine'|'equipment';
+export type LMode = 'request'|'offer';
 export type LItem = {
   id: string;
   ts: number;

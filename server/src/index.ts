@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors({
   origin: [/^https?:\/\/(localhost:|127\.0\.0\.1:)/, /render\.com$/, /afetnet/],
-  credentials: true
+  credentials: true,
 }));
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -33,24 +33,24 @@ app.get('/health', async (req, res) => {
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
-      database: dbConnected ? 'connected' : 'disconnected'
+      database: dbConnected ? 'connected' : 'disconnected',
     });
   } catch (error) {
     res.status(500).json({
       status: 'ERROR',
       timestamp: new Date().toISOString(),
       database: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });
 
 // Error handling
-app.use((error: any, req: any, res: any, next: any) => {
+app.use((error: any, req: any, res: any, _next: any) => {
   console.error('❌ Server error:', error);
   res.status(500).json({
     success: false,
-    error: 'Internal server error'
+    error: 'Internal server error',
   });
 });
 

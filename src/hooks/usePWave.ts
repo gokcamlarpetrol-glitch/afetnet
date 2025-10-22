@@ -6,7 +6,7 @@ import { logger } from '../utils/productionLogger';
 // Import Motion with fallback
 let Motion: any = null;
 try {
-  Motion = require('expo-sensors').Motion;
+  Motion = (globalThis as any).require('expo-sensors').Motion;
 } catch {
   // Motion not available
 }
@@ -45,12 +45,11 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
     isStationary: true,
     lastDetection: null,
     detectionCount: 0,
-    error: null
+    error: null,
   });
 
   const mergedConfig = { ...defaultConfig, ...config };
   const subscriptionRef = useRef<any>(null);
-  const motionSubscriptionRef = useRef<any>(null);
   const dataBufferRef = useRef<{ x: number; y: number; z: number; timestamp: number }[]>([]);
   const lastDetectionRef = useRef<number>(0);
 
@@ -65,7 +64,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
         const acceleration = Math.sqrt(
           motion.acceleration.x ** 2 + 
           motion.acceleration.y ** 2 + 
-          motion.acceleration.z ** 2
+          motion.acceleration.z ** 2,
         );
         
         const isStationary = acceleration < mergedConfig.stationaryThreshold;
@@ -82,10 +81,10 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
       }
     };
 
-    const motionInterval = setInterval(checkMotion, 1000);
+    const motionInterval = (globalThis as any).setInterval(checkMotion, 1000);
     checkMotion(); // Initial check
 
-    return () => clearInterval(motionInterval);
+    return () => (globalThis as any).clearInterval(motionInterval);
   }, [mergedConfig.enabled, mergedConfig.stationaryThreshold, state.isListening]);
 
   const calculateEnergy = (buffer: { x: number; y: number; z: number }[]): number => {
@@ -149,7 +148,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
       if (!state.isStationary) {
         setState(prev => ({ 
           ...prev, 
-          error: 'Cihaz hareket halinde - P-dalgası algısı devre dışı' 
+          error: 'Cihaz hareket halinde - P-dalgası algısı devre dışı', 
         }));
         return;
       }
@@ -165,13 +164,13 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
           x: data.x,
           y: data.y,
           z: data.z,
-          timestamp
+          timestamp,
         });
 
         // Keep only recent data (detection window)
         const cutoffTime = timestamp - mergedConfig.detectionWindowMs;
         dataBufferRef.current = dataBufferRef.current.filter(
-          sample => sample.timestamp > cutoffTime
+          sample => sample.timestamp > cutoffTime,
         );
 
         // Analyze for P-wave
@@ -186,7 +185,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
             setState(prev => ({
               ...prev,
               lastDetection: now,
-              detectionCount: prev.detectionCount + 1
+              detectionCount: prev.detectionCount + 1,
             }));
 
             // Send local notification
@@ -204,7 +203,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
       setState(prev => ({ 
         ...prev, 
         isListening: true, 
-        error: null 
+        error: null, 
       }));
 
       logger.debug('P-wave: Started listening');
@@ -213,7 +212,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
       logger.error('P-wave: Failed to start:', error);
       setState(prev => ({ 
         ...prev, 
-        error: error instanceof Error ? error.message : 'P-dalgası algısı başlatılamadı' 
+        error: error instanceof Error ? error.message : 'P-dalgası algısı başlatılamadı', 
       }));
     }
   };
@@ -228,7 +227,7 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
     
     setState(prev => ({ 
       ...prev, 
-      isListening: false 
+      isListening: false, 
     }));
 
     logger.debug('P-wave: Stopped listening');
@@ -251,6 +250,6 @@ export function usePWave(config: Partial<PWaveConfig> = {}) {
     ...state,
     startListening,
     stopListening,
-    config: mergedConfig
+    config: mergedConfig,
   };
 }

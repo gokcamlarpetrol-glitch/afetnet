@@ -72,7 +72,7 @@ export const usePDRStore = create<PDRState>()(
         const initialPoint: PDRPoint = {
           latitude: initialLat,
           longitude: initialLon,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         };
         
         set({
@@ -81,7 +81,7 @@ export const usePDRStore = create<PDRState>()(
           currentPosition: initialPoint,
           trail: [initialPoint],
           stepCount: 0,
-          heading: 0
+          heading: 0,
         });
         
         // Start accelerometer
@@ -107,12 +107,12 @@ export const usePDRStore = create<PDRState>()(
               const newPoint: PDRPoint = {
                 latitude: newLat,
                 longitude: newLon,
-                timestamp: Date.now()
+                timestamp: Date.now(),
               };
               
               set({
                 currentPosition: newPoint,
-                trail: [...state.trail, newPoint]
+                trail: [...state.trail, newPoint],
               });
             }
           }
@@ -146,7 +146,7 @@ export const usePDRStore = create<PDRState>()(
         }
         
         if (stepDetectionTimer) {
-          clearInterval(stepDetectionTimer);
+          (globalThis as any).clearInterval(stepDetectionTimer);
           stepDetectionTimer = null;
         }
         
@@ -158,7 +158,7 @@ export const usePDRStore = create<PDRState>()(
         const newPoint: PDRPoint = {
           latitude: lat,
           longitude: lon,
-          timestamp
+          timestamp,
         };
         
         set((state) => {
@@ -178,7 +178,7 @@ export const usePDRStore = create<PDRState>()(
             fusedPosition = {
               latitude: adjustedAlpha * (pdrPos?.latitude || 0) + (1 - adjustedAlpha) * gpsPos.latitude,
               longitude: adjustedAlpha * (pdrPos?.longitude || 0) + (1 - adjustedAlpha) * gpsPos.longitude,
-              timestamp
+              timestamp,
             };
             
             // TODO: Implement Kalman filter for production
@@ -191,7 +191,7 @@ export const usePDRStore = create<PDRState>()(
             trail: [...state.trail, fusedPosition],
             lastGPSPosition: newPoint,
             lastGPSTimestamp: timestamp,
-            gpsAccuracy: accuracy || 0
+            gpsAccuracy: accuracy || 0,
           };
         });
       },
@@ -200,7 +200,7 @@ export const usePDRStore = create<PDRState>()(
         set({
           trail: [],
           stepCount: 0,
-          currentPosition: null
+          currentPosition: null,
         });
       },
       
@@ -216,7 +216,7 @@ export const usePDRStore = create<PDRState>()(
         // Clamp alpha between 0 and 1
         const clampedAlpha = Math.max(0, Math.min(1, alpha));
         set({ fusionAlpha: clampedAlpha });
-      }
+      },
     }),
     {
       name: 'pdr-storage',
@@ -224,8 +224,8 @@ export const usePDRStore = create<PDRState>()(
       partialize: (state) => ({
         stepLength: state.stepLength,
         threshold: state.threshold,
-        fusionAlpha: state.fusionAlpha
-      })
-    }
-  )
+        fusionAlpha: state.fusionAlpha,
+      }),
+    },
+  ),
 );

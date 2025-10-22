@@ -24,7 +24,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   count: { color: '#e9eefc', fontSize: 22, fontWeight: '800' },
   btn: { backgroundColor: '#29b36b', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12 },
-  btnText: { color: '#051012', fontSize: 14, fontWeight: '800' }
+  btnText: { color: '#051012', fontSize: 14, fontWeight: '800' },
 });
 
 

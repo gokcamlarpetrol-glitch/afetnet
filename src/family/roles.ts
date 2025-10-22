@@ -1,7 +1,7 @@
-import * as FileSystem from "expo-file-system";
-const FILE = "/tmp/family.roles.json";
+import * as FileSystem from 'expo-file-system';
+const FILE = '/tmp/family.roles.json';
 
-export type Role = "guardian"|"child"|"elder"|"special";
+export type Role = 'guardian'|'child'|'elder'|'special';
 export type RoleEntry = { memberId:string; role: Role; note?:string };
 
 let mem: RoleEntry[] = [];

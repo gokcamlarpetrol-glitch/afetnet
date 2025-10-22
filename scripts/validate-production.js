@@ -9,13 +9,13 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const fetch = require('node-fetch');
+const _fetch = require('node-fetch');
 
 // Valid product IDs (only these are allowed)
 const VALID_PRODUCTS = [
   'afetnet_premium_monthly1',
   'afetnet_premium_yearly1', 
-  'afetnet_premium_lifetime'
+  'afetnet_premium_lifetime',
 ];
 
 // Required icon sizes for App Store
@@ -24,7 +24,7 @@ const REQUIRED_ICON_SIZES = [
   { size: '60x60', idiom: 'iphone', scale: '3x', pixels: 180 }, // iPhone App @3x
   { size: '76x76', idiom: 'ipad', scale: '2x', pixels: 152 },    // iPad App @2x
   { size: '83.5x83.5', idiom: 'ipad', scale: '2x', pixels: 167 }, // iPad Pro App @2x
-  { size: '1024x1024', idiom: 'ios-marketing', scale: '1x', pixels: 1024 } // App Store
+  { size: '1024x1024', idiom: 'ios-marketing', scale: '1x', pixels: 1024 }, // App Store
 ];
 
 console.log('🔍 COMPREHENSIVE PRODUCTION VALIDATION');
@@ -60,7 +60,7 @@ try {
   const forbiddenPatterns = [
     'afetnet_premium_monthly[^1]',
     'afetnet_premium_yearly[^1]',
-    'afetnet_premium_lifetime[^"]'
+    'afetnet_premium_lifetime[^"]',
   ];
   
   forbiddenPatterns.forEach(pattern => {
@@ -70,7 +70,7 @@ try {
         addError(`Found forbidden product ID pattern "${pattern}" in code`);
         console.log(`   Files: ${result.trim()}`);
       }
-    } catch (e) {
+    } catch {
       // grep returns non-zero when no matches found, which is good
     }
   });
@@ -79,7 +79,7 @@ try {
   const rawStringPatterns = [
     '"afetnet_premium_monthly1"',
     '"afetnet_premium_yearly1"',
-    '"afetnet_premium_lifetime"'
+    '"afetnet_premium_lifetime"',
   ];
   
   rawStringPatterns.forEach(pattern => {
@@ -88,7 +88,7 @@ try {
       if (result.trim()) {
         addWarning(`Found raw string usage: ${pattern} - should use IAP_PRODUCTS constants`);
       }
-    } catch (e) {
+    } catch {
       // grep returns non-zero when no matches found
     }
   });
@@ -187,7 +187,7 @@ if (!fs.existsSync(contentsJsonPath)) {
         const found = contents.images.find(img => 
           img.size === requiredIcon.size && 
           img.idiom === requiredIcon.idiom && 
-          img.scale === requiredIcon.scale
+          img.scale === requiredIcon.scale,
         );
         
         if (!found) {
@@ -305,7 +305,7 @@ const serverFiles = [
   'server/iap-routes.ts',
   'server/src/database.ts',
   'server/migrations/001_create_iap_tables.sql',
-  'server/package.json'
+  'server/package.json',
 ];
 
 serverFiles.forEach(file => {
@@ -358,7 +358,7 @@ try {
     'purchasePlan',
     'restorePurchases',
     'checkPremiumStatus',
-    'validateReceipt'
+    'validateReceipt',
   ];
   
   requiredMethods.forEach(method => {
@@ -414,7 +414,7 @@ try {
     'purchaseSuccess',
     'purchaseFailed',
     'restoreSuccess',
-    'verificationSuccess'
+    'verificationSuccess',
   ];
   
   requiredLogMethods.forEach(method => {
@@ -475,7 +475,7 @@ console.log('================================');
 
 // 7.1 Test webhook endpoints
 console.log('\n🔍 7.1 Testing webhook endpoints...');
-const webhookTests = [
+const _webhookTests = [
   {
     name: 'RENEWAL Event',
     payload: {
@@ -483,9 +483,9 @@ const webhookTests = [
       data: {
         transactionId: 'test_renewal_123',
         expiresDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-        originalTransactionId: 'test_original_123'
-      }
-    }
+        originalTransactionId: 'test_original_123',
+      },
+    },
   },
   {
     name: 'EXPIRED Event', 
@@ -493,9 +493,9 @@ const webhookTests = [
       notificationType: 'EXPIRED',
       data: {
         transactionId: 'test_expired_123',
-        originalTransactionId: 'test_original_123'
-      }
-    }
+        originalTransactionId: 'test_original_123',
+      },
+    },
   },
   {
     name: 'REFUND Event',
@@ -503,10 +503,10 @@ const webhookTests = [
       notificationType: 'REFUND',
       data: {
         transactionId: 'test_refund_123',
-        originalTransactionId: 'test_original_123'
-      }
-    }
-  }
+        originalTransactionId: 'test_original_123',
+      },
+    },
+  },
 ];
 
 // Note: This would require a running server to test
@@ -530,7 +530,7 @@ oldProductIds.forEach(oldId => {
     } else {
       addSuccess(`Old product ID removed: ${oldId}`);
     }
-  } catch (e) {
+  } catch {
     addSuccess(`Old product ID removed: ${oldId}`);
   }
 });
@@ -664,7 +664,7 @@ try {
   const requiredSettings = [
     'ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon',
     'CODE_SIGN_STYLE = Automatic',
-    'DEVELOPMENT_TEAM'
+    'DEVELOPMENT_TEAM',
   ];
   
   requiredSettings.forEach(setting => {
@@ -687,7 +687,7 @@ console.log('==================================');
 console.log('\n🔍 11.1 Checking App Store metadata...');
 const metadataFiles = [
   'APPLE_STORE_CHECKLIST.md',
-  'TESTFLIGHT_TESTING_PLAN.md'
+  'TESTFLIGHT_TESTING_PLAN.md',
 ];
 
 metadataFiles.forEach(file => {
@@ -732,7 +732,7 @@ const helperCommands = {
   'IAP Testing': 'npm run test:iap', 
   'System Verification': 'npm run verify:iap',
   'Production Validation': 'npm run validate:production',
-  'Open Xcode': 'xed ios/AfetNet.xcworkspace'
+  'Open Xcode': 'xed ios/AfetNet.xcworkspace',
 };
 
 console.log('\n📋 Available Commands:');
@@ -755,7 +755,7 @@ const validationSections = [
   { name: 'Migration', status: allChecksPassed ? 'PASS' : 'FAIL' },
   { name: 'Security', status: allChecksPassed ? 'PASS' : 'FAIL' },
   { name: 'Build', status: allChecksPassed ? 'PASS' : 'FAIL' },
-  { name: 'App Store Connect', status: allChecksPassed ? 'PASS' : 'FAIL' }
+  { name: 'App Store Connect', status: allChecksPassed ? 'PASS' : 'FAIL' },
 ];
 
 console.log('\n📊 VALIDATION SUMMARY TABLE');
@@ -824,7 +824,7 @@ const validationResults = {
   timestamp: new Date().toISOString(),
   readyForProduction: allChecksPassed,
   readyForTestFlight: allChecksPassed,
-  readyForAppStore: allChecksPassed
+  readyForAppStore: allChecksPassed,
 };
 
 fs.writeFileSync('validation-results.json', JSON.stringify(validationResults, null, 2));

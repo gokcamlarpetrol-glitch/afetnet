@@ -1,7 +1,7 @@
 export type EvidenceItem = 
-  | { t: "photo"; path: string; w?: number; h?: number; ts: number }
-  | { t: "audio"; path: string; dur?: number; ts: number }
-  | { t: "note";  text: string; ts: number };
+  | { t: 'photo'; path: string; w?: number; h?: number; ts: number }
+  | { t: 'audio'; path: string; dur?: number; ts: number }
+  | { t: 'note';  text: string; ts: number };
 
 export type EvidencePack = {
   id: string;                  // pack id (ulid-like)
@@ -13,7 +13,7 @@ export type EvidencePack = {
 
 export type EvidenceNotice = {
   v: 1;
-  kind: "evidence_notice";
+  kind: 'evidence_notice';
   id: string;                  // pack id
   ts: number;
   qlat?: number; qlng?: number;

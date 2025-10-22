@@ -13,18 +13,18 @@ let isExpoGo = false;
 
 // Detect Expo Go environment FIRST
 try {
-  const Constants = require('expo-constants');
+  const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient';
-} catch (e) {
+} catch {
   // Ignore
 }
 
 // Only try to import barcode scanner if NOT in Expo Go
 if (!isExpoGo) {
   try {
-    const barcodeScanner = require('expo-barcode-scanner');
+    const barcodeScanner = (globalThis as any).require('expo-barcode-scanner');
     BarCodeScanner = barcodeScanner.BarCodeScanner;
-  } catch (e) {
+  } catch {
     logger.warn('expo-barcode-scanner not available, using fallback');
     isExpoGo = true;
   }
@@ -67,8 +67,8 @@ export default function PairingQR() {
       } else {
         const newKeyPair = genKeyPair();
         const keyPairData = {
-          publicKey: Buffer.from(newKeyPair.publicKey).toString('base64'),
-          secretKey: Buffer.from(newKeyPair.secretKey).toString('base64')
+          publicKey: (globalThis as any).Buffer.from(newKeyPair.publicKey).toString('base64'),
+          secretKey: (globalThis as any).Buffer.from(newKeyPair.secretKey).toString('base64'),
         };
         await AsyncStorage.setItem('pairing_keypair', JSON.stringify(keyPairData));
         setKeyPair(keyPairData);
@@ -118,14 +118,14 @@ export default function PairingQR() {
 
       // Generate shared secret
       const sharedSecret = generateSharedSecret(
-        Buffer.from(keyPair.secretKey, 'base64'),
-        pairingData.publicKey
+        (globalThis as any).Buffer.from(keyPair.secretKey, 'base64'),
+        pairingData.publicKey,
       );
 
       // Store paired device
       const newPairedDevice = {
         ...pairingData,
-        sharedSecret: Buffer.from(sharedSecret).toString('base64')
+        sharedSecret: (globalThis as any).Buffer.from(sharedSecret).toString('base64'),
       };
 
       const updatedPairedDevices = [...pairedDevices, newPairedDevice];
@@ -135,7 +135,7 @@ export default function PairingQR() {
       Alert.alert(
         'Başarılı', 
         `${pairingData.deviceName} cihazı ile eşleştirme tamamlandı`,
-        [{ text: 'Tamam', onPress: () => setScanned(false) }]
+        [{ text: 'Tamam', onPress: () => setScanned(false) }],
       );
 
     } catch (error) {
@@ -145,11 +145,6 @@ export default function PairingQR() {
     }
   };
 
-  const generateQRData = (): PairingData => ({
-    deviceName,
-    publicKey: keyPair?.publicKey || '',
-    timestamp: Date.now()
-  });
 
   const removePairedDevice = async (publicKey: string) => {
     const updatedDevices = pairedDevices.filter(device => device.publicKey !== publicKey);

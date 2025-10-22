@@ -1,8 +1,8 @@
-import * as FileSystem from "expo-file-system";
-import { Beacon } from "./model";
+import * as FileSystem from 'expo-file-system';
+import { Beacon } from './model';
 
-const DIR = "/tmp/";
-const FILE = DIR + "beacons.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'beacons.json';
 
 type FileShape = { items: Beacon[] };
 
@@ -17,7 +17,7 @@ async function read(): Promise<FileShape>{
 }
 
 async function write(items: Beacon[]){
-  await FileSystem.writeAsStringAsync(FILE, JSON.stringify({items}));
+  await FileSystem.writeAsStringAsync(FILE, JSON.stringify({ items }));
 }
 
 export async function listBeacons(now = Date.now()){

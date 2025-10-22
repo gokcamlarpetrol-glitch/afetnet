@@ -4,7 +4,7 @@ import { saveActivation, Activation } from '../store/activation';
 
 export function parseActivationUrl(url: string): { serverUrl: string; secret?: string } | null {
   try {
-    const parsed = new URL(url);
+    const parsed = new (globalThis as any).URL(url);
     if (parsed.protocol !== 'afetnet:') {return null;}
     if (parsed.hostname !== 'activate') {return null;}
     

@@ -1,7 +1,7 @@
-import * as Beacon from "../ble/bridge";
-import { sanitizeText, rateLimit } from "../lib/sanitize";
-import { startForegroundNote, stopForegroundNote } from "../bg/service";
-import { noteConfigConflict } from "../diag/autoLog";
+import * as Beacon from '../ble/bridge';
+import { sanitizeText, rateLimit } from '../lib/sanitize';
+import { startForegroundNote, stopForegroundNote } from '../bg/service';
+import { noteConfigConflict } from '../diag/autoLog';
 
 let on = false;
 let t: any = null;
@@ -28,18 +28,22 @@ export async function start(cfg: SarConfig){
   Beacon.setRelayMode(true);
   // auto loop
   await startForegroundNote();
-  t = setInterval(async ()=>{
+  t = (globalThis as any).setInterval(async ()=>{
     if (!rateLimit(500)) {return;}
     try{
       await Beacon.broadcastSOS(()=>50);
       if (cfg.autoText) {await Beacon.broadcastText(sanitizeText(cfg.autoText));}
-    }catch{}
+    }catch{
+      // Ignore broadcast errors
+    }
   }, Math.max(cfg.sosEveryMs, 5000));
 }
 
 export function stop(){
   on = false;
-  if (t) {clearInterval(t), t=null;}
+  if (t) {(globalThis as any).clearInterval(t), t=null;}
   Beacon.setRelayMode(false);
-  stopForegroundNote().catch(()=>{});
+  stopForegroundNote().catch(()=>{
+    // Ignore stop errors
+  });
 }

@@ -5,11 +5,11 @@ export type EEWAlert = {
   lng: number;
   depth?: number;       // km
   mag: number;          // Mw or local equivalent
-  src: "AFAD"|"KANDILLI"|"USGS"|"SIM"|"LOCAL_PWAVE";
+  src: 'AFAD'|'KANDILLI'|'USGS'|'SIM'|'LOCAL_PWAVE';
 };
 
 export type EEWPush = {
-  kind: "eew";
+  kind: 'eew';
   alert: EEWAlert;
 };
 
@@ -18,7 +18,7 @@ export type EtaResult = {
   etaSec: number;       // estimated arrival of strong S-waves
   pEtaSec: number;      // P-wave arrival
   mmi: number;          // predicted intensity (MMI 1..10)
-  label: "Severe"|"Strong"|"Light"|"Weak";
+  label: 'Severe'|'Strong'|'Light'|'Weak';
 };
 
 export function haversineKm(a:{lat:number;lng:number}, b:{lat:number;lng:number}){

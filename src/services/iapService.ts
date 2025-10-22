@@ -1,6 +1,6 @@
 // APPLE & GOOGLE IAP SERVICE - PRODUCTION READY WITH SERVER VERIFICATION
 // Elite level implementation with comprehensive error handling and server-side verification
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import * as InAppPurchases from 'expo-in-app-purchases';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '../utils/logger';
@@ -8,7 +8,7 @@ import { usePremium } from '../store/premium';
 import { 
   IAP_PRODUCTS,
   IAP_PRODUCT_IDS,
-  SUBSCRIPTION_PRODUCTS,
+  // SUBSCRIPTION_PRODUCTS, // Not used
   LIFETIME_PRODUCTS,
   isSubscriptionProduct,
   isLifetimeProduct,
@@ -17,8 +17,8 @@ import {
   logProductDetection,
   logPremiumStatus,
   ProductId,
-  ProductInfo
-} from '@shared/iap/products';
+  ProductInfo,
+} from '../../shared/iap/products';
 
 // Server configuration
 const SERVER_BASE_URL = __DEV__ 
@@ -47,7 +47,7 @@ interface ServerResponse {
 export const PREMIUM_PLANS = {
   [IAP_PRODUCTS.monthly]: PRODUCT_CONFIG[IAP_PRODUCTS.monthly],
   [IAP_PRODUCTS.yearly]: PRODUCT_CONFIG[IAP_PRODUCTS.yearly],
-  [IAP_PRODUCTS.lifetime]: PRODUCT_CONFIG[IAP_PRODUCTS.lifetime]
+  [IAP_PRODUCTS.lifetime]: PRODUCT_CONFIG[IAP_PRODUCTS.lifetime],
 } as const;
 
 export type PremiumPlanId = ProductId;
@@ -87,7 +87,7 @@ class IAPService {
       // Initialize connection with timeout
       const initPromise = InAppPurchases.connectAsync();
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('IAP initialization timeout')), 10000)
+        (globalThis as any).setTimeout(() => reject(new Error('IAP initialization timeout')), 10000),
       );
 
       const result = await Promise.race([initPromise, timeoutPromise]);
@@ -157,14 +157,14 @@ class IAPService {
                   Alert.alert(
                     '✅ Başarılı!',
                     'Premium üyeliğiniz aktif edildi!',
-                    [{ text: 'Tamam', style: 'default' }]
+                    [{ text: 'Tamam', style: 'default' }],
                   );
                 } else {
                   logger.iap.verificationFailed(purchase.productId, 'Server validation failed');
                   Alert.alert(
                     '❌ Hata',
                     'Satın alma doğrulanamadı. Lütfen destek ekibiyle iletişime geçin.',
-                    [{ text: 'Tamam', style: 'default' }]
+                    [{ text: 'Tamam', style: 'default' }],
                   );
                 }
               } catch (error) {
@@ -172,7 +172,7 @@ class IAPService {
                 Alert.alert(
                   '❌ Hata',
                   'Satın alma işlenirken hata oluştu. Lütfen tekrar deneyin.',
-                  [{ text: 'Tamam', style: 'default' }]
+                  [{ text: 'Tamam', style: 'default' }],
                 );
               } finally {
                 this.isProcessingPurchase = false;
@@ -189,7 +189,7 @@ class IAPService {
             Alert.alert(
               '⏳ Beklemede',
               'Satın alma onay bekliyor (ebeveyn onayı gerekli).',
-              [{ text: 'Tamam', style: 'default' }]
+              [{ text: 'Tamam', style: 'default' }],
             );
           }
           // Handle other errors
@@ -205,7 +205,7 @@ class IAPService {
               E_REMOTE_ERROR: 'Bağlantı hatası. İnternet bağlantınızı kontrol edin.',
               E_NETWORK_ERROR: 'Ağ hatası. Lütfen tekrar deneyin.',
               E_RECEIPT_FAILED: 'Makbuz doğrulaması başarısız.',
-              E_RECEIPT_FINISHED_FAILED: 'Makbuz tamamlanamadı.'
+              E_RECEIPT_FINISHED_FAILED: 'Makbuz tamamlanamadı.',
             };
 
             const message = errorCode ? (errorMessages[errorCode] || 'Satın alma işlemi başarısız oldu.') : 'Satın alma işlemi başarısız oldu.';
@@ -213,10 +213,10 @@ class IAPService {
             Alert.alert(
               '❌ Satın Alma Hatası',
               message,
-              [{ text: 'Tamam', style: 'default' }]
+              [{ text: 'Tamam', style: 'default' }],
             );
           }
-        }
+        },
       );
 
       logger.info('✅ Purchase listeners set up successfully');
@@ -269,7 +269,7 @@ class IAPService {
         Alert.alert(
           'ℹ️ Bilgi',
           'Bir satın alma işlemi zaten devam ediyor.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
         return false;
       }
@@ -331,8 +331,8 @@ class IAPService {
         body: JSON.stringify({
           receiptData: purchase.orderId,
           userId,
-          productId: purchase.productId
-        })
+          productId: purchase.productId,
+        }),
       });
 
       const data: ServerResponse = await response.json();
@@ -429,7 +429,7 @@ class IAPService {
         purchaseTime: purchase.purchaseTime,
         expiryDate,
         productType: productConfig.type,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       };
 
       // Save to AsyncStorage
@@ -442,13 +442,13 @@ class IAPService {
         title: productConfig.title,
         price: 0, // Will be fetched from store
         currency: 'TRY',
-        description: productConfig.description
+        description: productConfig.description,
       };
       
       setPremium(
         true,
         planInfo,
-        expiryDate ? new Date(expiryDate) : undefined
+        expiryDate ? new Date(expiryDate) : undefined,
       );
 
       logger.info('✅ Premium status updated successfully (AsyncStorage + Zustand)');
@@ -465,7 +465,7 @@ class IAPService {
         productId: purchase.productId,
         orderId: purchase.orderId,
         purchaseTime: purchase.purchaseTime,
-        savedAt: Date.now()
+        savedAt: Date.now(),
       };
 
       await AsyncStorage.setItem(LAST_PURCHASE_KEY, JSON.stringify(purchaseInfo));
@@ -492,7 +492,7 @@ class IAPService {
           expiresAt: serverEntitlements.expiresAt,
           source: serverEntitlements.source,
           updatedAt: Date.now(),
-          fromServer: true
+          fromServer: true,
         };
         
         await AsyncStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(premiumStatus));
@@ -509,9 +509,9 @@ class IAPService {
                 title: productConfig.title,
                 price: 0,
                 currency: 'TRY',
-                description: productConfig.description
+                description: productConfig.description,
               },
-              serverEntitlements.expiresAt ? new Date(serverEntitlements.expiresAt) : undefined
+              serverEntitlements.expiresAt ? new Date(serverEntitlements.expiresAt) : undefined,
             );
           }
         } else {
@@ -565,9 +565,9 @@ class IAPService {
               title: productConfig.title,
               price: 0,
               currency: 'TRY',
-              description: productConfig.description
+              description: productConfig.description,
             },
-            status.expiryDate ? new Date(status.expiryDate) : undefined
+            status.expiryDate ? new Date(status.expiryDate) : undefined,
           );
         }
 
@@ -630,20 +630,20 @@ class IAPService {
             Alert.alert(
               '✅ Başarılı!',
               `${premiumPurchases} premium satın alım geri yüklendi.`,
-              [{ text: 'Tamam', style: 'default' }]
+              [{ text: 'Tamam', style: 'default' }],
             );
           } else {
             Alert.alert(
               'ℹ️ Bilgi',
               'Geri yüklenecek premium satın alım bulunamadı.',
-              [{ text: 'Tamam', style: 'default' }]
+              [{ text: 'Tamam', style: 'default' }],
             );
           }
         } else {
           Alert.alert(
             'ℹ️ Bilgi',
             'Geri yüklenecek satın alım bulunamadı.',
-            [{ text: 'Tamam', style: 'default' }]
+            [{ text: 'Tamam', style: 'default' }],
           );
         }
       } else {
@@ -651,7 +651,7 @@ class IAPService {
         Alert.alert(
           '❌ Hata',
           'Satın alımlar geri yüklenemedi. Lütfen tekrar deneyin.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
       }
 
@@ -662,7 +662,7 @@ class IAPService {
       Alert.alert(
         '❌ Hata',
         'Satın alımlar geri yüklenemedi. Lütfen tekrar deneyin.',
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
 
       return false;

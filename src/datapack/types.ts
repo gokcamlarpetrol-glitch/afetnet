@@ -3,7 +3,7 @@ export type DataPackManifest = {
   packId: string;
   version: string;
   createdTs: number;
-  files: { path: string; sha256: string; mode: "add"|"update"|"remove" }[];
+  files: { path: string; sha256: string; mode: 'add'|'update'|'remove' }[];
   note?: string;
 };
 

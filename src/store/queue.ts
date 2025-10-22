@@ -1,23 +1,23 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo";
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { bleRelay, RelayMessage } from "../services/ble/bleRelay";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { bleRelay, RelayMessage } from '../services/ble/bleRelay';
 
-export type QueueItem = { id: string; type: "sos" | "msg"; payload: any; ts: number };
+export type QueueItem = { id: string; type: 'sos' | 'msg'; payload: any; ts: number };
 
 type State = {
   items: QueueItem[];
-  add(i: Omit<QueueItem, "id" | "ts">): void;
+  add(i: Omit<QueueItem, 'id' | 'ts'>): void;
   remove(id: string): void;
   clear(): void;
   flush(): Promise<{ sent: number }>;
 };
 
 async function postJSON(url: string, data: unknown) {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   if (!r.ok) {
-    throw new Error("net");
+    throw new Error('net');
   }
 }
 
@@ -39,7 +39,7 @@ export const useQueue = create<State>()(persist((set, get) => ({
           ts: it.ts,
           type: it.type === 'sos' ? 'SOS' : 'PING',
           ttl: 5,
-          payload: JSON.stringify(it.payload)
+          payload: JSON.stringify(it.payload),
         };
         
         await bleRelay.sendDirect(relayMessage);
@@ -50,7 +50,7 @@ export const useQueue = create<State>()(persist((set, get) => ({
         try {
           const net = await NetInfo.fetch();
           if (net.isConnected) {
-            await postJSON("https://postman-echo.com/post", { type: it.type, payload: it.payload, ts: it.ts });
+            await postJSON('https://postman-echo.com/post', { type: it.type, payload: it.payload, ts: it.ts });
             sent++;
             get().remove(it.id);
           }
@@ -60,5 +60,5 @@ export const useQueue = create<State>()(persist((set, get) => ({
       }
     }
     return { sent };
-  }
-}), { name: "afn/queue/v1", storage: createJSONStorage(() => AsyncStorage) }));
+  },
+}), { name: 'afn/queue/v1', storage: createJSONStorage(() => AsyncStorage) }));

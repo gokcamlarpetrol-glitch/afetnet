@@ -16,18 +16,18 @@ export default function SOSScreen() {
   const { upsertFromSOS } = useIncidents();
 
   const statusOptions = [
-    "2 Kişiyiz",
-    "Yaralı Var",
-    "Kat: -1",
-    "Acil Nefes Darlığı",
-    "Sesimi Duyuyorsanız"
+    '2 Kişiyiz',
+    'Yaralı Var',
+    'Kat: -1',
+    'Acil Nefes Darlığı',
+    'Sesimi Duyuyorsanız',
   ];
 
   const toggleStatus = (status: string) => {
     setSelectedStatuses(prev =>
       prev.includes(status)
         ? prev.filter(s => s !== status)
-        : [...prev, status]
+        : [...prev, status],
     );
   };
 
@@ -43,7 +43,7 @@ export default function SOSScreen() {
       }
 
       const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced
+        accuracy: Location.Accuracy.Balanced,
       });
 
       const lat = location.coords.latitude;
@@ -64,7 +64,7 @@ export default function SOSScreen() {
         lat,
         lon,
         statuses: selectedStatuses,
-        ts: Date.now()
+        ts: Date.now(),
       };
       upsertFromSOS(sosMsg);
       
@@ -74,7 +74,7 @@ export default function SOSScreen() {
       Alert.alert(
         'SOS Gönderildi',
         `SOS mesajı gönderildi (ID: ${msgId.slice(-6)}). Yakın cihazlara yayınlanıyor.`,
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
 
     } catch (error) {
@@ -90,7 +90,7 @@ export default function SOSScreen() {
       <Text style={styles.title}>SOS Yardım Talebi</Text>
       
       <Pressable accessible={true}
-          accessibilityRole="button"
+        accessibilityRole="button"
         onPress={startSOS}
         disabled={isBroadcasting}
         style={[styles.sosButton, isBroadcasting && styles.sosButtonDisabled]}
@@ -120,17 +120,17 @@ export default function SOSScreen() {
       <View style={styles.statusContainer}>
         {statusOptions.map((status) => (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             key={status}
             onPress={() => toggleStatus(status)}
             style={[
               styles.statusButton,
-              selectedStatuses.includes(status) && styles.statusButtonSelected
+              selectedStatuses.includes(status) && styles.statusButtonSelected,
             ]}
           >
             <Text style={[
               styles.statusButtonText,
-              selectedStatuses.includes(status) && styles.statusButtonTextSelected
+              selectedStatuses.includes(status) && styles.statusButtonTextSelected,
             ]}>
               {status}
             </Text>

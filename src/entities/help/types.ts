@@ -1,8 +1,8 @@
 export type HelpPayload = {
-  type: "help";
+  type: 'help';
   note?: string;
   people?: number;
-  priority?: "low"|"med"|"high";
+  priority?: 'low'|'med'|'high';
   lat?: number | null;
   lon?: number | null;
   hash?: string; // optional source hash for dedupe/trace
@@ -17,7 +17,7 @@ export type QueueItem = {
 };
 
 export type MeshEnvelope = {
-  t: "help";
+  t: 'help';
   hash: string;
   createdAt: number;
   payload: HelpPayload;

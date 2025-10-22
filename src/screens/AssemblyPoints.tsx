@@ -49,7 +49,7 @@ export default function AssemblyPoints() {
       setAssemblyPoints(points.map(point => ({
         ...point,
         distance: 0,
-        bearing: 0
+        bearing: 0,
       })));
     } catch (error) {
       logger.error('Failed to load assembly points:', error);
@@ -65,17 +65,17 @@ export default function AssemblyPoints() {
     const updatedPoints = assemblyPoints.map(point => {
       const distance = haversineDistance(
         currentPos.lat, currentPos.lon,
-        point.lat, point.lon
+        point.lat, point.lon,
       );
       const bearing = bearingTo(
         currentPos.lat, currentPos.lon,
-        point.lat, point.lon
+        point.lat, point.lon,
       );
 
       return {
         ...point,
         distance,
-        bearing
+        bearing,
       };
     }).sort((a, b) => a.distance - b.distance);
 
@@ -88,7 +88,7 @@ export default function AssemblyPoints() {
       const count = 0; // Placeholder
       Alert.alert(
         'İçe Aktarım Tamamlandı',
-        `${count} toplanma noktası eklendi`
+        `${count} toplanma noktası eklendi`,
       );
       
       await loadAssemblyPoints();
@@ -106,16 +106,16 @@ export default function AssemblyPoints() {
         { text: 'İptal', style: 'cancel' },
         {
           text: 'Ayarlar',
-          onPress: () => Linking.openSettings()
-        }
-      ]
+          onPress: () => Linking.openSettings(),
+        },
+      ],
     );
   };
 
   const getBearingArrow = (bearing: number): string => {
     const directions = [
       'K', 'K-KD', 'KD', 'D-KD', 'D', 'D-GD', 'GD', 'G-GD',
-      'G', 'G-GB', 'GB', 'B-GB', 'B', 'B-KB', 'KB', 'K-KB'
+      'G', 'G-GB', 'GB', 'B-GB', 'B', 'B-KB', 'KB', 'K-KB',
     ];
     const index = Math.round(bearing / 22.5) % 16;
     return directions[index];
@@ -123,7 +123,7 @@ export default function AssemblyPoints() {
 
   const renderAssemblyPoint = ({ item }: { item: AssemblyWithDistance }) => (
     <Pressable accessible={true}
-          accessibilityRole="button"
+      accessibilityRole="button"
       onPress={() => {
         // This would open the map centered on this point
         Alert.alert(
@@ -136,9 +136,9 @@ export default function AssemblyPoints() {
               onPress: () => {
                 // This would open GoToTarget screen
                 logger.debug('Navigate to:', item);
-              }
-            }
-          ]
+              },
+            },
+          ],
         );
       }}
       style={styles.pointItem}
@@ -193,7 +193,7 @@ export default function AssemblyPoints() {
             Konum izni gerekli
           </Text>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={handleRequestLocationPermission}
             style={styles.permissionButton}
           >

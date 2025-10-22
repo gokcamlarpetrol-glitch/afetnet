@@ -26,22 +26,31 @@ interface IncidentsState {
 }
 
 interface IncidentsActions {
+   
   addIncident: (incident: Omit<Incident, 'confirmations' | 'priority' | 'helpers' | 'status'>) => void;
+   
   updateIncident: (id: string, updates: Partial<Incident>) => void;
+   
   upsertFromSOS: (sosMsg: any) => void;
+   
   mark: (id: string, field: 'sound' | 'listen' | 'arrived', helperId: string) => void;
+   
   assignTo: (id: string, meId: string) => void;
+   
   addConfirmation: (id: string, type: 'sound' | 'listen' | 'arrived', helperId: string) => void;
+   
   removeIncident: (id: string) => void;
+   
   getIncident: (id: string) => Incident | undefined;
   getAllIncidents: () => Incident[];
   getSortedIncidents: () => Incident[];
+   
   computePriority: (incident: Incident) => number;
   clearAll: () => void;
 }
 
 const defaultState: IncidentsState = {
-  incidents: new Map()
+  incidents: new Map(),
 };
 
 function calculatePriorityScore(incident: Incident): number {
@@ -93,7 +102,7 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
           confirmations: { sound: 0, listen: 0, arrived: 0 },
           priority: 1.0,
           helpers: [],
-          status: 'open'
+          status: 'open',
         };
         
         incident.priority = calculatePriorityScore(incident);
@@ -144,12 +153,12 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
             ...incident,
             confirmations: {
               ...incident.confirmations,
-              [field]: incident.confirmations[field] + 1
+              [field]: incident.confirmations[field] + 1,
             },
             helpers: incident.helpers.includes(helperId) 
               ? incident.helpers 
               : [...incident.helpers, helperId],
-            lastTs: Date.now()
+            lastTs: Date.now(),
           };
           
           updatedIncident.priority = calculatePriorityScore(updatedIncident);
@@ -169,7 +178,7 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
             ...incident,
             assignedTo: meId,
             status: 'enroute' as const,
-            lastTs: Date.now()
+            lastTs: Date.now(),
           };
           
           updatedIncident.priority = calculatePriorityScore(updatedIncident);
@@ -188,7 +197,7 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
           const updatedIncident = {
             ...incident,
             ...updates,
-            lastTs: Date.now()
+            lastTs: Date.now(),
           };
           
           updatedIncident.priority = calculatePriorityScore(updatedIncident);
@@ -211,10 +220,10 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
             ...incident,
             confirmations: {
               ...incident.confirmations,
-              [type]: hasConfirmed ? incident.confirmations[type] : incident.confirmations[type] + 1
+              [type]: hasConfirmed ? incident.confirmations[type] : incident.confirmations[type] + 1,
             },
             helpers: hasConfirmed ? incident.helpers : [...incident.helpers, helperId],
-            lastTs: Date.now()
+            lastTs: Date.now(),
           };
           
           updatedIncident.priority = calculatePriorityScore(updatedIncident);
@@ -252,7 +261,7 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
 
       clearAll: () => {
         set({ incidents: new Map() });
-      }
+      },
     }),
     {
       name: 'afn/incidents/v1',
@@ -269,6 +278,6 @@ export const useIncidents = create<IncidentsState & IncidentsActions>()(
         }
         return { ...defaultState, ...persistedState };
       },
-    } as any
-  )
+    } as any,
+  ),
 );

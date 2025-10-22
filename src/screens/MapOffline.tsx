@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { logger } from "../utils/productionLogger";
 import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
@@ -8,15 +9,11 @@ import { SafeMBTiles } from '../offline/SafeMBTiles';
 
 // Import expo-maps with fallback
 let ExpoMap: any = null;
-let MapView: any = null;
-let Marker: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
-  MapView = maps.MapView;
-  Marker = maps.Marker;
-} catch (e) {
+} catch {
   // expo-maps not available - fallback to alternative map solution
 }
 
@@ -63,7 +60,7 @@ export default function MapOffline() {
         }
       }
     } catch (error) {
-      console.error('Failed to load current location:', error);
+      logger.error('Failed to load current location:', error);
     }
   };
 

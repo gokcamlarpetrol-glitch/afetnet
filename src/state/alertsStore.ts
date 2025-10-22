@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 type AlertsState = {
   enableProximityAlerts: boolean;
   showOnlyNearby: boolean;
@@ -13,7 +13,7 @@ export const useAlerts = create<AlertsState>((set)=>({
   proximityMeters: 300,
   setEnable: (v)=>set({ enableProximityAlerts: v }),
   setShowNearby: (v)=>set({ showOnlyNearby: v }),
-  setMeters: (m)=>set({ proximityMeters: Math.max(100, Math.min(1000, m|0)) })
+  setMeters: (m)=>set({ proximityMeters: Math.max(100, Math.min(1000, m|0)) }),
 }));
 
 

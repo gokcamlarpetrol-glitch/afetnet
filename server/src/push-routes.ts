@@ -65,7 +65,7 @@ router.get('/tick', async (req, res) => {
         await sendFcm(entry.token, message.title, message.body);
       }
       sent++;
-    } catch (e) {
+    } catch {
       // continue
     }
   }
@@ -142,7 +142,7 @@ async function sendApns(deviceToken: string, title: string, body: string) {
     });
     const payload = JSON.stringify({
       aps: { alert: { title, body }, sound: 'default', badge: 1 },
-      meta: { t: Date.now() }
+      meta: { t: Date.now() },
     });
     req.end(payload);
     await new Promise<void>((resolve, reject) => {

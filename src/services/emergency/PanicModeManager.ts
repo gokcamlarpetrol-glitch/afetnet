@@ -54,7 +54,7 @@ class PanicModeManager extends SimpleEventEmitter {
   private emergencyContacts: EmergencyContact[] = [];
   private isPanicModeActive = false;
   private currentSession: PanicModeSession | null = null;
-  private actionIntervals = new Map<string, NodeJS.Timeout>();
+  private actionIntervals = new Map<string, any>();
   private panicButtonCooldown = 0;
 
   constructor() {
@@ -252,7 +252,7 @@ class PanicModeManager extends SimpleEventEmitter {
   }
 
   // CRITICAL: Activate Panic Mode
-  async activatePanicMode(configId: string, trigger: string = 'manual'): Promise<boolean> {
+  async activatePanicMode(configId: string): Promise<boolean> {
     // Check cooldown
     if (Date.now() - this.panicButtonCooldown < 5000) {
       logger.debug('⏰ Panic mode cooldown active');
@@ -309,7 +309,7 @@ class PanicModeManager extends SimpleEventEmitter {
 
       // Stop all action intervals
       this.actionIntervals.forEach((interval, actionId) => {
-        clearInterval(interval);
+        (globalThis as any).clearInterval(interval);
         this.actionIntervals.delete(actionId);
       });
 
@@ -355,12 +355,12 @@ class PanicModeManager extends SimpleEventEmitter {
           await executeAction();
         } else {
           // Schedule execution
-          setTimeout(executeAction, action.delay * 1000);
+          (globalThis as any).setTimeout(executeAction, action.delay * 1000);
         }
 
         // Set up repeating actions
         if (action.repeat && action.repeatInterval > 0) {
-          const interval = setInterval(async () => {
+          const interval = (globalThis as any).setInterval(async () => {
             await this.executePanicAction(action, session);
             session.actionsExecuted.push(action.id);
           }, action.repeatInterval * 1000);
@@ -380,32 +380,32 @@ class PanicModeManager extends SimpleEventEmitter {
 
     try {
       switch (action.type) {
-        case 'sos':
-          await this.sendSOS(action.parameters, session);
-          break;
+      case 'sos':
+        await this.sendSOS(action.parameters, session);
+        break;
 
-        case 'location':
-          await this.sendLocation(action.parameters, session);
-          break;
+      case 'location':
+        await this.sendLocation(action.parameters, session);
+        break;
 
-        case 'message':
-          await this.sendMessage(action.parameters, session);
-          break;
+      case 'message':
+        await this.sendMessage(action.parameters, session);
+        break;
 
-        case 'call':
-          await this.makeEmergencyCall(action.parameters, session);
-          break;
+      case 'call':
+        await this.makeEmergencyCall(action.parameters, session);
+        break;
 
-        case 'notification':
-          await this.sendNotification(action.parameters, session);
-          break;
+      case 'notification':
+        await this.sendNotification(action.parameters, session);
+        break;
 
-        case 'system':
-          await this.executeSystemAction(action.parameters, session);
-          break;
+      case 'system':
+        await this.executeSystemAction(action.parameters, session);
+        break;
 
-        default:
-          logger.warn(`Unknown panic action type: ${action.type}`);
+      default:
+        logger.warn(`Unknown panic action type: ${action.type}`);
       }
 
     } catch (error) {
@@ -419,21 +419,20 @@ class PanicModeManager extends SimpleEventEmitter {
     const { emergencyMeshManager } = await import('./EmergencyMeshManager');
 
     const message = parameters.message || 'PANIC MODE: Immediate help needed';
-    const priority = parameters.priority || 'critical';
 
     // Send via offline message manager
     const sosMessage = {
       type: 'sos',
       location: session.location,
       message,
-      people: 1
+      people: 1,
     };
     await offlineMessageManager.sendMessage(JSON.stringify(sosMessage) as any);
 
     // Send via emergency mesh
     await (emergencyMeshManager.sendEmergencySOS as any)(
       session.location,
-      message
+      message,
     );
 
     logger.debug(`🚨 SOS sent: ${message}`);
@@ -446,7 +445,7 @@ class PanicModeManager extends SimpleEventEmitter {
     const locationMessage = {
       type: 'location',
       location: session.location,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     await offlineMessageManager.sendMessage(JSON.stringify(locationMessage) as any);
@@ -492,24 +491,24 @@ class PanicModeManager extends SimpleEventEmitter {
     const action = parameters.action;
 
     switch (action) {
-      case 'play_audio_signal':
-        await this.playAudioSignal(parameters.frequency || 1000);
-        break;
+    case 'play_audio_signal':
+      await this.playAudioSignal(parameters.frequency || 1000);
+      break;
 
-      case 'flash_light':
-        await this.flashLight(parameters.duration || 5);
-        break;
+    case 'flash_light':
+      await this.flashLight(parameters.duration || 5);
+      break;
 
-      case 'vibrate':
-        await this.vibrateDevice(parameters.pattern || 'continuous');
-        break;
+    case 'vibrate':
+      await this.vibrateDevice(parameters.pattern || 'continuous');
+      break;
 
-      case 'max_volume':
-        await this.setMaxVolume();
-        break;
+    case 'max_volume':
+      await this.setMaxVolume();
+      break;
 
-      default:
-        logger.warn(`Unknown system action: ${action}`);
+    default:
+      logger.warn(`Unknown system action: ${action}`);
     }
   }
 
@@ -536,15 +535,15 @@ class PanicModeManager extends SimpleEventEmitter {
     let contacts = [...this.emergencyContacts];
 
     switch (filter) {
-      case 'family':
-        contacts = contacts.filter(c => c.relationship === 'family');
-        break;
-      case 'active':
-        contacts = contacts.filter(c => c.isActive);
-        break;
-      case 'priority':
-        contacts = contacts.filter(c => c.priority <= 3);
-        break;
+    case 'family':
+      contacts = contacts.filter(c => c.relationship === 'family');
+      break;
+    case 'active':
+      contacts = contacts.filter(c => c.isActive);
+      break;
+    case 'priority':
+      contacts = contacts.filter(c => c.priority <= 3);
+      break;
     }
 
     return contacts.sort((a, b) => a.priority - b.priority);
@@ -556,7 +555,7 @@ class PanicModeManager extends SimpleEventEmitter {
     currentSession: PanicModeSession | null;
     activeSessions: PanicModeSession[];
     emergencyContacts: EmergencyContact[];
-  } {
+    } {
     return {
       isActive: this.isPanicModeActive,
       currentSession: this.currentSession,
@@ -606,7 +605,7 @@ class PanicModeManager extends SimpleEventEmitter {
   }
 
   private async setMaxVolume(): Promise<void> {
-    logger.debug(`🔊 Setting volume to maximum`);
+    logger.debug('🔊 Setting volume to maximum');
     // In a real implementation, this would set device volume to maximum
   }
 

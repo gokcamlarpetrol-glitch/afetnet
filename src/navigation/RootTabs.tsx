@@ -1,4 +1,5 @@
 import React from 'react';
+import { logger } from "../utils/productionLogger";
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
@@ -10,7 +11,6 @@ import HomeScreen from '../screens/HomeSimple';
 import MapScreen from '../screens/Map';
 import MessagesScreen from '../screens/Messages';
 import SettingsScreen from '../screens/Settings/SettingsCore';
-import PremiumActiveScreen from '../screens/PremiumActive';
 
 // Premium control
 import { usePremiumFeatures } from '../store/premium';
@@ -19,7 +19,7 @@ const Tab = createBottomTabNavigator();
 
 // Premium Gate Component - Shows premium required message
 function PremiumGate({ children, featureName }: { children: React.ReactNode; featureName: string }) {
-  const { isPremium, canUseFeature } = usePremiumFeatures();
+  const { canUseFeature } = usePremiumFeatures();
   const navigation = useNavigation<any>();
   
   if (canUseFeature(featureName)) {
@@ -44,14 +44,14 @@ function PremiumGate({ children, featureName }: { children: React.ReactNode; fea
           paddingHorizontal: 32, 
           paddingVertical: 16, 
           borderRadius: 12, 
-          marginTop: 24 
+          marginTop: 24, 
         }}
         onPress={() => {
           // Navigate to premium screen using root navigator
           try {
             navigation.getParent()?.navigate('Premium');
           } catch (error) {
-            console.log('Navigation error:', error);
+            logger.info('Navigation error:', error);
           }
         }}
       >
@@ -64,7 +64,7 @@ function PremiumGate({ children, featureName }: { children: React.ReactNode; fea
 }
 
 export default function RootTabs() {
-  const { isPremium, canUseFeature } = usePremiumFeatures();
+  const { isPremium } = usePremiumFeatures();
   
   return (
     <Tab.Navigator
@@ -92,7 +92,6 @@ export default function RootTabs() {
       {/* 1. ANA SAYFA - FREE (Deprem bildirimleri) */}
       <Tab.Screen 
         name="Home" 
-        component={HomeScreen} 
         options={{
           tabBarLabel: 'Deprem',
           tabBarIcon: ({ color, focused }) => (
@@ -103,7 +102,9 @@ export default function RootTabs() {
             />
           ),
         }}
-      />
+      >
+        {() => <HomeScreen />}
+      </Tab.Screen>
       
       {/* 2. HARİTA - PREMIUM */}
       <Tab.Screen 

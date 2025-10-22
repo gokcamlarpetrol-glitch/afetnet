@@ -51,8 +51,8 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
   private satelliteConnections = new Map<string, SatelliteConnection>();
   private messageQueue = new Map<string, SatelliteMessage>();
   private emergencyBeacons = new Map<string, EmergencyBeacon>();
-  private satelliteInterval: NodeJS.Timeout | null = null;
-  private beaconInterval: NodeJS.Timeout | null = null;
+  private satelliteInterval: any = null;
+  private beaconInterval: any = null;
 
   constructor() {
     super();
@@ -74,7 +74,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       latency: 25,
       bandwidth: 100,
       isActive: true,
-      lastContact: Date.now()
+      lastContact: Date.now(),
     });
 
     // Iridium MEO satellites (Medium Earth Orbit - reliable)
@@ -88,7 +88,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       latency: 150,
       bandwidth: 10,
       isActive: true,
-      lastContact: Date.now()
+      lastContact: Date.now(),
     });
 
     // Inmarsat GEO satellites (Geostationary - global coverage)
@@ -102,7 +102,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       latency: 500,
       bandwidth: 5,
       isActive: true,
-      lastContact: Date.now()
+      lastContact: Date.now(),
     });
 
     logger.debug('✅ Satellite connections initialized');
@@ -117,12 +117,12 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start satellite monitoring
-      this.satelliteInterval = setInterval(() => {
+      this.satelliteInterval = (globalThis as any).setInterval(() => {
         this.monitorSatelliteConnections();
       }, 10000); // Every 10 seconds
 
       // Start emergency beacon monitoring
-      this.beaconInterval = setInterval(() => {
+      this.beaconInterval = (globalThis as any).setInterval(() => {
         this.monitorEmergencyBeacons();
       }, 5000); // Every 5 seconds
 
@@ -150,7 +150,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         timestamp: Date.now(),
         deliveryStatus: 'pending',
         retryCount: 0,
-        maxRetries: 5
+        maxRetries: 5,
       };
 
       // Add to message queue
@@ -163,7 +163,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Emergency satellite message sent', {
         messageId: satelliteMessage.id,
         type: message.type,
-        priority: message.priority
+        priority: message.priority,
       });
 
       logger.debug(`🛰️ Emergency message sent via satellite: ${satelliteMessage.id}`);
@@ -193,7 +193,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         message.satelliteId = bestSatellite.id;
         
         // Simulate delivery after latency
-        setTimeout(() => {
+        (globalThis as any).setTimeout(() => {
           message.deliveryStatus = 'delivered';
           this.emit('satelliteMessageDelivered', message);
           logger.debug(`✅ Satellite message delivered: ${message.id}`);
@@ -203,7 +203,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
         // Transmission failed, schedule retry
         message.retryCount++;
         if (message.retryCount < message.maxRetries) {
-          setTimeout(() => {
+          (globalThis as any).setTimeout(() => {
             this.attemptSatelliteTransmission(message);
           }, 5000 * message.retryCount); // Exponential backoff
         } else {
@@ -241,7 +241,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Satellite connection added', { 
         satelliteId: connection.id, 
         name: connection.name,
-        type: connection.type
+        type: connection.type,
       });
       logger.debug(`🛰️ Satellite connection added: ${connection.name}`);
     } catch (error) {
@@ -257,7 +257,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       const emergencyBeacon: EmergencyBeacon = {
         ...beacon,
         id: beaconId,
-        lastSignal: Date.now()
+        lastSignal: Date.now(),
       };
 
       this.emergencyBeacons.set(beaconId, emergencyBeacon);
@@ -266,7 +266,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Emergency beacon registered', {
         beaconId,
         type: beacon.type,
-        location: beacon.location
+        location: beacon.location,
       });
 
       logger.debug(`📍 Emergency beacon registered: ${beaconId}`);
@@ -331,10 +331,10 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
               beaconId,
               status: beacon.status,
               location: beacon.location,
-              batteryLevel: beacon.batteryLevel
+              batteryLevel: beacon.batteryLevel,
             },
             satelliteId: 'auto',
-            encryptionLevel: 'military'
+            encryptionLevel: 'military',
           });
         }
       }
@@ -347,7 +347,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
   // CRITICAL: Process Pending Messages
   private async processPendingMessages(): Promise<void> {
     try {
-      for (const [messageId, message] of this.messageQueue) {
+      for (const [, message] of this.messageQueue) {
         if (message.deliveryStatus === 'pending' && message.retryCount < message.maxRetries) {
           await this.attemptSatelliteTransmission(message);
         }
@@ -365,7 +365,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
     pendingMessages: number;
     registeredBeacons: number;
     averageSignalStrength: number;
-  } {
+    } {
     const activeSatellites = Array.from(this.satelliteConnections.values()).filter(sat => sat.isActive);
     const averageSignalStrength = activeSatellites.length > 0 
       ? activeSatellites.reduce((sum, sat) => sum + sat.signalStrength, 0) / activeSatellites.length
@@ -377,7 +377,7 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       totalSatellites: this.satelliteConnections.size,
       pendingMessages: this.messageQueue.size,
       registeredBeacons: this.emergencyBeacons.size,
-      averageSignalStrength
+      averageSignalStrength,
     };
   }
 
@@ -405,12 +405,12 @@ class SatelliteCommunicationSystem extends SimpleEventEmitter {
       this.isActive = false;
 
       if (this.satelliteInterval) {
-        clearInterval(this.satelliteInterval);
+        (globalThis as any).clearInterval(this.satelliteInterval);
         this.satelliteInterval = null;
       }
 
       if (this.beaconInterval) {
-        clearInterval(this.beaconInterval);
+        (globalThis as any).clearInterval(this.beaconInterval);
         this.beaconInterval = null;
       }
 

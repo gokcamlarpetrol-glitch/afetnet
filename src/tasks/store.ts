@@ -1,8 +1,8 @@
-import * as FileSystem from "expo-file-system";
-import { Task } from "./types";
+import * as FileSystem from 'expo-file-system';
+import { Task } from './types';
 
-const DIR = "/tmp/";
-const FILE = DIR + "tasks.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'tasks.json';
 
 export async function listTasks(): Promise<Task[]>{
   const ex = await FileSystem.getInfoAsync(FILE);

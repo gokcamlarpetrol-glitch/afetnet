@@ -83,7 +83,7 @@ export const PROVINCES = {
   '78': 'Karabük',
   '79': 'Kilis',
   '80': 'Osmaniye',
-  '81': 'Düzce'
+  '81': 'Düzce',
 };
 
 // Haversine distance calculation
@@ -91,7 +91,7 @@ export function haversineDistance(
   lat1: number, 
   lon1: number, 
   lat2: number, 
-  lon2: number
+  lon2: number,
 ): number {
   const R = 6371000; // Earth's radius in meters
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -142,7 +142,7 @@ export function inCircle(
   quake: QuakeItem, 
   centerLat: number, 
   centerLon: number, 
-  radiusKm: number
+  radiusKm: number,
 ): boolean {
   if (!quake.lat || !quake.lon) {
     return false;
@@ -154,31 +154,31 @@ export function inCircle(
 
 export function matchesRegionFilter(quake: QuakeItem, filter: RegionFilter): boolean {
   switch (filter.type) {
-    case 'all':
-      return true;
-    case 'province':
-      return inProvince(quake, filter.codes);
-    case 'circle':
-      return inCircle(quake, filter.lat, filter.lon, filter.km);
-    default:
-      return true;
+  case 'all':
+    return true;
+  case 'province':
+    return inProvince(quake, filter.codes);
+  case 'circle':
+    return inCircle(quake, filter.lat, filter.lon, filter.km);
+  default:
+    return true;
   }
 }
 
 export function getRegionDisplayName(filter: RegionFilter): string {
   switch (filter.type) {
-    case 'all':
-      return 'Tüm Türkiye';
-    case 'province':
-      if (filter.codes.length === 0) return 'İl seçilmedi';
-      if (filter.codes.length === 1) {
-        const code = filter.codes[0];
-        return PROVINCES[code as keyof typeof PROVINCES] || code;
-      }
-      return `${filter.codes.length} il`;
-    case 'circle':
-      return `${filter.km}km yarıçap (${filter.lat.toFixed(2)}, ${filter.lon.toFixed(2)})`;
-    default:
-      return 'Bilinmeyen';
+  case 'all':
+    return 'Tüm Türkiye';
+  case 'province':
+    if (filter.codes.length === 0) return 'İl seçilmedi';
+    if (filter.codes.length === 1) {
+      const code = filter.codes[0];
+      return PROVINCES[code as keyof typeof PROVINCES] || code;
+    }
+    return `${filter.codes.length} il`;
+  case 'circle':
+    return `${filter.km}km yarıçap (${filter.lat.toFixed(2)}, ${filter.lon.toFixed(2)})`;
+  default:
+    return 'Bilinmeyen';
   }
 }

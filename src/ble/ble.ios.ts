@@ -1,6 +1,7 @@
-import { SafeBLE } from "./SafeBLE";
-import { encodeSOSWithStatus as codecSOSWithStatus, encodeTextV2 as codecTextV2, encodeLoc, encodeTextChunk } from "./codec";
+import { SafeBLE } from './SafeBLE';
+import { encodeSOSWithStatus as codecSOSWithStatus, encodeTextV2 as codecTextV2, encodeLoc, encodeTextChunk } from './codec';
 
+ 
 export async function startScan(onFrame:(from:string, frame:any)=>void){
   return SafeBLE.startScan(onFrame);
 }

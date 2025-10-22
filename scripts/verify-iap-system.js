@@ -12,13 +12,13 @@ const path = require('path');
 const VALID_PRODUCTS = [
   'org.afetnet1.premium.monthly',
   'org.afetnet1.premium.yearly', 
-  'org.afetnet1.premium.lifetime'
+  'org.afetnet1.premium.lifetime',
 ];
 
 // Invalid/old product IDs to check for
 const INVALID_PRODUCTS = [
   'afetnet_premium_monthly',
-  'afetnet_premium_yearly'
+  'afetnet_premium_yearly',
 ];
 
 console.log('🔍 AfetNet IAP System Final Verification');

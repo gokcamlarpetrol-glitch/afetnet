@@ -33,7 +33,7 @@ export default function Chat() {
             from: msg.to || msg.group || 'unknown',
             timestamp: Date.now(),
             status: 'delivered',
-            encrypted: msg.enc
+            encrypted: msg.enc,
           };
           setMessages(prev => [...prev, message]);
         }
@@ -45,7 +45,7 @@ export default function Chat() {
           newMap.set(msg.ref, 'delivered');
           return newMap;
         });
-      }
+      },
     });
   }, []);
 
@@ -56,7 +56,7 @@ export default function Chat() {
     const messageId = await meshRelay.sendDM(
       selectedContact || undefined,
       selectedGroup || undefined,
-      messageText.trim()
+      messageText.trim(),
     );
 
     const message: Message = {
@@ -65,7 +65,7 @@ export default function Chat() {
       from: 'me',
       timestamp: Date.now(),
       status: 'pending',
-      encrypted: true
+      encrypted: true,
     };
 
     setMessages(prev => [...prev, message]);
@@ -75,23 +75,23 @@ export default function Chat() {
 
   const getDeliveryIcon = (status: 'pending' | 'sent' | 'delivered') => {
     switch (status) {
-      case 'pending': return '⬤';
-      case 'sent': return '✓';
-      case 'delivered': return '✓✓';
-      default: return '⬤';
+    case 'pending': return '⬤';
+    case 'sent': return '✓';
+    case 'delivered': return '✓✓';
+    default: return '⬤';
     }
   };
 
   const renderContact = ({ item }: { item: any }) => (
     <Pressable accessible={true}
-          accessibilityRole="button"
+      accessibilityRole="button"
       onPress={() => {
         setSelectedContact(item.id);
         setSelectedGroup(null);
       }}
       style={[
         styles.contactItem,
-        selectedContact === item.id && styles.contactItemSelected
+        selectedContact === item.id && styles.contactItemSelected,
       ]}
     >
       <Text style={styles.contactName}>{item.name}</Text>
@@ -101,14 +101,14 @@ export default function Chat() {
 
   const renderGroup = ({ item }: { item: any }) => (
     <Pressable accessible={true}
-          accessibilityRole="button"
+      accessibilityRole="button"
       onPress={() => {
         setSelectedGroup(item.id);
         setSelectedContact(null);
       }}
       style={[
         styles.contactItem,
-        selectedGroup === item.id && styles.contactItemSelected
+        selectedGroup === item.id && styles.contactItemSelected,
       ]}
     >
       <Text style={styles.contactName}>{item.name}</Text>
@@ -130,7 +130,7 @@ export default function Chat() {
             <Text style={[styles.messageTime, isMe && styles.messageTimeMe]}>
               {new Date(item.timestamp).toLocaleTimeString('tr-TR', { 
                 hour: '2-digit', 
-                minute: '2-digit' 
+                minute: '2-digit', 
               })}
             </Text>
             {isMe && (
@@ -199,7 +199,7 @@ export default function Chat() {
                 data={messages.filter(m => 
                   (selectedContact && m.from === selectedContact) ||
                   (selectedGroup && m.from === selectedGroup) ||
-                  m.from === 'me'
+                  m.from === 'me',
                 )}
                 renderItem={renderMessage}
                 keyExtractor={(item) => item.id}
@@ -209,7 +209,7 @@ export default function Chat() {
 
               <View style={styles.inputContainer}>
                 <TextInput
-          accessibilityRole="text"
+                  accessibilityRole="text"
                   value={messageText}
                   onChangeText={setMessageText}
                   placeholder="Mesaj yazın (max 120 karakter)"
@@ -219,12 +219,12 @@ export default function Chat() {
                   multiline
                 />
                 <Pressable accessible={true}
-          accessibilityRole="button"
+                  accessibilityRole="button"
                   onPress={sendMessage}
                   disabled={!messageText.trim()}
                   style={[
                     styles.sendButton,
-                    !messageText.trim() && styles.sendButtonDisabled
+                    !messageText.trim() && styles.sendButtonDisabled,
                   ]}
                 >
                   <Text style={styles.sendButtonText}>Gönder</Text>

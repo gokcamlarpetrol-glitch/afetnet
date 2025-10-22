@@ -15,7 +15,7 @@ const SUPPORTED_LANGUAGES = [
   { code: 'ru', name: 'Русский', flag: '🇷🇺' },
   { code: 'zh', name: '中文', flag: '🇨🇳' },
   { code: 'ja', name: '日本語', flag: '🇯🇵' },
-  { code: 'ko', name: '한국어', flag: '🇰🇷' }
+  { code: 'ko', name: '한국어', flag: '🇰🇷' },
 ];
 
 // Supported regions
@@ -25,7 +25,7 @@ const SUPPORTED_REGIONS = [
   { code: 'EU', name: 'Europe', flag: '🇪🇺', timezone: 'Europe/London' },
   { code: 'MENA', name: 'Middle East & North Africa', flag: '🌍', timezone: 'Asia/Dubai' },
   { code: 'ASIA', name: 'Asia Pacific', flag: '🌏', timezone: 'Asia/Tokyo' },
-  { code: 'LATAM', name: 'Latin America', flag: '🌎', timezone: 'America/Sao_Paulo' }
+  { code: 'LATAM', name: 'Latin America', flag: '🌎', timezone: 'America/Sao_Paulo' },
 ];
 
 export default function LanguageRegionScreen() {
@@ -46,7 +46,7 @@ export default function LanguageRegionScreen() {
       Alert.alert(
         'Dil Değiştirildi',
         'Uygulama dili başarıyla değiştirildi. Değişikliklerin etkili olması için uygulamayı yeniden başlatmanız önerilir.',
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     } catch (error) {
       Alert.alert('Hata', 'Dil değiştirilemedi. Lütfen tekrar deneyin.');
@@ -64,7 +64,7 @@ export default function LanguageRegionScreen() {
       Alert.alert(
         'Bölge Değiştirildi',
         `Bölge ${region.name} olarak ayarlandı. Deprem verileri ve bildirimler bu bölgeye göre güncellenecek.`,
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     } catch (error) {
       Alert.alert('Hata', 'Bölge değiştirilemedi. Lütfen tekrar deneyin.');
@@ -76,7 +76,7 @@ export default function LanguageRegionScreen() {
       key={language.code}
       style={[
         styles.languageItem,
-        selectedLanguage === language.code && styles.selectedItem
+        selectedLanguage === language.code && styles.selectedItem,
       ]}
       onPress={() => handleLanguageChange(language.code)}
       disabled={isLoading}
@@ -86,13 +86,13 @@ export default function LanguageRegionScreen() {
         <View style={styles.languageInfo}>
           <Text style={[
             styles.languageName,
-            selectedLanguage === language.code && styles.selectedText
+            selectedLanguage === language.code && styles.selectedText,
           ]}>
             {language.name}
           </Text>
           <Text style={[
             styles.languageCode,
-            selectedLanguage === language.code && styles.selectedSubText
+            selectedLanguage === language.code && styles.selectedSubText,
           ]}>
             {language.code.toUpperCase()}
           </Text>
@@ -109,7 +109,7 @@ export default function LanguageRegionScreen() {
       key={region.code}
       style={[
         styles.regionItem,
-        selectedRegion === region.code && styles.selectedItem
+        selectedRegion === region.code && styles.selectedItem,
       ]}
       onPress={() => handleRegionChange(region.code)}
       disabled={isLoading}
@@ -119,13 +119,13 @@ export default function LanguageRegionScreen() {
         <View style={styles.regionInfo}>
           <Text style={[
             styles.regionName,
-            selectedRegion === region.code && styles.selectedText
+            selectedRegion === region.code && styles.selectedText,
           ]}>
             {region.name}
           </Text>
           <Text style={[
             styles.regionCode,
-            selectedRegion === region.code && styles.selectedSubText
+            selectedRegion === region.code && styles.selectedSubText,
           ]}>
             {region.code} • {region.timezone}
           </Text>

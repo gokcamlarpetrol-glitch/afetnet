@@ -5,16 +5,16 @@ import { iapService, PremiumPlanId } from '../services/iapService';
 export default function PaywallDebugScreen(){
   const [products, setProducts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string>("");
+  const [status, setStatus] = useState<string>('');
 
   useEffect(()=>{ (async()=>{
     try{
-      setStatus("Initializing IAP...");
+      setStatus('Initializing IAP...');
       await iapService.initialize();
       const ps = await iapService.getAvailableProducts();
       setProducts(ps);
       setStatus(`Loaded ${ps.length} products`);
-    }catch(e:any){ setStatus(e?.message || "Init failed"); }
+    }catch(e:any){ setStatus(e?.message || 'Init failed'); }
   })(); },[]);
 
   async function onPurchase(id: PremiumPlanId){
@@ -23,8 +23,8 @@ export default function PaywallDebugScreen(){
     try{
       setStatus(`Purchasing ${id}...`);
       const ok = await iapService.purchasePlan(id);
-      setStatus(ok? "Purchase OK":"Purchase failed");
-    }catch(e:any){ setStatus(e?.message||"Error"); Alert.alert("Hata", e?.message||"Satın alma olmadı"); }
+      setStatus(ok? 'Purchase OK':'Purchase failed');
+    }catch(e:any){ setStatus(e?.message||'Error'); Alert.alert('Hata', e?.message||'Satın alma olmadı'); }
     setBusy(false);
   }
 
@@ -32,10 +32,10 @@ export default function PaywallDebugScreen(){
     if (busy) {return;}
     setBusy(true);
     try{
-      setStatus("Restoring...");
+      setStatus('Restoring...');
       const ok = await iapService.restorePurchases();
-      setStatus(ok? "Restore OK":"Restore failed");
-    }catch(e:any){ setStatus(e?.message||"Error"); }
+      setStatus(ok? 'Restore OK':'Restore failed');
+    }catch(e:any){ setStatus(e?.message||'Error'); }
     setBusy(false);
   }
 
@@ -63,6 +63,7 @@ export default function PaywallDebugScreen(){
     </ScrollView>
   );
 }
+
 
 
 

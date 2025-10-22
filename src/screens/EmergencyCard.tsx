@@ -17,7 +17,7 @@ export default function EmergencyCard() {
     name: 'Kullanıcı Adı', // Would be from profile store
     bloodType: 'A+', // Would be from profile store
     allergies: 'Polen, Penisilin', // Would be from profile store
-    emergencyContact: 'Anne: +90 555 123 4567' // Would be from profile store
+    emergencyContact: 'Anne: +90 555 123 4567', // Would be from profile store
   };
 
   const generateQRContent = () => {
@@ -32,8 +32,8 @@ export default function EmergencyCard() {
       profile: {
         name: userProfile.name,
         bloodType: userProfile.bloodType,
-        allergies: userProfile.allergies
-      }
+        allergies: userProfile.allergies,
+      },
     };
   };
 
@@ -63,9 +63,9 @@ export default function EmergencyCard() {
           { text: 'Tamam' },
           {
             text: 'Paylaş',
-            onPress: () => handleShare(fileUri)
-          }
-        ]
+            onPress: () => handleShare(fileUri),
+          },
+        ],
       );
     } catch (error) {
       logger.error('Failed to save card:', error);
@@ -91,7 +91,7 @@ export default function EmergencyCard() {
       if (isAvailable) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'text/plain',
-          dialogTitle: 'Acil Durum Kartını Paylaş'
+          dialogTitle: 'Acil Durum Kartını Paylaş',
         });
       } else {
         Alert.alert('Hata', 'Paylaşım bu cihazda desteklenmiyor');
@@ -106,8 +106,8 @@ export default function EmergencyCard() {
     const qrData = generateQRContent();
     const timestamp = new Date().toLocaleString('tr-TR');
     
-    let cardText = `AFETNET ACİL DURUM KARTI\n`;
-    cardText += `================================\n\n`;
+    let cardText = 'AFETNET ACİL DURUM KARTI\n';
+    cardText += '================================\n\n';
     cardText += `Ad: ${userProfile.name}\n`;
     cardText += `Kan Grubu: ${userProfile.bloodType}\n`;
     cardText += `Alerjiler: ${userProfile.allergies}\n`;
@@ -121,7 +121,7 @@ export default function EmergencyCard() {
     cardText += `Tarih: ${timestamp}\n\n`;
     
     if (contacts.length > 0) {
-      cardText += `ICE KİŞİLERİ:\n`;
+      cardText += 'ICE KİŞİLERİ:\n';
       contacts.slice(0, 3).forEach((contact, index) => {
         cardText += `${index + 1}. ${contact.name}: ${maskPhoneNumber(contact.phone)}\n`;
         if (contact.relation) {
@@ -131,7 +131,7 @@ export default function EmergencyCard() {
     }
     
     cardText += `\nQR KOD VERİSİ:\n${JSON.stringify(qrData, null, 2)}\n\n`;
-    cardText += `Bu kart AfetNet uygulaması ile oluşturulmuştur.`;
+    cardText += 'Bu kart AfetNet uygulaması ile oluşturulmuştur.';
     
     return cardText;
   };

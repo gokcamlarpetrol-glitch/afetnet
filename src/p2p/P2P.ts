@@ -1,9 +1,11 @@
 export type P2PPeer = { id: string; name: string; connected?: boolean };
 export type P2PEvents = {
+   
   onPeers?: (peers: P2PPeer[]) => void;
+   
   onMessage?: (from: P2PPeer, text: string, ts: number) => void;
   onError?: (err: string) => void;
-  onConnection?: (peer: P2PPeer, state: "connecting" | "connected" | "disconnected") => void;
+  onConnection?: (peer: P2PPeer, state: 'connecting' | 'connected' | 'disconnected') => void;
 };
 
 export interface P2P {
@@ -17,12 +19,12 @@ export interface P2P {
 
 export function notSupported(): P2P {
   return {
-    async start(){ throw new Error("P2P bu platformda desteklenmiyor."); },
+    async start(){ throw new Error('P2P bu platformda desteklenmiyor.'); },
     async stop(){},
     async peers(){ return []; },
-    async connect(){ throw new Error("Desteklenmiyor"); },
+    async connect(){ throw new Error('Desteklenmiyor'); },
     async disconnect(){},
-    async sendText(){ throw new Error("Desteklenmiyor"); }
+    async sendText(){ throw new Error('Desteklenmiyor'); },
   };
 }
 

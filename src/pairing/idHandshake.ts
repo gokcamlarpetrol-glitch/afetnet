@@ -55,7 +55,7 @@ class IdHandshakeManager {
         toAfn: targetAfnId,
         fromPubB64: myPubKey,
         timestamp: Date.now(),
-        status: 'pending'
+        status: 'pending',
       };
 
       this.pendingRequests.set(requestId, handshake);
@@ -67,7 +67,7 @@ class IdHandshakeManager {
         fromAfn: myAfnId,
         toAfn: targetAfnId,
         fromPubB64: myPubKey,
-        ts: Date.now()
+        ts: Date.now(),
       };
 
       // Send via mesh relay (this would be integrated with existing mesh system)
@@ -131,7 +131,6 @@ class IdHandshakeManager {
 
       // Get my public key and AFN-ID
       const myPubKey = await getPublicKey();
-      const myAfnId = pubKeyToAfnId(myPubKey);
 
       // Create PAIR_ACK message
       const pairAck: PairAck = {
@@ -139,7 +138,7 @@ class IdHandshakeManager {
         ref: requestId,
         toAfn: handshake.fromAfn,
         toPubB64: myPubKey,
-        ts: Date.now()
+        ts: Date.now(),
       };
 
       // Send ACK via mesh relay
@@ -187,7 +186,7 @@ class IdHandshakeManager {
         displayName: `AFN-${handshake.fromAfn.slice(-4)}`,
         afnId: handshake.fromAfn,
         pubKeyB64: handshake.fromPubB64,
-        paired: false
+        paired: false,
       });
 
       // Mark as paired

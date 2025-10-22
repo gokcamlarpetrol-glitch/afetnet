@@ -6,12 +6,12 @@ let Page: any = null;
 let rgb: any = null;
 
 try {
-  const pdfLibModule = require('react-native-pdf-lib');
+  const pdfLibModule = (globalThis as any).require('react-native-pdf-lib');
   PDFLib = pdfLibModule.default;
   PDFDocument = pdfLibModule.PDFDocument;
   Page = pdfLibModule.Page;
   rgb = pdfLibModule.rgb;
-} catch (e) {
+} catch {
   logger.warn('react-native-pdf-lib not available');
 }
 
@@ -28,11 +28,11 @@ export const SafePDFLib = {
       return {
         addPage: () => {},
         write: async () => ({ uri: '/tmp/mock.pdf' }),
-        end: async () => {}
+        end: async () => {},
       };
     }
     return PDFDocument.create();
-  }
+  },
 };
 
 

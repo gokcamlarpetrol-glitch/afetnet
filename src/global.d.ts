@@ -1,2 +1,2 @@
-declare var global: any;
+declare let global: any;
 declare const DEV: boolean;

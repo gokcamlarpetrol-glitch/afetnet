@@ -6,7 +6,7 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { palette, spacing } from '../ui/theme';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface CompassDirectionProps {
   visible: boolean;
@@ -75,7 +75,7 @@ export default function CompassDirection({ visible, onClose, target, currentPosi
             <View 
               style={[
                 styles.arrow, 
-                { transform: [{ rotate: `${relativeAngle}deg` }] }
+                { transform: [{ rotate: `${relativeAngle}deg` }] },
               ]} 
             />
             <View style={styles.compassCenter} />

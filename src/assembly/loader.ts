@@ -47,7 +47,7 @@ export async function importAssemblyFromFile(uri: string): Promise<number> {
     const newPoints = assemblyPoints.map(point => ({
       ...point,
       source: uri,
-      id: point.id || `imported_${Date.now()}_${Math.random().toString(36).slice(2)}`
+      id: point.id || `imported_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     }));
 
     const updatedPoints = [...existing, ...newPoints];
@@ -106,7 +106,7 @@ function parseGeoJSON(geojson: any): AssemblyPoint[] {
       capacity: props.capacity,
       type: props.type,
       contact: props.contact,
-      source: 'bundled'
+      source: 'bundled',
     };
   });
 }
@@ -161,7 +161,7 @@ function parseCSV(content: string): AssemblyPoint[] {
       capacity: row.capacity ? parseInt(row.capacity, 10) : 0,
       type: row.type,
       contact: row.contact,
-      source: 'imported'
+      source: 'imported',
     });
   }
 

@@ -1,4 +1,4 @@
-export type LinkKind = "ble"|"wfd"|"lora";
+export type LinkKind = 'ble'|'wfd'|'lora';
 
 export type LinkMetrics = {
   up: boolean;

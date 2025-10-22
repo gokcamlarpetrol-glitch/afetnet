@@ -3,14 +3,14 @@ import { logger } from '../utils/productionLogger';
 import NetInfo from '@react-native-community/netinfo';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Dimensions,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { earlyWarningSystem } from '../services/alerts/EarlyWarningSystem';
 import { victimDetectionSystem } from '../services/detection/VictimDetectionSystem';
@@ -28,8 +28,6 @@ import { useFamily } from '../store/family';
 import { useQueue } from '../store/queue';
 import { useSettings } from '../store/settings';
 import SOSModal from '../ui/SOSModal';
-
-const { width } = Dimensions.get('window');
 
 const Card = ({ children, style, onPress }: { 
   children: React.ReactNode; 
@@ -52,7 +50,7 @@ const Card = ({ children, style, onPress }: {
           shadowOffset: { width: 0, height: 6 },
           elevation: 8,
         },
-        style
+        style,
       ]}
       onPress={onPress}
       activeOpacity={onPress ? 0.8 : 1}
@@ -69,7 +67,7 @@ const SectionTitle = ({ title }: { title: string }) => (
     fontWeight: '600',
     marginBottom: 12, 
     marginTop: 24,
-    letterSpacing: 0.5
+    letterSpacing: 0.5,
   }}>
     {title}
   </Text>
@@ -95,15 +93,15 @@ export default function Home() {
   
   const { list: familyList } = useFamily();
   const { items: queueItems, flush } = useQueue();
-  const { } = useSettings();
+  useSettings();
 
   useEffect(() => {
     initializeEmergencySystems();
     setupEventListeners();
     updateStatus();
     
-    const interval = setInterval(updateStatus, 5000); // Update every 5 seconds
-    return () => clearInterval(interval);
+    const interval = (globalThis as any).setInterval(updateStatus, 5000); // Update every 5 seconds
+    return () => (globalThis as any).clearInterval(interval);
   }, []);
 
   const initializeEmergencySystems = async () => {
@@ -188,7 +186,7 @@ export default function Home() {
       Alert.alert(
         'SOS Gönderildi', 
         'Yardım talebiniz mesh ağına gönderildi. En yakın kurtarma ekibi bilgilendirildi.',
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     });
 
@@ -199,7 +197,7 @@ export default function Home() {
       Alert.alert(
         'DEPREM ALGILANDI',
         `${detection.intensity.toUpperCase()} şiddetinde deprem tespit edildi!\nBüyüklük: ${detection.magnitude.toFixed(1)}\nOtomatik yardım talebi gönderildi.`,
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     });
 
@@ -209,7 +207,7 @@ export default function Home() {
         Alert.alert(
           'ACİL DURUM ALGILANDI',
           `${event.type.toUpperCase()} olayı tespit edildi!\nŞiddet: ${event.severity.toUpperCase()}\nOtomatik yardım talebi gönderildi.`,
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
       }
     });
@@ -233,7 +231,7 @@ export default function Home() {
       Alert.alert(
         'KURBAN TESPİT EDİLDİ',
         `Enkaz altında kurban tespit edildi!\nKonum: ${detection.location.lat}, ${detection.location.lon}\nÖncelik: ${detection.priority.toUpperCase()}`,
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     });
 
@@ -259,10 +257,10 @@ export default function Home() {
             Alert.alert(
               'Acil Durum Talimatları',
               alert.instructions.join('\n'),
-              [{ text: 'Tamam', style: 'default' }]
+              [{ text: 'Tamam', style: 'default' }],
             );
-          }}
-        ]
+          } },
+        ],
       );
     });
 
@@ -273,7 +271,7 @@ export default function Home() {
       Alert.alert(
         'TIBBİ ACİL DURUM',
         `${emergency.type.toUpperCase()} tıbbi acil durum tespit edildi!\nŞiddet: ${emergency.severity.toUpperCase()}\nÖncelik: ${emergency.priority.toUpperCase()}`,
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     });
   };
@@ -289,7 +287,7 @@ export default function Home() {
       });
 
       // Get mesh network stats
-      const meshStats = emergencyMeshManager.getNetworkStats();
+      emergencyMeshManager.getNetworkStats();
       setConnectedNodes(emergencyMeshManager.getConnectedNodes());
 
       // Get message queue status
@@ -301,7 +299,7 @@ export default function Home() {
       setRescueOperations(operations);
 
       // Get sensor data
-      const latestSensorData = emergencySensorManager.getLatestSensorData();
+      emergencySensorManager.getLatestSensorData();
       setSensorMonitoring(emergencySensorManager.isCurrentlyMonitoring());
 
       // Get earthquake detections
@@ -359,11 +357,11 @@ export default function Home() {
         location,
         note: (data as any).note || 'Yardım istiyorum',
         people: (data as any).people,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
       
       const messageId = await offlineMessageManager.sendMessage(
-        JSON.stringify(sosMessage) as any
+        JSON.stringify(sosMessage) as any,
       );
 
       logger.debug('🚨 SOS message sent:', messageId);
@@ -384,19 +382,19 @@ export default function Home() {
         return;
       }
 
-              // Process all queued items
-              for (const item of queueItems) {
-                await offlineMessageManager.sendMessage(
-                  (item as any).text || 'Mesaj' // Simplified message
-                );
-              }
+      // Process all queued items
+      for (const item of queueItems) {
+        await offlineMessageManager.sendMessage(
+          (item as any).text || 'Mesaj', // Simplified message
+        );
+      }
 
       flush();
       
       Alert.alert(
         'Başarılı', 
         `${queueItems.length} mesaj mesh ağına gönderildi.`,
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
       
     } catch (error) {
@@ -428,9 +426,9 @@ export default function Home() {
           onPress: async () => {
             await offlineMessageManager.clearFailedMessages();
             updateStatus();
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -450,7 +448,7 @@ export default function Home() {
                 color: '#ffffff', 
                 fontSize: 32, 
                 fontWeight: '800',
-                letterSpacing: -0.5
+                letterSpacing: -0.5,
               }}>
                 AfetNet
               </Text>
@@ -458,7 +456,7 @@ export default function Home() {
                 color: '#8da0cc', 
                 fontSize: 14,
                 marginTop: 2,
-                fontWeight: '500'
+                fontWeight: '500',
               }}>
                 Acil Durum İletişim Ağı
               </Text>
@@ -473,14 +471,14 @@ export default function Home() {
                 paddingHorizontal: 12,
                 paddingVertical: 6,
                 borderRadius: 20,
-                marginBottom: 8
+                marginBottom: 8,
               }}>
                 <View style={{ 
                   width: 8, 
                   height: 8, 
                   borderRadius: 4, 
                   backgroundColor: '#38d39f', 
-                  marginRight: 8 
+                  marginRight: 8, 
                 }} />
                 <Text style={{ color: '#e9f0ff', fontSize: 12, fontWeight: '600' }}>
                   Durum OK
@@ -492,7 +490,7 @@ export default function Home() {
                 backgroundColor: '#1b2746',
                 paddingHorizontal: 12,
                 paddingVertical: 6,
-                borderRadius: 20
+                borderRadius: 20,
               }}>
                 <Ionicons name="list" size={12} color="#8da0cc" style={{ marginRight: 6 }} />
                 <Text style={{ color: '#8da0cc', fontSize: 12, fontWeight: '500' }}>
@@ -512,7 +510,7 @@ export default function Home() {
                 height: 12, 
                 borderRadius: 6, 
                 backgroundColor: meshActive ? '#38d39f' : '#ef476f', 
-                marginRight: 12 
+                marginRight: 12, 
               }} />
               <View>
                 <Text style={{ color: '#e9f0ff', fontSize: 16, fontWeight: '600' }}>
@@ -527,7 +525,7 @@ export default function Home() {
               backgroundColor: meshActive ? '#0e3d28' : '#7d1a1a', 
               paddingHorizontal: 10, 
               paddingVertical: 4, 
-              borderRadius: 12 
+              borderRadius: 12, 
             }}>
               <Text style={{ color: meshActive ? '#7df5b7' : '#ff7f7f', fontSize: 11, fontWeight: '600' }}>
                 {meshActive ? 'ONLINE' : 'OFFLINE'}
@@ -691,7 +689,7 @@ export default function Home() {
               backgroundColor: '#1a233b',
               padding: 8,
               borderRadius: 8,
-              marginTop: 8
+              marginTop: 8,
             }}>
               <Ionicons name="warning" size={16} color="#f59e0b" style={{ marginRight: 8 }} />
               <Text style={{ color: '#f59e0b', fontSize: 12, fontWeight: '600', flex: 1 }}>
@@ -701,7 +699,7 @@ export default function Home() {
                 Alert.alert(
                   'Aktif Operasyonlar',
                   rescueOperations.map(op => `Operasyon ${op.id}: ${op.priority} öncelik`).join('\n'),
-                  [{ text: 'Tamam' }]
+                  [{ text: 'Tamam' }],
                 );
               }}>
                 <Text style={{ color: '#8da0cc', fontSize: 11 }}>Detay</Text>
@@ -718,7 +716,7 @@ export default function Home() {
               padding: 8,
               borderRadius: 8,
               marginTop: 8,
-              justifyContent: 'space-between'
+              justifyContent: 'space-between',
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Ionicons name="alert-circle" size={16} color="#ff7f7f" style={{ marginRight: 8 }} />
@@ -797,7 +795,7 @@ export default function Home() {
               Alert.alert(
                 'PANİK MODU AKTİF',
                 'Panik modu aktifleştirildi! Tüm acil durum sistemleri devreye girdi.',
-                [{ text: 'Tamam', style: 'default' }]
+                [{ text: 'Tamam', style: 'default' }],
               );
             }
           }}
@@ -825,7 +823,7 @@ export default function Home() {
               </Text>
             </View>
             <Ionicons 
-              name={panicModeActive ? "radio-button-on" : "radio-button-off"} 
+              name={panicModeActive ? 'radio-button-on' : 'radio-button-off'} 
               size={28} 
               color="#FFFFFF" 
             />
@@ -862,12 +860,12 @@ export default function Home() {
               backgroundColor: queueItems.length > 0 ? '#0e3d28' : '#1a233b',
               paddingHorizontal: 12, 
               paddingVertical: 6, 
-              borderRadius: 16 
+              borderRadius: 16, 
             }}>
               <Text style={{ 
                 color: queueItems.length > 0 ? '#7df5b7' : '#8da0cc', 
                 fontSize: 11, 
-                fontWeight: '700' 
+                fontWeight: '700', 
               }}>
                 {queueItems.length > 0 ? 'Bekleyen' : 'Boş'}
               </Text>
@@ -890,7 +888,7 @@ export default function Home() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderWidth: 2,
-                  borderColor: member.status === 'ok' ? '#38d39f' : member.status === 'need' ? '#f59e0b' : '#ef476f'
+                  borderColor: member.status === 'ok' ? '#38d39f' : member.status === 'need' ? '#f59e0b' : '#ef476f',
                 }}>
                   <Text style={{ color: '#cdd7ff', fontSize: 16, fontWeight: '700' }}>
                     {member.name?.charAt(0) || '?'}
@@ -907,7 +905,7 @@ export default function Home() {
                   justifyContent: 'center',
                   borderWidth: 2,
                   borderColor: '#26345b',
-                  borderStyle: 'dashed'
+                  borderStyle: 'dashed',
                 }}>
                   <Ionicons name="person-add" size={20} color="#8da0cc" />
                 </View>
@@ -920,7 +918,7 @@ export default function Home() {
                     width: 10, 
                     height: 10, 
                     borderRadius: 5, 
-                    backgroundColor: color 
+                    backgroundColor: color, 
                   }} />
                 ))}
               </View>
@@ -945,7 +943,7 @@ export default function Home() {
               {[
                 { label: 'Harita', icon: 'map-outline' },
                 { label: 'Yakındakiler', icon: 'people-outline' },
-                { label: 'QR Senk', icon: 'qr-code-outline' }
+                { label: 'QR Senk', icon: 'qr-code-outline' },
               ].map((item, k) => (
                 <TouchableOpacity key={k} style={{ flex: 1 }}>
                   <View style={{
@@ -968,7 +966,7 @@ export default function Home() {
               {[
                 { label: 'BLE Yayın', icon: 'radio-outline' },
                 { label: 'Mesajlar', icon: 'chatbubble-outline' },
-                { label: 'Güvenlik', icon: 'shield-outline' }
+                { label: 'Güvenlik', icon: 'shield-outline' },
               ].map((item, k) => (
                 <TouchableOpacity key={k} style={{ flex: 1 }}>
                   <View style={{
@@ -983,7 +981,7 @@ export default function Home() {
                     <Text style={{ color: '#cdd7ff', fontSize: 12, fontWeight: '500' }}>
                       {item.label}
                     </Text>
-            </View>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>

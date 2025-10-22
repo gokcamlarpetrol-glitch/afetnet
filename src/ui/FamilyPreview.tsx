@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
   s: { color: '#9db0cd', fontSize: 13 },
   item: { backgroundColor: '#0d1122', borderRadius: 12, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#1b2140' },
   name: { color: '#e9eefc', fontWeight: '700' },
-  state: { color: '#9db0cd', fontSize: 12 }
+  state: { color: '#9db0cd', fontSize: 12 },
 });
 
 

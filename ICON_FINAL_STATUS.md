@@ -120,3 +120,5 @@ Icon preview açıldı: `/tmp/icon_preview.png`
 **Yayınlama için hazır!** 🚀
 
 
+
+

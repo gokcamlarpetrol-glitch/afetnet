@@ -67,7 +67,7 @@ class EmergencySensorManager extends SimpleEventEmitter {
     isMonitoring: boolean;
     activeSensors: number;
     totalReadings: number;
-  } {
+    } {
     let totalReadings = 0;
     for (const readings of this.sensorReadings.values()) {
       totalReadings += readings.length;
@@ -76,7 +76,7 @@ class EmergencySensorManager extends SimpleEventEmitter {
     return {
       isMonitoring: this.isMonitoring,
       activeSensors: this.sensorReadings.size,
-      totalReadings
+      totalReadings,
     };
   }
 

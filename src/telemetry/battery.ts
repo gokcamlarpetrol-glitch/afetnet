@@ -1,10 +1,10 @@
-import * as Battery from "expo-battery";
+import * as Battery from 'expo-battery';
 const arr: number[] = [];
 
 export async function startBatt(){
   const lvl = await Battery.getBatteryLevelAsync().catch(()=>null);
   if (lvl!=null) {arr.push(Math.round(lvl*100));}
-  setInterval(async ()=>{
+  (globalThis as any).setInterval(async ()=>{
     const v = await Battery.getBatteryLevelAsync().catch(()=>null);
     if (v!=null){
       arr.push(Math.round(v*100));

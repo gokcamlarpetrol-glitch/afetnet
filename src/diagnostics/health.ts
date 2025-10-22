@@ -1,24 +1,23 @@
-import * as AV from "expo-av";
+import * as AV from 'expo-av';
 import { logger } from '../utils/productionLogger';
-import * as Location from "expo-location";
-import * as Battery from "expo-battery";
-import * as Device from "expo-device";
-import * as IntentLauncher from "expo-intent-launcher";
-import * as FileSystem from "expo-file-system";
-import Constants from "expo-constants";
-import { Platform } from "react-native";
+import * as Location from 'expo-location';
+import * as Battery from 'expo-battery';
+import * as Device from 'expo-device';
+import * as IntentLauncher from 'expo-intent-launcher';
+import * as FileSystem from 'expo-file-system';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 // Safe BLE manager to prevent crashes when native modules are not available
 let BleManager: any = null;
-let BleState: any = null;
 let mgr: any = null;
 
 try {
-  const blePlx = require("react-native-ble-plx");
+  const blePlx = (globalThis as any).require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
-  BleState = blePlx.State;
-} catch (e) {
-  logger.warn("react-native-ble-plx not available, using fallback");
+  // BleState = blePlx.State; // Not used
+} catch {
+  logger.warn('react-native-ble-plx not available, using fallback');
 }
 
 function m(){ 
@@ -39,18 +38,20 @@ export type Health = {
 
 export async function getHealth(): Promise<Health>{
   // BLE
-  const state = await m().state().catch(()=> "Unknown");
+  const state = await m().state().catch(()=> 'Unknown');
   // Mic
   const mic = await AV.Audio.getPermissionsAsync().catch(()=>({ granted:false }));
   // Loc
-  const locPerm = await Location.getForegroundPermissionsAsync().catch(()=>({ status: "denied" as const }));
+  const locPerm = await Location.getForegroundPermissionsAsync().catch(()=>({ status: 'denied' as const }));
   let lastFix: string | undefined;
   try{
-    if (locPerm.status === "granted"){
+    if (locPerm.status === 'granted'){
       const fix = await Location.getLastKnownPositionAsync();
       if (fix) {lastFix = new Date(fix.timestamp).toLocaleString();}
     }
-  }catch{}
+  }catch{
+    // Ignore location errors
+  }
   // Battery
   let level: number | undefined; let isLowPower = false;
   try {
@@ -58,35 +59,41 @@ export async function getHealth(): Promise<Health>{
     // expo-battery lowPowerMode?
     // @ts-ignore
     isLowPower = Boolean(Battery.isLowPowerModeEnabledAsync && await Battery.isLowPowerModeEnabledAsync());
-  } catch {}
+  } catch {
+    // Ignore battery errors
+  }
   // MBTiles server flag (simple file sentinel)
   const server = (globalThis as typeof globalThis).__afn_mbtiles_server__ === true;
   // P2P availability (adapters may set flags)
-  const ios = Platform.OS === "ios";
-  const android = Platform.OS === "android";
+  const ios = Platform.OS === 'ios';
+  const android = Platform.OS === 'android';
   // Last SOS
   let lastSOS: any = null;
   try{
-    const raw = await FileSystem.readAsStringAsync("/tmp/last_sos.json");
+    const raw = await FileSystem.readAsStringAsync('/tmp/last_sos.json');
     lastSOS = JSON.parse(raw);
-  }catch{}
+  }catch{
+    // Ignore file read errors
+  }
   return {
     ble: { state: String(state) },
     mic: { granted: Boolean(mic?.granted) },
-    loc: { granted: locPerm.status === "granted", lastFix },
+    loc: { granted: locPerm.status === 'granted', lastFix },
     battery: { level, isLowPower },
-    device: { model: Device.modelName ?? null, os: `${Device.osName} ${Device.osVersion}`, app: Constants?.expoConfig?.name || "AfetNet", build: Constants?.nativeBuildVersion ?? Constants?.expoConfig?.version ?? null },
+    device: { model: Device.modelName ?? null, os: `${Device.osName} ${Device.osVersion}`, app: Constants?.expoConfig?.name || 'AfetNet', build: Constants?.nativeBuildVersion ?? Constants?.expoConfig?.version ?? null },
     mbtiles: { server },
     p2p: { ios, android },
-    lastSOS
+    lastSOS,
   };
 }
 
 export async function openBatterySettings(){
-  if (Platform.OS !== "android") {return false;}
+  if (Platform.OS !== 'android') {return false;}
   try{
     // Open battery optimization settings (generic)
-    await IntentLauncher.startActivityAsync("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS");
+    await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
     return true;
-  }catch{ return false; }
+  }catch{ 
+    return false; 
+  }
 }

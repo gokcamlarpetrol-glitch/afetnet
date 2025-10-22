@@ -1,6 +1,6 @@
-import { Graph } from "./types";
-import { haversine } from "../geo/haversine";
-import { HazardZone } from "../hazard/types";
+import { Graph } from './types';
+import { haversine } from '../geo/haversine';
+import { HazardZone } from '../hazard/types';
 
 function inCircle(p:{lat:number;lng:number}, z: HazardZone){
   const d = haversine(p, z.center);
@@ -19,13 +19,13 @@ export function routeAStar(g: Graph, startId:string, endId:string, hazards: Haza
   }
   const penaltyAt = (id:string)=>{
     const p = nodes.get(id)!; let pen=0;
-    for(const z of hazards){ if(inCircle({lat:p.lat,lng:p.lng}, z)) {pen += zonePenalty(z);} }
+    for(const z of hazards){ if(inCircle({ lat:p.lat,lng:p.lng }, z)) {pen += zonePenalty(z);} }
     return pen;
   };
   const open = new Set<string>([startId]);
   const came = new Map<string,string>();
   const gScore = new Map<string,number>([[startId,0]]);
-  const fScore = new Map<string,number>([[startId, haversine(nodes.get(startId)!, nodes.get(endId)!) ]]);
+  const fScore = new Map<string,number>([[startId, haversine(nodes.get(startId)!, nodes.get(endId)!)]]);
 
   function best(){ let sel:string|undefined; let best=Infinity; for(const id of open){ const f=fScore.get(id) ?? Infinity; if(f<best){ best=f; sel=id; } } return sel; }
 

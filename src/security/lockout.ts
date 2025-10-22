@@ -1,5 +1,5 @@
-import * as SecureStore from "expo-secure-store";
-const KEY = "afn:pin_fail_v1";
+import * as SecureStore from 'expo-secure-store';
+const KEY = 'afn:pin_fail_v1';
 export type PinState = { fails: number; until?: number };
 
 export async function getState(): Promise<PinState>{

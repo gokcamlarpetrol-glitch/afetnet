@@ -72,26 +72,26 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         'Drop, Cover, and Hold On',
         'Stay away from windows and heavy objects',
         'Check for injuries',
-        'Turn off gas if possible'
+        'Turn off gas if possible',
       ],
       safety_measures: [
         'Move to open area if safe',
         'Avoid damaged buildings',
         'Stay alert for aftershocks',
-        'Use stairs, not elevators'
+        'Use stairs, not elevators',
       ],
       resource_management: [
         'Conserve battery power',
         'Ration food and water',
         'Use phone only for emergencies',
-        'Keep warm if cold weather'
+        'Keep warm if cold weather',
       ],
       communication: [
         'Send location to emergency contacts',
         'Use SOS features',
         'Listen to emergency broadcasts',
-        'Signal for help if trapped'
-      ]
+        'Signal for help if trapped',
+      ],
     });
 
     // Fire templates
@@ -100,26 +100,26 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         'Get low and crawl to exit',
         'Feel doors before opening',
         'Cover mouth with cloth',
-        'Don\'t use elevators'
+        'Don\'t use elevators',
       ],
       safety_measures: [
         'Stay in room if exit blocked',
         'Seal door with wet towels',
         'Signal from window',
-        'Stay calm and wait for rescue'
+        'Stay calm and wait for rescue',
       ],
       resource_management: [
         'Conserve oxygen',
         'Stay hydrated',
         'Keep phone charged',
-        'Use flashlight sparingly'
+        'Use flashlight sparingly',
       ],
       communication: [
         'Call emergency services',
         'Send location immediately',
         'Use emergency features',
-        'Signal with light or sound'
-      ]
+        'Signal with light or sound',
+      ],
     });
 
     // Medical emergency templates
@@ -128,26 +128,26 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         'Assess consciousness',
         'Check breathing and pulse',
         'Apply first aid if trained',
-        'Keep person still'
+        'Keep person still',
       ],
       safety_measures: [
         'Ensure safe environment',
         'Prevent further injury',
         'Monitor vital signs',
-        'Keep person warm'
+        'Keep person warm',
       ],
       resource_management: [
         'Use medical supplies wisely',
         'Keep person hydrated',
         'Monitor condition closely',
-        'Prepare for evacuation'
+        'Prepare for evacuation',
       ],
       communication: [
         'Call emergency medical services',
         'Provide detailed medical info',
         'Send exact location',
-        'Keep emergency contacts updated'
-      ]
+        'Keep emergency contacts updated',
+      ],
     });
 
     logger.debug('✅ Emergency templates initialized');
@@ -196,7 +196,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         estimatedSurvivalTime: survivalTime,
         rescueProbability,
         lastUpdated: Date.now(),
-        status: 'active'
+        status: 'active',
       };
 
       // Store plan
@@ -237,7 +237,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
           steps: template.immediate_actions,
           estimatedTime: 5,
           aiConfidence: 95,
-          warnings: ['Bu adımlar hemen uygulanmalıdır']
+          warnings: ['Bu adımlar hemen uygulanmalıdır'],
         });
       }
 
@@ -251,7 +251,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
           description: 'Kendinizi ve diğerlerini koruma yöntemleri',
           steps: template.safety_measures,
           estimatedTime: 15,
-          aiConfidence: 90
+          aiConfidence: 90,
         });
       }
 
@@ -266,7 +266,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
           description: 'Mevcut kaynakları en iyi şekilde kullanma',
           steps: resourceSteps,
           estimatedTime: 10,
-          aiConfidence: 85
+          aiConfidence: 85,
         });
       }
 
@@ -281,7 +281,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
           description: 'Yardım talep etme ve iletişim kurma',
           steps: commSteps,
           estimatedTime: 5,
-          aiConfidence: 92
+          aiConfidence: 92,
         });
       }
 
@@ -306,7 +306,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         title: 'Temel Güvenlik',
         description: 'Genel güvenlik önlemleri',
         steps: ['Güvenli bir yere geçin', 'Yardım isteyin', 'Durumu bildirin'],
-        aiConfidence: 70
+        aiConfidence: 70,
       }];
     }
   }
@@ -373,7 +373,7 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         title: 'Özel İhtiyaçlar',
         description: 'Özel durumlar için önlemler',
         steps: context.specialNeeds,
-        aiConfidence: 80
+        aiConfidence: 80,
       });
     }
 
@@ -388,9 +388,9 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         steps: [
           'Açık alanlardan kaçının',
           'Yıldırım çekebilecek objelerden uzak durun',
-          'Güvenli bir barınak bulun'
+          'Güvenli bir barınak bulun',
         ],
-        aiConfidence: 85
+        aiConfidence: 85,
       });
     }
 
@@ -405,9 +405,9 @@ class SmartEmergencySystem extends SimpleEventEmitter {
         steps: [
           'Işık kaynaklarını koruyun',
           'Grup halinde kalın',
-          'Ses çıkararak varlığınızı belli edin'
+          'Ses çıkararak varlığınızı belli edin',
         ],
-        aiConfidence: 75
+        aiConfidence: 75,
       });
     }
 
@@ -428,25 +428,25 @@ class SmartEmergencySystem extends SimpleEventEmitter {
 
     // Adjust based on emergency type
     switch (context.emergencyType) {
-      case 'medical':
-        baseTime = Math.min(baseTime, 24);
-        break;
-      case 'fire':
-        baseTime = Math.min(baseTime, 12);
-        break;
-      case 'trapped':
-        baseTime = Math.min(baseTime, 48);
-        break;
+    case 'medical':
+      baseTime = Math.min(baseTime, 24);
+      break;
+    case 'fire':
+      baseTime = Math.min(baseTime, 12);
+      break;
+    case 'trapped':
+      baseTime = Math.min(baseTime, 48);
+      break;
     }
 
     // Adjust based on accessibility
     switch (context.accessibility) {
-      case 'blocked':
-        baseTime = Math.min(baseTime, 36);
-        break;
-      case 'partially_blocked':
-        baseTime = Math.min(baseTime, 60);
-        break;
+    case 'blocked':
+      baseTime = Math.min(baseTime, 36);
+      break;
+    case 'partially_blocked':
+      baseTime = Math.min(baseTime, 60);
+      break;
     }
 
     return Math.max(baseTime, 6); // Minimum 6 hours
@@ -458,50 +458,50 @@ class SmartEmergencySystem extends SimpleEventEmitter {
 
     // Adjust based on emergency type
     switch (context.emergencyType) {
-      case 'earthquake':
-        probability = 85;
-        break;
-      case 'fire':
-        probability = 90;
-        break;
-      case 'medical':
-        probability = 95;
-        break;
-      case 'trapped':
-        probability = 70;
-        break;
-      case 'lost':
-        probability = 75;
-        break;
+    case 'earthquake':
+      probability = 85;
+      break;
+    case 'fire':
+      probability = 90;
+      break;
+    case 'medical':
+      probability = 95;
+      break;
+    case 'trapped':
+      probability = 70;
+      break;
+    case 'lost':
+      probability = 75;
+      break;
     }
 
     // Adjust based on severity
     switch (context.severity) {
-      case 'critical':
-        probability += 10;
-        break;
-      case 'high':
-        probability += 5;
-        break;
-      case 'medium':
-        probability -= 5;
-        break;
-      case 'low':
-        probability -= 10;
-        break;
+    case 'critical':
+      probability += 10;
+      break;
+    case 'high':
+      probability += 5;
+      break;
+    case 'medium':
+      probability -= 5;
+      break;
+    case 'low':
+      probability -= 10;
+      break;
     }
 
     // Adjust based on accessibility
     switch (context.accessibility) {
-      case 'accessible':
-        probability += 10;
-        break;
-      case 'partially_blocked':
-        probability -= 5;
-        break;
-      case 'blocked':
-        probability -= 15;
-        break;
+    case 'accessible':
+      probability += 10;
+      break;
+    case 'partially_blocked':
+      probability -= 5;
+      break;
+    case 'blocked':
+      probability -= 15;
+      break;
     }
 
     // Adjust based on resources
@@ -584,12 +584,12 @@ class SmartEmergencySystem extends SimpleEventEmitter {
       
       // Filter for immediate actions only
       const immediateAdvice = recommendations.filter(rec => 
-        rec.type === 'immediate_action' || rec.priority === 'critical'
+        rec.type === 'immediate_action' || rec.priority === 'critical',
       );
 
       emergencyLogger.logSystem('info', 'Real-time emergency advice generated', { 
         totalRecommendations: recommendations.length,
-        immediateAdvice: immediateAdvice.length 
+        immediateAdvice: immediateAdvice.length, 
       });
 
       return immediateAdvice;

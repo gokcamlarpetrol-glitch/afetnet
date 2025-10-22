@@ -2,9 +2,9 @@
 // encode: utf8 -> crc32 append -> base32 -> duplicate+interleave
 // decode: deinterleave -> majority vote -> base32->crc32 verify
 
-const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 function toBase32(bytes: Uint8Array){
-  let out="", v=0, bits=0;
+  let out='', v=0, bits=0;
   for(const b of bytes){ v=(v<<8)|b; bits+=8; while(bits>=5){ out+=B32[(v>>>(bits-5))&31]; bits-=5; } }
   if(bits>0){ out+=B32[(v<<(5-bits))&31]; }
   return out;
@@ -23,8 +23,8 @@ export function crc32(u8: Uint8Array){
   }
   return (~c)>>>0;
 }
-function utf8Encode(s:string){ return new TextEncoder().encode(s); }
-function utf8Decode(u8:Uint8Array){ try{ return new TextDecoder().decode(u8); }catch{ return ""; } }
+function utf8Encode(s:string){ return new (globalThis as any).TextEncoder().encode(s); }
+function utf8Decode(u8:Uint8Array){ try{ return new (globalThis as any).TextDecoder().decode(u8); }catch{ return ''; } }
 
 export function fecEncode(text: string){
   const src = utf8Encode(text);
@@ -38,16 +38,16 @@ export function fecEncode(text: string){
   const b32 = toBase32(bundle);
   // duplicate+interleave
   const a=b32, b=b32;
-  let inter="";
+  let inter='';
   for(let i=0;i<a.length;i++){ inter+=a[i]; inter+=b[i]; }
   return inter;
 }
 
 export function fecDecode(interleaved: string){
-  if(!interleaved) {return { ok:false, text:"" };}
+  if(!interleaved) {return { ok:false, text:'' };}
   // deinterleave
-  let a="", b="";
-  for(let i=0;i<interleaved.length;i+=2){ a+=interleaved[i]||""; b+=interleaved[i+1]||""; }
+  let a='', b='';
+  for(let i=0;i<interleaved.length;i+=2){ a+=interleaved[i]||''; b+=interleaved[i+1]||''; }
   // majority vote per position (here just prefer the longer/valid arc)
   const cand=[a,b].sort((x,y)=>y.length-x.length);
   for(const s of cand){
@@ -59,7 +59,7 @@ export function fecDecode(interleaved: string){
       return { ok:true, text:utf8Decode(body) };
     }
   }
-  return { ok:false, text:"(bozuk)" };
+  return { ok:false, text:'(bozuk)' };
 }
 
 

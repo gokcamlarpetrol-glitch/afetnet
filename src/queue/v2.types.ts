@@ -1,4 +1,4 @@
-export type QueueKind = "sos" | "status" | "note" | "beacon";
+export type QueueKind = 'sos' | 'status' | 'note' | 'beacon';
 
 export interface QueueRecordV2 {
   id: string;          // ulid-like or ts-rand id

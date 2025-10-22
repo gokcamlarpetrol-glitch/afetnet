@@ -1,11 +1,11 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from 'expo-file-system';
 
-const DIR = "/tmp/";
-const FILE = DIR + "board.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'board.json';
 
 export type BoardPost = {
   id: string; ts: number;
-  kind: "sos"|"announcement"|"system";
+  kind: 'sos'|'announcement'|'system';
   text: string; ttlSec: number;
   qlat?: number; qlng?: number;
   sig?: string; // optional (Phase 42)

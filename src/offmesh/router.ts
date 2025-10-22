@@ -1,6 +1,6 @@
-import { Platform } from 'react-native';
+// import { Platform } from 'react-native'; // Not used
 import { logger } from '../utils/productionLogger';
-import { Envelope, PeerInfo, MeshStats, MeshConfig, MsgType } from './types';
+import { Envelope, PeerInfo, MeshStats, MeshConfig } from './types';
 import { meshStore } from './store';
 import { qosManager } from './qos';
 import { signEnvelope, verifyEnvelope } from './crypto';
@@ -307,7 +307,7 @@ class OffMeshRouter {
       }
 
       // Schedule next processing
-      setTimeout(processLoop, 1000);
+      (globalThis as any).setTimeout(processLoop, 1000);
     };
 
     processLoop();

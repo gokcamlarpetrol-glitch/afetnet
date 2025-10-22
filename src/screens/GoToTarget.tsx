@@ -24,12 +24,12 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
 
   const distance = currentPos ? haversineDistance(
     currentPos.lat, currentPos.lon,
-    target.lat, target.lon
+    target.lat, target.lon,
   ) : 0;
 
   const bearing = currentPos ? bearingTo(
     currentPos.lat, currentPos.lon,
-    target.lat, target.lon
+    target.lat, target.lon,
   ) : 0;
 
   const compassHeading = compass?.heading || 0;
@@ -38,7 +38,7 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
   const getBearingArrow = (degrees: number): string => {
     const directions = [
       'K', 'K-KD', 'KD', 'D-KD', 'D', 'D-GD', 'GD', 'G-GD',
-      'G', 'G-GB', 'GB', 'B-GB', 'B', 'B-KB', 'KB', 'K-KB'
+      'G', 'G-GB', 'GB', 'B-GB', 'B', 'B-KB', 'KB', 'K-KB',
     ];
     const index = Math.round(degrees / 22.5) % 16;
     return directions[index];
@@ -62,13 +62,13 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
       Alert.alert(
         'Pusula Kalibre Edildi',
         'Cihazı yavaşça 8 şeklinde hareket ettirin ve kalibrasyon tamamlandı.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     } else {
       Alert.alert(
         'Kalibrasyon',
         `${3 - calibrationCount} kez daha cihazı 360° çevirin.`,
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -83,8 +83,8 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
         { text: 'Aç', onPress: () => {
           // TODO: Open map with satellite view
           logger.debug('Open satellite view for:', target);
-        }}
-      ]
+        } },
+      ],
     );
   };
 
@@ -178,7 +178,7 @@ export default function GoToTarget({ target, onClose }: GoToTargetProps) {
 
         {onClose && (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={onClose}
             style={[styles.actionButton, styles.closeButton]}
           >

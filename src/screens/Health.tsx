@@ -67,7 +67,7 @@ export default function HealthScreen() {
         platform: Platform.OS,
       };
 
-      const uptime = Date.now() - (global.appStartTime || Date.now());
+      const uptime = Date.now() - ((globalThis as any).appStartTime || Date.now());
       
       const remoteConfig = remoteConfigManager.getConfig();
       const backgroundStatus = backgroundHardeningManager.getStatus();
@@ -272,7 +272,7 @@ Ek Bilgiler:
             <Text style={styles.infoLabel}>Kill Switch:</Text>
             <Text style={[
               styles.infoValue,
-              healthData.killSwitchActive ? styles.errorText : styles.successText
+              healthData.killSwitchActive ? styles.errorText : styles.successText,
             ]}>
               {healthData.killSwitchActive ? 'Aktif' : 'Pasif'}
             </Text>
@@ -281,7 +281,7 @@ Ek Bilgiler:
             <Text style={styles.infoLabel}>Arka Plan Görevler:</Text>
             <Text style={[
               styles.infoValue,
-              healthData.backgroundStatus.enabled ? styles.successText : styles.errorText
+              healthData.backgroundStatus.enabled ? styles.successText : styles.errorText,
             ]}>
               {healthData.backgroundStatus.enabled ? 'Aktif' : 'Pasif'}
             </Text>
@@ -305,7 +305,7 @@ Ek Bilgiler:
                 <Text style={styles.infoLabel}>Hata Sayısı:</Text>
                 <Text style={[
                   styles.infoValue,
-                  healthData.backgroundStatus.errorCount > 0 ? styles.errorText : styles.successText
+                  healthData.backgroundStatus.errorCount > 0 ? styles.errorText : styles.successText,
                 ]}>
                   {healthData.backgroundStatus.errorCount}
                 </Text>
@@ -331,7 +331,7 @@ Ek Bilgiler:
             <Text style={styles.infoLabel}>Acil Durum:</Text>
             <Text style={[
               styles.infoValue,
-              healthData.storage.emergencyActive ? styles.errorText : styles.successText
+              healthData.storage.emergencyActive ? styles.errorText : styles.successText,
             ]}>
               {healthData.storage.emergencyActive ? 'Aktif' : 'Pasif'}
             </Text>

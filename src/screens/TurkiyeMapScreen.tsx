@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { logger } from "../utils/productionLogger";
 import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
@@ -12,18 +13,17 @@ let Marker: any = null;
 let Circle: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Marker = maps.Marker;
   Circle = maps.Circle;
-} catch (e) {
+} catch {
   // expo-maps not available - fallback to alternative map solution
 }
 
 export default function TurkiyeMapScreen() {
   const [assemblyPoints, setAssemblyPoints] = useState<AssemblyPoint[]>([]);
-  const [selectedPoint, setSelectedPoint] = useState<AssemblyPoint | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
@@ -65,7 +65,7 @@ export default function TurkiyeMapScreen() {
         }
       }
     } catch (error) {
-      console.error('Failed to load current location:', error);
+      logger.error('Failed to load current location:', error);
     }
   };
 
@@ -75,7 +75,7 @@ export default function TurkiyeMapScreen() {
       const points = await listAssembly();
       setAssemblyPoints(points);
     } catch (error) {
-      console.error('Failed to load assembly points:', error);
+      logger.error('Failed to load assembly points:', error);
       Alert.alert('Hata', 'Toplanma noktaları yüklenemedi');
     } finally {
       setIsLoading(false);
@@ -103,7 +103,7 @@ export default function TurkiyeMapScreen() {
             }
           },
         },
-      ]
+      ],
     );
   };
 

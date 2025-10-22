@@ -34,7 +34,7 @@ export async function getOrCreateKeyPair(): Promise<KeyPair> {
     const naclKeyPair = nacl.box.keyPair();
     const keyPair: KeyPair = {
       pubKeyB64: encodeBase64(naclKeyPair.publicKey),
-      secKeyB64: encodeBase64(naclKeyPair.secretKey)
+      secKeyB64: encodeBase64(naclKeyPair.secretKey),
     };
 
     // Store the new keypair

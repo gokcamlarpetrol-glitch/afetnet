@@ -110,7 +110,7 @@ export class PermissionsManager {
         Alert.alert(
           'Bluetooth Kapalı',
           'AfetNet için Bluetooth\'u açmanız gerekiyor. Ayarlar > Bluetooth bölümünden açabilirsiniz.',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
         this.status.bluetooth = 'denied';
         return 'denied';

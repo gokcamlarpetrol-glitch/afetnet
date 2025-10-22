@@ -63,7 +63,7 @@ export const PRODUCT_CONFIG = {
     currency: 'TRY',
     type: 'lifetime' as const,
     duration: 'permanent' as const,
-  }
+  },
 } as const;
 
 // Type definitions

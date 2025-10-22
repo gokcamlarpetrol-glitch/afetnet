@@ -46,7 +46,7 @@ const ICON_SIZES = [
   { size: '83.5x83.5', idiom: 'ipad', filename: 'ipad-pro-app-83.5@2x.png', scale: '2x', width: 167, height: 167 },
   
   // App Store marketing icon
-  { size: '1024x1024', idiom: 'ios-marketing', filename: 'app-store-1024.png', scale: '1x', width: 1024, height: 1024 }
+  { size: '1024x1024', idiom: 'ios-marketing', filename: 'app-store-1024.png', scale: '1x', width: 1024, height: 1024 },
 ];
 
 async function generateIcons() {
@@ -79,12 +79,12 @@ async function generateIcons() {
       await sourceImage
         .resize(icon.width, icon.height, {
           fit: 'cover',
-          position: 'center'
+          position: 'center',
         })
         .png({
           quality: 100,
           compressionLevel: 0,
-          adaptiveFiltering: false
+          adaptiveFiltering: false,
         })
         .toFile(outputPath);
       
@@ -99,12 +99,12 @@ async function generateIcons() {
         size: icon.size,
         idiom: icon.idiom,
         filename: icon.filename,
-        scale: icon.scale
+        scale: icon.scale,
       })),
       info: {
         version: 1,
-        author: 'xcode'
-      }
+        author: 'xcode',
+      },
     };
     
     const contentsPath = path.join(OUTPUT_DIR, 'Contents.json');

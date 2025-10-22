@@ -24,5 +24,5 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#12162a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#20253b' },
   h: { color: '#9ac7ff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
   m: { color: '#e9eefc', fontSize: 18, fontWeight: '700' },
-  s: { color: '#b8c2d9', fontSize: 13, marginTop: 2 }
+  s: { color: '#b8c2d9', fontSize: 13, marginTop: 2 },
 });

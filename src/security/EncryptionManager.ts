@@ -30,7 +30,7 @@ class EncryptionManager {
       algorithm: 'AES-256-GCM',
       keySize: 256,
       iterations: 100000,
-      salt: this.generateRandomSalt()
+      salt: this.generateRandomSalt(),
     };
     
     this.keyDerivationSalt = this.generateRandomSalt();
@@ -91,14 +91,14 @@ class EncryptionManager {
       // Derive key from master key and salt
       const key = CryptoJS.PBKDF2(this.masterKey, salt, {
         keySize: this.encryptionConfig.keySize / 32,
-        iterations: this.encryptionConfig.iterations
+        iterations: this.encryptionConfig.iterations,
       });
 
       // Encrypt data
       const encrypted = CryptoJS.AES.encrypt(data, key, {
         iv: iv,
         mode: CryptoJS.mode.CBC,
-        padding: CryptoJS.pad.Pkcs7
+        padding: CryptoJS.pad.Pkcs7,
       });
 
       // Generate checksum for integrity
@@ -109,12 +109,12 @@ class EncryptionManager {
         iv: iv.toString(),
         salt: salt.toString(),
         timestamp: Date.now(),
-        checksum: checksum
+        checksum: checksum,
       };
 
       emergencyLogger.logSecurity('info', 'Data encrypted successfully', { 
         dataLength: data.length,
-        timestamp: encryptedData.timestamp 
+        timestamp: encryptedData.timestamp, 
       });
 
       return encryptedData;
@@ -141,14 +141,14 @@ class EncryptionManager {
       // Reconstruct key
       const key = CryptoJS.PBKDF2(this.masterKey, encryptedData.salt, {
         keySize: this.encryptionConfig.keySize / 32,
-        iterations: this.encryptionConfig.iterations
+        iterations: this.encryptionConfig.iterations,
       });
 
       // Decrypt data
       const decrypted = CryptoJS.AES.decrypt(encryptedData.data, key, {
         iv: encryptedData.iv,
         mode: CryptoJS.mode.CBC,
-        padding: CryptoJS.pad.Pkcs7
+        padding: CryptoJS.pad.Pkcs7,
       });
 
       const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
@@ -159,7 +159,7 @@ class EncryptionManager {
 
       emergencyLogger.logSecurity('info', 'Data decrypted successfully', { 
         dataLength: decryptedString.length,
-        timestamp: encryptedData.timestamp 
+        timestamp: encryptedData.timestamp, 
       });
 
       return decryptedString;
@@ -273,7 +273,7 @@ class EncryptionManager {
       const encrypted = CryptoJS.AES.encrypt(data, peerKey, {
         iv: iv,
         mode: CryptoJS.mode.CBC,
-        padding: CryptoJS.pad.Pkcs7
+        padding: CryptoJS.pad.Pkcs7,
       });
 
       return {
@@ -281,7 +281,7 @@ class EncryptionManager {
         iv: iv.toString(),
         salt: '',
         timestamp: Date.now(),
-        checksum: CryptoJS.SHA256(encrypted.toString() + peerKey).toString()
+        checksum: CryptoJS.SHA256(encrypted.toString() + peerKey).toString(),
       };
     } catch (error) {
       emergencyLogger.logSecurity('error', 'Peer encryption failed', { error: String(error) });
@@ -305,7 +305,7 @@ class EncryptionManager {
       const decrypted = CryptoJS.AES.decrypt(encryptedData.data, peerKey, {
         iv: encryptedData.iv,
         mode: CryptoJS.mode.CBC,
-        padding: CryptoJS.pad.Pkcs7
+        padding: CryptoJS.pad.Pkcs7,
       });
 
       return decrypted.toString(CryptoJS.enc.Utf8);
@@ -348,7 +348,7 @@ class EncryptionManager {
       // Derive master key using PBKDF2
       this.masterKey = CryptoJS.PBKDF2(baseKey, this.keyDerivationSalt, {
         keySize: this.encryptionConfig.keySize / 32,
-        iterations: this.encryptionConfig.iterations
+        iterations: this.encryptionConfig.iterations,
       }).toString();
 
       emergencyLogger.logSecurity('info', 'Device key generated');
@@ -367,7 +367,7 @@ class EncryptionManager {
     return {
       deviceId: this.deviceId || 'unknown',
       platform: 'react-native',
-      version: '1.0.0'
+      version: '1.0.0',
     };
   }
 

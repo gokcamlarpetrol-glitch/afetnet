@@ -67,10 +67,10 @@ class VoiceCommandManager extends SimpleEventEmitter {
   getVoiceStatus(): {
     isListening: boolean;
     commandsCount: number;
-  } {
+    } {
     return {
       isListening: this.isListening,
-      commandsCount: this.voiceCommands.size
+      commandsCount: this.voiceCommands.size,
     };
   }
 }

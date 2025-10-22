@@ -3,9 +3,9 @@
 
 export async function registerQuakeBackground() {
   try {
-    console.log('Background earthquake monitoring registered (Expo Go compatible)');
+    // Background earthquake monitoring registered (Expo Go compatible)
     // Simple implementation for Expo Go
-  } catch (error) {
-    console.error('Failed to register background task', error);
+  } catch {
+    // Failed to register background task
   }
 }

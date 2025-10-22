@@ -33,7 +33,7 @@ class OfflineMapManager extends SimpleEventEmitter {
       const mapLocation: MapLocation = {
         ...location,
         id: locationId,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       this.mapLocations.set(locationId, mapLocation);

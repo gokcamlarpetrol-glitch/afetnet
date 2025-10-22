@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   splash: { 
     image: "./assets/splash.png", 
     resizeMode: "contain", 
-    backgroundColor: "#C62828" 
+    backgroundColor: "#C62828", 
   },
   primaryColor: "#C62828",
   updates: { fallbackToCacheTimeout: 0 },
@@ -30,10 +30,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-build-properties",
       {
         "ios": {
-          "deploymentTarget": "15.1"
-        }
-      }
-    ]
+          "deploymentTarget": "15.1",
+        },
+      },
+    ],
   ],
   ios: {
     ...config.ios,
@@ -51,10 +51,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-central",
         "bluetooth-peripheral",
         "processing",
-        "location"
+        "location",
       ],
-      ITSAppUsesNonExemptEncryption: false
-    }
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
   android: {
     ...config.android,
@@ -62,7 +62,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
-      backgroundImage: "./assets/adaptive-icon-background.png"
+      backgroundImage: "./assets/adaptive-icon-background.png",
     },
     permissions: [
       "android.permission.BLUETOOTH",
@@ -74,7 +74,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.ACCESS_BACKGROUND_LOCATION",
       "android.permission.CAMERA",
       "android.permission.RECORD_AUDIO",
-      "android.permission.INTERNET"
+      "android.permission.INTERNET",
     ],
   },
   extra: {
@@ -82,6 +82,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     devClient: true,
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
-    supportEmail: "support@afetnet.app"
-  }
+    supportEmail: "support@afetnet.app",
+  },
 });

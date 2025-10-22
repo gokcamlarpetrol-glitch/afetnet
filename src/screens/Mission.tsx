@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { usePDRFuse } from '../hooks/usePDRFuse';
 import { computeWeightedCentroid, RSSISample, combineEstimates } from '../algorithms/rssiGradient';
 import { meshRelay } from '../services/mesh/relay';
 import { logger } from '../utils/productionLogger';
-
-const { width } = Dimensions.get('window');
 
 export interface MissionTarget {
   id: string;
@@ -32,13 +30,13 @@ export default function Mission({ target }: { target?: MissionTarget }) {
     sound: false,
     noSound: false,
     listening: false,
-    unsafe: false
+    unsafe: false,
   });
 
   const { currentPos } = usePDRFuse();
-  const [heading, setHeading] = useState(0);
-  // @ts-expect-error - NodeJS.Timeout type mismatch with React Native
-  const scanIntervalRef = useRef<NodeJS.Timeout>();
+  const [heading] = useState(0);
+  // @ts-expect-error - Timer type mismatch with React Native
+  const scanIntervalRef = useRef<any>();
 
   useEffect(() => {
     if (target && currentPos) {
@@ -82,7 +80,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
   };
 
   const startGridScan = () => {
-    scanIntervalRef.current = setInterval(() => {
+    scanIntervalRef.current = (globalThis as any).setInterval(() => {
       if (currentPos) {
         // Simulate RSSI samples (in real implementation, get from BLE relay)
         const simulatedSample: RSSISample = {
@@ -90,7 +88,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
           lat: currentPos.lat + (Math.random() - 0.5) * 0.001,
           lon: currentPos.lon + (Math.random() - 0.5) * 0.001,
           timestamp: Date.now(),
-          deviceId: target?.id || 'unknown'
+          deviceId: target?.id || 'unknown',
         };
 
         setRssiSamples(prev => [...prev.slice(-50), simulatedSample]);
@@ -100,7 +98,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
           lat: currentPos.lat,
           lon: currentPos.lon,
           timestamp: Date.now(),
-          confidence: 0.7
+          confidence: 0.7,
         };
 
         setCoveragePoints(prev => [...prev, coveragePoint]);
@@ -110,7 +108,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
 
   const stopGridScan = () => {
     if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
+      (globalThis as any).clearInterval(scanIntervalRef.current);
       scanIntervalRef.current = undefined as any;
     }
   };
@@ -118,7 +116,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
   const toggleStatusFlag = (flag: keyof typeof statusFlags) => {
     setStatusFlags(prev => ({
       ...prev,
-      [flag]: !prev[flag]
+      [flag]: !prev[flag],
     }));
 
     // Send confirmation via mesh
@@ -138,7 +136,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
     if (rssiSamples.length === 0) return null;
     
     const recentSamples = rssiSamples.filter(s => 
-      Date.now() - s.timestamp < 30000
+      Date.now() - s.timestamp < 30000,
     );
 
     if (recentSamples.length === 0) return null;
@@ -167,7 +165,7 @@ export default function Mission({ target }: { target?: MissionTarget }) {
           <View 
             style={[
               styles.arrow,
-              { transform: [{ rotate: `${direction}deg` }] }
+              { transform: [{ rotate: `${direction}deg` }] },
             ]}
           >
             <Text style={styles.arrowText}>➤</Text>
@@ -212,12 +210,12 @@ export default function Mission({ target }: { target?: MissionTarget }) {
               onPress={() => toggleStatusFlag(key as keyof typeof statusFlags)}
               style={[
                 styles.statusButton,
-                value && styles.statusButtonActive
+                value && styles.statusButtonActive,
               ]}
             >
               <Text style={[
                 styles.statusButtonText,
-                value && styles.statusButtonTextActive
+                value && styles.statusButtonTextActive,
               ]}>
                 {getStatusLabel(key)}
               </Text>
@@ -252,11 +250,11 @@ export default function Mission({ target }: { target?: MissionTarget }) {
 
 function getStatusLabel(key: string): string {
   switch (key) {
-    case 'sound': return 'Ses var';
-    case 'noSound': return 'Ses yok';
-    case 'listening': return 'Dinleme yapıldı';
-    case 'unsafe': return 'Güvenli değil';
-    default: return key;
+  case 'sound': return 'Ses var';
+  case 'noSound': return 'Ses yok';
+  case 'listening': return 'Dinleme yapıldı';
+  case 'unsafe': return 'Güvenli değil';
+  default: return key;
   }
 }
 

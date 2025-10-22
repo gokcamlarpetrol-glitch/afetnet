@@ -1,12 +1,12 @@
-import * as FileSystem from "expo-file-system";
-import { EEWAlert } from "../eew/types";
-import { estimateETAAndMMI } from "../eew/estimate";
-import { TR_BBOX } from "./const";
+import * as FileSystem from 'expo-file-system';
+import { EEWAlert } from '../eew/types';
+import { estimateETAAndMMI } from '../eew/estimate';
+import { TR_BBOX } from './const';
 
 export type GridCell = { lat:number; lng:number; mmi:number; etaSec:number; pEtaSec:number };
-export type GridBundle = { id:string; ts:number; src:EEWAlert["src"]; mag:number; depth?:number; epi:{lat:number;lng:number}; stepDeg:number; cells: GridCell[] };
+export type GridBundle = { id:string; ts:number; src:EEWAlert['src']; mag:number; depth?:number; epi:{lat:number;lng:number}; stepDeg:number; cells: GridCell[] };
 
-const FILE = "/tmp/risk.grid.json";
+const FILE = '/tmp/risk.grid.json';
 
 export async function computeGrid(alert: EEWAlert, stepDeg=0.2): Promise<GridBundle>{
   const cells: GridCell[] = [];

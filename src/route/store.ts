@@ -1,9 +1,9 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from 'expo-file-system';
 // import * as ImagePicker from "expo-image-picker"; // Not available
-import { Graph } from "./types";
+import { Graph } from './types';
 
-const DIR = "/tmp/";
-const FILE = DIR + "route.graph.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'route.graph.json';
 
 export async function loadGraph(): Promise<Graph>{
   const ex = await FileSystem.getInfoAsync(FILE);
@@ -14,7 +14,7 @@ async function save(g: Graph){ g.ts = Date.now(); await FileSystem.writeAsString
 
 export async function addNode(p:{lat:number;lng:number}){
   const g = await loadGraph();
-  const id = "wp_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const id = 'wp_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   g.nodes.push({ id, lat:p.lat, lng:p.lng });
   await save(g); return id;
 }

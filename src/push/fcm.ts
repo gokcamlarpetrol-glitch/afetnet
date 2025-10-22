@@ -43,7 +43,7 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/push/register`, {
+    const response = await (globalThis as any).fetch(`${WORKER_URL}/push/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -54,8 +54,8 @@ export async function registerTokenWithWorker(token: string, provinces: string[]
         // iOS currently provides APNs token via expo-notifications
         // Backend will determine routing by type
         type: Platform.OS === 'ios' ? 'ios' : 'fcm',
-        provinces
-      })
+        provinces,
+      }),
     });
 
     if (!response.ok) {
@@ -80,15 +80,15 @@ export async function unregisterToken(token: string): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/push/unregister`, {
+    const response = await (globalThis as any).fetch(`${WORKER_URL}/push/unregister`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-org-secret': ORG_SECRET,
       },
       body: JSON.stringify({
-        token
-      })
+        token,
+      }),
     });
 
     if (!response.ok) {
@@ -113,11 +113,11 @@ export async function testWorkerHealth(): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/push/health`, {
+    const response = await (globalThis as any).fetch(`${WORKER_URL}/push/health`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-      }
+      },
     });
 
     if (!response.ok) {
@@ -141,11 +141,11 @@ export async function triggerWorkerTick(): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${WORKER_URL}/push/tick`, {
+    const response = await (globalThis as any).fetch(`${WORKER_URL}/push/tick`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-      }
+      },
     });
 
     if (!response.ok) {

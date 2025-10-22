@@ -60,14 +60,14 @@ export default function VoicePing() {
             setIsRecording(false);
             processRecording(newRecording);
           }
-        }
+        },
       );
 
       setRecording(newRecording);
       setIsRecording(true);
 
       // Auto-stop after 2 seconds
-      setTimeout(() => {
+      (globalThis as any).setTimeout(() => {
         if (newRecording) {
           stopRecording();
         }
@@ -123,7 +123,7 @@ export default function VoicePing() {
       
       Alert.alert(
         'Ses Ping Gönderildi',
-        `Ses ping gönderildi (${chunks.length} parça, ${msgId.slice(-6)})`
+        `Ses ping gönderildi (${chunks.length} parça, ${msgId.slice(-6)})`,
       );
 
     } catch (error) {
@@ -139,7 +139,7 @@ export default function VoicePing() {
       // Create a simple test sound
       const { sound: newSound } = await Audio.Sound.createAsync(
         { uri: 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBS13yO/eizEIHWq+8+OWT' },
-        { shouldPlay: true }
+        { shouldPlay: true },
       );
 
       setSound(newSound);
@@ -183,7 +183,7 @@ export default function VoicePing() {
           style={[
             styles.recordButton,
             isRecording && styles.recordButtonActive,
-            isPlaying && styles.recordButtonDisabled
+            isPlaying && styles.recordButtonDisabled,
           ]}
         >
           <Text style={styles.recordButtonText}>
@@ -207,12 +207,12 @@ export default function VoicePing() {
       </View>
 
       <Pressable accessible={true}
-          accessibilityRole="button"
+        accessibilityRole="button"
         onPress={playTestSound}
         disabled={isPlaying || isRecording}
         style={[
           styles.testButton,
-          (isPlaying || isRecording) && styles.testButtonDisabled
+          (isPlaying || isRecording) && styles.testButtonDisabled,
         ]}
       >
         <Text style={styles.testButtonText}>

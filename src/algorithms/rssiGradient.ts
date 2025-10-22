@@ -33,7 +33,7 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
       lat: sample.lat,
       lon: sample.lon,
       confidence: 0.1,
-      samplesUsed: 1
+      samplesUsed: 1,
     };
   }
 
@@ -49,7 +49,7 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
       lat: avgLat,
       lon: avgLon,
       confidence: 0.3,
-      samplesUsed: samples.length
+      samplesUsed: samples.length,
     };
   }
 
@@ -73,13 +73,13 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
     minLat: Math.min(...lats),
     maxLat: Math.max(...lats),
     minLon: Math.min(...lons),
-    maxLon: Math.max(...lons)
+    maxLon: Math.max(...lons),
   };
 
   // Confidence based on sample count, weight distribution, and spatial spread
   const spatialSpread = Math.max(
     bboxApprox.maxLat - bboxApprox.minLat,
-    bboxApprox.maxLon - bboxApprox.minLon
+    bboxApprox.maxLon - bboxApprox.minLon,
   );
   
   const weightVariance = weights.reduce((sum, w) => {
@@ -92,7 +92,7 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
     0.2 + // base confidence
     (samples.length / 10) * 0.3 + // more samples = higher confidence
     (1 - weightVariance) * 0.2 + // better weight distribution
-    (1 - Math.min(spatialSpread * 1000, 1)) * 0.3 // smaller spread = higher confidence
+    (1 - Math.min(spatialSpread * 1000, 1)) * 0.3, // smaller spread = higher confidence
   ));
 
   return {
@@ -100,7 +100,7 @@ export function computeWeightedCentroid(samples: RSSISample[]): LocationEstimate
     lon: weightedLon,
     confidence,
     samplesUsed: samples.length,
-    bboxApprox
+    bboxApprox,
   };
 }
 
@@ -151,7 +151,7 @@ export function combineEstimates(estimates: LocationEstimate[], alpha: number = 
     lat: combinedLat,
     lon: combinedLon,
     confidence: combinedConfidence,
-    samplesUsed: totalSamples
+    samplesUsed: totalSamples,
   };
 }
 

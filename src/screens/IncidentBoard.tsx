@@ -9,11 +9,10 @@ export default function IncidentBoard() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   
   const { 
-    getAllIncidents, 
     getSortedIncidents, 
     mark, 
     assignTo, 
-    updateIncident 
+    updateIncident, 
   } = useIncidents();
   
   const { currentPos } = usePDRFuse();
@@ -24,7 +23,7 @@ export default function IncidentBoard() {
     if (!currentPos || !incident.lat || !incident.lon) return 0;
     return haversineDistance(
       currentPos.lat, currentPos.lon,
-      incident.lat, incident.lon
+      incident.lat, incident.lon,
     );
   };
 
@@ -47,11 +46,11 @@ export default function IncidentBoard() {
 
   const getStatusColor = (status: string): string => {
     switch (status) {
-      case 'open': return '#6b7280';
-      case 'enroute': return '#f59e0b';
-      case 'arrived': return '#3b82f6';
-      case 'resolved': return '#10b981';
-      default: return '#6b7280';
+    case 'open': return '#6b7280';
+    case 'enroute': return '#f59e0b';
+    case 'arrived': return '#3b82f6';
+    case 'resolved': return '#10b981';
+    default: return '#6b7280';
     }
   };
 
@@ -65,9 +64,9 @@ export default function IncidentBoard() {
     
     let message = '';
     switch (field) {
-      case 'sound': message = 'Ses var işaretlendi'; break;
-      case 'listen': message = 'Dinleme yapıldı işaretlendi'; break;
-      case 'arrived': message = 'Ulaştım işaretlendi'; break;
+    case 'sound': message = 'Ses var işaretlendi'; break;
+    case 'listen': message = 'Dinleme yapıldı işaretlendi'; break;
+    case 'arrived': message = 'Ulaştım işaretlendi'; break;
     }
     
     Alert.alert('Durum Güncellendi', message);
@@ -78,9 +77,9 @@ export default function IncidentBoard() {
     
     let message = '';
     switch (status) {
-      case 'enroute': message = 'GİDİYORUM durumu güncellendi'; break;
-      case 'arrived': message = 'ULAŞTIM durumu güncellendi'; break;
-      case 'resolved': message = 'ÇÖZÜLDÜ durumu güncellendi'; break;
+    case 'enroute': message = 'GİDİYORUM durumu güncellendi'; break;
+    case 'arrived': message = 'ULAŞTIM durumu güncellendi'; break;
+    case 'resolved': message = 'ÇÖZÜLDÜ durumu güncellendi'; break;
     }
     
     Alert.alert('Durum Güncellendi', message);
@@ -92,11 +91,11 @@ export default function IncidentBoard() {
     
     return (
       <Pressable accessible={true}
-          accessibilityRole="button"
+        accessibilityRole="button"
         onPress={() => setSelectedIncident(item)}
         style={[
           styles.incidentItem,
-          isAssignedToMe && styles.incidentItemAssigned
+          isAssignedToMe && styles.incidentItemAssigned,
         ]}
       >
         <View style={styles.incidentHeader}>
@@ -104,7 +103,7 @@ export default function IncidentBoard() {
             <View 
               style={[
                 styles.priorityBadge, 
-                { backgroundColor: getPriorityColor(item.priority) }
+                { backgroundColor: getPriorityColor(item.priority) },
               ]}
             >
               <Text style={styles.priorityText}>
@@ -118,7 +117,7 @@ export default function IncidentBoard() {
             <View 
               style={[
                 styles.statusBadge, 
-                { backgroundColor: getStatusColor(item.status) }
+                { backgroundColor: getStatusColor(item.status) },
               ]}
             >
               <Text style={styles.statusText}>
@@ -172,7 +171,7 @@ export default function IncidentBoard() {
 
         {!isAssignedToMe && selectedIncident.status === 'open' && (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => handleAssignToMe(selectedIncident)}
             style={styles.assignButton}
           >
@@ -183,7 +182,7 @@ export default function IncidentBoard() {
         {isAssignedToMe && (
           <View style={styles.actionRow}>
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => handleSetStatus(selectedIncident, 'enroute')}
               style={[styles.actionButton, styles.enrouteButton]}
             >
@@ -191,7 +190,7 @@ export default function IncidentBoard() {
             </Pressable>
             
             <Pressable accessible={true}
-          accessibilityRole="button"
+              accessibilityRole="button"
               onPress={() => handleSetStatus(selectedIncident, 'arrived')}
               style={[styles.actionButton, styles.arrivedButton]}
             >
@@ -202,7 +201,7 @@ export default function IncidentBoard() {
 
         <View style={styles.confirmationRow}>
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => handleMarkStatus(selectedIncident, 'listen')}
             style={[styles.confirmationButton, styles.listenButton]}
           >
@@ -210,7 +209,7 @@ export default function IncidentBoard() {
           </Pressable>
           
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => handleMarkStatus(selectedIncident, 'sound')}
             style={[styles.confirmationButton, styles.soundButton]}
           >
@@ -220,7 +219,7 @@ export default function IncidentBoard() {
 
         {isAssignedToMe && (
           <Pressable accessible={true}
-          accessibilityRole="button"
+            accessibilityRole="button"
             onPress={() => handleSetStatus(selectedIncident, 'resolved')}
             style={[styles.actionButton, styles.resolvedButton]}
           >
@@ -253,11 +252,11 @@ export default function IncidentBoard() {
 
 function getStatusText(status: string): string {
   switch (status) {
-    case 'open': return 'Açık';
-    case 'enroute': return 'Yolda';
-    case 'arrived': return 'Ulaştı';
-    case 'resolved': return 'Çözüldü';
-    default: return 'Bilinmiyor';
+  case 'open': return 'Açık';
+  case 'enroute': return 'Yolda';
+  case 'arrived': return 'Ulaştı';
+  case 'resolved': return 'Çözüldü';
+  default: return 'Bilinmiyor';
   }
 }
 

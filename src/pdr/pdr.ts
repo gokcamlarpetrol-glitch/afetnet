@@ -1,6 +1,6 @@
-import { Accelerometer, Magnetometer } from "expo-sensors";
-import * as Location from "expo-location";
-import { appendTrail } from "./store";
+import { Accelerometer, Magnetometer } from 'expo-sensors';
+import * as Location from 'expo-location';
+import { appendTrail } from './store';
 
 let run=false;
 let lastGps: {lat:number;lng:number;ts:number}|null=null;
@@ -23,19 +23,21 @@ export async function startPDR(){
       if(pos && (now - (pos?.timestamp||0) < 4000)){
         // trust GPS; reset anchor
         lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, ts: now };
-        await appendTrail({ ts: now, lat: lastGps.lat, lng: lastGps.lng, src:"gps" });
+        await appendTrail({ ts: now, lat: lastGps.lat, lng: lastGps.lng, src:'gps' });
       }else if(lastGps){
         const d = 0.7; // meters/step
         const rad = (heading) * Math.PI/180;
         const dLat = (d * Math.cos(rad)) / 111320; // meters to deg
         const dLng = (d * Math.sin(rad)) / (111320 * Math.cos(lastGps.lat*Math.PI/180));
         lastGps = { lat: lastGps.lat + dLat, lng: lastGps.lng + dLng, ts: now };
-        await appendTrail({ ts: now, lat: lastGps.lat, lng: lastGps.lng, src:"pdr" });
+        await appendTrail({ ts: now, lat: lastGps.lat, lng: lastGps.lng, src:'pdr' });
       }
     }
   });
   // initial GPS anchor
-  try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ lastGps={ lat:p.coords.latitude, lng:p.coords.longitude, ts: Date.now() }; await appendTrail({ ts: Date.now(), lat:lastGps.lat, lng:lastGps.lng, src:"gps" }); } }catch{}
+  try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ lastGps={ lat:p.coords.latitude, lng:p.coords.longitude, ts: Date.now() }; await appendTrail({ ts: Date.now(), lat:lastGps.lat, lng:lastGps.lng, src:'gps' }); } }catch{
+    // Ignore GPS errors
+  }
   // stop handle
   (startPDR as any)._stop = ()=>{ run=false; m.remove(); a.remove(); };
 }
@@ -47,7 +49,7 @@ export function reset(){ stepCount = 0; }
 export function start(){ return startPDR(); }
 
 // Update state for legacy compatibility
-setInterval(() => {
+(globalThis as any).setInterval(() => {
   state.stepCount = stepCount;
   state.heading = heading;
 }, 1000);

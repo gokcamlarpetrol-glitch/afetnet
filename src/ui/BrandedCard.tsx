@@ -13,10 +13,8 @@ interface BrandedCardProps {
 
 export default function BrandedCard({
   children,
-  title,
   priority = false,
   style,
-  padding = 'lg',
   shadowDisabled = false,
 }: BrandedCardProps) {
   const cardStyles = [

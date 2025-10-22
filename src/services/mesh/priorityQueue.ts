@@ -23,7 +23,7 @@ class PriorityQueue {
   private queues: Map<Priority, QueuedMessage[]> = new Map([
     ['HIGH', []],
     ['NORMAL', []],
-    ['LOW', []]
+    ['LOW', []],
   ]);
   private seenIds: Set<string> = new Set();
   private storageKey = 'afn/mesh/queue';
@@ -49,7 +49,7 @@ class PriorityQueue {
     try {
       const data = {
         queues: Array.from(this.queues.entries()),
-        seenIds: Array.from(this.seenIds)
+        seenIds: Array.from(this.seenIds),
       };
       await AsyncStorage.setItem(this.storageKey, JSON.stringify(data));
     } catch (error) {
@@ -81,7 +81,7 @@ class PriorityQueue {
       priority,
       attempts: 0,
       lastAttempt: 0,
-      maxAttempts
+      maxAttempts,
     };
 
     this.queues.get(priority)!.push(queuedMsg);
@@ -128,7 +128,7 @@ class PriorityQueue {
     msg.lastAttempt = Date.now() + delay;
 
     // Re-queue with delay
-    setTimeout(() => {
+    (globalThis as any).setTimeout(() => {
       this.queues.get(msg.priority)!.push(msg);
       this.saveToStorage();
     }, delay);
@@ -152,7 +152,7 @@ class PriorityQueue {
       low: this.queues.get('LOW')!.length,
       total: this.queues.get('HIGH')!.length + 
              this.queues.get('NORMAL')!.length + 
-             this.queues.get('LOW')!.length
+             this.queues.get('LOW')!.length,
     };
   }
 

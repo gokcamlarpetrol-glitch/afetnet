@@ -1,8 +1,8 @@
-import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
-const DIR = "/tmp/";
-const FILE = DIR + "sonar.pings.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'sonar.pings.json';
 
 let listening=false;
 
@@ -16,13 +16,15 @@ export async function startListen(){
     // enable metering (iOS)
     await (rec as any).prepareToRecordAsync({
       isMeteringEnabled: true,
-      android: { extension: ".amr" },
-      ios: { extension: ".caf", extensionHint: ".caf" }
+      android: { extension: '.amr' },
+      ios: { extension: '.caf', extensionHint: '.caf' },
     });
     await rec.startAsync();
 
     const loop = async()=>{
-      if(!listening) { try{ await rec.stopAndUnloadAsync(); }catch{} return; }
+      if(!listening) { try{ await rec.stopAndUnloadAsync(); }catch{
+        // Ignore stop errors
+      } return; }
       const st:any = await rec.getStatusAsync();
       // metering: iOS -> st.metering is in dBFS
       if(st.metering !== undefined){
@@ -30,7 +32,7 @@ export async function startListen(){
         const peak = st.metering as number;
         if(peak > -20){ await appendDet({ ts: Date.now(), slot, peak }); }
       }
-      setTimeout(loop, 200);
+      (globalThis as any).setTimeout(loop, 200);
     };
     loop();
   }catch{
@@ -45,10 +47,12 @@ async function appendDet(d: Det){
   try{
     const ex = await FileSystem.getInfoAsync(FILE);
     const arr = ex.exists ? JSON.parse(await FileSystem.readAsStringAsync(FILE)) : [];
-    arr.push({ id:"unknown", slot:d.slot, ts:d.ts, kind:"rx", strength: 1 + Math.max(0, (d.peak+60)/40) });
+    arr.push({ id:'unknown', slot:d.slot, ts:d.ts, kind:'rx', strength: 1 + Math.max(0, (d.peak+60)/40) });
     const cutoff = Date.now()-24*3600*1000;
     await FileSystem.writeAsStringAsync(FILE, JSON.stringify(arr.filter((r:any)=>r.ts>=cutoff)));
-  }catch{}
+  }catch{
+    // Ignore file write errors
+  }
 }
 
 

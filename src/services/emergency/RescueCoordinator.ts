@@ -39,7 +39,7 @@ class RescueCoordinator extends SimpleEventEmitter {
         id: operationId,
         status: 'pending',
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       };
 
       this.activeOperations.set(operationId, operation);

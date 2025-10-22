@@ -26,7 +26,7 @@ export default function StatusIndicator({ status, label, value, animated = true 
             duration: 1000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
       pulse.start();
       return () => pulse.stop();
@@ -35,14 +35,14 @@ export default function StatusIndicator({ status, label, value, animated = true 
 
   const getStatusConfig = () => {
     switch (status) {
-      case 'active':
-        return { color: '#10b981', icon: 'checkmark-circle', bg: '#064e3b' };
-      case 'inactive':
-        return { color: '#6b7280', icon: 'close-circle', bg: '#374151' };
-      case 'warning':
-        return { color: '#f59e0b', icon: 'warning', bg: '#78350f' };
-      case 'critical':
-        return { color: '#ef4444', icon: 'alert-circle', bg: '#7f1d1d' };
+    case 'active':
+      return { color: '#10b981', icon: 'checkmark-circle', bg: '#064e3b' };
+    case 'inactive':
+      return { color: '#6b7280', icon: 'close-circle', bg: '#374151' };
+    case 'warning':
+      return { color: '#f59e0b', icon: 'warning', bg: '#78350f' };
+    case 'critical':
+      return { color: '#ef4444', icon: 'alert-circle', bg: '#7f1d1d' };
     }
   };
 
@@ -74,6 +74,7 @@ export default function StatusIndicator({ status, label, value, animated = true 
     </Animated.View>
   );
 }
+
 
 
 

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Linking,
   Pressable,
   ScrollView,
@@ -13,7 +12,6 @@ import {
   StyleSheet,
   Text,
   View,
-  ImageBackground
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { iapService, PREMIUM_PLANS, PremiumPlanId } from '../services/iapService';
@@ -22,18 +20,14 @@ import { logger } from '../utils/productionLogger';
 import { useTranslation } from 'react-i18next';
 import { IAP_PRODUCTS } from '../../shared/iap/products';
 
-const { width } = Dimensions.get('window');
-
 export default function PremiumActiveScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<PremiumPlanId>(IAP_PRODUCTS.monthly);
   const [initError, setInitError] = useState<string | null>(null);
   
   // Use premium store
   const { isPremium, currentPlan, subscriptionEndDate } = usePremium();
-  const { canUseFeature } = usePremiumFeatures();
   
   // Use translations
   const { t } = useTranslation();
@@ -53,7 +47,6 @@ export default function PremiumActiveScreen() {
 
         // Fetch available products
         const products = await iapService.getAvailableProducts();
-        setAvailableProducts(products);
 
         logger.info('📦 Products loaded:', products.length);
       } else {
@@ -125,7 +118,7 @@ export default function PremiumActiveScreen() {
       Alert.alert(
         '❌ Hata',
         'Satın alma işlemi başlatılamadı. Lütfen tekrar deneyin.',
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
     } finally {
       setIsLoading(false);
@@ -232,8 +225,8 @@ export default function PremiumActiveScreen() {
                   { icon: 'alert-circle', nameKey: 'sos_system', descKey: 'instant_help' },
                   { icon: 'shield-checkmark', nameKey: 'critical_alarm', descKey: 'silent_mode_bypass' },
                   { icon: 'medical', nameKey: 'medical_info', descKey: 'ice_data' },
-                  { icon: 'people', nameKey: 'rescue_coordination', descKey: 'sar_triage' }
-                ]
+                  { icon: 'people', nameKey: 'rescue_coordination', descKey: 'sar_triage' },
+                ],
               },
               {
                 categoryKey: 'family',
@@ -241,8 +234,8 @@ export default function PremiumActiveScreen() {
                   { icon: 'people', nameKey: 'unlimited_family_tracking', descKey: 'realtime_location' },
                   { icon: 'chatbubbles', nameKey: 'family_messaging', descKey: 'encrypted_communication' },
                   { icon: 'heart', nameKey: 'proximity_detection', descKey: 'family_alerts' },
-                  { icon: 'location', nameKey: 'family_map', descKey: 'all_members_map' }
-                ]
+                  { icon: 'location', nameKey: 'family_map', descKey: 'all_members_map' },
+                ],
               },
               {
                 categoryKey: 'maps',
@@ -250,8 +243,8 @@ export default function PremiumActiveScreen() {
                   { icon: 'map', nameKey: 'offline_maps', descKey: 'without_internet' },
                   { icon: 'navigate', nameKey: 'route_planning', descKey: 'advanced_optimization' },
                   { icon: 'trail-sign', nameKey: 'pdr_tracking', descKey: 'step_based_location' },
-                  { icon: 'location', nameKey: 'topographic_maps', descKey: 'high_resolution_offline' }
-                ]
+                  { icon: 'location', nameKey: 'topographic_maps', descKey: 'high_resolution_offline' },
+                ],
               },
               {
                 categoryKey: 'mesh',
@@ -259,8 +252,8 @@ export default function PremiumActiveScreen() {
                   { icon: 'radio', nameKey: 'ble_mesh_network', descKey: 'bluetooth_mesh' },
                   { icon: 'wifi', nameKey: 'wifi_direct', descKey: 'direct_connection' },
                   { icon: 'chatbubble', nameKey: 'p2p_messaging', descKey: 'network_free_communication' },
-                  { icon: 'repeat', nameKey: 'message_relay', descKey: 'automatic_forwarding' }
-                ]
+                  { icon: 'repeat', nameKey: 'message_relay', descKey: 'automatic_forwarding' },
+                ],
               },
               {
                 categoryKey: 'ai',
@@ -268,8 +261,8 @@ export default function PremiumActiveScreen() {
                   { icon: 'brain', nameKey: 'ai_decision_support', descKey: 'smart_analysis' },
                   { icon: 'analytics', nameKey: 'smart_recommendations', descKey: 'personalized' },
                   { icon: 'eye', nameKey: 'situation_analysis', descKey: 'risk_assessment' },
-                  { icon: 'bulb', nameKey: 'automatic_decisions', descKey: 'ai_powered' }
-                ]
+                  { icon: 'bulb', nameKey: 'automatic_decisions', descKey: 'ai_powered' },
+                ],
               },
               {
                 categoryKey: 'security',
@@ -277,9 +270,9 @@ export default function PremiumActiveScreen() {
                   { icon: 'lock-closed', nameKey: 'end_to_end_encryption', descKey: 'full_security' },
                   { icon: 'finger-print', nameKey: 'biometric_security', descKey: 'fingerprint_face' },
                   { icon: 'shield', nameKey: 'secure_storage', descKey: 'encrypted_data' },
-                  { icon: 'key', nameKey: 'secure_identity', descKey: 'afn_id_system' }
-                ]
-              }
+                  { icon: 'key', nameKey: 'secure_identity', descKey: 'afn_id_system' },
+                ],
+              },
             ].map((category, categoryIndex) => (
               <View key={categoryIndex} style={styles.categoryCard}>
                 <Text style={styles.categoryTitle}>{t(`premium.features.categories.${category.categoryKey}.title`)}</Text>
@@ -369,7 +362,7 @@ export default function PremiumActiveScreen() {
               key={planId}
               style={[
                 styles.premiumPlanCard,
-                selectedPlan === planId && styles.selectedPlanCard
+                selectedPlan === planId && styles.selectedPlanCard,
               ]}
               onPress={() => setSelectedPlan(planId as PremiumPlanId)}
               disabled={isLoading}
@@ -411,8 +404,8 @@ export default function PremiumActiveScreen() {
                 'Kurtarma Koordinasyonu - SAR ve triaj',
                 'Medikal Bilgi - ICE verileri',
                 'Enkaz Modu - Hareketsizlik algılama',
-                'Ses Ping - Enkaz altı iletişim'
-              ]
+                'Ses Ping - Enkaz altı iletişim',
+              ],
             },
             {
               category: '👨‍👩‍👧‍👦 Aile & Sosyal',
@@ -423,8 +416,8 @@ export default function PremiumActiveScreen() {
                 'Yakınlık Algılama - Aile uyarıları',
                 'Aile Haritası - Tüm üyelerin haritası',
                 'Grup Yönetimi - Takım koordinasyonu',
-                'Sosyal Güvenlik - Topluluk desteği'
-              ]
+                'Sosyal Güvenlik - Topluluk desteği',
+              ],
             },
             {
               category: '🗺️ Harita & Navigasyon',
@@ -435,8 +428,8 @@ export default function PremiumActiveScreen() {
                 'Rota Planlama - Gelişmiş optimizasyon',
                 'PDR İz Takibi - Adım bazlı konum',
                 'GPS Fusion - Çoklu sensör birleşimi',
-                'Konum Paylaşımı - Gerçek zamanlı'
-              ]
+                'Konum Paylaşımı - Gerçek zamanlı',
+              ],
             },
             {
               category: '📡 Mesh Ağ & İletişim',
@@ -447,8 +440,8 @@ export default function PremiumActiveScreen() {
                 'P2P Mesajlaşma - Şebekesiz iletişim',
                 'Mesaj Rölesi - Otomatik iletim',
                 'Çevrimdışı Senkronizasyon - Veri senkronu',
-                'Kritik Mesajlar - Öncelikli iletim'
-              ]
+                'Kritik Mesajlar - Öncelikli iletim',
+              ],
             },
             {
               category: '🤖 AI & Akıllı Sistemler',
@@ -459,8 +452,8 @@ export default function PremiumActiveScreen() {
                 'Akıllı Öneriler - Kişiselleştirilmiş',
                 'Otomatik Kararlar - AI destekli',
                 'Makine Öğrenmesi - Adaptif sistem',
-                'Öngörücü Analiz - Gelecek tahmini'
-              ]
+                'Öngörücü Analiz - Gelecek tahmini',
+              ],
             },
             {
               category: '🔒 Güvenlik & Şifreleme',
@@ -471,8 +464,8 @@ export default function PremiumActiveScreen() {
                 'Güvenli Depolama - Şifreli veri',
                 'AFN-ID Sistemi - Güvenli kimlik',
                 'Çok Faktörlü Doğrulama - 2FA',
-                'Güvenli İletişim - Şifreli mesajlar'
-              ]
+                'Güvenli İletişim - Şifreli mesajlar',
+              ],
             },
             {
               category: '🎯 Gelişmiş Özellikler',
@@ -483,9 +476,9 @@ export default function PremiumActiveScreen() {
                 'Eğitim Simülasyonları - Hazırlık',
                 'Raporlama & Analitik - Detaylı analiz',
                 'Erişilebilirlik - Özel ihtiyaçlar',
-                'Çok Dilli Destek - 20+ dil'
-              ]
-            }
+                'Çok Dilli Destek - 20+ dil',
+              ],
+            },
           ].map((category, index) => (
             <View key={index} style={styles.featureCategoryCard}>
               <View style={[styles.categoryHeader, { backgroundColor: category.color + '15' }]}>
@@ -569,22 +562,22 @@ export default function PremiumActiveScreen() {
           Abonelikleri yönetmek ve otomatik yenilemeyi kapatmak için satın alma 
           işleminden sonra Hesap Ayarlarınıza gidin.{'\n\n'}
           <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]} 
-                onPress={() => {
-                  Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html').catch(err => {
-                    Alert.alert('Hata', 'Gizlilik Politikası açılamadı');
-                    logger.error('Failed to open privacy policy:', err);
-                  });
-                }}>
+            onPress={() => {
+              Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html').catch(err => {
+                Alert.alert('Hata', 'Gizlilik Politikası açılamadı');
+                logger.error('Failed to open privacy policy:', err);
+              });
+            }}>
             Gizlilik Politikası
           </Text>
           {' • '}
           <Text style={[styles.termsText, { color: '#3B82F6', textDecorationLine: 'underline' }]}
-                onPress={() => {
-                  Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html').catch(err => {
-                    Alert.alert('Hata', 'Kullanım Koşulları açılamadı');
-                    logger.error('Failed to open terms of service:', err);
-                  });
-                }}>
+            onPress={() => {
+              Linking.openURL('https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html').catch(err => {
+                Alert.alert('Hata', 'Kullanım Koşulları açılamadı');
+                logger.error('Failed to open terms of service:', err);
+              });
+            }}>
             Kullanım Koşulları
           </Text>
         </Text>
@@ -597,60 +590,60 @@ const styles = StyleSheet.create({
   // Original container styles
   container: {
     flex: 1,
-    backgroundColor: '#0F172A'
+    backgroundColor: '#0F172A',
   },
   content: {
     padding: 16,
-    alignItems: 'center'
+    alignItems: 'center',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F172A'
+    backgroundColor: '#0F172A',
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#94A3B8'
+    color: '#94A3B8',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-    backgroundColor: '#0F172A'
+    backgroundColor: '#0F172A',
   },
   errorTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
     marginTop: 16,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   errorMessage: {
     fontSize: 16,
     color: '#94A3B8',
     marginTop: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   retryButton: {
     marginTop: 24,
     backgroundColor: '#3B82F6',
     paddingHorizontal: 32,
     paddingVertical: 16,
-    borderRadius: 12
+    borderRadius: 12,
   },
   retryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: 'bold'
+    fontWeight: 'bold',
   },
 
   // Premium Active Styles
   premiumActiveContainer: {
     flex: 1,
-    backgroundColor: '#0F172A'
+    backgroundColor: '#0F172A',
   },
   premiumHeader: {
     backgroundColor: '#1E293B',
@@ -658,10 +651,10 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155'
+    borderBottomColor: '#334155',
   },
   premiumHeaderContent: {
-    alignItems: 'center'
+    alignItems: 'center',
   },
   premiumBadge: {
     flexDirection: 'row',
@@ -670,72 +663,72 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    marginBottom: 16
+    marginBottom: 16,
   },
   premiumBadgeText: {
     color: '#FFD700',
     fontSize: 12,
     fontWeight: '700',
-    marginLeft: 6
+    marginLeft: 6,
   },
   premiumTitle: {
     fontSize: 32,
     fontWeight: '900',
     color: '#FFFFFF',
     marginBottom: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   premiumSubtitle: {
     fontSize: 16,
     color: '#94A3B8',
     marginBottom: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   currentPlan: {
     fontSize: 14,
     color: '#10B981',
-    fontWeight: '600'
+    fontWeight: '600',
   },
   premiumScrollView: {
     flex: 1,
-    paddingHorizontal: 20
+    paddingHorizontal: 20,
   },
   featuresShowcase: {
-    marginTop: 24
+    marginTop: 24,
   },
   showcaseTitle: {
     fontSize: 24,
     fontWeight: '800',
     color: '#FFFFFF',
     marginBottom: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   showcaseSubtitle: {
     fontSize: 16,
     color: '#94A3B8',
     marginBottom: 24,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   categoryCard: {
     backgroundColor: '#1E293B',
     borderRadius: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: '#334155',
   },
   categoryTitle: {
     fontSize: 18,
     fontWeight: '700',
     padding: 16,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   featuresGrid: {
-    padding: 16
+    padding: 16,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12
+    marginBottom: 12,
   },
   featureIconContainer: {
     width: 32,
@@ -744,35 +737,35 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12
+    marginRight: 12,
   },
   featureContent: {
-    flex: 1
+    flex: 1,
   },
   featureName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-    marginBottom: 2
+    marginBottom: 2,
   },
   featureDesc: {
     fontSize: 14,
-    color: '#94A3B8'
+    color: '#94A3B8',
   },
   premiumStats: {
-    marginTop: 24
+    marginTop: 24,
   },
   statsTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 16,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
   },
   statCard: {
     width: '48%',
@@ -782,24 +775,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: '#334155',
   },
   statNumber: {
     fontSize: 24,
     fontWeight: '800',
     color: '#10B981',
-    marginBottom: 4
+    marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
     color: '#94A3B8',
-    textAlign: 'center'
+    textAlign: 'center',
   },
 
   // Purchase Screen Styles
   purchaseContainer: {
     flex: 1,
-    backgroundColor: '#0F172A'
+    backgroundColor: '#0F172A',
   },
   heroSection: {
     backgroundColor: '#1E293B',
@@ -807,10 +800,10 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155'
+    borderBottomColor: '#334155',
   },
   heroContent: {
-    alignItems: 'center'
+    alignItems: 'center',
   },
   heroBadge: {
     flexDirection: 'row',
@@ -819,54 +812,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    marginBottom: 16
+    marginBottom: 16,
   },
   heroBadgeText: {
     color: '#FFD700',
     fontSize: 12,
     fontWeight: '700',
-    marginLeft: 6
+    marginLeft: 6,
   },
   heroTitle: {
     fontSize: 32,
     fontWeight: '900',
     color: '#FFFFFF',
     marginBottom: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   heroSubtitle: {
     fontSize: 18,
     color: '#10B981',
     marginBottom: 8,
     textAlign: 'center',
-    fontWeight: '700'
+    fontWeight: '700',
   },
   heroDescription: {
     fontSize: 16,
     color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 24,
-    marginTop: 8
+    marginTop: 8,
   },
   purchaseScrollView: {
     flex: 1,
-    paddingHorizontal: 20
+    paddingHorizontal: 20,
   },
   premiumPlansSection: {
-    marginTop: 24
+    marginTop: 24,
   },
   sectionTitle: {
     fontSize: 24,
     fontWeight: '800',
     color: '#FFFFFF',
     marginBottom: 16,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   sectionSubtitle: {
     fontSize: 16,
     color: '#94A3B8',
     marginBottom: 24,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   premiumPlanCard: {
     backgroundColor: '#1E293B',
@@ -874,43 +867,43 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 2,
     borderColor: '#334155',
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
   selectedPlanCard: {
     borderColor: '#3B82F6',
-    backgroundColor: 'rgba(59, 130, 246, 0.1)'
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
   },
   planHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20
+    padding: 20,
   },
   planInfo: {
-    flex: 1
+    flex: 1,
   },
   planTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 4
+    marginBottom: 4,
   },
   planDescription: {
     fontSize: 14,
-    color: '#94A3B8'
+    color: '#94A3B8',
   },
   priceSection: {
-    alignItems: 'flex-end'
+    alignItems: 'flex-end',
   },
   planPrice: {
     fontSize: 28,
     fontWeight: '800',
     color: '#10B981',
-    marginBottom: 2
+    marginBottom: 2,
   },
   planCurrency: {
     fontSize: 14,
-    color: '#94A3B8'
+    color: '#94A3B8',
   },
   selectedIndicator: {
     flexDirection: 'row',
@@ -919,13 +912,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: '#334155'
+    borderTopColor: '#334155',
   },
   selectedText: {
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '600',
-    color: '#10B981'
+    color: '#10B981',
   },
 
   // Feature Categories
@@ -935,41 +928,41 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#334155',
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
   categoryHeader: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155'
+    borderBottomColor: '#334155',
   },
   categoryTitleText: {
     fontSize: 18,
     fontWeight: '700',
-    textAlign: 'center'
+    textAlign: 'center',
   },
   categoryFeatures: {
-    padding: 16
+    padding: 16,
   },
   categoryFeatureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12
+    marginBottom: 12,
   },
   categoryFeatureText: {
     fontSize: 14,
     color: '#E2E8F0',
     marginLeft: 8,
-    flex: 1
+    flex: 1,
   },
 
   // Premium Stats Section
   premiumStatsSection: {
-    marginTop: 24
+    marginTop: 24,
   },
   purchaseStatsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
   },
   purchaseStatItem: {
     width: '48%',
@@ -979,18 +972,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: '#334155',
   },
   purchaseStatNumber: {
     fontSize: 24,
     fontWeight: '800',
     color: '#10B981',
-    marginBottom: 4
+    marginBottom: 4,
   },
   purchaseStatLabel: {
     fontSize: 12,
     color: '#94A3B8',
-    textAlign: 'center'
+    textAlign: 'center',
   },
 
   // Buttons
@@ -1006,31 +999,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8
+    elevation: 8,
   },
   purchaseButtonText: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '800',
-    marginBottom: 4
+    marginBottom: 4,
   },
   purchaseButtonSubtext: {
     color: '#FFFFFF',
     fontSize: 14,
-    opacity: 0.9
+    opacity: 0.9,
   },
   restoreButton: {
     padding: 16,
     marginBottom: 24,
-    alignItems: 'center'
+    alignItems: 'center',
   },
   restoreButtonText: {
     color: '#3B82F6',
     fontSize: 16,
-    fontWeight: '600'
+    fontWeight: '600',
   },
   disabledButton: {
-    opacity: 0.6
+    opacity: 0.6,
   },
   termsText: {
     fontSize: 12,
@@ -1038,6 +1031,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     marginHorizontal: 20,
-    marginBottom: 32
-  }
+    marginBottom: 32,
+  },
 });

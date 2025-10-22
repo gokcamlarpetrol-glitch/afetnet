@@ -46,7 +46,7 @@ class QoSManager {
 
   private startBatteryMonitoring(): void {
     // Check battery level every 30 seconds
-    setInterval(async () => {
+    (globalThis as any).setInterval(async () => {
       try {
         const batteryLevel = await Battery.getBatteryLevelAsync();
         this.lastBatteryLevel = Math.round(batteryLevel * 100);
@@ -163,7 +163,7 @@ class QoSManager {
     isHighTemp: boolean;
     canActivateMesh: boolean;
     rateLimits: Record<MsgType, { tokens: number; capacity: number; timeUntilNext: number }>;
-  } {
+    } {
     const rateLimits: Record<MsgType, { tokens: number; capacity: number; timeUntilNext: number }> = {} as any;
     
     for (const [type, bucket] of this.buckets.entries()) {

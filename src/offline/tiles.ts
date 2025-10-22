@@ -56,7 +56,7 @@ export async function prefetchTiles(
   radiusKm: number, 
   minZoom: number, 
   maxZoom: number,
-  onProgress?: (downloaded: number, total: number) => void
+  onProgress?: (_downloaded: number, _total: number) => void,
 ): Promise<void> {
   const netInfo = await NetInfo.fetch();
   if (!netInfo.isConnected) {

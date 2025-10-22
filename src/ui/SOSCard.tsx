@@ -10,15 +10,15 @@ export default function SOSCard() {
     try {
       const c = await getCoords();
       enqueue({
-        type: "help",
-        note: "SOS Yardım Talebi",
+        type: 'help',
+        note: 'SOS Yardım Talebi',
         people: 1,
-        priority: "high",
+        priority: 'high',
         lat: c.lat, 
         lon: c.lon,
       });
-    } catch (error) {
-      console.error('SOS send error:', error);
+    } catch {
+      // SOS send error (silently ignored to not interrupt user)
     }
   };
 
@@ -35,5 +35,5 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#12162a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#20253b' },
   h: { color: '#b0bbd6', fontSize: 14, marginBottom: 8, fontWeight: '700' },
   btn: { backgroundColor: '#e15058', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.7 }
+  btnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.7 },
 });

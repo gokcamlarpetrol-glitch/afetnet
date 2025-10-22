@@ -24,7 +24,7 @@ class MeshRelay {
     this.loadSeenIds();
   }
 
-  enqueue(message: MeshMsg, priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM') {
+  enqueue(message: MeshMsg) {
     this.messageQueue.push(message);
     this.processQueue();
   }
@@ -104,20 +104,21 @@ class MeshRelay {
 
   private emitToUI(msg: MeshMsg) {
     switch (msg.t) {
-      case 'SOS':
-        this.events.onSOS?.(msg);
-        break;
-      case 'ACK':
-        this.events.onACK?.(msg);
-        break;
-      case 'DM':
-        // Try to decrypt
-        const decrypted = this.decryptDM(msg);
-        this.events.onDM?.(msg, decrypted || undefined);
-        break;
-      case 'VP':
-        this.events.onVP?.(msg);
-        break;
+    case 'SOS':
+      this.events.onSOS?.(msg);
+      break;
+    case 'ACK':
+      this.events.onACK?.(msg);
+      break;
+    case 'DM': {
+      // Try to decrypt
+      const decrypted = this.decryptDM(msg);
+      this.events.onDM?.(msg, decrypted || undefined);
+      break;
+    }
+    case 'VP':
+      this.events.onVP?.(msg);
+      break;
     }
   }
 
@@ -139,7 +140,7 @@ class MeshRelay {
     // Add backoff for NORMAL/LOW messages
     const backoff = priority === 'HIGH' ? 0 : Math.random() * 1000;
     
-    setTimeout(() => {
+    (globalThis as any).setTimeout(() => {
       const encoded = encodeMeshMsg(msg);
       this.sendToBLE(encoded);
     }, backoff);
@@ -177,8 +178,8 @@ class MeshRelay {
   private sendToBLE(data: string) {
     // This would integrate with the existing BLE layer
     // For now, we'll emit to a global event system
-    if ((global as typeof globalThis).bleRelay) {
-      (global as typeof globalThis).bleRelay.broadcastText(data);
+    if ((globalThis as any).bleRelay) {
+      (globalThis as any).bleRelay.broadcastText(data);
     }
   }
 
@@ -205,7 +206,6 @@ class MeshRelay {
       // Encrypt for group
       const group = pairing.groups.find(g => g.id === groupId);
       if (group?.sharedKeyB64) {
-        const groupKey = decodeBase64(group.sharedKeyB64);
         // Encryption not available - would need cryptoGroup implementation
         bodyB64 = plaintext;
         nonceB64 = '';
@@ -221,7 +221,7 @@ class MeshRelay {
       enc: encrypted as true,
       bodyB64,
       nonceB64,
-      ttl: 3
+      ttl: 3,
     };
 
     meshQueue.enqueue(msg, 'NORMAL');
@@ -240,7 +240,7 @@ class MeshRelay {
         idx: i,
         total: chunks.length,
         bytesB64: chunks[i],
-        ttl: 1 // Only 1 hop for voice ping (near-only)
+        ttl: 1, // Only 1 hop for voice ping (near-only)
       };
 
       meshQueue.enqueue(msg, 'LOW');
@@ -256,7 +256,7 @@ class MeshRelay {
       t: 'ACK',
       id: msgId,
       ref: refId,
-      ttl: 3
+      ttl: 3,
     };
 
     meshQueue.enqueue(msg, 'HIGH');
@@ -273,7 +273,7 @@ class MeshRelay {
       lat,
       lon,
       statuses,
-      ttl: 5
+      ttl: 5,
     };
 
     meshQueue.enqueue(msg, 'HIGH');

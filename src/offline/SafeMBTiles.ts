@@ -1,23 +1,23 @@
 // Safe MBTiles wrapper - NO EXTERNAL DEPENDENCIES
 // Apple Store quality implementation without any Node.js dependencies
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from 'expo-file-system';
 import { logger } from '../utils/productionLogger';
 
 let SQLite: any = null;
 let TcpSocket: any = null;
 
 try {
-  SQLite = require('react-native-sqlite-storage');
+  SQLite = (globalThis as any).require('react-native-sqlite-storage');
   if (SQLite) {
     SQLite.enablePromise(true);
   }
-} catch (e) {
+} catch {
   logger.warn('react-native-sqlite-storage not available');
 }
 
 try {
-  TcpSocket = require('react-native-tcp-socket');
-} catch (e) {
+  TcpSocket = (globalThis as any).require('react-native-tcp-socket');
+} catch {
   logger.warn('react-native-tcp-socket not available');
 }
 
@@ -31,23 +31,23 @@ const mimeTypes: Record<string, string> = {
   '.txt': 'text/plain',
   '.html': 'text/html',
   '.css': 'text/css',
-  '.js': 'application/javascript'
+  '.js': 'application/javascript',
 };
 
 const mime = {
-  lookup: (ext: string) => mimeTypes[ext] || 'application/octet-stream'
+  lookup: (ext: string) => mimeTypes[ext] || 'application/octet-stream',
 };
 
 type ServerHandle = { close: () => void };
 let db: any = null;
-let fmt: "png"|"jpg"|"pbf" = "png";
+let fmt: 'png'|'jpg'|'pbf' = 'png';
 let server: any = null;
 
 function httpResp(status: number, headers: Record<string, string>, body: Uint8Array | string) {
-  const h = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\r\n");
+  const h = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n');
   const head = `HTTP/1.1 ${status} OK\r\n${h}\r\n\r\n`;
-  if (typeof body === "string") {return Buffer.concat([Buffer.from(head, "utf8"), Buffer.from(body, "utf8")]);}
-  return Buffer.concat([Buffer.from(head, "utf8"), Buffer.from(body)]);
+  if (typeof body === 'string') {return (globalThis as any).Buffer.concat([(globalThis as any).Buffer.from(head, 'utf8'), (globalThis as any).Buffer.from(body, 'utf8')]);}
+  return (globalThis as any).Buffer.concat([(globalThis as any).Buffer.from(head, 'utf8'), (globalThis as any).Buffer.from(body)]);
 }
 
 export const SafeMBTiles = {
@@ -62,15 +62,15 @@ export const SafeMBTiles = {
     try {
       // Copy MBTiles to app doc dir if content:// or asset; SQLite wants local path
       let path = uri;
-      if (!uri.startsWith("/tmp/")) {
-        const dest = "/tmp/mbtiles/current.mbtiles";
-        await FileSystem.makeDirectoryAsync("/tmp/mbtiles/", { intermediates: true }).catch(() => {});
+      if (!uri.startsWith('/tmp/')) {
+        const dest = '/tmp/mbtiles/current.mbtiles';
+        await FileSystem.makeDirectoryAsync('/tmp/mbtiles/', { intermediates: true }).catch(() => {});
         await FileSystem.copyAsync({ from: uri, to: dest });
         path = dest;
       }
-      db = await SQLite.openDatabase({ name: path, location: "default", createFromLocation: path });
-      const rf = await db.executeSql("SELECT value FROM metadata WHERE name='format'");
-      fmt = (rf[0].rows.length ? rf[0].rows.item(0).value : "png");
+      db = await SQLite.openDatabase({ name: path, location: 'default', createFromLocation: path });
+      const rf = await db.executeSql('SELECT value FROM metadata WHERE name=\'format\'');
+      fmt = (rf[0].rows.length ? rf[0].rows.item(0).value : 'png');
     } catch (e) {
       logger.warn('Failed to open MBTiles database:', e);
     }
@@ -83,12 +83,12 @@ export const SafeMBTiles = {
       // MBTiles uses TMS; convert XYZ y->TMS
       const yTms = (1 << z) - 1 - y;
       const res = await db.executeSql(
-        "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=? LIMIT 1",
-        [z, x, yTms]
+        'SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=? LIMIT 1',
+        [z, x, yTms],
       );
       if (!res[0].rows.length) {return null;}
       const base64 = res[0].rows.item(0).tile_data as string;
-      return Buffer.from(base64, "base64");
+      return (globalThis as any).Buffer.from(base64, 'base64');
     } catch (e) {
       logger.warn('Failed to read tile:', e);
       return null;
@@ -112,30 +112,30 @@ export const SafeMBTiles = {
     
     try {
       server = TcpSocket.createServer(async (socket: any) => {
-        socket.on("data", async (raw: Buffer) => {
-          const req = raw.toString("utf8");
-          const first = req.split("\r\n")[0] || "";
+        socket.on('data', async (raw: (globalThis as any).Buffer) => {
+          const req = raw.toString('utf8');
+          const first = req.split('\r\n')[0] || '';
           const p = SafeMBTiles.parsePath(first);
           if (!p) {
-            const body = "AfetNet MBTiles Server";
-            socket.write(httpResp(200, { "Content-Type": "text/plain", "Content-Length": String(body.length) }, body));
+            const body = 'AfetNet MBTiles Server';
+            socket.write(httpResp(200, { 'Content-Type': 'text/plain', 'Content-Length': String(body.length) }, body));
             return;
           }
           try {
             const tile = await SafeMBTiles.readTile(p.z, p.x, p.y);
             if (!tile) {
-              const body = "Not Found";
-              socket.write(httpResp(404, { "Content-Type": "text/plain", "Content-Length": String(body.length) }, body));
+              const body = 'Not Found';
+              socket.write(httpResp(404, { 'Content-Type': 'text/plain', 'Content-Length': String(body.length) }, body));
               return;
             }
             const ctype = mime.lookup(`.${p.ext}`);
-            socket.write(httpResp(200, { "Content-Type": ctype, "Content-Length": String(tile.byteLength), "Cache-Control": "max-age=3600" }, tile));
+            socket.write(httpResp(200, { 'Content-Type': ctype, 'Content-Length': String(tile.byteLength), 'Cache-Control': 'max-age=3600' }, tile));
           } catch {
-            const body = "Error";
-            socket.write(httpResp(500, { "Content-Type": "text/plain", "Content-Length": String(body.length) }, body));
+            const body = 'Error';
+            socket.write(httpResp(500, { 'Content-Type': 'text/plain', 'Content-Length': String(body.length) }, body));
           }
         });
-      }).listen({ port: 17311, host: "127.0.0.1" });
+      }).listen({ port: 17311, host: '127.0.0.1' });
       
       return { close: () => { try { server.close(); } catch {} server = null; } };
     } catch (e) {
@@ -150,8 +150,8 @@ export const SafeMBTiles = {
   },
 
   localTileUrlTemplate: () => {
-    return "http://127.0.0.1:17311/tiles/{z}/{x}/{y}.png";
+    return 'http://127.0.0.1:17311/tiles/{z}/{x}/{y}.png';
   },
 
-  currentFormat: () => fmt
+  currentFormat: () => fmt,
 };

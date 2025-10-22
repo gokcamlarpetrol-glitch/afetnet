@@ -1,4 +1,4 @@
-import { decodeULB } from "./codec";
+import { decodeULB } from './codec';
 
 type Subscriber = (text: string) => void;
 let subscribers: Subscriber[] = [];

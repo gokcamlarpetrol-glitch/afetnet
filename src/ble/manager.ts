@@ -39,9 +39,9 @@ class AfetBle {
     } else {
       try {
         // Dynamic import for development builds
-        const { BleManager } = require('react-native-ble-plx');
+        const { BleManager } = (globalThis as any).require('react-native-ble-plx');
         this.manager = new BleManager({
-          restoreStateIdentifier: "afetnet-ble",
+          restoreStateIdentifier: 'afetnet-ble',
           restoreStateFunction: () => {},
         });
         logger.debug('🔧 BLE Native Mode: Development build detected');

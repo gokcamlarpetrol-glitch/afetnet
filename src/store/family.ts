@@ -1,13 +1,13 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 export type FamilyMember = {
   id: string;
   name: string;
   emoji?: string;
-  status: "ok" | "need" | "unknown";
+  status: 'ok' | 'need' | 'unknown';
   lastSeen?: number;
   // Yeni alanlar
   afnId?: string; // Benzersiz AFN-ID (örn: AFN-1A2B3C4D)
@@ -36,16 +36,24 @@ type State = {
   myAfnId: string; // Kullanıcının kendi AFN-ID'si
   
   // Basic actions
-  add(m: Omit<FamilyMember, "id">): void;
+   
+  add(m: Omit<FamilyMember, 'id'>): void;
+   
   update(id: string, patch: Partial<FamilyMember>): void;
+   
   remove(id: string): void;
   clear(): void;
   
   // Advanced actions
+   
   addByAfnId(afnId: string, name: string): Promise<{ success: boolean; member?: FamilyMember; error?: string }>;
+   
   addByQR(qrData: string): Promise<{ success: boolean; member?: FamilyMember; error?: string }>;
+   
   verifyMember(id: string): void;
+   
   updateLocation(id: string, lat: number, lon: number, accuracy?: number): void;
+   
   getMemberByAfnId(afnId: string): FamilyMember | undefined;
   getOnlineMembers(): FamilyMember[];
   getNeedHelpMembers(): FamilyMember[];
@@ -76,7 +84,7 @@ export const useFamily = create<State>()(
               isVerified: m.isVerified ?? false,
               connectionMethod: m.connectionMethod || 'manual',
             },
-            ...s.list
+            ...s.list,
           ],
         })),
 
@@ -138,7 +146,7 @@ export const useFamily = create<State>()(
       verifyMember: (id) =>
         set((s) => ({
           list: s.list.map((x) =>
-            x.id === id ? { ...x, isVerified: true } : x
+            x.id === id ? { ...x, isVerified: true } : x,
           ),
         })),
 
@@ -147,11 +155,11 @@ export const useFamily = create<State>()(
           list: s.list.map((x) =>
             x.id === id
               ? {
-                  ...x,
-                  location: { lat, lon, timestamp: Date.now(), accuracy },
-                  lastSeen: Date.now(),
-                }
-              : x
+                ...x,
+                location: { lat, lon, timestamp: Date.now(), accuracy },
+                lastSeen: Date.now(),
+              }
+              : x,
           ),
         })),
 
@@ -162,7 +170,7 @@ export const useFamily = create<State>()(
       getOnlineMembers: () => {
         const now = Date.now();
         return get().list.filter(
-          (m) => m.lastSeen && now - m.lastSeen < 300000 // 5 dakika içinde
+          (m) => m.lastSeen && now - m.lastSeen < 300000, // 5 dakika içinde
         );
       },
 
@@ -243,9 +251,9 @@ export const useFamily = create<State>()(
       },
     }),
     {
-      name: "afn/family/v2",
+      name: 'afn/family/v2',
       storage: createJSONStorage(() => AsyncStorage),
       version: 2,
-    }
-  )
+    },
+  ),
 );

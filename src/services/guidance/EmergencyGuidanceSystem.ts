@@ -48,7 +48,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
   private guidanceHistory: EmergencyGuidance[] = [];
   private emergencyScenarios = new Map<string, EmergencyScenario>();
   private isActive = false;
-  private guidanceInterval: NodeJS.Timeout | null = null;
+  private guidanceInterval: any = null;
 
   constructor() {
     super();
@@ -84,7 +84,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Başınızı koruyun', 'Sarsıntı bitene kadar bekleyin'],
-            warnings: ['Asansör kullanmayın', 'Merdivenlerden kaçının']
+            warnings: ['Asansör kullanmayın', 'Merdivenlerden kaçının'],
           },
           {
             id: 'step_2',
@@ -96,7 +96,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Çanta hazır değilse su ve yiyecek alın'],
-            warnings: ['Çok fazla eşya almayın']
+            warnings: ['Çok fazla eşya almayın'],
           },
           {
             id: 'step_3',
@@ -108,7 +108,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Önce kapıyı kontrol edin', 'Duman varsa yere yakın kalın'],
-            warnings: ['Asansör kullanmayın', 'Acil çıkışları kullanın']
+            warnings: ['Asansör kullanmayın', 'Acil çıkışları kullanın'],
           },
           {
             id: 'step_4',
@@ -120,7 +120,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Elektrik direklerinden uzak durun', 'Yüksek binalardan kaçının'],
-            warnings: ['Artçı sarsıntılara dikkat edin']
+            warnings: ['Artçı sarsıntılara dikkat edin'],
           },
           {
             id: 'step_5',
@@ -132,15 +132,15 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Sakin konuşun', 'Konumunuzu belirtin'],
-            warnings: ['Telefon hatları yoğun olabilir']
-          }
+            warnings: ['Telefon hatları yoğun olabilir'],
+          },
         ],
         estimatedDuration: 10,
         priority: 10,
         location: { lat: 0, lon: 0 },
         timestamp: Date.now(),
-        completed: false
-      }
+        completed: false,
+      },
     });
 
     // Fire scenario
@@ -168,7 +168,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Dumanın rengine dikkat edin', 'Rüzgarın yönünü belirleyin'],
-            warnings: ['Kapıları dokunarak kontrol edin']
+            warnings: ['Kapıları dokunarak kontrol edin'],
           },
           {
             id: 'fire_step_2',
@@ -180,7 +180,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Alarm çalışmıyorsa sesli uyarı yapın'],
-            warnings: ['Zaman kaybetmeyin']
+            warnings: ['Zaman kaybetmeyin'],
           },
           {
             id: 'fire_step_3',
@@ -192,7 +192,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Alternatif yollar belirleyin', 'Kapıları kontrol edin'],
-            warnings: ['Asansör kullanmayın', 'Dumanlı alanlardan kaçının']
+            warnings: ['Asansör kullanmayın', 'Dumanlı alanlardan kaçının'],
           },
           {
             id: 'fire_step_4',
@@ -204,7 +204,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Yere yakın kalın', 'Nefesinizi tutun'],
-            warnings: ['Kapıları kapatın', 'Koşmayın']
+            warnings: ['Kapıları kapatın', 'Koşmayın'],
           },
           {
             id: 'fire_step_5',
@@ -216,15 +216,15 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
             completed: false,
             critical: true,
             tips: ['Yangının yerini belirtin', 'Yaralı varsa söyleyin'],
-            warnings: ['Önce kendinizi kurtarın']
-          }
+            warnings: ['Önce kendinizi kurtarın'],
+          },
         ],
         estimatedDuration: 8,
         priority: 9,
         location: { lat: 0, lon: 0 },
         timestamp: Date.now(),
-        completed: false
-      }
+        completed: false,
+      },
     });
 
     logger.debug('✅ Emergency scenarios initialized');
@@ -239,7 +239,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       this.isActive = true;
 
       // Start guidance monitoring
-      this.guidanceInterval = setInterval(() => {
+      this.guidanceInterval = (globalThis as any).setInterval(() => {
         this.performGuidanceMonitoring();
       }, 10000); // Every 10 seconds
 
@@ -288,7 +288,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
         id: `guidance_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         location,
         timestamp: Date.now(),
-        completed: false
+        completed: false,
       };
 
       // Add to active guidance
@@ -304,7 +304,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       emergencyLogger.logSystem('info', 'Emergency guidance triggered', {
         guidanceId: guidance.id,
         type: guidance.type,
-        severity: guidance.severity
+        severity: guidance.severity,
       });
 
       logger.debug(`✅ Emergency guidance triggered: ${guidance.title}`);
@@ -411,7 +411,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
   private async performGuidanceMonitoring(): Promise<void> {
     try {
       // Check for completed guidance
-      for (const [guidanceId, guidance] of this.activeGuidance) {
+      for (const [, guidance] of this.activeGuidance) {
         const timeElapsed = Date.now() - guidance.timestamp;
         const estimatedDuration = guidance.estimatedDuration * 60 * 1000; // Convert to milliseconds
 
@@ -459,7 +459,7 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
       this.isActive = false;
 
       if (this.guidanceInterval) {
-        clearInterval(this.guidanceInterval);
+        (globalThis as any).clearInterval(this.guidanceInterval);
         this.guidanceInterval = null;
       }
 
@@ -480,12 +480,12 @@ class EmergencyGuidanceSystem extends SimpleEventEmitter {
     activeGuidance: number;
     totalScenarios: number;
     completedGuidance: number;
-  } {
+    } {
     return {
       isActive: this.isActive,
       activeGuidance: this.activeGuidance.size,
       totalScenarios: this.emergencyScenarios.size,
-      completedGuidance: this.guidanceHistory.filter(g => g.completed).length
+      completedGuidance: this.guidanceHistory.filter(g => g.completed).length,
     };
   }
 }

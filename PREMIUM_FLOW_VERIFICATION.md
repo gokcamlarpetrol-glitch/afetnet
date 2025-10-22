@@ -370,3 +370,5 @@ if (status.expiryDate && status.expiryDate < Date.now()) {
 - Lifetime alır → **Sonsuza kadar premium, hiç bitmez**
 
 
+
+

@@ -498,3 +498,5 @@ Bitiş: 20.11.2025 (veya "Sınırsız" for lifetime)
 **Sonuç**: ✅ TÜM SORUNLAR ÇÖZÜLDÜ
 
 
+
+

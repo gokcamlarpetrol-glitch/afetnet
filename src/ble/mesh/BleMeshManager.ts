@@ -9,13 +9,13 @@ let BleManager: any = null;
 // let Service: any = null; // Not used
 
 try {
-  const blePlx = require('react-native-ble-plx');
+  const blePlx = (globalThis as any).require('react-native-ble-plx');
   BleManager = blePlx.BleManager;
   // Device = blePlx.Device; // Not used
   // State = blePlx.State; // Not used
   // Characteristic = blePlx.Characteristic; // Not used
   // Service = blePlx.Service; // Not used
-} catch (e) {
+} catch {
   logger.warn('react-native-ble-plx not available, using fallback');
 }
 
@@ -146,11 +146,11 @@ export class BleMeshManager extends SimpleEventEmitter {
           if (device) {
             this.handleDeviceFound(device);
           }
-        }
+        },
       );
 
       // Stop scanning after timeout
-      setTimeout(() => {
+      (globalThis as any).setTimeout(() => {
         if (this.isScanning) {
           this.stopScanning();
         }
@@ -257,7 +257,7 @@ export class BleMeshManager extends SimpleEventEmitter {
           if (characteristic?.value) {
             this.handleIncomingMessage(characteristic.value, meshDevice);
           }
-        }
+        },
       );
 
     } catch (error) {
@@ -345,7 +345,7 @@ export class BleMeshManager extends SimpleEventEmitter {
       await device.device.writeCharacteristicWithResponseForService(
         this.config.serviceUUID,
         this.config.characteristicUUID,
-        Buffer.from(data).toString('base64')
+        (globalThis as any).Buffer.from(data).toString('base64'),
       );
 
       logger.debug(`Message sent to ${device.name}`);
@@ -360,7 +360,7 @@ export class BleMeshManager extends SimpleEventEmitter {
   private startHeartbeat(): void {
     if (this.heartbeatInterval) return;
 
-    this.heartbeatInterval = setInterval(() => {
+    this.heartbeatInterval = (globalThis as any).setInterval(() => {
       this.sendHeartbeat();
     }, this.config.heartbeatInterval);
 
@@ -369,7 +369,7 @@ export class BleMeshManager extends SimpleEventEmitter {
 
   private stopHeartbeat(): void {
     if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
+      (globalThis as any).clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined as any;
       logger.debug('Heartbeat stopped');
     }

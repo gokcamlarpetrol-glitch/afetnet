@@ -31,7 +31,7 @@ export class PaymentService {
   }> {
     return {
       clientSecret: '',
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 
@@ -42,7 +42,7 @@ export class PaymentService {
   }> {
     return {
       success: false,
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 
@@ -53,7 +53,7 @@ export class PaymentService {
   }> {
     return {
       verified: false,
-      error: 'Premium features coming soon with Apple In-App Purchase'
+      error: 'Premium features coming soon with Apple In-App Purchase',
     };
   }
 }

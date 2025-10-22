@@ -1,34 +1,38 @@
-import * as Battery from "expo-battery";
-import * as Location from "expo-location";
+import * as Battery from 'expo-battery';
+import * as Location from 'expo-location';
 // import * as Beacon from "../ble/bridge"; // Removed to break circular dependency
-import { note as logNote } from "../diag/autoLog";
+import { note as logNote } from '../diag/autoLog';
 let t:any=null, lastPkt=Date.now();
 
 export function markBlePacket(){ lastPkt = Date.now(); }
 
 export function startWatchdogs(){
   if (t) {return;}
-  t = setInterval(async()=>{
+  t = (globalThis as any).setInterval(async()=>{
     // BLE watchdog
     if (Date.now()-lastPkt > 45_000){
-      logNote("WD BLE: restart scan");
+      logNote('WD BLE: restart scan');
       try{ 
         // Dynamic import to avoid circular dependency
-        const { stop, start } = await import("../ble/bridge");
+        const { stop, start } = await import('../ble/bridge');
         await stop(); 
-        await new Promise(r=>setTimeout(r,300)); 
+        await new Promise(r=>(globalThis as any).setTimeout(r,300)); 
         await start({}); 
-      }catch{}
+      }catch{
+        // Ignore BLE restart errors
+      }
       lastPkt = Date.now();
     }
     // History watchdog
     try{
       const perm = await Location.getForegroundPermissionsAsync();
-      if (perm.status==="granted"){
+      if (perm.status==='granted'){
         // ping location each 2 min to wake sensors
         if ((Date.now()%120_000) < 1500) {await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });}
       }
-    }catch{}
+    }catch{
+      // Ignore location errors
+    }
     // EPM battery thresholds
     try{
       const lvl = await Battery.getBatteryLevelAsync();
@@ -36,13 +40,17 @@ export function startWatchdogs(){
         const pct = Math.round(lvl*100);
         if (pct<=5){
           try{
-            const epm = require("../power/epm");
+            const epm = (globalThis as any).require('../power/epm');
             await epm.enableEPM();
-            logNote("WD EPM: forced enable at 5%");
-          }catch{}
+            logNote('WD EPM: forced enable at 5%');
+          }catch{
+            // Ignore EPM errors
+          }
         }
       }
-    }catch{}
+    }catch{
+      // Ignore battery errors
+    }
   }, 5000);
 }
-export function stopWatchdogs(){ if (t){ clearInterval(t); t=null; } }
+export function stopWatchdogs(){ if (t){ (globalThis as any).clearInterval(t); t=null; } }

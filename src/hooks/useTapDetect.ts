@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { logger } from '../utils/productionLogger';
 import { Accelerometer } from 'expo-sensors';
 import { Audio } from 'expo-av';
-import { bleRelay } from '../services/ble/bleRelay';
 import { useQueue } from '../store/queue';
 import { usePDRFuse } from './usePDRFuse';
 import { useSettings } from '../store/settings';
@@ -21,7 +20,7 @@ export function useTapDetect() {
     enabled: settings.tapDetectionEnabled,
     threshold: settings.tapThreshold,
     windowMs: settings.tapWindowMs,
-    requiredTaps: settings.tapRequiredTaps
+    requiredTaps: settings.tapRequiredTaps,
   };
   const [tapCount, setTapCount] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
@@ -114,9 +113,9 @@ export function useTapDetect() {
           position: currentPos ? {
             lat: currentPos.lat,
             lon: currentPos.lon,
-            accuracy: currentPos.accuracy
-          } : null
-        }
+            accuracy: currentPos.accuracy,
+          } : null,
+        },
       };
       
       queue.add(message);
@@ -138,7 +137,7 @@ export function useTapDetect() {
     isListening,
     remainingTaps: Math.max(0, config.requiredTaps - tapCount),
     resetTapCount,
-    config
+    config,
   };
 }
 

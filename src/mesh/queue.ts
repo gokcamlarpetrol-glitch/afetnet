@@ -1,24 +1,24 @@
-import * as FileSystem from "expo-file-system";
-import { p2pLocalSend } from "../p2p/send";
-import { getPower } from "../power/profile";
-import { laneDelay, Lane } from "./priority";
+import * as FileSystem from 'expo-file-system';
+import { p2pLocalSend } from '../p2p/send';
+import { getPower } from '../power/profile';
+import { laneDelay, Lane } from './priority';
 
-type QItem = { id:string; payload:any; ts:number; tries:number; next:number; kind:"msg"|"ack"; lane?:Lane };
+type QItem = { id:string; payload:any; ts:number; tries:number; next:number; kind:'msg'|'ack'; lane?:Lane };
 
-const OUT = "/tmp/mesh.out.jsonl";
-const IN  = "/tmp/mesh.in.jsonl";
+const OUT = '/tmp/mesh.out.jsonl';
+const IN  = '/tmp/mesh.in.jsonl';
 
-export async function enqueue(payload:any, kind:"msg"|"ack"="msg", lane:Lane="normal"){
-  const it:QItem = { id: payload.id || ("q_"+Date.now().toString(36)), payload, ts: Date.now(), tries:0, next: Date.now()+laneDelay(lane), kind, lane };
-  const existing = await FileSystem.readAsStringAsync(OUT).catch(()=>"");
-  await FileSystem.writeAsStringAsync(OUT, existing + JSON.stringify(it)+"\n");
+export async function enqueue(payload:any, kind:'msg'|'ack'='msg', lane:Lane='normal'){
+  const it:QItem = { id: payload.id || ('q_'+Date.now().toString(36)), payload, ts: Date.now(), tries:0, next: Date.now()+laneDelay(lane), kind, lane };
+  const existing = await FileSystem.readAsStringAsync(OUT).catch(()=>'');
+  await FileSystem.writeAsStringAsync(OUT, existing + JSON.stringify(it)+'\n');
 }
 export async function readOut(limit=500): Promise<QItem[]>{
   const ex=await FileSystem.getInfoAsync(OUT); if(!ex.exists) {return [];}
   const txt=await FileSystem.readAsStringAsync(OUT);
-  return txt.split("\n").filter(Boolean).slice(-limit).map(l=>{try{return JSON.parse(l);}catch{return null;}}).filter(Boolean);
+  return txt.split('\n').filter(Boolean).slice(-limit).map(l=>{try{return JSON.parse(l);}catch{return null;}}).filter(Boolean);
 }
-async function rewriteOut(arr:QItem[]){ await FileSystem.writeAsStringAsync(OUT, arr.map(x=>JSON.stringify(x)).join("\n")); }
+async function rewriteOut(arr:QItem[]){ await FileSystem.writeAsStringAsync(OUT, arr.map(x=>JSON.stringify(x)).join('\n')); }
 
 export async function pumpOnce(){
   const arr = await readOut(1000);
@@ -42,11 +42,11 @@ export async function pumpOnce(){
   }
 }
 let on=false; let t:any=null;
-export function startPump(){ if(on) {return;} on=true; t=setInterval(pumpOnce, 15_000); }
-export function stopPump(){ on=false; if(t){ clearInterval(t); t=null; } }
+export function startPump(){ if(on) {return;} on=true; t=(globalThis as any).setInterval(pumpOnce, 15_000); }
+export function stopPump(){ on=false; if(t){ (globalThis as any).clearInterval(t); t=null; } }
 
 // Inbox (optional for debugging)
 export async function inboxWrite(msg:any){ 
-  const existing = await FileSystem.readAsStringAsync(IN).catch(()=>"");
-  await FileSystem.writeAsStringAsync(IN, existing + JSON.stringify({ts:Date.now(),msg})+"\n");
+  const existing = await FileSystem.readAsStringAsync(IN).catch(()=>'');
+  await FileSystem.writeAsStringAsync(IN, existing + JSON.stringify({ ts:Date.now(),msg })+'\n');
 }

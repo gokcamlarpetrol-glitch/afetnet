@@ -1,7 +1,7 @@
-import { Accelerometer } from "expo-sensors";
-import * as Location from "expo-location";
-import { quantizeLatLng } from "../geo/coarse";
-import { appendQuake, notifyQuake } from "./store";
+import { Accelerometer } from 'expo-sensors';
+import * as Location from 'expo-location';
+import { quantizeLatLng } from '../geo/coarse';
+import { appendQuake, notifyQuake } from './store';
 
 let sub: any = null;
 let buf: number[] = [];
@@ -27,9 +27,11 @@ export function startStaLta(){
         try{
           const p = await Location.getLastKnownPositionAsync({}); let lat=0, lng=0;
           if(p){ const q=quantizeLatLng(p.coords.latitude,p.coords.longitude); lat=q.lat; lng=q.lng; }
-          const qk = { id:"LOCAL_"+now, ts:now, lat, lng, mag: Math.min(4.0, sta*10), src:"LOCAL" as const };
+          const qk = { id:'LOCAL_'+now, ts:now, lat, lng, mag: Math.min(4.0, sta*10), src:'LOCAL' as const };
           await appendQuake(qk); await notifyQuake(qk);
-        }catch{}
+        }catch{
+          // Ignore location errors
+        }
       }
     }
   });

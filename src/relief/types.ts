@@ -1,4 +1,4 @@
-export type FacilityKind = "shelter"|"clinic"|"pharmacy"|"food"|"water";
+export type FacilityKind = 'shelter'|'clinic'|'pharmacy'|'food'|'water';
 export type Facility = {
   id: string;
   kind: FacilityKind;
@@ -10,11 +10,11 @@ export type Facility = {
   lastTs?: number;     // last verified
 };
 
-export type HelpPriority = "life"|"urgent"|"normal";
-export type HelpStatus = "new"|"queued"|"assigned"|"enroute"|"done"|"cancelled";
+export type HelpPriority = 'life'|'urgent'|'normal';
+export type HelpStatus = 'new'|'queued'|'assigned'|'enroute'|'done'|'cancelled';
 export type HelpTicket = {
   id: string; ts: number;
-  kind: "medical"|"rescue"|"evac"|"supply"|"other";
+  kind: 'medical'|'rescue'|'evac'|'supply'|'other';
   title: string; detail?: string;
   qlat?: number; qlng?: number;
   prio: HelpPriority;

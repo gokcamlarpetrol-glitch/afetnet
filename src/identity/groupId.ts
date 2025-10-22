@@ -46,7 +46,7 @@ function decodeBase32(str: string): Uint8Array {
 
 export function generateGroupSeed(): Uint8Array {
   const seed = new Uint8Array(16);
-  crypto.getRandomValues(seed);
+  (globalThis as any).crypto.getRandomValues(seed);
   return seed;
 }
 
@@ -79,7 +79,7 @@ export function deriveGroupKey(seed: Uint8Array, memberPubKeysB64: string[]): st
   
   let offset = seed.length;
   for (const key of sortedKeys) {
-    const keyBytes = new TextEncoder().encode(key);
+    const keyBytes = new (globalThis as any).TextEncoder().encode(key);
     keyData.set(keyBytes, offset);
     offset += keyBytes.length;
   }

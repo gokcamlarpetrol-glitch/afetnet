@@ -22,7 +22,7 @@ interface DevLogActions {
 
 const defaultState: DevLogState = {
   events: [],
-  maxEvents: 1000
+  maxEvents: 1000,
 };
 
 export const useDevLog = create<DevLogState & DevLogActions>()(
@@ -34,7 +34,7 @@ export const useDevLog = create<DevLogState & DevLogActions>()(
         const event: LogEvent = {
           ts: Date.now(),
           tag,
-          data
+          data,
         };
 
         set((state) => {
@@ -61,7 +61,7 @@ export const useDevLog = create<DevLogState & DevLogActions>()(
       exportEvents: () => {
         const { events } = get();
         return [...events];
-      }
+      },
     }),
     {
       name: 'afn/devlog/v1',
@@ -69,9 +69,9 @@ export const useDevLog = create<DevLogState & DevLogActions>()(
       version: 1,
       migrate: (persistedState: any, version: number) => {
         return { ...defaultState, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );
 
 // Convenience function for global logging

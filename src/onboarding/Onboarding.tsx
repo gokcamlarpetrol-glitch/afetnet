@@ -1,12 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import { palette, spacing } from '../ui/theme';
-
-const { width } = Dimensions.get('window');
 
 interface OnboardingPage {
   id: string;

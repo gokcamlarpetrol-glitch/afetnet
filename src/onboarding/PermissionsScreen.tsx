@@ -38,18 +38,18 @@ export default function PermissionsScreen() {
       let result: 'granted' | 'denied' | 'undetermined' = 'denied';
       
       switch (currentStepData.key) {
-        case 'notifications':
-          result = await permissionsManager.requestNotificationPermission();
-          break;
-        case 'location':
-          result = await permissionsManager.requestLocationPermission();
-          break;
-        case 'bluetooth':
-          result = await permissionsManager.requestBluetoothPermission();
-          break;
-        case 'backgroundLocation':
-          result = await permissionsManager.requestBackgroundLocationPermission();
-          break;
+      case 'notifications':
+        result = await permissionsManager.requestNotificationPermission();
+        break;
+      case 'location':
+        result = await permissionsManager.requestLocationPermission();
+        break;
+      case 'bluetooth':
+        result = await permissionsManager.requestBluetoothPermission();
+        break;
+      case 'backgroundLocation':
+        result = await permissionsManager.requestBackgroundLocationPermission();
+        break;
       }
 
       // Update status
@@ -63,7 +63,7 @@ export default function PermissionsScreen() {
           [
             { text: 'Tekrar Dene', onPress: () => {} },
             { text: 'Geç', onPress: handleNext },
-          ]
+          ],
         );
       } else {
         handleNext();
@@ -91,7 +91,7 @@ export default function PermissionsScreen() {
         `${currentStepData.title} gerekli bir izindir. Ayarlardan daha sonra izin verebilirsiniz.`,
         [
           { text: 'Tamam', onPress: handleNext },
-        ]
+        ],
       );
     } else {
       handleNext();
@@ -110,29 +110,29 @@ export default function PermissionsScreen() {
 
   const getStatusIcon = (status: 'granted' | 'denied' | 'undetermined' | undefined) => {
     switch (status) {
-      case 'granted':
-        return <Ionicons name="checkmark-circle" size={24} color={palette.success.main} />;
-      case 'denied':
-        return <Ionicons name="close-circle" size={24} color={palette.error.main} />;
-      case 'undetermined':
-      case undefined:
-        return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
-      default:
-        return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
+    case 'granted':
+      return <Ionicons name="checkmark-circle" size={24} color={palette.success.main} />;
+    case 'denied':
+      return <Ionicons name="close-circle" size={24} color={palette.error.main} />;
+    case 'undetermined':
+    case undefined:
+      return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
+    default:
+      return <Ionicons name="help-circle" size={24} color={palette.text.secondary} />;
     }
   };
 
   const getStatusText = (status: 'granted' | 'denied' | 'undetermined' | undefined) => {
     switch (status) {
-      case 'granted':
-        return 'Verildi';
-      case 'denied':
-        return 'Reddedildi';
-      case 'undetermined':
-      case undefined:
-        return 'Bekleniyor';
-      default:
-        return 'Bekleniyor';
+    case 'granted':
+      return 'Verildi';
+    case 'denied':
+      return 'Reddedildi';
+    case 'undetermined':
+    case undefined:
+      return 'Bekleniyor';
+    default:
+      return 'Bekleniyor';
     }
   };
 

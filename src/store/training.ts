@@ -25,7 +25,7 @@ const defaultState: TrainingState = {
   enabled: false,
   scenario: 'single',
   count: 3,
-  activeIncidents: []
+  activeIncidents: [],
 };
 
 export const useTraining = create<TrainingState & TrainingActions>()(
@@ -51,13 +51,13 @@ export const useTraining = create<TrainingState & TrainingActions>()(
 
       addActiveIncident: (id: string) => {
         set((state) => ({
-          activeIncidents: [...state.activeIncidents, id]
+          activeIncidents: [...state.activeIncidents, id],
         }));
       },
 
       removeActiveIncident: (id: string) => {
         set((state) => ({
-          activeIncidents: state.activeIncidents.filter(incidentId => incidentId !== id)
+          activeIncidents: state.activeIncidents.filter(incidentId => incidentId !== id),
         }));
       },
 
@@ -67,7 +67,7 @@ export const useTraining = create<TrainingState & TrainingActions>()(
 
       reset: () => {
         set(defaultState);
-      }
+      },
     }),
     {
       name: 'afn/training/v1',
@@ -75,7 +75,7 @@ export const useTraining = create<TrainingState & TrainingActions>()(
       version: 1,
       migrate: (persistedState: any, version: number) => {
         return { ...defaultState, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );

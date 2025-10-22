@@ -1,6 +1,6 @@
-import * as Location from "expo-location";
-import { toENU } from "../map/localproj";
-import { tx, prune } from "../db/core";
+import * as Location from 'expo-location';
+import { toENU } from '../map/localproj';
+import { tx, prune } from '../db/core';
 
 let running=false;
 let origin:{lat0:number;lon0:number}|null=null;
@@ -10,7 +10,7 @@ export async function startHistory(){
   if (running) {return;} running=true;
   try{
     const perm = await Location.requestForegroundPermissionsAsync();
-    if (perm.status!=="granted"){ running=false; return; }
+    if (perm.status!=='granted'){ running=false; return; }
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     origin = { lat0: fix.coords.latitude, lon0: fix.coords.longitude };
   }catch{ /* fail-soft */ }
@@ -28,12 +28,14 @@ export async function startHistory(){
         }
         const enu = origin ? toENU(loc.coords.latitude, loc.coords.longitude, origin) : { x:null, y:null };
         await tx(async d=>{
-          await d.executeSql(`INSERT INTO loc_points(ts,lat,lon,acc,enu_x,enu_y) VALUES(?,?,?,?,?,?)`,
+          await d.executeSql('INSERT INTO loc_points(ts,lat,lon,acc,enu_x,enu_y) VALUES(?,?,?,?,?,?)',
             [ts, loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy ?? null, enu?.x ?? null, enu?.y ?? null]);
         });
         last = { lat: loc.coords.latitude, lon: loc.coords.longitude, ts };
         await prune();
-      }catch{}
+      }catch{
+        // Ignore location collection errors
+      }
       await sleep(7000);
     }
   };
@@ -44,7 +46,7 @@ export async function stopHistory(){ running=false; }
 
 export async function listBetween(t0:number, t1:number){
   return tx(async d=>{
-    const r = await d.executeSql(`SELECT ts,lat,lon,acc FROM loc_points WHERE ts BETWEEN ? AND ? ORDER BY ts ASC`, [t0,t1]);
+    const r = await d.executeSql('SELECT ts,lat,lon,acc FROM loc_points WHERE ts BETWEEN ? AND ? ORDER BY ts ASC', [t0,t1]);
     const out:{ts:number;lat:number;lon:number;acc:number|null}[] = [];
     for (let i=0;i<r[0].rows.length;i++){ const it=r[0].rows.item(i); out.push({ ts: it.ts, lat: it.lat, lon: it.lon, acc: it.acc ?? null }); }
     return out;
@@ -61,7 +63,7 @@ export function speedsFrom(points:{ts:number;lat:number;lon:number}[]){
   return sp;
 }
 
-function sleep(ms:number){ return new Promise(res=>setTimeout(res,ms)); }
+function sleep(ms:number){ return new Promise(res=>(globalThis as any).setTimeout(res,ms)); }
 function haversine(lat1:number,lon1:number,lat2:number,lon2:number){
   const R=6371000; const toRad=(x:number)=>x*Math.PI/180;
   const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);

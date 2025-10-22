@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
+import { logger } from "../utils/productionLogger";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Localization from 'expo-localization';
 import i18n from '../i18n';
@@ -10,6 +10,7 @@ class GlobalLanguageManager {
   private static instance: GlobalLanguageManager;
   private currentLanguage: string = 'tr';
   private currentRegion: string = 'TR';
+   
   private listeners: Array<(lang: string, region: string) => void> = [];
 
   static getInstance(): GlobalLanguageManager {
@@ -46,7 +47,7 @@ class GlobalLanguageManager {
       await this.applyRegion(this.currentRegion);
       
     } catch (error) {
-      console.warn('Failed to initialize language manager:', error);
+      logger.warn('Failed to initialize language manager:', error);
     }
   }
 
@@ -95,7 +96,7 @@ class GlobalLanguageManager {
       // use more sophisticated locale management
       
     } catch (error) {
-      console.warn('Failed to apply language:', error);
+      logger.warn('Failed to apply language:', error);
     }
   }
 
@@ -108,7 +109,7 @@ class GlobalLanguageManager {
         'EU': 'Europe/London',
         'MENA': 'Asia/Dubai',
         'ASIA': 'Asia/Tokyo',
-        'LATAM': 'America/Sao_Paulo'
+        'LATAM': 'America/Sao_Paulo',
       };
 
       const timezone = timezoneMap[region] || 'Europe/Istanbul';
@@ -121,14 +122,14 @@ class GlobalLanguageManager {
         'EU': 'USGS',
         'MENA': 'USGS',
         'ASIA': 'USGS',
-        'LATAM': 'USGS'
+        'LATAM': 'USGS',
       };
 
       const dataSource = dataSourceMap[region] || 'AFAD';
       await AsyncStorage.setItem('afn/earthquakeDataSource', dataSource);
       
     } catch (error) {
-      console.warn('Failed to apply region:', error);
+      logger.warn('Failed to apply region:', error);
     }
   }
 
@@ -157,7 +158,7 @@ class GlobalLanguageManager {
       try {
         listener(this.currentLanguage, this.currentRegion);
       } catch (error) {
-        console.warn('Error in language listener:', error);
+        logger.warn('Error in language listener:', error);
       }
     });
   }
@@ -182,7 +183,7 @@ class GlobalLanguageManager {
       // Return key as last resort
       return key;
     } catch (error) {
-      console.warn('Failed to get localized text:', error);
+      logger.warn('Failed to get localized text:', error);
       return key;
     }
   }
@@ -225,7 +226,7 @@ export function useGlobalLanguage() {
     try {
       await globalLanguageManager.setLanguage(newLanguage);
     } catch (error) {
-      console.error('Failed to change language:', error);
+      logger.error('Failed to change language:', error);
     } finally {
       setIsLoading(false);
     }
@@ -236,7 +237,7 @@ export function useGlobalLanguage() {
     try {
       await globalLanguageManager.setRegion(newRegion);
     } catch (error) {
-      console.error('Failed to change region:', error);
+      logger.error('Failed to change region:', error);
     } finally {
       setIsLoading(false);
     }
@@ -252,7 +253,7 @@ export function useGlobalLanguage() {
     isLoading,
     changeLanguage,
     changeRegion,
-    getText
+    getText,
   };
 }
 

@@ -32,12 +32,19 @@ export interface IceState {
 }
 
 interface IceActions {
+   
   addContact: (contact: IceContact) => void;
+   
   removeContact: (id: string) => void;
+   
   updateContact: (id: string, updates: Partial<IceContact>) => void;
+   
   reorder: (ids: string[]) => void;
+   
   addTemplate: (template: SmsTemplate) => void;
+   
   updateTemplate: (template: SmsTemplate) => void;
+   
   removeTemplate: (id: string) => void;
   enqueue: (to: string, body: string) => void;
   markSent: (id: string) => void;
@@ -49,19 +56,19 @@ const defaultTemplates: SmsTemplate[] = [
   {
     id: 'short_sos',
     label: 'Kısa SOS',
-    text: 'AfetNet SOS: Yardım lazım. {Durum}. {KişiSayısı}. Son konumum: {Konum}'
+    text: 'AfetNet SOS: Yardım lazım. {Durum}. {KişiSayısı}. Son konumum: {Konum}',
   },
   {
     id: 'detailed_sos',
     label: 'Detaylı SOS',
-    text: 'AfetNet: Enkazdayım. {Durum}. {KişiSayısı}. Yaklaşık konum: {Konum}. Lütfen koordinasyonu sağlayın.'
-  }
+    text: 'AfetNet: Enkazdayım. {Durum}. {KişiSayısı}. Yaklaşık konum: {Konum}. Lütfen koordinasyonu sağlayın.',
+  },
 ];
 
 const defaultState: IceState = {
   contacts: [],
   templates: defaultTemplates,
-  queue: []
+  queue: [],
 };
 
 export const useIce = create<IceState & IceActions>()(
@@ -71,21 +78,21 @@ export const useIce = create<IceState & IceActions>()(
 
       addContact: (contact: IceContact) => {
         set((state) => ({
-          contacts: [...state.contacts, contact]
+          contacts: [...state.contacts, contact],
         }));
       },
 
       removeContact: (id: string) => {
         set((state) => ({
-          contacts: state.contacts.filter(c => c.id !== id)
+          contacts: state.contacts.filter(c => c.id !== id),
         }));
       },
 
       updateContact: (id: string, updates: Partial<IceContact>) => {
         set((state) => ({
           contacts: state.contacts.map(c =>
-            c.id === id ? { ...c, ...updates } : c
-          )
+            c.id === id ? { ...c, ...updates } : c,
+          ),
         }));
       },
 
@@ -102,21 +109,21 @@ export const useIce = create<IceState & IceActions>()(
 
       addTemplate: (template: SmsTemplate) => {
         set((state) => ({
-          templates: [...state.templates, template]
+          templates: [...state.templates, template],
         }));
       },
 
       updateTemplate: (template: SmsTemplate) => {
         set((state) => ({
           templates: state.templates.map(t =>
-            t.id === template.id ? template : t
-          )
+            t.id === template.id ? template : t,
+          ),
         }));
       },
 
       removeTemplate: (id: string) => {
         set((state) => ({
-          templates: state.templates.filter(t => t.id !== id)
+          templates: state.templates.filter(t => t.id !== id),
         }));
       },
 
@@ -126,19 +133,19 @@ export const useIce = create<IceState & IceActions>()(
           phone: to,
           body,
           created: Date.now(),
-          attempts: 0
+          attempts: 0,
         };
 
         set((state) => ({
-          queue: [...state.queue, queueItem]
+          queue: [...state.queue, queueItem],
         }));
       },
 
       markSent: (id: string) => {
         set((state) => ({
           queue: state.queue.map(item =>
-            item.id === id ? { ...item, sent: Date.now() } : item
-          )
+            item.id === id ? { ...item, sent: Date.now() } : item,
+          ),
         }));
       },
 
@@ -149,7 +156,7 @@ export const useIce = create<IceState & IceActions>()(
       getNextQueued: () => {
         const { queue } = get();
         return queue.find(item => !item.sent) || null;
-      }
+      },
     }),
     {
       name: 'afn/ice/v1',
@@ -162,7 +169,7 @@ export const useIce = create<IceState & IceActions>()(
           state.templates = defaultTemplates;
         }
         return state;
-      }
-    }
-  )
+      },
+    },
+  ),
 );

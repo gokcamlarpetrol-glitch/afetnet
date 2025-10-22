@@ -1,10 +1,10 @@
-import NetInfo from "@react-native-community/netinfo";
-import * as FileSystem from "expo-file-system";
-import * as Location from "expo-location";
-import { AUTO_PREFETCH_KM, AUTO_PREFETCH_ZOOMS, REMOTE_S2_TEMPLATE } from "../config/mapBootstrap";
+import NetInfo from '@react-native-community/netinfo';
+import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
+import { AUTO_PREFETCH_KM, AUTO_PREFETCH_ZOOMS, REMOTE_S2_TEMPLATE } from '../config/mapBootstrap';
 import { logger } from '../utils/productionLogger';
-import { tileManager } from "./tileManager";
-import { tilesForBBox } from "./tiles";
+import { tileManager } from './tileManager';
+import { tilesForBBox } from './tiles';
 
 function bboxFromCenter(lat: number, lon: number, km: number) {
   const d = km / 111;
@@ -33,7 +33,7 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
     const loc = await Location.getCurrentPositionAsync({});
     const box = bboxFromCenter(loc.coords.latitude, loc.coords.longitude, AUTO_PREFETCH_KM);
     
-    const dstRoot = await tileManager.ensurePackDir("sentinel-auto");
+    const dstRoot = await tileManager.ensurePackDir('sentinel-auto');
     
     let downloadedTiles = 0;
     let totalTiles = 0;
@@ -51,9 +51,9 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
       
       for (const tile of tiles) {
         const url = (REMOTE_S2_TEMPLATE as string)
-          .replace("{z}", String(tile.z))
-          .replace("{x}", String(tile.x))
-          .replace("{y}", String(tile.y));
+          .replace('{z}', String(tile.z))
+          .replace('{x}', String(tile.x))
+          .replace('{y}', String(tile.y));
         
         const dst = `${dstRoot}${tile.z}/${tile.x}/${tile.y}.jpg`;
         
@@ -76,13 +76,13 @@ export async function autoPrefetchSmallSatellite(): Promise<boolean> {
         
         // Yield control every 10 tiles
         if ((downloadedTiles % 10) === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
+          await new Promise(resolve => (globalThis as any).setTimeout(resolve, 0));
         }
       }
     }
     
     if (downloadedTiles > 0) {
-      await tileManager.registerFolderPack("sentinel-auto", dstRoot, "raster", AUTO_PREFETCH_ZOOMS);
+      await tileManager.registerFolderPack('sentinel-auto', dstRoot, 'raster', AUTO_PREFETCH_ZOOMS);
       logger.debug(`Auto-prefetch completed: ${downloadedTiles}/${totalTiles} tiles downloaded`);
       return true;
     } else {

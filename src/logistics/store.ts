@@ -1,8 +1,8 @@
-import * as FileSystem from "expo-file-system";
-import { LItem, LCategory, LMode } from "./types";
+import * as FileSystem from 'expo-file-system';
+import { LItem, LCategory, LMode } from './types';
 
-const DIR = "/tmp/";
-const FILE = DIR + "logistics.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'logistics.json';
 
 export async function listLogistics(cat?:LCategory, mode?:LMode, now=Date.now()){
   const ex = await FileSystem.getInfoAsync(FILE);

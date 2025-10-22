@@ -5,7 +5,7 @@
  * - Keep last N samples: {headingDeg, level0..1}, compute heading where level was max.
  * - Haptic guidance pulses when user heading approaches target heading.
  */
-import * as Haptics from "expo-haptics";
+import * as Haptics from 'expo-haptics';
 
 type Sample = { h: number; l: number; t: number };
 const buf: Sample[] = [];

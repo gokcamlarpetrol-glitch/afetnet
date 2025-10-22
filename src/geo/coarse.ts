@@ -9,12 +9,12 @@ export function quantizeLatLng(lat: number, lng: number){
 }
 
 /** Age bucket helper for fading UI */
-export function ageBucket(ts: number): "fresh"|"stale"|"old"|"expired"{
+export function ageBucket(ts: number): 'fresh'|'stale'|'old'|'expired'{
   const ageH = (Date.now()-ts)/3600000;
-  if(ageH <= 24) {return "fresh";}
-  if(ageH <= 72) {return "stale";}
-  if(ageH <= 120) {return "old";}
-  return "expired";
+  if(ageH <= 24) {return 'fresh';}
+  if(ageH <= 72) {return 'stale';}
+  if(ageH <= 120) {return 'old';}
+  return 'expired';
 }
 
 

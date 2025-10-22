@@ -26,7 +26,7 @@ export default function AppNavigator() {
             title: 'Premium',
             headerStyle: { backgroundColor: '#0f172a' },
             headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' }
+            headerTitleStyle: { fontWeight: 'bold' },
           }}
         />
         {__DEV__ && (

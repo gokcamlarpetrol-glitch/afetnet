@@ -1,15 +1,15 @@
-import * as BackgroundFetch from "expo-background-fetch";
-import * as TaskManager from "expo-task-manager";
-import NetInfo from "@react-native-community/netinfo";
+import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
+import NetInfo from '@react-native-community/netinfo';
 
-const TASK = "BG_FLUSH";
+const TASK = 'BG_FLUSH';
 
 TaskManager.defineTask(TASK, async () => {
   try {
     const state = await NetInfo.fetch();
     if (!state.isConnected) {return BackgroundFetch.BackgroundFetchResult.NoData;}
     // Access store indirectly to avoid bundler cyclic import
-    const store = require("../store/app");
+    const store = (globalThis as any).require('../store/app');
     const sent = store.useApp.getState().flush();
     return sent > 0 ? BackgroundFetch.BackgroundFetchResult.NewData : BackgroundFetch.BackgroundFetchResult.NoData;
   } catch {
@@ -24,5 +24,7 @@ export async function registerBgFlush() {
       stopOnTerminate: false,
       startOnBoot: true,
     });
-  } catch {}
+  } catch {
+    // Ignore background task registration errors
+  }
 }

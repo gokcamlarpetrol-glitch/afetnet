@@ -3,8 +3,8 @@ import { logger } from '../utils/productionLogger';
 let Torch: any = null;
 
 try {
-  Torch = require('react-native-torch');
-} catch (e) {
+  Torch = (globalThis as any).require('react-native-torch');
+} catch {
   logger.warn('react-native-torch not available');
 }
 
@@ -21,7 +21,7 @@ export const SafeTorch = {
     } catch (e) {
       logger.warn('Failed to switch torch state:', e);
     }
-  }
+  },
 };
 
 

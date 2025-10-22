@@ -17,19 +17,19 @@ export default function BLEMeshScreen() {
     });
 
     // Update RSSI samples periodically
-    const rssiInterval = setInterval(() => {
+    const rssiInterval = (globalThis as any).setInterval(() => {
       setRssiSamples(bleRelay.getRSSISamples());
     }, 5000);
 
     // Update seen count periodically
-    const seenInterval = setInterval(() => {
+    const seenInterval = (globalThis as any).setInterval(() => {
       setSeenCount(bleRelay.getSeenCount());
     }, 2000);
 
     return () => {
       unsubscribe();
-      clearInterval(rssiInterval);
-      clearInterval(seenInterval);
+      (globalThis as any).clearInterval(rssiInterval);
+      (globalThis as any).clearInterval(seenInterval);
     };
   }, []);
 
@@ -65,7 +65,7 @@ export default function BLEMeshScreen() {
         ts: Date.now(),
         type: 'PING',
         ttl: 3,
-        payload: 'Test mesajı'
+        payload: 'Test mesajı',
       };
 
       await bleRelay.sendDirect(testMessage);
@@ -87,7 +87,7 @@ export default function BLEMeshScreen() {
         lat: 41.0082, // Istanbul coordinates
         lon: 28.9784,
         ttl: 5,
-        payload: 'Acil durum - yardım istiyorum!'
+        payload: 'Acil durum - yardım istiyorum!',
       };
 
       await bleRelay.sendDirect(sosMessage);

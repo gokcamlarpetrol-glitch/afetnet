@@ -1,14 +1,14 @@
-import * as FileSystem from "expo-file-system";
-import * as Crypto from "expo-crypto";
-import { QueueMeta, QueueRecordV2, QueueKind } from "./v2.types";
-import { quantizeLatLng } from "../geo/coarse";
+import * as FileSystem from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+import { QueueMeta, QueueRecordV2, QueueKind } from './v2.types';
+import { quantizeLatLng } from '../geo/coarse';
 
-const DIR = "/tmp/";
-const WAL = DIR + "ocb.jsonl";          // append-only queue log
-const WAL_TMP = DIR + "ocb.jsonl.tmp";   // temp for atomic appends
-const LEGACY_JSON = DIR + "ocb.json";    // v1 array file (if exists)
+const DIR = '/tmp/';
+const WAL = DIR + 'ocb.jsonl';          // append-only queue log
+const WAL_TMP = DIR + 'ocb.jsonl.tmp';   // temp for atomic appends
+const LEGACY_JSON = DIR + 'ocb.json';    // v1 array file (if exists)
 
-function toJsonl(r: QueueRecordV2){ return JSON.stringify(r) + "\n"; }
+function toJsonl(r: QueueRecordV2){ return JSON.stringify(r) + '\n'; }
 
 async function sha256(txt: string){
   return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, txt);
@@ -33,12 +33,14 @@ export async function initQueue(): Promise<QueueMeta>{
         const arr = JSON.parse(raw) as any[];
         // append legacy as v2 records
         for(const it of arr){
-          await append(it.kind ?? "note", it.payload ?? it, true);
+          await append(it.kind ?? 'note', it.payload ?? it);
         }
         // keep legacy as historical artifact; do not delete silently
-      }catch{}
+      }catch{
+        // Ignore legacy migration errors
+      }
     }else{
-      await FileSystem.writeAsStringAsync(WAL, ""); // create empty
+      await FileSystem.writeAsStringAsync(WAL, ''); // create empty
     }
   }
   return await stats();
@@ -49,7 +51,7 @@ export async function stats(): Promise<QueueMeta>{
   let count = 0, pending = 0, lastTs: number|undefined = undefined;
   if(info.exists){
     const content = await FileSystem.readAsStringAsync(WAL);
-    const lines = content.split("\n").filter(Boolean);
+    const lines = content.split('\n').filter(Boolean);
     for(const ln of lines){
       try{
         const r = JSON.parse(ln) as QueueRecordV2;
@@ -62,14 +64,16 @@ export async function stats(): Promise<QueueMeta>{
 }
 
 export async function list(limit=100, includeSent=false): Promise<QueueRecordV2[]>{
-  const content = await FileSystem.readAsStringAsync(WAL).catch(()=> "");
-  const lines = content.split("\n").filter(Boolean).slice(-limit); // tail
+  const content = await FileSystem.readAsStringAsync(WAL).catch(()=> '');
+  const lines = content.split('\n').filter(Boolean).slice(-limit); // tail
   const out: QueueRecordV2[] = [];
   for(const ln of lines){
     try{
       const r = JSON.parse(ln) as QueueRecordV2;
       if(includeSent || !r.sent) {out.push(r);}
-    }catch{}
+    }catch{
+      // Ignore corrupt line errors
+    }
   }
   return out;
 }
@@ -78,15 +82,18 @@ async function withCoarseGeo(payload:any){
   try{
     // You may have a getLastLocation() helper; if not available, keep payload untouched.
     const loc = await (globalThis as typeof globalThis).getLastLocation?.();
-    if(loc && typeof loc.latitude==="number" && typeof loc.longitude==="number"){
+    if(loc && typeof loc.latitude==='number' && typeof loc.longitude==='number'){
       const q = quantizeLatLng(loc.latitude, loc.longitude);
       return { ...payload, qlat: q.lat, qlng: q.lng };
     }
-  }catch{}
+  }catch{
+    // Ignore location errors
+  }
   return payload;
 }
 
-export async function append(kind: QueueKind, payload: any, fromLegacy=false): Promise<QueueRecordV2>{
+export async function append(kind: QueueKind, payload: any): Promise<QueueRecordV2>{
+   
   const id = makeId();
   const ts = Date.now();
   const enriched = await withCoarseGeo(payload ?? null);
@@ -97,17 +104,17 @@ export async function append(kind: QueueKind, payload: any, fromLegacy=false): P
   // atomic append: write tmp then concat+move
   const line = toJsonl(rec);
   const tmpHas = await FileSystem.getInfoAsync(WAL);
-  const current = tmpHas.exists ? await FileSystem.readAsStringAsync(WAL) : "";
-  await FileSystem.writeAsStringAsync(WAL_TMP, current + line, { encoding: "utf8" });
+  const current = tmpHas.exists ? await FileSystem.readAsStringAsync(WAL) : '';
+  await FileSystem.writeAsStringAsync(WAL_TMP, current + line, { encoding: 'utf8' });
   await FileSystem.moveAsync({ from: WAL_TMP, to: WAL });
   return rec;
 }
 
 export async function markSent(ids: string[]): Promise<void>{
   if(ids.length === 0) {return;}
-  const content = await FileSystem.readAsStringAsync(WAL).catch(()=> "");
+  const content = await FileSystem.readAsStringAsync(WAL).catch(()=> '');
   if(!content){ return; }
-  const lines = content.split("\n").filter(Boolean);
+  const lines = content.split('\n').filter(Boolean);
   const updated: string[] = [];
   for(const ln of lines){
     try{
@@ -119,8 +126,8 @@ export async function markSent(ids: string[]): Promise<void>{
       updated.push(ln);
     }
   }
-  const joined = updated.join("\n") + "\n";
-  await FileSystem.writeAsStringAsync(WAL_TMP, joined, { encoding: "utf8" });
+  const joined = updated.join('\n') + '\n';
+  await FileSystem.writeAsStringAsync(WAL_TMP, joined, { encoding: 'utf8' });
   await FileSystem.moveAsync({ from: WAL_TMP, to: WAL });
 }
 

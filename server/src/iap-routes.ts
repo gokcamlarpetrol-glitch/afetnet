@@ -15,7 +15,7 @@ router.get('/products', (req, res) => {
         description: 'Tüm premium özellikler 1 ay',
         price: 49.99,
         currency: 'TRY',
-        type: 'subscription'
+        type: 'subscription',
       },
       {
         id: 'org.afetnet1.premium.yearly',
@@ -23,7 +23,7 @@ router.get('/products', (req, res) => {
         description: 'Tüm premium özellikler 1 yıl (%17 indirim)',
         price: 499.99,
         currency: 'TRY',
-        type: 'subscription'
+        type: 'subscription',
       },
       {
         id: 'org.afetnet1.premium.lifetime',
@@ -31,19 +31,19 @@ router.get('/products', (req, res) => {
         description: 'Tüm premium özellikler kalıcı (%50 indirim)',
         price: 999.99,
         currency: 'TRY',
-        type: 'lifetime'
-      }
+        type: 'lifetime',
+      },
     ];
 
     res.json({
       success: true,
-      products
+      products,
     });
   } catch (error) {
     console.error('❌ Error getting products:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get products'
+      error: 'Failed to get products',
     });
   }
 });
@@ -65,14 +65,14 @@ router.post('/verify', async (req, res) => {
         isPremium: true,
         productId: productId,
         expiresAt: null,
-        source: productId?.includes('monthly') ? 'monthly' : 'yearly'
-      }
+        source: productId?.includes('monthly') ? 'monthly' : 'yearly',
+      },
     });
   } catch (error) {
     console.error('❌ Error verifying receipt:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to verify receipt'
+      error: 'Failed to verify receipt',
     });
   }
 });
@@ -91,14 +91,14 @@ router.get('/entitlements/:userId', async (req, res) => {
       entitlements: {
         isPremium: false,
         source: null,
-        expiresAt: null
-      }
+        expiresAt: null,
+      },
     });
   } catch (error) {
     console.error('❌ Error getting entitlements:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get entitlements'
+      error: 'Failed to get entitlements',
     });
   }
 });

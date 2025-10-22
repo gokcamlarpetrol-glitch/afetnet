@@ -54,7 +54,7 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
         isPremium,
         plan,
         endDate: endDate?.toISOString(),
-        timestamp: Date.now()
+        timestamp: Date.now(),
       }));
       
       logger.info('Premium status updated:', { isPremium, plan: plan?.id });
@@ -98,20 +98,20 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
         isPremium: finalStatus,
         currentPlan: localPlan,
         subscriptionEndDate: localEndDate,
-        isLoading: false
+        isLoading: false,
       });
       
       logger.info('Premium status checked:', { 
         isPremium: finalStatus, 
         iapStatus, 
-        localStatus 
+        localStatus, 
       });
       
     } catch (error) {
       logger.error('Failed to check premium status:', error);
       set({ 
         isLoading: false, 
-        error: 'Premium durumu kontrol edilemedi' 
+        error: 'Premium durumu kontrol edilemedi', 
       });
     }
   },
@@ -139,7 +139,7 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
       logger.error('Purchase failed:', error);
       set({ 
         isLoading: false, 
-        error: 'Satın alma işlemi başarısız oldu' 
+        error: 'Satın alma işlemi başarısız oldu', 
       });
       return false;
     }
@@ -166,7 +166,7 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
       logger.error('Restore failed:', error);
       set({ 
         isLoading: false, 
-        error: 'Satın alımlar geri yüklenemedi' 
+        error: 'Satın alımlar geri yüklenemedi', 
       });
       return false;
     }
@@ -184,13 +184,13 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
         currentPlan: null,
         subscriptionEndDate: null,
         isLoading: false,
-        error: null
+        error: null,
       });
       logger.info('Premium store reset');
     } catch (error) {
       logger.error('Failed to reset premium store:', error);
     }
-  }
+  },
 }));
 
 // Premium feature access helpers - STRICT PREMIUM GATING
@@ -202,7 +202,7 @@ export const usePremiumFeatures = () => {
     const freeFeatures = [
       'earthquake_notifications',  // Only earthquake notifications are free
       'basic_deprem_takip',        // Basic earthquake tracking
-      'deprem_verisi'             // Earthquake data viewing
+      'deprem_verisi',             // Earthquake data viewing
     ];
     
     // If it's a free feature, allow access
@@ -217,46 +217,46 @@ export const usePremiumFeatures = () => {
     
     // Premium features
     switch (feature) {
-      case 'family_tracking':
-      case 'family_messaging':
-      case 'family_map':
-      case 'mesh_network':
-      case 'offline_maps':
-      case 'advanced_maps':
-      case 'route_planning':
-      case 'p2p_messaging':
-      case 'rescue_tools':
-      case 'sar_mode':
-      case 'triage_system':
-      case 'health_monitoring':
-      case 'self_check':
-      case 'ice_data':
-      case 'security_features':
-      case 'encryption':
-      case 'biometric_auth':
-      case 'backup_restore':
-      case 'data_export':
-      case 'voice_commands':
-      case 'audio_beacon':
-      case 'sonar_system':
-      case 'pdr_tracking':
-      case 'sensor_fusion':
-      case 'ai_features':
-      case 'smart_analytics':
-      case 'drone_control':
-      case 'logistics_management':
-      case 'training_simulations':
-      case 'advanced_reporting':
-      case 'accessibility_features':
-      case 'haptic_navigation':
-      case 'comprehensive_features':
-      case 'premium_settings':
-      case 'unlimited_storage':
-      case 'priority_support':
-        return isPremium;
-      default:
-        // All unknown features require premium
-        return isPremium;
+    case 'family_tracking':
+    case 'family_messaging':
+    case 'family_map':
+    case 'mesh_network':
+    case 'offline_maps':
+    case 'advanced_maps':
+    case 'route_planning':
+    case 'p2p_messaging':
+    case 'rescue_tools':
+    case 'sar_mode':
+    case 'triage_system':
+    case 'health_monitoring':
+    case 'self_check':
+    case 'ice_data':
+    case 'security_features':
+    case 'encryption':
+    case 'biometric_auth':
+    case 'backup_restore':
+    case 'data_export':
+    case 'voice_commands':
+    case 'audio_beacon':
+    case 'sonar_system':
+    case 'pdr_tracking':
+    case 'sensor_fusion':
+    case 'ai_features':
+    case 'smart_analytics':
+    case 'drone_control':
+    case 'logistics_management':
+    case 'training_simulations':
+    case 'advanced_reporting':
+    case 'accessibility_features':
+    case 'haptic_navigation':
+    case 'comprehensive_features':
+    case 'premium_settings':
+    case 'unlimited_storage':
+    case 'priority_support':
+      return isPremium;
+    default:
+      // All unknown features require premium
+      return isPremium;
     }
   };
   
@@ -291,7 +291,7 @@ export const usePremiumFeatures = () => {
     currentPlan,
     canUseFeature,
     getRemainingUsage,
-    getFeatureDescription
+    getFeatureDescription,
   };
 };
 

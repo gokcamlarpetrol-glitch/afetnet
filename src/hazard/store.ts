@@ -1,8 +1,8 @@
-import * as FileSystem from "expo-file-system";
-import { HazardZone } from "./types";
+import * as FileSystem from 'expo-file-system';
+import { HazardZone } from './types';
 
-const DIR = "/tmp/";
-const FILE = DIR + "hazards.json";
+const DIR = '/tmp/';
+const FILE = DIR + 'hazards.json';
 
 export async function listHazards(): Promise<HazardZone[]>{
   const ex = await FileSystem.getInfoAsync(FILE);

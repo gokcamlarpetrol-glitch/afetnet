@@ -3,11 +3,11 @@ import { logger } from '../utils/productionLogger';
 let SQLite: any = null;
 
 try {
-  SQLite = require('react-native-sqlite-storage');
+  SQLite = (globalThis as any).require('react-native-sqlite-storage');
   if (SQLite) {
     SQLite.enablePromise(true);
   }
-} catch (e) {
+} catch {
   logger.warn('react-native-sqlite-storage not available');
 }
 
@@ -20,20 +20,20 @@ export const SafeSQLite = {
       return {
         executeSql: async () => [{ rows: { length: 0 } }],
         transaction: async (fn: any) => fn({ executeSql: async () => [{ rows: { length: 0 } }] }),
-        close: async () => {}
+        close: async () => {},
       };
     }
     try {
       return await SQLite.openDatabase(options);
-    } catch (e) {
-      logger.warn('Failed to open SQLite database:', e);
+    } catch {
+      logger.warn('Failed to open SQLite database');
       return {
         executeSql: async () => [{ rows: { length: 0 } }],
         transaction: async (fn: any) => fn({ executeSql: async () => [{ rows: { length: 0 } }] }),
-        close: async () => {}
+        close: async () => {},
       };
     }
-  }
+  },
 };
 
 

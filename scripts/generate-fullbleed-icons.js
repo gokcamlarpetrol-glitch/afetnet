@@ -36,7 +36,7 @@ const ICON_SIZES = [
   { size: '83.5x83.5', idiom: 'ipad', scale: '2x', filename: 'ipad-pro-app-83.5@2x.png', pixels: 167 },
   
   // App Store Marketing
-  { size: '1024x1024', idiom: 'ios-marketing', scale: '1x', filename: 'app-store-1024.png', pixels: 1024 }
+  { size: '1024x1024', idiom: 'ios-marketing', scale: '1x', filename: 'app-store-1024.png', pixels: 1024 },
 ];
 
 async function ensureFullBleedSource() {
@@ -45,7 +45,7 @@ async function ensureFullBleedSource() {
   try {
     // Read the source image
     const sourceBuffer = await sharp(SOURCE_ICON).raw().toBuffer({ resolveWithObject: true });
-    const { data, info } = sourceBuffer;
+    const { info } = sourceBuffer;
     
     console.log(`📸 Source image: ${info.width}x${info.height}, ${info.channels} channels`);
     
@@ -64,15 +64,15 @@ async function ensureFullBleedSource() {
       raw: {
         width: info.width,
         height: info.height,
-        channels: 3
-      }
+        channels: 3,
+      },
     })
-    .composite([{
-      input: await sharp(SOURCE_ICON).png().toBuffer(),
-      blend: 'over'
-    }])
-    .png()
-    .toBuffer();
+      .composite([{
+        input: await sharp(SOURCE_ICON).png().toBuffer(),
+        blend: 'over',
+      }])
+      .png()
+      .toBuffer();
     
     // Save the full-bleed source
     await sharp(fullBleedIcon).png().toFile(SOURCE_ICON);
@@ -98,12 +98,12 @@ async function generateIcons() {
       await sharp(SOURCE_ICON)
         .resize(icon.pixels, icon.pixels, {
           fit: 'cover',
-          position: 'center'
+          position: 'center',
         })
         .png({ 
           compressionLevel: 9,
           adaptiveFiltering: false,
-          force: true
+          force: true,
         })
         .removeAlpha()
         .toFile(path.join(OUTPUT_DIR, icon.filename));
@@ -124,17 +124,17 @@ async function generateContentsJson() {
       size: icon.size,
       idiom: icon.idiom,
       filename: icon.filename,
-      scale: icon.scale
+      scale: icon.scale,
     })),
     info: {
       version: 1,
-      author: 'xcode'
-    }
+      author: 'xcode',
+    },
   };
   
   fs.writeFileSync(
     path.join(OUTPUT_DIR, 'Contents.json'),
-    JSON.stringify(contents, null, 2)
+    JSON.stringify(contents, null, 2),
   );
   
   console.log('✅ Generated Contents.json with 18 icon definitions');

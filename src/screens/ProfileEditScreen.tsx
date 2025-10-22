@@ -41,7 +41,7 @@ const GENDER_OPTIONS = [
   'Erkek',
   'Kadın', 
   'Belirtmek istemiyorum',
-  'Diğer'
+  'Diğer',
 ];
 
 // Emergency contact relation options
@@ -52,7 +52,7 @@ const RELATION_OPTIONS = [
   'Kardeş',
   'Çocuk',
   'Arkadaş',
-  'Diğer'
+  'Diğer',
 ];
 
 export default function ProfileEditScreen() {
@@ -79,7 +79,7 @@ export default function ProfileEditScreen() {
     emergencyContactRelation: 'Diğer',
     medicalConditions: '',
     doctorName: '',
-    doctorPhone: ''
+    doctorPhone: '',
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -96,8 +96,8 @@ export default function ProfileEditScreen() {
         const parsedData = JSON.parse(savedData);
         setProfileData(prev => ({ ...prev, ...parsedData }));
       }
-    } catch (error) {
-      console.warn('Failed to load profile data:', error);
+    } catch {
+      // Failed to load profile data - silently ignored
     }
   };
 
@@ -106,7 +106,7 @@ export default function ProfileEditScreen() {
     try {
       await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileData));
       Alert.alert('✅ Başarılı', 'Profil bilgileri kaydedildi!');
-    } catch (error) {
+    } catch {
       Alert.alert('❌ Hata', 'Profil bilgileri kaydedilemedi. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
@@ -190,13 +190,13 @@ export default function ProfileEditScreen() {
                 key={option}
                 style={[
                   styles.optionButton,
-                  profileData.gender === option && styles.selectedOption
+                  profileData.gender === option && styles.selectedOption,
                 ]}
                 onPress={() => updateProfileData('gender', option)}
               >
                 <Text style={[
                   styles.optionText,
-                  profileData.gender === option && styles.selectedOptionText
+                  profileData.gender === option && styles.selectedOptionText,
                 ]}>
                   {option}
                 </Text>
@@ -232,13 +232,13 @@ export default function ProfileEditScreen() {
                 key={type}
                 style={[
                   styles.optionButton,
-                  profileData.bloodType === type && styles.selectedOption
+                  profileData.bloodType === type && styles.selectedOption,
                 ]}
                 onPress={() => updateProfileData('bloodType', type)}
               >
                 <Text style={[
                   styles.optionText,
-                  profileData.bloodType === type && styles.selectedOptionText
+                  profileData.bloodType === type && styles.selectedOptionText,
                 ]}>
                   {type}
                 </Text>
@@ -356,13 +356,13 @@ export default function ProfileEditScreen() {
                 key={relation}
                 style={[
                   styles.optionButton,
-                  profileData.emergencyContactRelation === relation && styles.selectedOption
+                  profileData.emergencyContactRelation === relation && styles.selectedOption,
                 ]}
                 onPress={() => updateProfileData('emergencyContactRelation', relation)}
               >
                 <Text style={[
                   styles.optionText,
-                  profileData.emergencyContactRelation === relation && styles.selectedOptionText
+                  profileData.emergencyContactRelation === relation && styles.selectedOptionText,
                 ]}>
                   {relation}
                 </Text>
@@ -404,14 +404,14 @@ export default function ProfileEditScreen() {
 
   const renderSectionContent = () => {
     switch (activeSection) {
-      case 'personal':
-        return renderPersonalSection();
-      case 'health':
-        return renderHealthSection();
-      case 'emergency':
-        return renderEmergencySection();
-      default:
-        return renderPersonalSection();
+    case 'personal':
+      return renderPersonalSection();
+    case 'health':
+      return renderHealthSection();
+    case 'emergency':
+      return renderEmergencySection();
+    default:
+      return renderPersonalSection();
     }
   };
 
@@ -436,7 +436,7 @@ export default function ProfileEditScreen() {
           <Pressable
             style={[
               styles.sectionButton,
-              activeSection === 'personal' && styles.activeSectionButton
+              activeSection === 'personal' && styles.activeSectionButton,
             ]}
             onPress={() => setActiveSection('personal')}
           >
@@ -447,7 +447,7 @@ export default function ProfileEditScreen() {
             />
             <Text style={[
               styles.sectionLabel,
-              activeSection === 'personal' && styles.activeSectionLabel
+              activeSection === 'personal' && styles.activeSectionLabel,
             ]}>
               Kişisel
             </Text>
@@ -456,7 +456,7 @@ export default function ProfileEditScreen() {
           <Pressable
             style={[
               styles.sectionButton,
-              activeSection === 'health' && styles.activeSectionButton
+              activeSection === 'health' && styles.activeSectionButton,
             ]}
             onPress={() => setActiveSection('health')}
           >
@@ -467,7 +467,7 @@ export default function ProfileEditScreen() {
             />
             <Text style={[
               styles.sectionLabel,
-              activeSection === 'health' && styles.activeSectionLabel
+              activeSection === 'health' && styles.activeSectionLabel,
             ]}>
               Sağlık
             </Text>
@@ -476,7 +476,7 @@ export default function ProfileEditScreen() {
           <Pressable
             style={[
               styles.sectionButton,
-              activeSection === 'emergency' && styles.activeSectionButton
+              activeSection === 'emergency' && styles.activeSectionButton,
             ]}
             onPress={() => setActiveSection('emergency')}
           >
@@ -487,7 +487,7 @@ export default function ProfileEditScreen() {
             />
             <Text style={[
               styles.sectionLabel,
-              activeSection === 'emergency' && styles.activeSectionLabel
+              activeSection === 'emergency' && styles.activeSectionLabel,
             ]}>
               Acil Durum
             </Text>

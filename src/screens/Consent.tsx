@@ -102,7 +102,7 @@ export default function ConsentScreen() {
       [
         { text: 'Tamam' },
         { text: 'Onam Ver', onPress: handleAcceptAll },
-      ]
+      ],
     );
   };
 
@@ -137,7 +137,7 @@ export default function ConsentScreen() {
             </View>
             <View style={styles.statusItem}>
               <Ionicons 
-                name={consentData.dataProcessing ? "checkmark-circle" : "close-circle"} 
+                name={consentData.dataProcessing ? 'checkmark-circle' : 'close-circle'} 
                 size={20} 
                 color={consentData.dataProcessing ? (palette.successColors?.main || '#22c55e') : (palette.errorColors?.main || '#ef4444')} 
               />
@@ -145,7 +145,7 @@ export default function ConsentScreen() {
             </View>
             <View style={styles.statusItem}>
               <Ionicons 
-                name={consentData.emergencySharing ? "checkmark-circle" : "close-circle"} 
+                name={consentData.emergencySharing ? 'checkmark-circle' : 'close-circle'} 
                 size={20} 
                 color={consentData.emergencySharing ? (palette.successColors?.main || '#22c55e') : (palette.errorColors?.main || '#ef4444')} 
               />
@@ -153,7 +153,7 @@ export default function ConsentScreen() {
             </View>
             <View style={styles.statusItem}>
               <Ionicons 
-                name={consentData.analytics ? "checkmark-circle" : "close-circle"} 
+                name={consentData.analytics ? 'checkmark-circle' : 'close-circle'} 
                 size={20} 
                 color={consentData.analytics ? (palette.successColors?.main || '#22c55e') : (palette.errorColors?.main || '#ef4444')} 
               />
@@ -170,9 +170,9 @@ export default function ConsentScreen() {
             Bu onam, cihazınızdaki verilerin işlenmesi, şifrelenmesi ve güvenli iletişim için kullanılması anlamına gelir.
           </Text>
           <Button
-            label={consentData.dataProcessing ? "Onam Verildi ✓" : "Onam Ver"}
+            label={consentData.dataProcessing ? 'Onam Verildi ✓' : 'Onam Ver'}
             onPress={handleToggleDataProcessing}
-            variant={consentData.dataProcessing ? "ghost" : "primary"}
+            variant={consentData.dataProcessing ? 'ghost' : 'primary'}
             style={styles.consentButton}
           />
         </Card>
@@ -185,9 +185,9 @@ export default function ConsentScreen() {
             Bu onam, acil durumlarda (SOS) konum ve durum bilgilerinizin güvenli şekilde paylaşılması anlamına gelir.
           </Text>
           <Button
-            label={consentData.emergencySharing ? "Onam Verildi ✓" : "Onam Ver"}
+            label={consentData.emergencySharing ? 'Onam Verildi ✓' : 'Onam Ver'}
             onPress={handleToggleEmergencySharing}
-            variant={consentData.emergencySharing ? "ghost" : "primary"}
+            variant={consentData.emergencySharing ? 'ghost' : 'primary'}
             style={styles.consentButton}
           />
         </Card>
@@ -200,9 +200,9 @@ export default function ConsentScreen() {
             Bu onam, uygulamanın geliştirilmesi için anonim kullanım verilerinin toplanması anlamına gelir. Kişisel bilgiler toplanmaz.
           </Text>
           <Button
-            label={consentData.analytics ? "Onam Verildi ✓" : "Onam Ver"}
+            label={consentData.analytics ? 'Onam Verildi ✓' : 'Onam Ver'}
             onPress={handleToggleAnalytics}
-            variant={consentData.analytics ? "ghost" : "primary"}
+            variant={consentData.analytics ? 'ghost' : 'primary'}
             style={styles.consentButton}
           />
         </Card>

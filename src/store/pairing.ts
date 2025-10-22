@@ -29,13 +29,21 @@ interface PairingState {
 }
 
 interface PairingActions {
+   
   addContact: (contact: Omit<PairedContact, 'lastSeen'>) => void;
+   
   updateContactLastSeen: (id: string) => void;
+   
   removeContact: (id: string) => void;
+   
   addGroup: (group: Omit<Group, 'created' | 'updated'>) => void;
+   
   updateGroup: (id: string, updates: Partial<Group>) => void;
+   
   setGroupSharedKey: (groupId: string, sharedKeyB64: string) => void;
+   
   getSharedFor: (pubKey: string) => Uint8Array | null;
+   
   setMyKeys: (publicKey: string, secretKey: Uint8Array) => void;
   clearAll: () => void;
 }
@@ -44,7 +52,7 @@ const defaultState: PairingState = {
   pairedContacts: [],
   groups: [],
   myPublicKey: undefined,
-  mySecretKey: undefined
+  mySecretKey: undefined,
 };
 
 export const usePairing = create<PairingState & PairingActions>()(
@@ -63,28 +71,28 @@ export const usePairing = create<PairingState & PairingActions>()(
         const newContact: PairedContact = {
           ...contact,
           lastSeen: Date.now(),
-          sharedKey: sharedKey as any
+          sharedKey: sharedKey as any,
         };
 
         set((state) => ({
           pairedContacts: [
             ...state.pairedContacts.filter(c => c.id !== contact.id),
-            newContact
-          ]
+            newContact,
+          ],
         }));
       },
 
       updateContactLastSeen: (id) => {
         set((state) => ({
           pairedContacts: state.pairedContacts.map(contact =>
-            contact.id === id ? { ...contact, lastSeen: Date.now() } : contact
-          )
+            contact.id === id ? { ...contact, lastSeen: Date.now() } : contact,
+          ),
         }));
       },
 
       removeContact: (id) => {
         set((state) => ({
-          pairedContacts: state.pairedContacts.filter(c => c.id !== id)
+          pairedContacts: state.pairedContacts.filter(c => c.id !== id),
         }));
       },
 
@@ -92,27 +100,27 @@ export const usePairing = create<PairingState & PairingActions>()(
         const newGroup: Group = {
           ...group,
           created: Date.now(),
-          updated: Date.now()
+          updated: Date.now(),
         };
 
         set((state) => ({
-          groups: [...state.groups, newGroup]
+          groups: [...state.groups, newGroup],
         }));
       },
 
       updateGroup: (id, updates) => {
         set((state) => ({
           groups: state.groups.map(group =>
-            group.id === id ? { ...group, ...updates, updated: Date.now() } : group
-          )
+            group.id === id ? { ...group, ...updates, updated: Date.now() } : group,
+          ),
         }));
       },
 
       setGroupSharedKey: (groupId, sharedKeyB64) => {
         set((state) => ({
           groups: state.groups.map(group =>
-            group.id === groupId ? { ...group, sharedKeyB64, updated: Date.now() } : group
-          )
+            group.id === groupId ? { ...group, sharedKeyB64, updated: Date.now() } : group,
+          ),
         }));
       },
 
@@ -129,8 +137,8 @@ export const usePairing = create<PairingState & PairingActions>()(
         const sharedKey: any = deriveSharedKey(pubKey as any, mySecretKey);
         set((state) => ({
           pairedContacts: state.pairedContacts.map(c =>
-            c.pubKeyB64 === pubKey ? { ...c, sharedKey: sharedKey as any } : c
-          ) as any
+            c.pubKeyB64 === pubKey ? { ...c, sharedKey: sharedKey as any } : c,
+          ) as any,
         }));
 
         return sharedKey;
@@ -142,7 +150,7 @@ export const usePairing = create<PairingState & PairingActions>()(
 
       clearAll: () => {
         set(defaultState);
-      }
+      },
     }),
     {
       name: 'afn/pairing/v1',
@@ -151,7 +159,7 @@ export const usePairing = create<PairingState & PairingActions>()(
       migrate: (persistedState: any, version: number) => {
         // Handle migrations if needed
         return { ...defaultState, ...persistedState };
-      }
-    }
-  )
+      },
+    },
+  ),
 );

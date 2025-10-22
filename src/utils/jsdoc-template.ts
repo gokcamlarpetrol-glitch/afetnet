@@ -113,7 +113,7 @@ export async function relayMeshMessage(message: any): Promise<any> {
 export function encryptMessage(
   plaintext: string,
   theirPublicKey: Uint8Array,
-  mySecretKey: Uint8Array
+  mySecretKey: Uint8Array,
 ): string {
   // Implementation
   return '';
@@ -150,7 +150,7 @@ export function calculateDistance(
   lat1: number,
   lon1: number,
   lat2: number,
-  lon2: number
+  lon2: number,
 ): number {
   const R = 6371; // Earth radius in km
   const dLat = (lat2 - lat1) * Math.PI / 180;

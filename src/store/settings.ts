@@ -71,6 +71,7 @@ export interface Settings {
 }
 
 type SettingsState = Settings & {
+   
   updateSettings: (updates: Partial<Settings>) => void;
   resetToDefaults: () => void;
 };
@@ -95,11 +96,12 @@ const defaultSettings: Settings = {
   region: { type: 'all' },
   experimentalPWave: false,
   // FCM Push defaults
-  selectedProvinces: []
+  selectedProvinces: [],
 };
 
 export const useSettings = create<SettingsState>()(
   persist(
+     
     (set, get) => ({
       ...defaultSettings,
       
@@ -109,16 +111,17 @@ export const useSettings = create<SettingsState>()(
       
       resetToDefaults: () => {
         set(defaultSettings);
-      }
+      },
     }),
     {
       name: 'afn/settings/v1',
       storage: createJSONStorage(() => AsyncStorage),
       version: 1,
+       
       migrate: (persistedState: any, version: number) => {
         // Handle migrations if needed
         return ensureDefaults(persistedState || {});
-      }
-    }
-  )
+      },
+    },
+  ),
 );

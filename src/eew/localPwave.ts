@@ -1,8 +1,8 @@
-import { Accelerometer } from "expo-sensors";
-import * as Location from "expo-location";
-import { quantizeLatLng } from "../geo/coarse";
-import { EEWAlert } from "./types";
-import { pushEEW, notifyEEW } from "./store";
+import { Accelerometer } from 'expo-sensors';
+import * as Location from 'expo-location';
+import { quantizeLatLng } from '../geo/coarse';
+import { EEWAlert } from './types';
+import { pushEEW, notifyEEW } from './store';
 
 /** Simplified P-wave detector:
  * High-pass-ish transform on |a|-1g, STA(0.6s)/LTA(8s) ratio ≥ 2.2 for ≥0.8s triggers.
@@ -31,9 +31,11 @@ export function startLocalPwave(){
       try{
         const p = await Location.getLastKnownPositionAsync({}); let lat=0, lng=0;
         if(p){ const q=quantizeLatLng(p.coords.latitude,p.coords.longitude); lat=q.lat; lng=q.lng; }
-        const a: EEWAlert = { id:"LOCAL_P_"+now, ts: now, lat, lng, depth: 5, mag: 3.5, src:"LOCAL_PWAVE" };
+        const a: EEWAlert = { id:'LOCAL_P_'+now, ts: now, lat, lng, depth: 5, mag: 3.5, src:'LOCAL_PWAVE' };
         await pushEEW(a); await notifyEEW(a);
-      }catch{}
+      }catch{
+        // Ignore location errors
+      }
     }
   });
 }

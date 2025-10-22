@@ -5,18 +5,18 @@ import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from 'react-native';
 import { usePDRFuse } from '../hooks/usePDRFuse';
 import { currentFormat, localTileUrlTemplate, startMbtilesServer } from '../offline/mbtiles-server';
@@ -27,21 +27,18 @@ import NetInfo from '@react-native-community/netinfo';
 let ExpoMap: any = null;
 let MapView: any = null;
 let Marker: any = null;
-let Circle: any = null;
 let Polyline: any = null;
 
 try {
-  const maps = require('expo-maps');
+  const maps = (globalThis as any).require('expo-maps');
   ExpoMap = maps.default;
   MapView = maps.MapView;
   Marker = maps.Marker;
-  Circle = maps.Circle;
   Polyline = maps.Polyline;
-} catch (e) {
+} catch {
   // expo-maps not available - fallback to alternative map solution
 }
 
-const { width, height } = Dimensions.get('window');
 
 interface MapMarker {
   id: string;
@@ -113,7 +110,6 @@ export default function AdvancedMapOffline() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState<Location.LocationObject[]>([]);
-  const [selectedMarker, setSelectedMarker] = useState<MapMarker | null>(null);
 
   // Animations
   const panelAnimation = useRef(new Animated.Value(0)).current;
@@ -288,7 +284,7 @@ export default function AdvancedMapOffline() {
             description: `Doğruluk: ${newLocation.coords.accuracy?.toFixed(0)}m`,
             accuracy: newLocation.coords.accuracy || 0,
           });
-        }
+        },
       );
 
       return () => subscription.then(sub => sub.remove());
@@ -353,7 +349,7 @@ export default function AdvancedMapOffline() {
           style: 'destructive',
           onPress: () => removeMarker(marker.id),
         },
-      ]
+      ],
     );
   };
 
@@ -373,14 +369,14 @@ export default function AdvancedMapOffline() {
     try {
       // Update pack status
       setOfflineTilePacks(prev => 
-        prev.map(p => p.id === pack.id ? { ...p, status: 'downloading' } : p)
+        prev.map(p => p.id === pack.id ? { ...p, status: 'downloading' } : p),
       );
 
       // Simulate download process (in real implementation, this would download actual tiles)
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => (globalThis as any).setTimeout(resolve, 3000));
 
       setOfflineTilePacks(prev => 
-        prev.map(p => p.id === pack.id ? { ...p, status: 'downloaded' } : p)
+        prev.map(p => p.id === pack.id ? { ...p, status: 'downloaded' } : p),
       );
 
       await AsyncStorage.setItem('offline_tile_packs', JSON.stringify(offlineTilePacks));
@@ -388,7 +384,7 @@ export default function AdvancedMapOffline() {
       Alert.alert('Başarılı', `${pack.name} offline paketi indirildi!`);
     } catch (error) {
       setOfflineTilePacks(prev => 
-        prev.map(p => p.id === pack.id ? { ...p, status: 'error' } : p)
+        prev.map(p => p.id === pack.id ? { ...p, status: 'error' } : p),
       );
       Alert.alert('Hata', 'Offline paket indirilemedi.');
     }
@@ -550,22 +546,22 @@ export default function AdvancedMapOffline() {
                 <Text style={styles.tilePackSize}>{(pack.size / 1000000).toFixed(1)} MB</Text>
                 <Text style={styles.tilePackStatus}>
                   Durum: {pack.status === 'downloaded' ? 'İndirildi' : 
-                         pack.status === 'downloading' ? 'İndiriliyor...' :
-                         pack.status === 'available' ? 'Kullanılabilir' : 'Hata'}
+                    pack.status === 'downloading' ? 'İndiriliyor...' :
+                      pack.status === 'available' ? 'Kullanılabilir' : 'Hata'}
                 </Text>
               </View>
               
               <Pressable
                 style={[
                   styles.tilePackButton,
-                  { backgroundColor: pack.status === 'downloaded' ? '#10b981' : '#3b82f6' }
+                  { backgroundColor: pack.status === 'downloaded' ? '#10b981' : '#3b82f6' },
                 ]}
                 onPress={() => downloadOfflinePack(pack)}
                 disabled={pack.status === 'downloading'}
               >
                 <Text style={styles.tilePackButtonText}>
                   {pack.status === 'downloaded' ? '✅' : 
-                   pack.status === 'downloading' ? '⏳' : '⬇️'}
+                    pack.status === 'downloading' ? '⏳' : '⬇️'}
                 </Text>
               </Pressable>
             </View>
@@ -622,7 +618,7 @@ export default function AdvancedMapOffline() {
           <Text style={styles.trackingTitle}>🎯 Takip Bilgileri</Text>
           <Text style={styles.trackingText}>
             Mod: {trackingMode === 'off' ? 'Kapalı' : 
-                  trackingMode === 'basic' ? 'Temel' : 'Gelişmiş'}
+              trackingMode === 'basic' ? 'Temel' : 'Gelişmiş'}
           </Text>
           <Text style={styles.trackingText}>
             Kayıt Sayısı: {trackingHistory.length}
@@ -744,7 +740,7 @@ export default function AdvancedMapOffline() {
           <Text style={styles.statusText}>
             {tileServerActive ? '✅ Elite Offline' : '⚠️ Online Fallback'} | 
             {trackingMode === 'off' ? ' 📍 Kapalı' : 
-             trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
+              trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
             {markers.length} işaret
           </Text>
         </View>
@@ -824,7 +820,7 @@ export default function AdvancedMapOffline() {
         <Text style={styles.statusText}>
           {tileServerActive ? '✅ Elite Offline' : '⚠️ Online Fallback'} | 
           {trackingMode === 'off' ? ' 📍 Kapalı' : 
-           trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
+            trackingMode === 'basic' ? ' 🎯 Temel' : ' 🎯 Gelişmiş'} |
           {markers.length} işaret | {isOnline ? '🟢' : '🔴'}
         </Text>
       </View>
@@ -855,25 +851,25 @@ export default function AdvancedMapOffline() {
 // Helper functions
 const getMarkerColor = (type: MapMarker['type']): string => {
   switch (type) {
-    case 'safe_zone': return 'green';
-    case 'emergency': return 'red';
-    case 'family_member': return 'blue';
-    case 'incident': return 'orange';
-    case 'waypoint': return 'purple';
-    case 'danger': return 'red';
-    default: return 'gray';
+  case 'safe_zone': return 'green';
+  case 'emergency': return 'red';
+  case 'family_member': return 'blue';
+  case 'incident': return 'orange';
+  case 'waypoint': return 'purple';
+  case 'danger': return 'red';
+  default: return 'gray';
   }
 };
 
 const getMarkerEmoji = (type: MapMarker['type']): string => {
   switch (type) {
-    case 'safe_zone': return '🛡️';
-    case 'emergency': return '🚨';
-    case 'family_member': return '👨‍👩‍👧‍👦';
-    case 'incident': return '⚠️';
-    case 'waypoint': return '📍';
-    case 'danger': return '☠️';
-    default: return '📍';
+  case 'safe_zone': return '🛡️';
+  case 'emergency': return '🚨';
+  case 'family_member': return '👨‍👩‍👧‍👦';
+  case 'incident': return '⚠️';
+  case 'waypoint': return '📍';
+  case 'danger': return '☠️';
+  default: return '📍';
   }
 };
 

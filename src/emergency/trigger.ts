@@ -1,9 +1,9 @@
-import { Platform } from "react-native";
-import { p2pLocalSend } from "../p2p/send";
-import { useSafety } from "../state/safetyStore";
-import { sayKey } from "../voice/voice";
-import { quantizeLatLng } from "../geo/coarse";
-import * as Location from "expo-location";
+// import { Platform } from 'react-native'; // Not used
+import { p2pLocalSend } from '../p2p/send';
+import { useSafety } from '../state/safetyStore';
+import { sayKey } from '../voice/voice';
+import { quantizeLatLng } from '../geo/coarse';
+import * as Location from 'expo-location';
 
 // NOTE: Expo Managed projede HW tuşlarını global dinlemek sınırlı. Burada fallback: hızlı iki "ses azalt" tuşu algısı için ekran açıkken listener ekleyin.
 // Eğer Bare veya dev-client ise native Module (VolumeKeyEmitter) ile bağlayın. Aksi halde SOS ekranına giden UI butonları sağlayın.
@@ -24,22 +24,22 @@ async function quickDraftSOS(){
   const safety = useSafety.getState();
   const loc = await Location.getLastKnownPositionAsync({}).catch(()=>null);
   const q = loc ? quantizeLatLng(loc.coords.latitude, loc.coords.longitude) : null;
-  const msg:any = { kind:"sos", body:"Hızlı SOS (kısayol)", hops:0, maxHops:6, ttlSec:3600, ts:Date.now() };
+  const msg:any = { kind:'sos', body:'Hızlı SOS (kısayol)', hops:0, maxHops:6, ttlSec:3600, ts:Date.now() };
   if(q){ (msg).qlat=q.lat; (msg).qlng=q.lng; }
   if(safety.unconsciousMode){ await p2pLocalSend(msg); } else { msg.draft=true; await p2pLocalSend(msg); }
-  await sayKey("sos_sent");
+  await sayKey('sos_sent');
 }
 
 // Torch SOS (Morse ...---...)
 export async function torchSOS(){
   try{
     // Optional: react-native-torch (Bare/dev-client). Dynamic import; fallback to screen flash UI.
-    const Torch = require("react-native-torch").default;
+    const Torch = (globalThis as any).require('react-native-torch').default;
     const unit = 200;
     const pattern = [1,1,1,3,3,3,1,1,1]; // S O S
     for(const p of pattern){
-      Torch.switchState(true); await new Promise(r=>setTimeout(r, unit*p));
-      Torch.switchState(false); await new Promise(r=>setTimeout(r, unit));
+      Torch.switchState(true); await new Promise(r=>(globalThis as any).setTimeout(r, unit*p));
+      Torch.switchState(false); await new Promise(r=>(globalThis as any).setTimeout(r, unit));
     }
   }catch{
     // fallback: no-op (veya bir ekran strobosu bileşeni ile)

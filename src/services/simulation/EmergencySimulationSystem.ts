@@ -110,7 +110,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'survival',
           points: 100,
           completed: false,
-          timeLimit: 30
+          timeLimit: 30,
         },
         {
           id: 'obj_2',
@@ -119,7 +119,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'survival',
           points: 150,
           completed: false,
-          timeLimit: 120
+          timeLimit: 120,
         },
         {
           id: 'obj_3',
@@ -128,7 +128,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'rescue',
           points: 300,
           completed: false,
-          timeLimit: 600
+          timeLimit: 600,
         },
         {
           id: 'obj_4',
@@ -137,8 +137,8 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'communication',
           points: 200,
           completed: false,
-          timeLimit: 180
-        }
+          timeLimit: 180,
+        },
       ],
       events: [
         {
@@ -155,23 +155,23 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
               text: 'Masa altına geçin',
               consequence: 'Güvenli bir yere geçtiniz. +50 puan',
               points: 50,
-              nextEvent: 'event_2'
+              nextEvent: 'event_2',
             },
             {
               id: 'choice_2',
               text: 'Merdivenlerden kaçmaya çalışın',
               consequence: 'Tehlikeli! Merdivenler çökmüş olabilir. -30 puan',
               points: -30,
-              nextEvent: 'event_2'
+              nextEvent: 'event_2',
             },
             {
               id: 'choice_3',
               text: 'Pencereye yaklaşın',
               consequence: 'Çok tehlikeli! Cam kırılabilir. -50 puan',
               points: -50,
-              nextEvent: 'event_2'
-            }
-          ]
+              nextEvent: 'event_2',
+            },
+          ],
         },
         {
           id: 'event_2',
@@ -187,24 +187,24 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
               text: 'Acil durum çantasını alın',
               consequence: 'İyi karar! Çanta alındı. +100 puan',
               points: 100,
-              nextEvent: 'event_3'
+              nextEvent: 'event_3',
             },
             {
               id: 'choice_5',
               text: 'Hemen dışarı çıkın',
               consequence: 'Çanta olmadan çıktınız. -50 puan',
               points: -50,
-              nextEvent: 'event_3'
+              nextEvent: 'event_3',
             },
             {
               id: 'choice_6',
               text: 'Önce binayı kontrol edin',
               consequence: 'Dikkatli yaklaşım. +25 puan',
               points: 25,
-              nextEvent: 'event_3'
-            }
-          ]
-        }
+              nextEvent: 'event_3',
+            },
+          ],
+        },
       ],
       rewards: [
         {
@@ -213,7 +213,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           name: 'Deprem Ustası',
           description: 'Deprem simülasyonunu başarıyla tamamladınız',
           icon: '🏆',
-          rarity: 'rare'
+          rarity: 'rare',
         },
         {
           id: 'reward_2',
@@ -221,11 +221,11 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           name: 'Hayatta Kalma +10',
           description: 'Hayatta kalma becerileriniz gelişti',
           icon: '💪',
-          rarity: 'common'
-        }
+          rarity: 'common',
+        },
       ],
       requirements: ['basic_emergency_knowledge'],
-      estimatedScore: 750
+      estimatedScore: 750,
     });
 
     // Fire scenario
@@ -244,7 +244,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'survival',
           points: 50,
           completed: false,
-          timeLimit: 60
+          timeLimit: 60,
         },
         {
           id: 'fire_obj_2',
@@ -253,7 +253,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'communication',
           points: 75,
           completed: false,
-          timeLimit: 30
+          timeLimit: 30,
         },
         {
           id: 'fire_obj_3',
@@ -262,7 +262,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'evacuation',
           points: 150,
           completed: false,
-          timeLimit: 120
+          timeLimit: 120,
         },
         {
           id: 'fire_obj_4',
@@ -271,8 +271,8 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           type: 'evacuation',
           points: 200,
           completed: false,
-          timeLimit: 300
-        }
+          timeLimit: 300,
+        },
       ],
       events: [
         {
@@ -289,24 +289,24 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
               text: 'Dumanın kaynağını araştırın',
               consequence: 'Dumanın kaynağını buldunuz. +75 puan',
               points: 75,
-              nextEvent: 'fire_event_2'
+              nextEvent: 'fire_event_2',
             },
             {
               id: 'fire_choice_2',
               text: 'Hemen alarmı çalıştırın',
               consequence: 'Hızlı tepki! Alarm çalıştırıldı. +100 puan',
               points: 100,
-              nextEvent: 'fire_event_2'
+              nextEvent: 'fire_event_2',
             },
             {
               id: 'fire_choice_3',
               text: 'Koku görmezden gelin',
               consequence: 'Tehlikeli! Yangın yayılabilir. -100 puan',
               points: -100,
-              nextEvent: 'fire_event_2'
-            }
-          ]
-        }
+              nextEvent: 'fire_event_2',
+            },
+          ],
+        },
       ],
       rewards: [
         {
@@ -315,11 +315,11 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           name: 'Yangın Savaşçısı',
           description: 'Yangın simülasyonunu başarıyla tamamladınız',
           icon: '🔥',
-          rarity: 'epic'
-        }
+          rarity: 'epic',
+        },
       ],
       requirements: [],
-      estimatedScore: 475
+      estimatedScore: 475,
     });
 
     logger.debug('✅ Simulation scenarios initialized');
@@ -366,8 +366,8 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
           accuracy: 0,
           survivalRate: 0,
           efficiency: 0,
-          leadership: 0
-        }
+          leadership: 0,
+        },
       };
 
       this.activeSimulations.set(sessionId, session);
@@ -377,7 +377,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         sessionId,
         scenarioId,
         userId,
-        difficulty: scenario.difficulty
+        difficulty: scenario.difficulty,
       });
 
       logger.debug(`✅ Simulation started: ${sessionId}`);
@@ -417,7 +417,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         eventId,
         choiceId,
         points: choice.points,
-        consequence: choice.consequence
+        consequence: choice.consequence,
       });
 
       logger.debug(`🎯 Choice processed: ${choice.consequence}`);
@@ -452,7 +452,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         sessionId,
         objectiveId,
         objectiveTitle: objective.title,
-        points: objective.points
+        points: objective.points,
       });
 
       logger.debug(`✅ Objective completed: ${objective.title}`);
@@ -496,7 +496,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         sessionId,
         score: session.score,
         completedObjectives: session.completedObjectives,
-        duration: duration
+        duration: duration,
       });
 
       logger.debug(`🎉 Simulation completed: ${sessionId} (Score: ${session.score})`);
@@ -526,7 +526,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         name: 'Yüksek Skor Ustası',
         description: 'Beklenen skorun %150\'sini geçtiniz',
         icon: '⭐',
-        rarity: 'epic'
+        rarity: 'epic',
       });
     }
 
@@ -569,7 +569,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
         averageScore: 0,
         totalPlayTime: 0,
         completedObjectives: 0,
-        badges: []
+        badges: [],
       };
     }
 
@@ -586,7 +586,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
       averageScore,
       totalPlayTime,
       completedObjectives,
-      badges: [] // TODO: Implement badge system
+      badges: [], // TODO: Implement badge system
     };
   }
 
@@ -596,12 +596,12 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
     activeSimulations: number;
     totalScenarios: number;
     totalSessions: number;
-  } {
+    } {
     return {
       isActive: this.isActive,
       activeSimulations: this.activeSimulations.size,
       totalScenarios: this.simulationScenarios.size,
-      totalSessions: this.simulationHistory.length
+      totalSessions: this.simulationHistory.length,
     };
   }
 }
@@ -609,6 +609,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const emergencySimulationSystem = new EmergencySimulationSystem();
 export default EmergencySimulationSystem;
+
 
 
 
