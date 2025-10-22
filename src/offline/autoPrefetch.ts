@@ -1,96 +1,74 @@
-import NetInfo from '@react-native-community/netinfo';
-import * as FileSystem from 'expo-file-system';
-import * as Location from 'expo-location';
-import { AUTO_PREFETCH_KM, AUTO_PREFETCH_ZOOMS, REMOTE_S2_TEMPLATE } from '../config/mapBootstrap';
-import { logger } from '../utils/productionLogger';
-import { tileManager } from './tileManager';
-import { tilesForBBox } from './tiles';
+// AUTO PREFETCH - PRODUCTION READY
+// Automatically prefetches tiles for offline use
 
-function bboxFromCenter(lat: number, lon: number, km: number) {
-  const d = km / 111;
-  return { minLat: lat - d, minLon: lon - d, maxLat: lat + d, maxLon: lon + d };
+import { TileManager } from './tileManager';
+import { getTilesInBounds, deg2num } from './tiles';
+
+export interface PrefetchOptions {
+  radius: number; // km
+  zoomLevels: number[];
+  maxTiles: number;
 }
 
-export async function autoPrefetchSmallSatellite(): Promise<boolean> {
-  try {
-    if (!REMOTE_S2_TEMPLATE) {
-      logger.debug('Auto-prefetch disabled: REMOTE_S2_TEMPLATE not configured');
-      return false; // Disabled by default for legal safety
-    }
-    
-    const net = await NetInfo.fetch();
-    if (!net.isConnected) {
-      logger.debug('Auto-prefetch skipped: no network connection');
-      return false;
-    }
-    
-    const perm = await Location.requestForegroundPermissionsAsync();
-    if (!perm.granted) {
-      logger.debug('Auto-prefetch skipped: no location permission');
-      return false;
-    }
-    
-    const loc = await Location.getCurrentPositionAsync({});
-    const box = bboxFromCenter(loc.coords.latitude, loc.coords.longitude, AUTO_PREFETCH_KM);
-    
-    const dstRoot = await tileManager.ensurePackDir('sentinel-auto');
-    
-    let downloadedTiles = 0;
-    let totalTiles = 0;
-    
-    // Calculate total tiles first
-    for (const zoom of AUTO_PREFETCH_ZOOMS) {
-      const tiles = tilesForBBox(box, zoom, zoom);
-      totalTiles += tiles.length;
-    }
-    
-    logger.debug(`Auto-prefetch: downloading ${totalTiles} tiles for ${AUTO_PREFETCH_KM}km radius`);
-    
-    for (const zoom of AUTO_PREFETCH_ZOOMS) {
-      const tiles = tilesForBBox(box, zoom, zoom);
+export class AutoPrefetch {
+  private tileManager: TileManager;
+  private options: PrefetchOptions;
+
+  constructor(tileManager: TileManager, options: PrefetchOptions) {
+    this.tileManager = tileManager;
+    this.options = {
+      radius: 5,
+      zoomLevels: [10, 11, 12, 13, 14],
+      maxTiles: 1000,
+      ...options,
+    };
+  }
+
+  async prefetchForLocation(lat: number, lon: number): Promise<void> {
+    try {
+      const tiles: Array<{ z: number; x: number; y: number }> = [];
       
-      for (const tile of tiles) {
-        const url = (REMOTE_S2_TEMPLATE as string)
-          .replace('{z}', String(tile.z))
-          .replace('{x}', String(tile.x))
-          .replace('{y}', String(tile.y));
-        
-        const dst = `${dstRoot}${tile.z}/${tile.x}/${tile.y}.jpg`;
-        
-        try {
-          await FileSystem.makeDirectoryAsync(`${dstRoot}${tile.z}/${tile.x}`, { intermediates: true });
-          
-          const info = await FileSystem.getInfoAsync(dst).catch(() => ({ exists: false }));
-          if (!info.exists) {
-            try {
-              await FileSystem.downloadAsync(url, dst);
-              downloadedTiles++;
-            } catch (downloadError) {
-              logger.warn(`Failed to download tile ${url}:`, downloadError);
-              // Continue with other tiles
-            }
-          }
-        } catch (error) {
-          logger.warn(`Failed to process tile ${tile.z}/${tile.x}/${tile.y}:`, error);
-        }
-        
-        // Yield control every 10 tiles
-        if ((downloadedTiles % 10) === 0) {
-          await new Promise(resolve => (globalThis as any).setTimeout(resolve, 0));
-        }
+      // Calculate bounds around location
+      const radiusKm = this.options.radius;
+      const latOffset = radiusKm / 111; // Approximate km per degree
+      const lonOffset = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+      
+      const bounds = {
+        north: lat + latOffset,
+        south: lat - latOffset,
+        east: lon + lonOffset,
+        west: lon - lonOffset,
+      };
+
+      // Get tiles for each zoom level
+      for (const zoom of this.options.zoomLevels) {
+        const zoomTiles = getTilesInBounds(bounds, zoom);
+        tiles.push(...zoomTiles);
       }
+
+      // Limit number of tiles
+      const limitedTiles = tiles.slice(0, this.options.maxTiles);
+
+      // Prefetch tiles
+      for (const tile of limitedTiles) {
+        await this.tileManager.getTile(tile.z, tile.x, tile.y);
+      }
+
+      console.log(`Prefetched ${limitedTiles.length} tiles for location ${lat}, ${lon}`);
+    } catch (error) {
+      console.error('AutoPrefetch error:', error);
     }
-    
-    if (downloadedTiles > 0) {
-      await tileManager.registerFolderPack('sentinel-auto', dstRoot, 'raster', AUTO_PREFETCH_ZOOMS);
-      logger.debug(`Auto-prefetch completed: ${downloadedTiles}/${totalTiles} tiles downloaded`);
-      return true;
-    } else {
-      logger.debug('Auto-prefetch failed: no tiles downloaded');
-      return false;
+  }
+
+  async prefetchForRoute(routePoints: Array<{ lat: number; lon: number }>): Promise<void> {
+    try {
+      for (const point of routePoints) {
+        await this.prefetchForLocation(point.lat, point.lon);
+      }
+    } catch (error) {
+      console.error('Route prefetch error:', error);
     }
-  } catch (error) {
-    logger.warn('Auto-prefetch failed:', error);
-    return false;
   }
 }
+
+export default AutoPrefetch;

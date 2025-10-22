@@ -2,7 +2,7 @@ import React from 'react';
 import { logger } from "../utils/productionLogger";
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
+// import { useNavigation } from '@react-navigation/native';
 import { View, Text, Pressable } from 'react-native';
 
 // Available screens

@@ -5,7 +5,7 @@ import typescriptParser from '@typescript-eslint/parser';
 export default [
   js.configs.recommended,
   {
-    ignores: ['src/offline/**/*', 'src/relief/**/*'],
+    ignores: ['src/relief/**/*'],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {

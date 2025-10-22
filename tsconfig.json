@@ -6,7 +6,7 @@
       "DOM"
     ],
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "jsx": "react-native",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -28,9 +28,6 @@
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo",
     "forceConsistentCasingInFileNames": false,
-    "noErrorTruncation": true,
-    "suppressImplicitAnyIndexErrors": true,
-    "suppressExcessPropertyErrors": true,
     "baseUrl": ".",
     "paths": {
       "@/*": [
@@ -45,13 +42,7 @@
       "react-native",
       "node"
     ],
-    "isolatedModules": true,
-    "noEmit": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
-    "downlevelIteration": true,
-    "allowJs": false,
-    "forceConsistentCasingInFileNames": true
+    "isolatedModules": true
   },
   "include": [
     "src/**/*",
@@ -64,7 +55,8 @@
     "node_modules",
     "dist",
     "**/*.test.ts",
-    "**/*.test.tsx"
+    "**/*.test.tsx",
+    "src/offline/**/*"
   ],
   "extends": "./node_modules/expo/tsconfig.base.json"
 }

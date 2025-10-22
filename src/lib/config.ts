@@ -10,7 +10,7 @@ export async function getApiBase(): Promise<string>{
   }
   
   // Fallback to secure store
-  return (await load(KEYS.api)) || (Constants.expoConfig?.extra as any)?.apiBase || '';
+  return (await load(KEYS.api)) || (Constants.expoConfig?.extra as any)?.apiBase || 'https://afetnet-backend.onrender.com';
 }
 
 export async function getSecret(): Promise<string|undefined>{
