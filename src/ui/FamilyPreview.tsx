@@ -1,17 +1,18 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useFamily } from '../store/familyStore';
-import { useNavigation } from '@react-navigation/native';
+
+type NavigationProp = any;
 
 export default function FamilyPreview() {
   const { members } = useFamily();
-  const nav = useNavigation<any>();
+  const navigation = require('@react-navigation/native').useNavigation() as NavigationProp;
   const top = members.slice(0, 2);
   return (
     <View style={styles.card}>
       <View style={styles.row}>
         <Text style={styles.h}>Aile</Text>
-        <Pressable onPress={() => nav.navigate('Family')}>
+        <Pressable onPress={() => navigation.navigate('Family')}>
           <Text style={styles.link}>Tümü</Text>
         </Pressable>
       </View>

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-// import { useNavigation, useRoute } from '@react-navigation/native';
+// import { useNavigation, useRoute } from '@react-navigation/native'; // Temporarily disabled
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -21,8 +21,9 @@ type GroupMessage = {
 };
 
 export default function GroupChatScreen() {
-  const route = useRoute();
-  const navigation = useNavigation();
+  // Mock navigation and route for now
+  const route = { params: { groupId: 'demo-group' } } as any;
+  const navigation = { goBack: () => {}, navigate: () => {} } as any;
   const { groups, updateLastActivity, getSharedKey } = useGroups();
   const { meAfnId } = usePeople();
   

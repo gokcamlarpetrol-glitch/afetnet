@@ -37,6 +37,7 @@ export default function ConvoyMapScreen() {
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState<ConvoyVehicle | null>(null);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {

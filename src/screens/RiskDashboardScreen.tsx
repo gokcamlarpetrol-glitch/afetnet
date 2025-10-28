@@ -19,6 +19,7 @@ function label(mmi:number){
 
 export default function RiskDashboardScreen(){
   const [lastId,setLastId]=useState<string>('');
+  const [rows, setRows] = useState<Row[]>([]);
 
   async function compute(){
     const eews = await listEEW(5); if(!eews.length) {return;}

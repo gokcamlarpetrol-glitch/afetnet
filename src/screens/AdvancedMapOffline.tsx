@@ -110,6 +110,7 @@ export default function AdvancedMapOffline() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState<Location.LocationObject[]>([]);
+  const [selectedMarker, setSelectedMarker] = useState<MapMarker | null>(null);
 
   // Animations
   const panelAnimation = useRef(new Animated.Value(0)).current;

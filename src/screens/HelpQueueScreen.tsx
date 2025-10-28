@@ -20,7 +20,22 @@ export default function HelpQueueScreen(){
   async function submit(){
     const pos = await Location.getLastKnownPositionAsync({}).catch(()=>null);
     const q = pos? quantizeLatLng(pos.coords.latitude,pos.coords.longitude) : undefined;
-    const t: HelpTicket = { id: makeId('h'), ts: now(), kind, title, detail, prio, status:'new', qlat:q?.lat, qlng:q?.lng };
+    const t: HelpTicket = {
+      id: makeId('h'),
+      requesterId: 'current_user',
+      title,
+      description: detail,
+      detail,
+      kind,
+      prio,
+      priority: prio === 'life' ? 'critical' : prio === 'urgent' ? 'high' : 'normal',
+      status:'new',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ts: now(),
+      qlat: q?.lat,
+      qlng: q?.lng
+    };
     await broadcastTicket(t); setTitle(''); setDetail(''); refresh(); Alert.alert('Kaydedildi','Yardım çağrısı mesh\'e duyuruldu.');
   }
 

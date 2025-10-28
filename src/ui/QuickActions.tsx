@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+
+type NavigationProp = any;
 
 const items = [
   { key: 'map', label: 'Harita', to: 'Map' },
@@ -11,13 +12,13 @@ const items = [
 ];
 
 export default function QuickActions() {
-  const nav = useNavigation<any>();
+  const navigation = require('@react-navigation/native').useNavigation() as NavigationProp;
   return (
     <View style={styles.card}>
       <Text style={styles.h}>Kısayollar</Text>
       <View style={styles.grid}>
         {items.map(it => (
-          <Pressable key={it.key} onPress={() => nav.navigate(it.to)} style={styles.item}>
+          <Pressable key={it.key} onPress={() => navigation.navigate(it.to)} style={styles.item}>
             <Text style={styles.txt}>{it.label}</Text>
           </Pressable>
         ))}

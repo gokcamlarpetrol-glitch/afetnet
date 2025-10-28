@@ -1,8 +1,10 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import RootTabs from './RootTabs';
-import PaywallDebugScreen from '../screens/PaywallDebugScreen';
 import PremiumActiveScreen from '../screens/PremiumActive';
+import QRScanner from '../screens/QRScanner';
+import MapOffline from '../screens/MapOffline';
+import { offlineSyncManager } from '../services/OfflineSyncManager';
 
 const Stack = createStackNavigator();
 
@@ -19,23 +21,38 @@ export default function AppNavigator() {
           component={RootTabs} 
         />
         <Stack.Screen 
-          name="Premium" 
-          component={PremiumActiveScreen}
+          name="QRScanner" 
+          component={QRScanner}
           options={{ 
             headerShown: true, 
+            title: 'QR Kod Tara',
+            headerStyle: { backgroundColor: '#0f172a' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        />
+        <Stack.Screen
+          name="MapOffline"
+          component={MapOffline}
+          options={{
+            headerShown: true,
+            title: 'Offline Harita',
+            headerStyle: { backgroundColor: '#0f172a' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        />
+        <Stack.Screen
+          name="Premium"
+          component={PremiumActiveScreen}
+          options={{
+            headerShown: true,
             title: 'Premium',
             headerStyle: { backgroundColor: '#0f172a' },
             headerTintColor: '#fff',
             headerTitleStyle: { fontWeight: 'bold' },
           }}
         />
-        {__DEV__ && (
-          <Stack.Screen 
-            name="PaywallDebug" 
-            component={PaywallDebugScreen} 
-            options={{ headerShown: true, title: 'Paywall Debug' }}
-          />
-        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

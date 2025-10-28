@@ -61,6 +61,15 @@ export class SafeMBTiles {
   isReady(): boolean {
     return this.isOpen && this.mbtiles !== null;
   }
+
+  static isAvailable(): boolean {
+    return MBTiles.isAvailable();
+  }
+
+  static async pickMbtiles(): Promise<string | null> {
+    const mbtiles = new MBTiles();
+    return await mbtiles.pickMbtiles();
+  }
 }
 
 export default SafeMBTiles;

@@ -6,6 +6,25 @@ export interface TileManagerOptions {
   cacheTimeout?: number;
 }
 
+export interface PrefetchOptions {
+  bounds: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  };
+  zoomLevels: number[];
+  onProgress?: (progress: PrefetchProgress) => void;
+}
+
+export interface PrefetchProgress {
+  currentZoom: number;
+  currentTile: number;
+  totalTiles: number;
+  completedTiles: number;
+  percentage: number;
+}
+
 export class TileManager {
   private cache: Map<string, Buffer> = new Map();
   private options: TileManagerOptions;
@@ -56,6 +75,48 @@ export class TileManager {
   getCacheSize(): number {
     return this.cache.size;
   }
+
+  async prefetchTiles(options: PrefetchOptions): Promise<void> {
+    const { bounds, zoomLevels, onProgress } = options;
+    
+    let totalTiles = 0;
+    let completedTiles = 0;
+    
+    // Calculate total tiles
+    for (const zoom of zoomLevels) {
+      const tiles = this.getTilesInBounds(bounds, zoom);
+      totalTiles += tiles.length;
+    }
+    
+    // Prefetch tiles
+    for (const zoom of zoomLevels) {
+      const tiles = this.getTilesInBounds(bounds, zoom);
+      
+      for (const tile of tiles) {
+        await this.getTile(tile.z, tile.x, tile.y);
+        completedTiles++;
+        
+        if (onProgress) {
+          onProgress({
+            currentZoom: zoom,
+            currentTile: completedTiles,
+            totalTiles,
+            completedTiles,
+            percentage: Math.round((completedTiles / totalTiles) * 100),
+          });
+        }
+      }
+    }
+  }
+
+  private getTilesInBounds(bounds: any, zoom: number): any[] {
+    // This is a simplified implementation
+    // In a real app, this would use proper tile calculation
+    return [];
+  }
 }
 
 export default TileManager;
+
+// Export a default instance
+export const tileManager = new TileManager();

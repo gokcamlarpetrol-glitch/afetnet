@@ -20,7 +20,20 @@ export default function SelfCheckScreen(){
     await addSelf(c);
     // optional: auto help
     const red = (avpu!=='A') || bleed || breath || imm;
-    if(red){ await broadcastTicket({ id: makeId('h'), ts: now(), kind:'medical', title:'Self-Check: Kritik', detail:`AVPU=${avpu} bleed=${bleed} breath=${breath} imm=${imm}`, prio:'life', status:'new' }); }
+    if(red){ await broadcastTicket({
+      id: makeId('h'),
+      requesterId: 'current_user',
+      title:'Self-Check: Kritik',
+      description:`AVPU=${avpu} bleed=${bleed} breath=${breath} imm=${imm}`,
+      detail:`AVPU=${avpu} bleed=${bleed} breath=${breath} imm=${imm}`,
+      kind:'medical',
+      prio:'life',
+      priority:'critical',
+      status:'new',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ts: now()
+    }); }
     Alert.alert('Kaydedildi', red? 'Durum kritik; yardım talebi yayınlandı.' : 'Durum kaydedildi.');
     refresh();
   }

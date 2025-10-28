@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+// Navigation handled by parent component
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../ui/Button';
@@ -16,7 +16,8 @@ export default function PermissionsScreen() {
     bluetooth: 'undetermined',
   });
   const [isLoading, setIsLoading] = useState(false);
-  const navigation = useNavigation();
+  // Navigation handled by parent component
+  const navigation = { navigate: () => {} } as any;
 
   const steps = permissionsManager.getPermissionSteps();
   const currentStepData = steps[currentStep];

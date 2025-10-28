@@ -14,12 +14,25 @@ import {
 import { useFamily } from '../store/family';
 import { Contact, useMessages } from '../store/messages';
 import { useQueue } from '../store/queue';
+import { broadcastText, broadcastTeamLocation } from '../ble/bridge';
+import { BLEMesh } from '../nearby/ble';
+import { offlineMessaging, OfflineMessage, OfflineContact } from '../services/OfflineMessaging';
+import { offlineSyncManager } from '../services/OfflineSyncManager';
+import { advancedBatteryManager } from '../services/AdvancedBatteryManager';
 
 import { NavigationProp } from '../types/interfaces';
+import NetInfo from '@react-native-community/netinfo';
 
 export default function Messages({ navigation }: { navigation?: NavigationProp }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState<'all' | 'sos' | 'groups'>('all');
+  const [offlineStats, setOfflineStats] = useState({ total: 0, delivered: 0, pending: 0, sos: 0 });
+  const [offlineContacts, setOfflineContacts] = useState<OfflineContact[]>([]);
+  const [networkHealth, setNetworkHealth] = useState<any>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [emergencyMode, setEmergencyMode] = useState(false);
+  const [batteryHealth, setBatteryHealth] = useState<any>(null);
+  const [powerSavings, setPowerSavings] = useState<any>(null);
   const { items: queueItems } = useQueue();
   const { list: familyList } = useFamily();
   
@@ -34,6 +47,20 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
     getNearbyContacts,
     setActiveContact,
   } = useMessages();
+
+  // Network state listener
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(!!state.isConnected);
+    });
+
+    // Initial state
+    NetInfo.fetch().then(state => {
+      setIsOnline(!!state.isConnected);
+    });
+
+    return unsubscribe;
+  }, []);
 
   // Demo veriler ekle (ilk yükleme)
   useEffect(() => {
@@ -94,6 +121,127 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
       logger.debug('Demo messages loaded');
     }
   }, []);
+
+  // Offline BLE mesajlaşma fonksiyonları - ENHANCED WITH SYNC
+  const broadcastOfflineMessage = async (contactId: string, message: string) => {
+    try {
+      // Offline messaging system kullan
+      const offlineMsg = await offlineMessaging.sendMessage(contactId, message, 'text');
+      logger.debug(`Offline message sent via enhanced system to ${contactId}: ${message}`);
+
+      // Add to sync manager for when back online
+      if (typeof isOnline !== 'undefined' && isOnline) {
+        await offlineSyncManager.addMessageToSync({
+          id: offlineMsg.id,
+          contactId,
+          content: message,
+          type: 'text',
+          timestamp: offlineMsg.timestamp,
+          isDelivered: offlineMsg.isDelivered,
+        });
+      }
+
+    } catch (error) {
+      logger.error('Failed to send offline message:', error);
+      throw error;
+    }
+  };
+
+  const broadcastOfflineLocation = async (contactId: string, lat: number, lon: number) => {
+    try {
+      // Offline messaging system kullan
+      const offlineMsg = await offlineMessaging.sendMessage(contactId, `📍 Konum: ${lat.toFixed(6)}, ${lon.toFixed(6)}`, 'location', lat, lon);
+      logger.debug(`Offline location sent via enhanced system to ${contactId}: ${lat}, ${lon}`);
+
+      // Add to sync manager for when back online
+      if (typeof isOnline !== 'undefined' && isOnline) {
+        await offlineSyncManager.addLocationToSync({
+          id: offlineMsg.id,
+          contactId,
+          lat,
+          lon,
+          timestamp: offlineMsg.timestamp,
+          accuracy: 10, // Mock accuracy
+        });
+      }
+
+    } catch (error) {
+      logger.error('Failed to send offline location:', error);
+      throw error;
+    }
+  };
+
+  // Offline messaging system başlat
+  useEffect(() => {
+    const startOfflineMessaging = async () => {
+      try {
+        await offlineMessaging.start();
+        logger.debug('Offline messaging system started');
+        
+        // Update stats and contacts
+        updateOfflineData();
+      } catch (error) {
+        logger.error('Failed to start offline messaging:', error);
+      }
+    };
+
+    startOfflineMessaging();
+
+    // Update offline data every 10 seconds
+    const updateInterval = setInterval(updateOfflineData, 10000);
+
+    // Update battery data every 30 seconds
+    const batteryInterval = setInterval(() => {
+      updateBatteryData().catch(logger.error);
+    }, 30000);
+
+    // Battery manager listener
+    const unsubscribeBattery = advancedBatteryManager.addPowerModeListener((profile, settings) => {
+      logger.debug(`Battery mode changed: ${profile.level}% (${profile.state})`);
+    });
+
+    // Initial battery data update
+    updateBatteryData();
+
+    return () => {
+      // Cleanup offline messaging
+      offlineMessaging.stop();
+      clearInterval(updateInterval);
+      clearInterval(batteryInterval);
+      unsubscribeBattery();
+      logger.debug('Offline messaging system stopped');
+    };
+  }, []);
+
+  const updateOfflineData = () => {
+    try {
+      const stats = offlineMessaging.getMessageStats();
+      const contacts = offlineMessaging.getContacts();
+      const health = offlineMessaging.getNetworkHealth();
+
+      setOfflineStats(stats);
+      setOfflineContacts(contacts);
+      setNetworkHealth(health);
+
+      logger.debug(`Offline system updated: ${stats.total} messages, ${contacts.length} contacts, ${health.meshConnectivity}% connectivity`);
+    } catch (error) {
+      logger.error('Failed to update offline data:', error);
+    }
+  };
+
+  const updateBatteryData = async () => {
+    try {
+      const health = await advancedBatteryManager.getBatteryHealth();
+      const savings = advancedBatteryManager.getPowerSavings();
+
+      setBatteryHealth(health);
+      setPowerSavings(savings);
+
+      logger.debug(`Battery system updated: ${health.currentLevel}% (${health.trend}), ${savings.totalPowerSavings}% power savings`);
+    } catch (error) {
+      logger.error('Failed to update battery data:', error);
+    }
+  };
 
   // Yakındaki kişileri güncelle
   useEffect(() => {
@@ -239,10 +387,16 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                         location.coords.longitude,
                       );
 
-                      // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
-                      logger.debug('Message sent to store:', message.id);
-
-                      Alert.alert('Başarılı', 'Mesaj gönderildi ve kaydedildi!');
+                      // BLE mesh network integration - ACTIVE
+                      try {
+                        // Offline BLE broadcast
+                        await broadcastOfflineMessage(contact.id, text.trim());
+                        logger.debug('Message sent via BLE mesh:', message.id);
+                        Alert.alert('Başarılı', 'Mesaj hem kaydedildi hem de BLE üzerinden yayınlandı!');
+                      } catch (error) {
+                        logger.error('BLE broadcast failed:', error);
+                        Alert.alert('Başarılı', 'Mesaj kaydedildi (BLE yayını başarısız)');
+                      }
                     }
                   },
                 },
@@ -264,10 +418,16 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
                 location.coords.longitude,
               );
 
-              // TODO: BLE üzerinden gönder (gelecekte aktif olacak)
-              logger.debug('Location shared:', message.id);
-
-              Alert.alert('Başarılı', 'Konumunuz paylaşıldı ve kaydedildi!');
+              // BLE mesh network integration - ACTIVE
+              try {
+                // Offline BLE location broadcast
+                await broadcastOfflineLocation(contact.id, location.coords.latitude, location.coords.longitude);
+                logger.debug('Location shared via BLE mesh:', message.id);
+                Alert.alert('Başarılı', 'Konum hem kaydedildi hem de BLE üzerinden yayınlandı!');
+              } catch (error) {
+                logger.error('BLE location broadcast failed:', error);
+                Alert.alert('Başarılı', 'Konum kaydedildi (BLE yayını başarısız)');
+              }
             } catch (error) {
               Alert.alert('Hata', 'Konum alınamadı');
             }
@@ -345,11 +505,89 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
     <View style={{ flex: 1, backgroundColor: '#0a0f1f' }}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" />
 
-      {/* Offline Status Banner */}
-      <View style={{ backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center' }}>
+      {/* Enhanced Offline Status Banner */}
+      <View style={{ backgroundColor: emergencyMode ? '#ef4444' : '#10b981', paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center' }}>
         <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '700', textAlign: 'center' }}>
-          📡 OFFLINE MESAJLAŞMA: BLE ile şebekesiz iletişim aktif!
+          {emergencyMode ? '🚨 ACİL DURUM MODU AKTİF!' : '📡 OFFLINE MESAJLAŞMA: BLE Mesh Network Aktif!'}
         </Text>
+        <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600', textAlign: 'center', marginTop: 2 }}>
+          {networkHealth ? `${networkHealth.meshConnectivity}% bağlantı • ${networkHealth.pendingMessages} bekleyen • ${networkHealth.criticalMessages} kritik` : `${offlineStats.total} mesaj • ${offlineContacts.length} kişi • ${offlineStats.sos} SOS`}
+        </Text>
+
+        {/* Battery Status */}
+        {batteryHealth && (
+          <Text style={{
+            color: batteryHealth.currentLevel <= 20 ? '#ef4444' : batteryHealth.currentLevel <= 50 ? '#f97316' : '#ffffff',
+            fontSize: 10,
+            fontWeight: '600',
+            textAlign: 'center',
+            marginTop: 2,
+          }}>
+            🔋 {batteryHealth?.currentLevel || 0}% ({batteryHealth?.trend || 'stable'}) • {powerSavings?.totalPowerSavings || 0}% güç tasarrufu
+          </Text>
+        )}
+
+        {/* Emergency Mode Controls */}
+        {!isOnline && (
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+            <Pressable
+              style={{
+                backgroundColor: emergencyMode ? '#dc2626' : '#ef4444',
+                paddingHorizontal: 12,
+                paddingVertical: 4,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                if (emergencyMode) {
+                  setEmergencyMode(false);
+                  Alert.alert('Acil Durum', 'Acil durum modu kapatıldı');
+                } else {
+                  offlineMessaging.activateEmergencyMode();
+                  setEmergencyMode(true);
+                  Alert.alert('🚨 Acil Durum', 'Acil durum modu aktif! Tüm sistemler maksimum güvenilirlik için optimize edildi.');
+                }
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '700' }}>
+                {emergencyMode ? 'ACİL MODU KAPAT' : '🚨 ACİL MODU'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={{
+                backgroundColor: '#22c55e',
+                paddingHorizontal: 12,
+                paddingVertical: 4,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                offlineMessaging.activateBatterySavingMode();
+                Alert.alert('🔋 Pil Tasarrufu', 'Pil tasarrufu modu aktif! Tarama sıklığı azaltıldı.');
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '700' }}>
+                🔋 PİL TASARRUFU
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={{
+                backgroundColor: '#3b82f6',
+                paddingHorizontal: 12,
+                paddingVertical: 4,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                offlineMessaging.optimizeRouting();
+                Alert.alert('🛣️ Routing', 'Mesaj yönlendirmesi optimize edildi');
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '700' }}>
+                🛣️ ROUTING
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
 
       {/* Premium Header */}

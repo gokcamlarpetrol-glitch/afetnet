@@ -1,4 +1,4 @@
-import { useNavigation } from '@react-navigation/native';
+// import { useNavigation } from '@react-navigation/native'; // Temporarily disabled
 import { logger } from '../utils/productionLogger';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';

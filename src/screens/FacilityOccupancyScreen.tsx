@@ -5,20 +5,20 @@ import { loadFacilities } from '../relief/store';
 import { getOcc, setOccupancy } from '../relief/occupancy';
 
 export default function FacilityOccupancyScreen(){
-  const [rows,setRows]=useState<(Facility & {occ:number})[]>([]);
+  const [rows, setRows] = useState<(Facility & {occ:number})[]>([]);
 
   async function refresh(){
-    const all = await loadFacilities();
+    const all = await loadFacilities?.() || [];
     const out: (Facility & {occ:number})[] = [];
     for(const f of all){
-      const o = await getOcc(f.id);
+      const o = await getOcc?.(f.id) || 0;
       out.push({ ...f, occ:o });
     }
     setRows(out.filter(x=>x.kind==='shelter').sort((a,b)=> (b.occ-a.occ)));
   }
   useEffect(()=>{ refresh(); const t=(globalThis as any).setInterval(refresh,4000); return ()=>(globalThis as any).clearInterval(t); },[]);
 
-  async function setOcc(id:string, v:string){ const val = Math.max(0, Math.min(1, parseFloat(v||'0'))); await setOccupancy(id, val); refresh(); }
+  async function setOcc(id:string, v:string){ const val = Math.max(0, Math.min(1, parseFloat(v||'0'))); await setOccupancy?.(id, val); refresh(); }
 
   return (
     <View style={{ flex:1, backgroundColor:'#0f172a', padding:12 }}>

@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { Facility } from '../relief/types';
-import { saveFacilities } from '../relief/store';
+import { ReliefStore } from '../relief/store';
 import { saveGraph } from '../routing/store';
 import { RoadGraph } from '../routing/types';
 
@@ -15,7 +15,7 @@ export async function pickAndLoadDataPack(): Promise<DataPackSummary>{
   const txt = await FileSystem.readAsStringAsync(uri);
   const j = JSON.parse(txt);
   const summary: DataPackSummary = {};
-  if(Array.isArray(j.facilities)){ await saveFacilities(j.facilities as Facility[]); summary.facilities = j.facilities.length; }
+  if(Array.isArray(j.facilities)){ await ReliefStore.saveFacilities(j.facilities as Facility[]); summary.facilities = j.facilities.length; }
   if(j.roads && j.roads.nodes && j.roads.edges){
     await saveGraph(j.roads as RoadGraph);
     summary.routes = Object.keys(j.roads.edges||{}).length;

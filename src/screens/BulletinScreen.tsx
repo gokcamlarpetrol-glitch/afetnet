@@ -9,8 +9,12 @@ export default function BulletinScreen(){
   const [cat,setCat]=useState<Bulletin['cat']>('general');
   const [prio,setPrio]=useState<Bulletin['prio']>('med');
   const [ttl,setTtl]=useState('180');
+  const [rows, setRows] = useState<Bulletin[]>([]);
 
-  async function refresh(){ /* refresh bulletins */ }
+  async function refresh(){ 
+    const bulletins = await listBulletins();
+    setRows(bulletins.sort((a,b) => weight(b) - weight(a)));
+  }
   useEffect(()=>{ refresh(); const t=(globalThis as any).setInterval(refresh,3000); return ()=>(globalThis as any).clearInterval(t); },[]);
 
   function weight(b:Bulletin){ return (b.prio==='high'?3:b.prio==='med'?2:1) + (b.expires? 0: 0.5); }

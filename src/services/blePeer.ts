@@ -212,7 +212,6 @@ class BlePeerService {
   }
 
   // Start scanning for nearby devices
-  // @ts-expect-error - Device type from react-native-ble-plx
   async startScanning(onDeviceFound?: (device: any) => void): Promise<void> {
     if (this.isScanning) return;
     

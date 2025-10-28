@@ -13,6 +13,8 @@ services:
         value: 3001
       - key: DATABASE_URL
         sync: false
+      - key: APNS_BUNDLE_ID
+        value: com.gokhancamci.afetnetapp
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL

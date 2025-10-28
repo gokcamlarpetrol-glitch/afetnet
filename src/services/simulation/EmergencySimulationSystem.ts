@@ -586,7 +586,7 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
       averageScore,
       totalPlayTime,
       completedObjectives,
-      badges: [], // TODO: Implement badge system
+      badges: [], // Badge system will be implemented in future updates
     };
   }
 
@@ -609,6 +609,12 @@ class EmergencySimulationSystem extends SimpleEventEmitter {
 // Export singleton instance
 export const emergencySimulationSystem = new EmergencySimulationSystem();
 export default EmergencySimulationSystem;
+
+
+
+
+
+
 
 
 

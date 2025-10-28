@@ -14,9 +14,10 @@ export default function FamilyChatScreen(){
   const [list,setList]=useState<FamilyContact[]>([]);
   const [sel,setSel]=useState<FamilyContact|null>(null);
   const [text,setText]=useState('');
+  const [rows, setRows] = useState<Row[]>([]);
 
   useEffect(()=>{ (async()=> setList(await loadFamily()))(); },[]);
-  useEffect(()=>{ if(sel) { /* set rows for selected contact */ } },[sel?.id]);
+  useEffect(()=>{ if(sel) { setRows(mem[sel.id] || []); } },[sel?.id]);
 
   useEffect(()=> {
     const unsub = subscribeULB(async (raw:string)=>{

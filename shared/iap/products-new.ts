@@ -1,4 +1,4 @@
-// SHARED IAP PRODUCTS MODULE - NEW BUNDLE ID (org.afetnet1.app)
+// SHARED IAP PRODUCTS MODULE - NEW BUNDLE ID (com.gokhancamci.afetnet1)
 // Single source of truth for all IAP product IDs across client and server
 // IMPORTANT: These are NEW product IDs for the NEW App Store submission
 

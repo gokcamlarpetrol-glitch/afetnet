@@ -88,7 +88,7 @@ function xorEncrypt(text: string, key: string): string {
 function xorDecrypt(encryptedB64: string, key: string): string {
   try {
     const encrypted = new (globalThis as any).TextDecoder().decode(
-      new Uint8Array(Array.from((typeof (globalThis as any).atob !== 'undefined' ? (globalThis as any).atob(encryptedB64) : (globalThis as any).Buffer.from(encryptedB64, 'base64').toString('binary'))).map(c => c.charCodeAt(0))),
+      new Uint8Array(Array.from((typeof (globalThis as any).atob !== 'undefined' ? (globalThis as any).atob(encryptedB64) : (globalThis as any).Buffer.from(encryptedB64, 'base64').toString('binary'))).map((c: any) => c.charCodeAt(0))),
     );
     
     let result = '';

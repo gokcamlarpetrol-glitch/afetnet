@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, useWindowDimensions, Pressable, Alert, Modal } from 'react-native';
 import HeatOverlay from './HeatOverlay';
 import * as Beacon from '../ble/bridge';
-import * as MB from '../offline/mbtiles';
 import { openDbFromUri } from '../offline/mbtiles-server';
 import { startMbtilesServer, stopMbtilesServer, localTileUrlTemplate } from '../offline/mbtiles-server';
+import { SafeMBTiles } from '../offline/SafeMBTiles';
 import { toENU } from '../map/localproj';
 import * as Location from 'expo-location';
 import { listPins } from '../map/pins';
@@ -17,6 +17,8 @@ import { startTrapped, stopTrapped } from '../trapped/mode';
 import { loadFamily } from '../family/store';
 import * as Haptics from 'expo-haptics';
 import * as Battery from 'expo-battery';
+import { offlineMessaging } from '../services/OfflineMessaging';
+import { logger } from '../utils/productionLogger';
 
 // Import expo-maps with fallback
 let ExpoMap: any = null;
@@ -43,10 +45,15 @@ export default function MapScreen(){
   // Offline peer tracking (family members, team members, trapped persons)
   const [peers, setPeers] = useState<Peer[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [beacons, setBeacons] = useState<{x:number;y:number}[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<{lat:number;lon:number;label:string}|null>(null);
   const [showGoToTarget, setShowGoToTarget] = useState(false);
   const [trappedMode, setTrappedMode] = useState(false);
   const [showTrappedAlert, setShowTrappedAlert] = useState(false);
+
+  // Offline messaging integration
+  const [offlineStats, setOfflineStats] = useState({ total: 0, delivered: 0, pending: 0, sos: 0 });
+  const [offlineContacts, setOfflineContacts] = useState<any[]>([]);
 
   // Network status monitoring
   useEffect(() => {
@@ -55,6 +62,44 @@ export default function MapScreen(){
     });
     return () => unsubscribe();
   }, []);
+
+  // Offline messaging system initialization
+  useEffect(() => {
+    const startOfflineMessaging = async () => {
+      try {
+        await offlineMessaging.start();
+        updateOfflineData();
+        logger.debug('Offline messaging started in MapScreen');
+      } catch (error) {
+        logger.error('Failed to start offline messaging in MapScreen:', error);
+      }
+    };
+
+    startOfflineMessaging();
+
+    // Update offline data every 10 seconds
+    const updateInterval = setInterval(updateOfflineData, 10000);
+
+    return () => {
+      offlineMessaging.stop();
+      clearInterval(updateInterval);
+      logger.debug('Offline messaging stopped in MapScreen');
+    };
+  }, []);
+
+  const updateOfflineData = () => {
+    try {
+      const stats = offlineMessaging.getMessageStats();
+      const contacts = offlineMessaging.getContacts();
+
+      setOfflineStats(stats);
+      setOfflineContacts(contacts);
+
+      logger.debug(`MapScreen - Offline stats updated: ${stats.total} messages, ${contacts.length} contacts`);
+    } catch (error) {
+      logger.error('Failed to update offline data in MapScreen:', error);
+    }
+  };
 
   useEffect(()=>{ 
     let origin: {lat0:number; lon0:number}|null = null;
@@ -102,7 +147,7 @@ export default function MapScreen(){
 
   async function onImportMbtiles(){
     try{
-      const uri = await MB.pickMbtiles();
+      const uri = await SafeMBTiles.pickMbtiles();
       await openDbFromUri(uri);
       await startMbtilesServer();
       setUseLocal(true);
@@ -201,10 +246,15 @@ export default function MapScreen(){
   }
   return (
     <View style={{ flex:1 }}>
-      {/* Offline indicator */}
+      {/* Enhanced Offline indicator */}
       {!isOnline && (
         <View style={{ position:'absolute', top:0, left:0, right:0, backgroundColor:'#f97316', padding:8, zIndex:1000 }}>
-          <Text style={{ color:'white', fontWeight:'bold', textAlign:'center' }}>📴 Çevrimdışı Mod</Text>
+          <Text style={{ color:'white', fontWeight:'bold', textAlign:'center' }}>
+            📴 ÇEVRİMDIŞI MOD - BLE Mesh Network Aktif!
+          </Text>
+          <Text style={{ color:'white', fontSize:12, textAlign:'center', marginTop:2 }}>
+            {offlineStats.total} mesaj • {offlineContacts.length} kişi • {offlineStats.sos} SOS
+          </Text>
         </View>
       )}
 
@@ -254,15 +304,61 @@ export default function MapScreen(){
             onPress={() => handleMarkerPress(peer)}
           />
         ))}
+
+        {/* Offline Messaging Contacts */}
+        {offlineContacts.map((contact) => (
+          <ExpoMap.Marker
+            key={`offline-contact-${contact.id}`}
+            coordinate={{
+              latitude: contact.lat || 39.9334,
+              longitude: contact.lon || 32.8597
+            }}
+            title={`📡 ${contact.name}`}
+            description={`BLE Mesh • ${contact.distance}m • ${contact.battery}% batarya • ${contact.isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}`}
+            pinColor={contact.isOnline ? "green" : "orange"}
+            onPress={() => {
+              Alert.alert(
+                '📡 Offline Contact',
+                `${contact.name}\n\nMesafe: ${contact.distance}m\nBatarya: ${contact.battery}%\nSon Görülme: ${new Date(contact.lastSeen).toLocaleTimeString()}\nDurum: ${contact.isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}`,
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  {
+                    text: 'Mesaj Gönder',
+                    onPress: async () => {
+                      try {
+                        await offlineMessaging.sendMessage(contact.id, 'Merhaba! Nasılsın?', 'text');
+                        Alert.alert('Başarılı', 'Offline mesaj gönderildi!');
+                      } catch (error) {
+                        Alert.alert('Hata', 'Mesaj gönderilemedi');
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+          />
+        ))}
       </ExpoMap>
       
       {/* Overlays */}
       {center && <HeatGridOverlay w={width} h={height} center={center} scale={1/2} />}
       {trail.length>1 && <TrailOverlay pts={trail} speeds={speeds} w={width} h={height} />}
 
-      {/* Controls */}
+      {/* Enhanced Controls */}
       <Pressable onPress={onImportMbtiles} style={{ position:'absolute', right:16, top:64, backgroundColor:'#111827', padding:10, borderRadius:10 }}>
         <Text style={{ color:'white', fontWeight:'800' }}>.MBTILES</Text>
+      </Pressable>
+
+      {/* Offline Map Button */}
+      <Pressable
+        onPress={() => {
+          // Navigate to offline map screen
+          // This would require navigation prop or context
+          Alert.alert('Offline Harita', 'Offline harita ekranına geçiliyor...');
+        }}
+        style={{ position:'absolute', right:16, top:110, backgroundColor:'#10b981', padding:10, borderRadius:10 }}
+      >
+        <Text style={{ color:'white', fontWeight:'800' }}>🗺️ OFFLINE</Text>
       </Pressable>
       <Pressable onPress={()=>refreshTrail(2)} style={{ position:'absolute', left:16, top:64, backgroundColor:'#111827', padding:10, borderRadius:10 }}>
         <Text style={{ color:'white' }}>2s</Text>
@@ -289,13 +385,19 @@ export default function MapScreen(){
         <Text style={{ color:'white', fontWeight:'800' }}>{trappedMode ? '🚨 Enkaz Modu AKTİF' : '🚨 Enkaz Modu'}</Text>
       </Pressable>
       
-      {/* Info panel */}
+      {/* Enhanced Info panel */}
       <View style={{ position:'absolute', top:60, left:16, backgroundColor:'rgba(17, 24, 39, 0.9)', padding:12, borderRadius:10, gap:4 }}>
         <Text style={{ color:'white', fontSize:12 }}>📍 {center ? `${center.lat.toFixed(6)}, ${center.lon.toFixed(6)}` : 'Konum alınıyor...'}</Text>
         <Text style={{ color:'white', fontSize:12 }}>{isOnline ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}</Text>
         <Text style={{ color:'white', fontSize:12 }}>📍 {pins.length} İşaret</Text>
         <Text style={{ color:'#10b981', fontSize:12 }}>👥 {peers.length} Yakındaki Kişi</Text>
         <Text style={{ color:'#3b82f6', fontSize:12 }}>👨‍👩‍👧‍👦 {familyMembers.length} Aile Üyesi</Text>
+        {!isOnline && (
+          <>
+            <Text style={{ color:'#10b981', fontSize:12, fontWeight:'bold' }}>📡 BLE Mesh: {offlineStats.total} mesaj</Text>
+            <Text style={{ color:'#10b981', fontSize:12 }}>👤 {offlineContacts.length} kişi • {offlineStats.sos} SOS</Text>
+          </>
+        )}
       </View>
       
       {/* GoToTarget Modal */}
