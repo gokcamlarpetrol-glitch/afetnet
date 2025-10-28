@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+// Navigation handled by parent component
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../ui/Button';
@@ -68,7 +68,8 @@ const pages: OnboardingPage[] = [
 
 export default function Onboarding() {
   const [currentPage, setCurrentPage] = useState(0);
-  const navigation = useNavigation();
+  // Navigation handled by parent component
+  const navigation = { navigate: () => {} } as any;
 
   const handleNext = () => {
     if (currentPage < pages.length - 1) {

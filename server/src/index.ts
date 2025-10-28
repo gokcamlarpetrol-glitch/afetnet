@@ -7,6 +7,8 @@ import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
+import { earthquakeDetectionService } from './earthquake-detection';
+import { earthquakeWarningService } from './earthquake-warnings';
 
 // Load environment variables
 dotenv.config();
@@ -69,7 +71,7 @@ process.on('SIGTERM', async () => {
 
 // Start server
 app.listen(PORT, async () => {
-  console.log(`🚀 IAP Verification Server running on port ${PORT}`);
+  console.log(`🚀 AfetNet Server running on port ${PORT}`);
   console.log(`📱 Endpoints:`);
   console.log(`   GET  /api/iap/products`);
   console.log(`   POST /api/iap/verify`);
@@ -86,6 +88,12 @@ app.listen(PORT, async () => {
   if (!dbConnected) {
     console.error('❌ Database connection failed - server may not work properly');
   }
+  
+  // Start earthquake detection and warning services
+  console.log('🌍 Starting earthquake services...');
+  earthquakeDetectionService; // Auto-starts monitoring
+  earthquakeWarningService.startMonitoring();
+  console.log('✅ Earthquake services started');
 });
 
 export default app;

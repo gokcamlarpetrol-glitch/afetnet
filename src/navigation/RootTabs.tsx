@@ -2,7 +2,8 @@ import React from 'react';
 import { logger } from "../utils/productionLogger";
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-// import { useNavigation } from '@react-navigation/native';
+// Navigation handled by parent component
+import MapOffline from '../screens/MapOffline';
 import { View, Text, Pressable } from 'react-native';
 
 // Available screens
@@ -20,7 +21,8 @@ const Tab = createBottomTabNavigator();
 // Premium Gate Component - Shows premium required message
 function PremiumGate({ children, featureName }: { children: React.ReactNode; featureName: string }) {
   const { canUseFeature } = usePremiumFeatures();
-  const navigation = useNavigation<any>();
+  // Navigation handled by parent component
+  const navigation = { navigate: () => {} } as any;
   
   if (canUseFeature(featureName)) {
     return <>{children}</>;
@@ -69,7 +71,6 @@ export default function RootTabs() {
   return (
     <Tab.Navigator
       screenOptions={{
-        headerShown: false,
         tabBarActiveTintColor: '#3b82f6',
         tabBarInactiveTintColor: '#9ca3af',
         tabBarStyle: {
@@ -107,15 +108,15 @@ export default function RootTabs() {
       </Tab.Screen>
       
       {/* 2. HARİTA - PREMIUM */}
-      <Tab.Screen 
-        name="Harita" 
+      <Tab.Screen
+        name="Harita"
         options={{
           tabBarLabel: 'Harita',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons 
-              name={focused ? 'map' : 'map-outline'} 
-              size={24} 
-              color={isPremium ? color : '#6b7280'} 
+            <Ionicons
+              name={focused ? 'map' : 'map-outline'}
+              size={24}
+              color={isPremium ? color : '#6b7280'}
             />
           ),
         }}
@@ -123,6 +124,27 @@ export default function RootTabs() {
         {() => (
           <PremiumGate featureName="advanced_maps">
             <MapScreen />
+          </PremiumGate>
+        )}
+      </Tab.Screen>
+
+      {/* 2.1 OFFLINE HARİTA - PREMIUM */}
+      <Tab.Screen
+        name="OfflineHarita"
+        options={{
+          tabBarLabel: 'Offline',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? 'map' : 'map-outline'}
+              size={20}
+              color={isPremium ? color : '#6b7280'}
+            />
+          ),
+        }}
+      >
+        {() => (
+          <PremiumGate featureName="offline_maps">
+            <MapOffline />
           </PremiumGate>
         )}
       </Tab.Screen>

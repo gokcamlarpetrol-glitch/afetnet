@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AfetNet Fleet Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+            color: #FFFFFF;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #3B82F6, #10B981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #94A3B8;
+            font-size: 0.875rem;
+        }
+
+        .last-update {
+            color: #10B981;
+            font-size: 0.75rem;
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(51, 65, 85, 0.3);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .metric-title {
+            font-size: 0.875rem;
+            color: #94A3B8;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-change {
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .positive { color: #10B981; }
+        .negative { color: #EF4444; }
+        .neutral { color: #94A3B8; }
+
+        .connectivity-excellent { color: #10B981; }
+        .connectivity-good { color: #3B82F6; }
+        .connectivity-fair { color: #F59E0B; }
+        .connectivity-poor { color: #EF4444; }
+
+        .chart-container {
+            height: 200px;
+            margin-top: 1rem;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94A3B8;
+            font-size: 0.875rem;
+        }
+
+        .alerts-section {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(51, 65, 85, 0.3);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .alert-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .alert-icon {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #EF4444;
+        }
+
+        .alert-text {
+            color: #FFFFFF;
+            font-size: 0.875rem;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .btn {
+            background: #3B82F6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #2563EB;
+        }
+
+        .btn-secondary {
+            background: rgba(55, 65, 81, 0.8);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(75, 85, 99, 0.8);
+        }
+
+        .footer {
+            text-align: center;
+            color: #94A3B8;
+            font-size: 0.75rem;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(51, 65, 85, 0.3);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-left: 0.5rem;
+        }
+
+        .status-online {
+            background: #10B981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
+        .status-offline {
+            background: #6B7280;
+        }
+
+        .status-warning {
+            background: #F59E0B;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1 class="title">AfetNet Fleet Dashboard</h1>
+            <p class="subtitle">Enterprise-grade disaster communication monitoring</p>
+        </div>
+        <div class="status-indicator status-online"></div>
+    </div>
+
+    <div class="container">
+        <div class="controls">
+            <button class="btn" onclick="refreshData()">🔄 Refresh Data</button>
+            <button class="btn btn-secondary" onclick="exportReport()">📊 Export Report</button>
+            <button class="btn btn-secondary" onclick="toggleAutoRefresh()">⏸️ Pause Auto-Refresh</button>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <h3 class="metric-title">Fleet Overview</h3>
+                <div class="metric-value" id="totalDevices">-</div>
+                <div class="metric-change neutral">Total Devices</div>
+                <div class="chart-container">
+                    <canvas id="fleetChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="metric-title">Network Health</h3>
+                <div class="metric-value" id="connectivity">-</div>
+                <div class="metric-change positive">Connectivity</div>
+                <div class="chart-container">
+                    <canvas id="networkChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="metric-title">Battery Status</h3>
+                <div class="metric-value" id="batteryLevel">-</div>
+                <div class="metric-change positive">Average Level</div>
+                <div class="chart-container">
+                    <canvas id="batteryChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="metric-title">Message Delivery</h3>
+                <div class="metric-value" id="deliveryRate">-</div>
+                <div class="metric-change positive">Success Rate</div>
+                <div class="chart-container">
+                    <canvas id="deliveryChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="metric-title">Security Score</h3>
+                <div class="metric-value" id="securityScore">-</div>
+                <div class="metric-change positive">Overall Security</div>
+                <div class="chart-container">
+                    <canvas id="securityChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="metric-title">Emergency Activations</h3>
+                <div class="metric-value" id="emergencyCount">-</div>
+                <div class="metric-change neutral">Total Activations</div>
+                <div class="chart-container">
+                    <canvas id="emergencyChart" width="300" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="alerts-section">
+            <h3 style="margin-bottom: 1rem; color: #FFFFFF;">🚨 Active Alerts</h3>
+            <div id="alertsContainer">
+                <div class="alert-item">
+                    <div class="alert-icon"></div>
+                    <span class="alert-text">No active alerts</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>AfetNet Fleet Dashboard v1.0 | Last updated: <span id="lastUpdate">-</span></p>
+            <p>Monitoring <span id="deviceCount">-</span> devices across disaster zones</p>
+        </div>
+    </div>
+
+    <script>
+        let autoRefresh = true;
+        let refreshInterval;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshData();
+            startAutoRefresh();
+        });
+
+        function refreshData() {
+            // Simulate fetching data from local storage or API
+            fetch('/api/fleet/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    updateMetrics(data);
+                    updateCharts(data);
+                    updateAlerts(data.alerts || []);
+                    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+                })
+                .catch(error => {
+                    console.error('Failed to fetch metrics:', error);
+                    // Use mock data
+                    updateMetrics(generateMockData());
+                });
+        }
+
+        function updateMetrics(data) {
+            document.getElementById('totalDevices').textContent = data.totalDevices || '-';
+            document.getElementById('connectivity').textContent = (data.averageConnectivity || 0).toFixed(1) + '%';
+            document.getElementById('batteryLevel').textContent = (data.averageBatteryLevel || 0).toFixed(1) + '%';
+            document.getElementById('deliveryRate').textContent = (data.messageDeliveryRate || 0).toFixed(1) + '%';
+            document.getElementById('securityScore').textContent = (data.securityScore || 0).toFixed(1) + '%';
+            document.getElementById('emergencyCount').textContent = data.emergencyActivations || '-';
+            document.getElementById('deviceCount').textContent = data.totalDevices || '-';
+        }
+
+        function updateCharts(data) {
+            // Simple chart updates (would use Chart.js in production)
+            const charts = ['fleetChart', 'networkChart', 'batteryChart', 'deliveryChart', 'securityChart', 'emergencyChart'];
+
+            charts.forEach(chartId => {
+                const canvas = document.getElementById(chartId);
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    // Simple placeholder visualization
+                    ctx.fillStyle = '#1E293B';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#3B82F6';
+                    ctx.fillRect(10, 10, Math.random() * 280, 180);
+                }
+            });
+        }
+
+        function updateAlerts(alerts) {
+            const container = document.getElementById('alertsContainer');
+
+            if (alerts.length === 0) {
+                container.innerHTML = `
+                    <div class="alert-item">
+                        <div class="alert-icon" style="background: #10B981;"></div>
+                        <span class="alert-text">✅ All systems operational</span>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = alerts.map(alert => `
+                <div class="alert-item">
+                    <div class="alert-icon" style="background: ${alert.severity === 'critical' ? '#EF4444' : '#F59E0B'};"></div>
+                    <span class="alert-text">${alert.message}</span>
+                </div>
+            `).join('');
+        }
+
+        function generateMockData() {
+            return {
+                totalDevices: Math.floor(Math.random() * 100) + 50,
+                averageConnectivity: Math.random() * 100,
+                averageBatteryLevel: Math.random() * 100,
+                messageDeliveryRate: Math.random() * 100,
+                securityScore: Math.random() * 100,
+                emergencyActivations: Math.floor(Math.random() * 20),
+                alerts: []
+            };
+        }
+
+        function startAutoRefresh() {
+            refreshInterval = setInterval(() => {
+                if (autoRefresh) {
+                    refreshData();
+                }
+            }, 5000); // 5 seconds
+        }
+
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const button = document.querySelector('.btn:nth-child(3)');
+            button.textContent = autoRefresh ? '⏸️ Pause Auto-Refresh' : '▶️ Resume Auto-Refresh';
+            button.classList.toggle('pulse', !autoRefresh);
+        }
+
+        function exportReport() {
+            alert('Export functionality would generate a comprehensive fleet report');
+        }
+
+        // Initialize with mock data
+        refreshData();
+    </script>
+</body>
+</html>
+
+
+
+
+

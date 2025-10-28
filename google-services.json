@@ -10,7 +10,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:YOUR_APP_ID",
         "android_client_info": {
-          "package_name": "org.afetnet1.app"
+          "package_name": "com.gokhancamci.afetnetapp"
         }
       },
       "oauth_client": [

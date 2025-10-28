@@ -26,13 +26,13 @@ export async function pbkdf2(passUtf8: Uint8Array, salt: Uint8Array, keyLen=32){
 
 export async function secretboxEncrypt(plaintext: Uint8Array, password: string, salt?: Uint8Array){
   const s = salt || Crypto.getRandomBytes(16);
-  const key = await pbkdf2(new (globalThis as any).TextEncoder().encode(password), s, 100000, 32);
+  const key = await pbkdf2(new (globalThis as any).TextEncoder().encode(password), s, 100000);
   const nonce = Crypto.getRandomBytes(24);
   const ct = nacl.secretbox(plaintext, nonce, key);
   return { salt_b64: b64(s), nonce_b64: b64(nonce), ct_b64: b64(ct) };
 }
 export async function secretboxDecrypt(obj:{salt_b64:string;nonce_b64:string;ct_b64:string}, password:string){
-  const key = await pbkdf2(new (globalThis as any).TextEncoder().encode(password), toU8(obj.salt_b64), 100000, 32);
+  const key = await pbkdf2(new (globalThis as any).TextEncoder().encode(password), toU8(obj.salt_b64), 100000);
   const pt = nacl.secretbox.open(toU8(obj.ct_b64), toU8(obj.nonce_b64), key);
   if(!pt) {throw new Error('Decrypt failed');}
   return pt;

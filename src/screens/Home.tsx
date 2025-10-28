@@ -789,7 +789,7 @@ export default function Home() {
         <TouchableOpacity 
           activeOpacity={0.8}
           onPress={async () => {
-            const success = await panicModeManager.activatePanicMode('emergency_sos', 'manual');
+            const success = await panicModeManager.activatePanicMode('emergency_sos');
             if (success) {
               setPanicModeActive(true);
               Alert.alert(

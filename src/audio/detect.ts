@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import { whisper } from '../family/whisper';
 import { quantizeLatLng } from '../geo/coarse';
 import { addTicket } from '../help/store';
-import { now } from '../relief/util';
+import { ReliefUtils } from '../relief/util';
 import { writeAudit } from '../safety/audit';
 
 let rec: Audio.Recording | null = null;
@@ -120,14 +120,20 @@ async function triggerSOS(reason:string){
     // Ignore location errors
   }
   await addTicket({
-    id: 'h_sos_'+now(),
-    ts: now(),
-    kind: 'rescue',
+    id: 'h_sos_'+ReliefUtils.now(),
+    requesterId: 'current_user',
     title: 'Ses Algılandı (Yardım Sinyali)',
+    description: 'Enerji yüksek/keskin tepe — olası düdük/panlama',
     detail: 'Enerji yüksek/keskin tepe — olası düdük/panlama',
+    kind: 'rescue',
     prio: 'life',
-    status: 'new',
-    qlat: q?.lat ?? 0, qlng: q?.lng ?? 0,
+    priority: 'critical',
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ts: ReliefUtils.now(),
+    qlat: q?.lat ?? 0,
+    qlng: q?.lng ?? 0,
   });
   await whisper('s o s ses yardim'); // ULB kısa
   await writeAudit('system','audio.detect.sos',{ reason, q });

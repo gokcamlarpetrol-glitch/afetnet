@@ -6,16 +6,16 @@
  * Includes ASSN v2 webhook testing, migration checks, security validation
  */
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const _fetch = require('node-fetch');
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import fetch from 'node-fetch';
 
 // Valid product IDs (only these are allowed)
 const VALID_PRODUCTS = [
-  'afetnet_premium_monthly1',
-  'afetnet_premium_yearly1', 
-  'afetnet_premium_lifetime',
+  'org.afetnetapp.premium.monthly',
+  'org.afetnetapp.premium.yearly',
+  'org.afetnetapp.premium.lifetime',
 ];
 
 // Required icon sizes for App Store
@@ -125,7 +125,7 @@ console.log('\n🔍 1.3 Checking IAP service imports...');
 try {
   const iapServiceFile = fs.readFileSync('src/services/iapService.ts', 'utf8');
   
-  if (!iapServiceFile.includes("from '@shared/iap/products'")) {
+  if (!iapServiceFile.includes("from '../../shared/iap/products'")) {
     addError('IAP service not importing from centralized products');
   } else {
     addSuccess('IAP service using centralized product list');
@@ -144,7 +144,7 @@ try {
 // 1.4 Check server imports
 console.log('\n🔍 1.4 Checking server imports...');
 try {
-  const serverFile = fs.readFileSync('server/iap-routes.ts', 'utf8');
+  const serverFile = fs.readFileSync('server/src/iap-routes.ts', 'utf8');
   
   if (!serverFile.includes("from '@shared/iap/products'")) {
     addError('Server not importing from centralized products');
@@ -161,7 +161,7 @@ console.log('========================');
 
 // 2.1 Check AppIcon.appiconset exists
 console.log('\n🔍 2.1 Checking AppIcon.appiconset...');
-const appIconDir = 'ios/AfetNet/Assets.xcassets/AppIcon.appiconset';
+const appIconDir = 'ios/AfetNet/Images.xcassets/AppIcon.appiconset';
 
 if (!fs.existsSync(appIconDir)) {
   addError('AppIcon.appiconset directory missing');
@@ -301,10 +301,10 @@ console.log('=======================');
 // 4.1 Check server files exist
 console.log('\n🔍 4.1 Checking server files...');
 const serverFiles = [
-  'server/index.ts',
-  'server/iap-routes.ts',
+  'server/src/index.ts',
+  'server/src/iap-routes.ts',
   'server/src/database.ts',
-  'server/migrations/001_create_iap_tables.sql',
+  'server/src/migrations/001_create_iap_tables.sql',
   'server/package.json',
 ];
 
@@ -319,7 +319,7 @@ serverFiles.forEach(file => {
 // 4.2 Check database schema
 console.log('\n🔍 4.2 Checking database schema...');
 try {
-  const migrationFile = fs.readFileSync('server/migrations/001_create_iap_tables.sql', 'utf8');
+  const migrationFile = fs.readFileSync('server/src/migrations/001_create_iap_tables.sql', 'utf8');
   
   // Check for required tables
   const requiredTables = ['users', 'purchases', 'entitlements'];
@@ -538,7 +538,7 @@ oldProductIds.forEach(oldId => {
 // 8.2 Check database migration script
 console.log('\n🔍 8.2 Checking database migration...');
 try {
-  const migrationFile = fs.readFileSync('server/migrations/001_create_iap_tables.sql', 'utf8');
+  const migrationFile = fs.readFileSync('server/src/migrations/001_create_iap_tables.sql', 'utf8');
   
   if (migrationFile.includes('CHECK (product_id IN')) {
     addSuccess('Database has product ID constraints preventing old IDs');

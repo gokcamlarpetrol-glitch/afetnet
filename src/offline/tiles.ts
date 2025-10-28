@@ -60,6 +60,13 @@ export function getTilesInBounds(
   return tiles;
 }
 
+// Cache size utility
+export function cacheSizeBytes(): number {
+  // This is a placeholder implementation
+  // In a real app, this would calculate actual cache size
+  return 0;
+}
+
 export default {
   deg2num,
   num2deg,

@@ -11,7 +11,7 @@ import { setNeighborCount } from '../p2p/peers';
 import { paramsFor } from '../profile/params';
 import { handleEEWIncoming } from '../quake/mesh';
 import { list, stats } from '../queue/v2';
-import { handleIncoming as occHandle } from '../relief/occupancy';
+// import { handleIncoming as occHandle } from '../relief/occupancy'; // TODO: Implement occupancy handling
 import { addReceived } from '../route/share';
 import { handleIncoming as roadHandle } from '../routing/mesh';
 import { handleIncoming as shareHandle } from '../share/mesh';
@@ -249,7 +249,8 @@ async function handleDevice(dev: any){
       // Handle occupancy messages if present
       if((bundle as any).kind && ((bundle as any).kind.startsWith('fac_'))){
         try{
-          await occHandle(bundle);
+          // TODO: Implement occupancy handling
+          console.log('Occupancy bundle received:', bundle);
         }catch{ /* ignore occupancy errors */ }
       }
       

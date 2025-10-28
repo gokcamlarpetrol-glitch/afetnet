@@ -4,8 +4,13 @@ import { isInspect, readAudit, setInspect, writeAudit } from '../safety/audit';
 
 export default function PrivacyAuditScreen(){
   const [inspect,setIns]=useState(false);
+  const [rows, setRows] = useState<any[]>([]);
 
-  async function refresh(){ /* refresh audit data */ setIns(await isInspect()); }
+  async function refresh(){
+    setIns(await isInspect());
+    const auditData = await readAudit();
+    setRows(auditData);
+  }
   useEffect(()=>{ refresh(); const t=(globalThis as any).setInterval(refresh,3000); return ()=>(globalThis as any).clearInterval(t); },[]);
 
   async function toggle(){

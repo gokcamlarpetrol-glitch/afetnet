@@ -7,6 +7,7 @@ import { pushSample, getTarget, headingDiff, hapticFor, resetDir } from '../assi
 export default function DirectionScreen(){
   const [head, setHead] = useState(0);
   const [lvl, setLvl] = useState(0);
+  const [tgt, setTgt] = useState(0);
   const detRef = useRef<any>(null);
 
   useEffect(()=>{

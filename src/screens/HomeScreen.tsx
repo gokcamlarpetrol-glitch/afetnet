@@ -10,7 +10,7 @@ import { runPreflight } from '../safety/preflight';
 import { getNeighborCount } from '../p2p/peers';
 import { getPower, savePower } from '../power/profile';
 import { latestEEW } from '../quake/state';
-import { now } from '../relief/util';
+// import { now } from '../relief/util'; // TODO: Implement relief util
 
 export default function HomeScreen(){
   const [bat,setBat]=useState<number>(0);

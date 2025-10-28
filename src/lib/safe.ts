@@ -95,7 +95,7 @@ export function withWatchdog<T>(
   });
 }
 
-export function safeCall<T>(
+export async function safeCall<T>(
   fn: () => T | Promise<T>,
   options: SafeCallOptions = {},
 ): Promise<T | undefined> {
@@ -106,67 +106,64 @@ export function safeCall<T>(
     fallback,
   } = options;
 
-  return new Promise((resolve) => {
-    let lastError: Error | undefined;
-    
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const watchdogName = `safeCall_${Date.now()}_${attempt}`;
-        
-        const result = await withWatchdog(
-          watchdogName,
-          timeout,
-          async () => {
-            const fnResult = fn();
-            return Promise.resolve(fnResult);
-          },
-          (name, duration) => {
-            logEvent('SAFE_CALL_TIMEOUT', {
-              name: watchdogName,
-              duration,
-              timeout,
-              attempt,
-            });
-          },
-        );
-        
-        if (attempt > 0) {
-          logEvent('SAFE_CALL_SUCCESS_RETRY', {
+  let lastError: Error | undefined;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const watchdogName = `safeCall_${Date.now()}_${attempt}`;
+      
+      const result = await withWatchdog(
+        watchdogName,
+        timeout,
+        async () => {
+          const fnResult = fn();
+          return Promise.resolve(fnResult);
+        },
+        (name, duration) => {
+          logEvent('SAFE_CALL_TIMEOUT', {
+            name: watchdogName,
+            duration,
+            timeout,
             attempt,
-            totalAttempts: retries + 1,
           });
-        }
-        
-        resolve(result);
-        return;
-      } catch (error) {
-        lastError = error as Error;
-        
-        logEvent('SAFE_CALL_ERROR', {
+        },
+      );
+      
+      if (attempt > 0) {
+        logEvent('SAFE_CALL_SUCCESS_RETRY', {
           attempt,
-          error: error instanceof Error ? error.message : String(error),
-          willRetry: attempt < retries,
+          totalAttempts: retries + 1,
         });
-        
-        if (onError) {
-          onError(lastError);
-        }
-        
-        if (attempt < retries) {
-          // Wait before retry (exponential backoff)
-          await new Promise(resolve => (globalThis as any).setTimeout(resolve, Math.pow(2, attempt) * 1000));
-        }
+      }
+      
+      return result;
+    } catch (error) {
+      lastError = error as Error;
+      
+      logEvent('SAFE_CALL_ERROR', {
+        attempt,
+        error: error instanceof Error ? error.message : String(error),
+        willRetry: attempt < retries,
+      });
+      
+      if (onError) {
+        onError(lastError);
+      }
+      
+      if (attempt < retries) {
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => (globalThis as any).setTimeout(resolve, Math.pow(2, attempt) * 1000));
       }
     }
-    
-    // All attempts failed
-    logEvent('SAFE_CALL_FAILED_ALL_ATTEMPTS', {
-      totalAttempts: retries + 1,
-      error: lastError?.message || 'Unknown error',
-    });
-    
-    resolve(fallback);
+  }
+  
+  // All attempts failed
+  logEvent('SAFE_CALL_FAILED_ALL_ATTEMPTS', {
+    totalAttempts: retries + 1,
+    error: lastError?.message || 'Unknown error',
   });
+  
+  return fallback;
 }
 
 export function safeAwait<T>(

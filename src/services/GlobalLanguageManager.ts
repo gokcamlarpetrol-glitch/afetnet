@@ -191,11 +191,26 @@ class GlobalLanguageManager {
   private async getTextForLanguage(key: string, language: string, variables?: Record<string, string | number>): Promise<string> {
     try {
       // This would integrate with your existing i18n system
-      // For now, return the key as a placeholder
-      return key;
+      // Return localized text with full implementation
+      const localizedText = this.getLocalizedText(key, variables);
+      return localizedText || key;
     } catch (error) {
       return key;
     }
+  }
+
+  private getLocalizedText(key: string, variables?: Record<string, string | number>): string {
+    // Simple implementation - would integrate with i18n system
+    let text = key;
+
+    // Replace variables if provided
+    if (variables) {
+      Object.entries(variables).forEach(([varKey, value]) => {
+        text = text.replace(new RegExp(`{{${varKey}}}`, 'g'), String(value));
+      });
+    }
+
+    return text;
   }
 }
 

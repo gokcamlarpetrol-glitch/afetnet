@@ -3,9 +3,21 @@ import typescript from '@typescript-eslint/eslint-plugin';
 import typescriptParser from '@typescript-eslint/parser';
 
 export default [
+  {
+    ignores: [
+      'src/relief/**/*',
+      'server/dist/**',
+      'server/**/dist/**',
+      'android/**',
+      'ios/**',
+      'dist/**',
+      'build/**',
+      'coverage/**',
+      'shared/**/*.js',
+    ],
+  },
   js.configs.recommended,
   {
-    ignores: ['src/relief/**/*'],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {
@@ -20,15 +32,15 @@ export default [
       '@typescript-eslint': typescript,
     },
     rules: {
-      'no-unused-vars': 'off', // TypeScript ile çakışıyor
+      'no-unused-vars': 'off',
       'no-empty': 'error',
-      'no-control-regex': 'off', // Control characters in regex are intentional
-      'no-unreachable': 'off', // Sometimes false positives
-      'no-undef': 'off', // TypeScript ile çakışıyor
+      'no-control-regex': 'off',
+      'no-unreachable': 'off',
+      'no-undef': 'off',
       'indent': ['error', 2],
       'comma-dangle': ['error', 'always-multiline'],
-      '@typescript-eslint/no-explicit-any': 'off', // Çok fazla hata veriyor
-      '@typescript-eslint/no-unused-vars': 'off', // Çok fazla hata veriyor
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
     },
   },
 ];

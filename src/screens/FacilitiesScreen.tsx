@@ -6,10 +6,25 @@ import { loadFacilities, saveFacilities, searchFacilities } from '../relief/stor
 export default function FacilitiesScreen(){
   const [all,setAll]=useState<Facility[]>([]);
   const [q,setQ]=useState(''); const [kinds,setKinds]=useState<FacilityKind[]|null>(null);
-  const [rows,setRows]=useState<Facility[]>([]);
+  const [rows, setRows] = useState<Facility[]>([]);
 
-  useEffect(()=>{ (async()=>{ const a=await loadFacilities(); setAll(a); setRows(a); })(); },[]);
-  function apply(){ setRows(searchFacilities(all,q,kinds)); }
+  useEffect(()=>{
+    (async()=>{
+      try {
+        const a = await loadFacilities() || [];
+        setAll(a as Facility[]);
+        setRows(a as Facility[]);
+      } catch (error) {
+        console.error('Failed to load facilities:', error);
+        setAll([]);
+        setRows([]);
+      }
+    })();
+  },[]);
+  async function apply(){
+    const filtered = await searchFacilities(q, all, kinds);
+    setRows(filtered || all);
+  }
 
   return (
     <View style={{ flex:1, backgroundColor:'#0f172a', padding:12 }}>

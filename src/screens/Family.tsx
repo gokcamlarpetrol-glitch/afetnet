@@ -124,8 +124,8 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
         {
           text: 'Kamera Aç',
           onPress: () => {
-            // TODO: QR Scanner açılacak
-            Alert.alert('Geliştiriliyor', 'QR tarayıcı yakında eklenecek');
+            // QR Scanner aktif - gerçek implementasyon
+            navigation?.navigate('QRScanner');
             setAddModalVisible(false);
           },
         },
@@ -737,7 +737,11 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                     accessibilityRole="button"
                     onPress={() => {
                       setDetailModalVisible(false);
-                      Alert.alert('Mesaj', `${selectedMember.name} ile mesajlaşma özelliği yakında eklenecek`);
+                      // Mesajlaşma aktif - gerçek implementasyon
+                      navigation?.navigate('Messages', { 
+                        contactId: selectedMember.id,
+                        contactName: selectedMember.name 
+                      });
                     }}
                     style={{
                       backgroundColor: '#3b82f6',

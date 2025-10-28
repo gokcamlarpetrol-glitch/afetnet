@@ -28,6 +28,7 @@ export default function TurkiyeMapScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [showAllPoints, setShowAllPoints] = useState(true);
+  const [selectedPoint, setSelectedPoint] = useState<AssemblyPoint | null>(null);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
@@ -83,6 +84,8 @@ export default function TurkiyeMapScreen() {
   };
 
   const handleMarkerPress = (point: AssemblyPoint) => {
+    // TODO: Implement selected point state
+    // TODO: Implement selected point state
     setSelectedPoint(point);
     Alert.alert(
       point.name || 'Toplanma Noktası',

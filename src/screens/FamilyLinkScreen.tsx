@@ -7,6 +7,7 @@ import { sendULB } from '../ulb/api';
 
 export default function FamilyLinkScreen(){
   const [name,setName]=useState(''); const [rel,setRel]=useState<FamilyContact['relation']>('diğer');
+  const [rows, setRows] = useState<FamilyContact[]>([]);
 
   async function refresh(){ /* refresh family data */ }
   useEffect(()=>{ refresh(); },[]);

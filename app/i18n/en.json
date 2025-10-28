@@ -1,0 +1,224 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "share": "Share",
+    "close": "Close",
+    "ok": "OK",
+    "yes": "Yes",
+    "no": "No",
+    "next": "Next",
+    "previous": "Back",
+    "finish": "Finish",
+    "continue": "Continue"
+  },
+  "navigation": {
+    "home": "Home",
+    "map": "Map",
+    "offlineMap": "Offline Map",
+    "messages": "Messages",
+    "family": "Family",
+    "settings": "Settings",
+    "diagnostics": "Diagnostics",
+    "premium": "Premium"
+  },
+  "emergency": {
+    "sos": "SOS",
+    "help": "Help",
+    "emergency": "Emergency",
+    "callEmergency": "Call Emergency",
+    "sendLocation": "Send Location",
+    "activateEmergencyMode": "Activate Emergency Mode",
+    "deactivateEmergencyMode": "Deactivate Emergency Mode",
+    "emergencyActive": "Emergency Active",
+    "emergencyResolved": "Emergency Resolved"
+  },
+  "premium": {
+    "title": "Premium",
+    "subtitle": "200+ premium features",
+    "description": "Get access to all AfetNet features with premium membership.",
+    "worldClassBadge": "World Class",
+    "premiumActive": "Premium Active",
+    "subscriptionEnd": "Subscription End",
+    "unlimited": "Unlimited",
+    "features": {
+      "title": "Premium Features",
+      "subtitle": "200+ advanced features",
+      "categories": {
+        "emergency": {
+          "title": "🚨 Emergency & Rescue",
+          "features": [
+            "SOS System - Instant help calls",
+            "Critical Alerts - Silent mode bypass",
+            "Rescue Coordination - SAR and triage",
+            "Medical Info - ICE data",
+            "Rubble Mode - Inactivity detection",
+            "Audio Ping - Under-rubble communication"
+          ]
+        },
+        "family": {
+          "title": "👨‍👩‍👧‍👦 Family & Social",
+          "features": [
+            "Unlimited Family Tracking - Real-time location",
+            "Family Messaging - Encrypted communication",
+            "Proximity Detection - Family alerts",
+            "Family Map - All members map",
+            "Group Management - Team coordination",
+            "Social Security - Community support"
+          ]
+        },
+        "maps": {
+          "title": "🗺️ Maps & Navigation",
+          "features": [
+            "Offline Maps - Without internet",
+            "Topographic Maps - High resolution",
+            "Route Planning - Advanced optimization",
+            "PDR Tracking - Step-based location",
+            "GPS Fusion - Multi-sensor fusion",
+            "Location Sharing - Real-time"
+          ]
+        },
+        "mesh": {
+          "title": "📡 Mesh Network & Communication",
+          "features": [
+            "BLE Mesh Network - Bluetooth mesh",
+            "WiFi Direct - Direct connection",
+            "P2P Messaging - Network-free communication",
+            "Message Relay - Automatic forwarding",
+            "Offline Sync - Data synchronization",
+            "Critical Messages - Priority transmission"
+          ]
+        },
+        "ai": {
+          "title": "🤖 AI & Smart Systems",
+          "features": [
+            "AI Decision Support - Smart analysis",
+            "Situation Analysis - Risk assessment",
+            "Smart Recommendations - Personalized",
+            "Automatic Decisions - AI powered",
+            "Machine Learning - Adaptive systems",
+            "Predictive Analytics - Future prediction"
+          ]
+        },
+        "security": {
+          "title": "🔒 Security & Encryption",
+          "features": [
+            "End-to-End Encryption - Full security",
+            "Biometric Security - Fingerprint/face",
+            "Secure Storage - Encrypted data",
+            "AFN-ID System - Secure identity",
+            "Multi-Factor Auth - 2FA",
+            "Secure Communication - Encrypted messages"
+          ]
+        }
+      }
+    },
+    "stats": {
+      "title": "Premium Benefits",
+      "features": "200+ Premium Features",
+      "support": "24/7 Priority Support",
+      "usage": "Unlimited Usage",
+      "security": "100% Secure & Encrypted"
+    },
+    "plans": {
+      "monthly": {
+        "title": "Monthly Premium",
+        "description": "Monthly subscription - Access to all premium features",
+        "price": "29"
+      },
+      "yearly": {
+        "title": "Yearly Premium",
+        "description": "Yearly subscription - 50% savings",
+        "price": "299"
+      },
+      "lifetime": {
+        "title": "Lifetime Premium",
+        "description": "One-time payment - Premium forever",
+        "price": "999"
+      }
+    },
+    "actions": {
+      "upgrade": "Upgrade to Premium",
+      "restore": "Restore Purchases",
+      "manage": "Manage Subscription",
+      "cancel": "Cancel Subscription"
+    }
+  },
+  "permissions": {
+    "location": {
+      "title": "Location Access",
+      "message": "AfetNet needs location access to safely share your location during emergencies.",
+      "always": "Location access is required for background secure communication during emergencies.",
+      "whenInUse": "Location is used when sending emergency signals to rescue teams."
+    },
+    "bluetooth": {
+      "title": "Bluetooth Access",
+      "message": "We use Bluetooth to establish networks with nearby devices.",
+      "always": "Bluetooth is needed for Bluetooth Mesh communication without internet during emergencies."
+    },
+    "motion": {
+      "title": "Motion Sensors",
+      "message": "Motion data is needed for location estimation when GPS is unavailable.",
+      "description": "AfetNet uses motion sensors to detect earthquake shaking for early warning."
+    },
+    "camera": {
+      "title": "Camera Access",
+      "message": "Camera is used to add family members."
+    },
+    "microphone": {
+      "title": "Microphone Access",
+      "message": "Microphone is used for emergency voice guidance."
+    },
+    "notifications": {
+      "title": "Notification Access",
+      "message": "Required for emergency alerts and important notifications."
+    },
+    "contacts": {
+      "title": "Contacts Access",
+      "message": "Required to add emergency contacts to your address book."
+    }
+  },
+  "errors": {
+    "network": "Network error",
+    "location": "Location unavailable",
+    "permission": "Permission required",
+    "timeout": "Timeout",
+    "unknown": "Unknown error",
+    "retry": "Please try again",
+    "contactSupport": "Contact support team"
+  },
+  "success": {
+    "messageSent": "Message sent",
+    "locationShared": "Location shared",
+    "emergencyActivated": "Emergency mode activated",
+    "premiumActivated": "Premium membership activated",
+    "settingsSaved": "Settings saved"
+  },
+  "diagnostics": {
+    "title": "Ultra-Elite Diagnostics",
+    "subtitle": "Real-time system monitoring",
+    "lastUpdate": "Last update",
+    "refresh": "Refresh",
+    "export": "Export",
+    "emergencyMode": "Emergency Mode",
+    "systemHealth": "System Health",
+    "networkHealth": "Network Health",
+    "batteryStatus": "Battery Status",
+    "locationAccuracy": "Location Accuracy",
+    "sensorStatus": "Sensor Status",
+    "meshNetwork": "Mesh Network",
+    "offlineMessaging": "Offline Messaging",
+    "securityStatus": "Security Status",
+    "performance": "Performance"
+  }
+}
+
+
+
+
+
