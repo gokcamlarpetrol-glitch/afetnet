@@ -83,7 +83,10 @@ export function usePremium(): PremiumStatus & {
     });
 
     return () => {
-      listener.remove();
+      // Listener cleanup is handled automatically by react-native-purchases
+      if (typeof listener === 'object' && listener && 'remove' in listener) {
+        (listener as any).remove();
+      }
     };
   }, [updatePremiumStatus]);
 

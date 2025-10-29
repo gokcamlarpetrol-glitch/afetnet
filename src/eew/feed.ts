@@ -1,4 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
+import * as Location from 'expo-location';
+import * as Localization from 'expo-localization';
+import { Platform } from 'react-native';
 import { EEWAlert, EEWPush } from './types';
 import { pushEEW, notifyEEW } from './store';
 
@@ -6,6 +9,12 @@ type Cfg = {
   WS_URLS: string[];     // e.g. ["wss://eew.afad.gov.tr/ws", "wss://eew.kandilli.org/ws"]
   POLL_URLS: string[];   // e.g. REST fallbacks
   POLL_INTERVAL_SEC: number;
+  // Country-based WS selection
+  EEW_WS_TR_PRIMARY?: string;    // TR resmi/öncelik WS
+  EEW_WS_TR_FALLBACK?: string;   // TR fallback WS
+  EEW_WS_GLOBAL_PRIMARY?: string; // Global primary (USGS/JMA)
+  EEW_WS_GLOBAL_FALLBACK?: string; // Global fallback
+  EEW_PROXY_WS?: string;          // Server relay WS
 };
 let cfg: Cfg = {
   WS_URLS: [],
@@ -19,12 +28,56 @@ const seen = new Set<string>();
 
 export function setEEWFeedConfig(c: Partial<Cfg>){ cfg = { ...cfg, ...c }; }
 
+/**
+ * Detect user's country/region for WS selection
+ */
+async function detectRegion(): Promise<'TR' | 'GLOBAL'> {
+  try {
+    // Try location-based detection first
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+      // Simple check: Turkey bounding box approx
+      if (loc.coords.latitude >= 36 && loc.coords.latitude <= 42 &&
+          loc.coords.longitude >= 26 && loc.coords.longitude <= 45) {
+        return 'TR';
+      }
+    }
+    // Fallback: Check device locale
+    const locale = Localization.getLocales()?.[0]?.languageCode || '';
+    if (locale.toLowerCase().includes('tr')) {
+      return 'TR';
+    }
+    return 'GLOBAL';
+  } catch {
+    // Default to GLOBAL if detection fails
+    return 'GLOBAL';
+  }
+}
+
 export async function startEEW(){
   const net = await NetInfo.fetch().catch(()=>null);
   if(!net?.isConnected) {return;}
 
-  // Try WS first
-  for(const url of cfg.WS_URLS){
+  // Auto-select WS URLs based on region
+  const region = await detectRegion();
+  const wsUrls: string[] = [...cfg.WS_URLS]; // Start with manual config
+  
+  if (region === 'TR') {
+    // TR priority: official WS > proxy > fallback > manual
+    if (cfg.EEW_WS_TR_PRIMARY) wsUrls.unshift(cfg.EEW_WS_TR_PRIMARY);
+    if (cfg.EEW_PROXY_WS) wsUrls.push(cfg.EEW_PROXY_WS);
+    if (cfg.EEW_WS_TR_FALLBACK) wsUrls.push(cfg.EEW_WS_TR_FALLBACK);
+  } else {
+    // Global priority: global WS > proxy > manual
+    if (cfg.EEW_WS_GLOBAL_PRIMARY) wsUrls.unshift(cfg.EEW_WS_GLOBAL_PRIMARY);
+    if (cfg.EEW_PROXY_WS) wsUrls.push(cfg.EEW_PROXY_WS);
+    if (cfg.EEW_WS_GLOBAL_FALLBACK) wsUrls.push(cfg.EEW_WS_GLOBAL_FALLBACK);
+  }
+
+  // Try WS first (with deduplication)
+  const uniqueWsUrls = [...new Set(wsUrls.filter(Boolean))];
+  for(const url of uniqueWsUrls){
     try{
       ws = new (globalThis as any).WebSocket(url);
       ws.onmessage = (ev)=>{

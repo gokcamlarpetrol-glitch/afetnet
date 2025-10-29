@@ -6,9 +6,9 @@
 // International (USD): Monthly 9.99, Yearly 99.99, Lifetime 199.99
 
 export const IAP_PRODUCTS = {
-  monthly: 'org.afetnetapp.premium.monthly',
-  yearly: 'org.afetnetapp.premium.yearly',
-  lifetime: 'org.afetnetapp.premium.lifetime',
+  monthly: 'org.afetapp.premium.monthly',
+  yearly: 'org.afetapp.premium.yearly',
+  lifetime: 'org.afetapp.premium.lifetime',
 } as const;
 
 export type ProductKey = keyof typeof IAP_PRODUCTS;

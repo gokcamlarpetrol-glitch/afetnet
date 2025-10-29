@@ -100,6 +100,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },
     devClient: true,
+    EEW_ENABLED: process.env.EEW_ENABLED === 'true' ? true : false,
+    EEW_NATIVE_ALARM: process.env.EEW_NATIVE_ALARM === 'true' ? true : false,
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app",

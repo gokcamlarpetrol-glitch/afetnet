@@ -1,3 +1,26 @@
+import { create } from 'zustand';
+
+export type ActiveEEW = {
+  eventId: string;
+  etaSec: number;
+  mag?: number;
+  region?: string;
+  issuedAt: number;
+  source: string;
+};
+
+type EEWState = {
+  active?: ActiveEEW;
+  setActive: (a: ActiveEEW) => void;
+  clear: () => void;
+};
+
+export const useEEWStore = create<EEWState>((set) => ({
+  active: undefined,
+  setActive: (a) => set({ active: a }),
+  clear: () => set({ active: undefined }),
+}));
+
 import * as FileSystem from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import { EEWAlert } from './types';
