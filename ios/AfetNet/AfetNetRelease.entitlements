@@ -8,6 +8,8 @@
 	<array>
 		<string>applinks:afetnet.app</string>
 	</array>
+	<key>com.apple.developer.background-fetch</key>
+	<true/>
 	<key>com.apple.developer.bluetooth-central</key>
 	<true/>
 	<key>com.apple.developer.bluetooth-peripheral</key>
