@@ -60,7 +60,9 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string></string>
+	<string>AfetNet, acil durumlarda mesh ağ iletişimi için Bluetooth kullanır.</string>
+	<key>NSBluetoothWhileInUseUsageDescription</key>
+	<string>AfetNet, acil durumlarda mesh ağ iletişimi için Bluetooth kullanır.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>AfetNet, QR kodları okumak için kameraya erişir.</string>
 	<key>NSContactsUsageDescription</key>
