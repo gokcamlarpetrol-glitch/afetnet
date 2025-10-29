@@ -22,6 +22,8 @@
     "test:iap": "node scripts/test-iap.js",
     "verify:iap": "node scripts/verify-iap-system.js",
     "validate:production": "node scripts/validate-production.js",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
