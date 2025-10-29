@@ -1,6 +1,9 @@
 // REVENUECAT CONFIGURATION & INITIALIZATION
 // Elite-level RevenueCat implementation for AfetNet
-import Purchases, { CustomerInfo, Offerings, PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
+import Purchases, { CustomerInfo, PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
+
+// Offerings type is not exported from react-native-purchases, define our own
+type PurchasesOfferings = Awaited<ReturnType<typeof Purchases.getOfferings>>;
 import { Platform, Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { logger } from '../utils/productionLogger';
@@ -14,7 +17,7 @@ const RC_ANDROID_KEY = process.env.RC_ANDROID_KEY || '';
 // Initialize RevenueCat
 let isInitialized = false;
 let currentCustomerInfo: CustomerInfo | null = null;
-let currentOfferings: Offerings | null = null;
+let currentOfferings: PurchasesOfferings | null = null;
 
 // Product ID mapping (fallback)
 export const PRODUCT_IDS = {
@@ -127,7 +130,7 @@ export async function fetchCustomerInfo(): Promise<CustomerInfo | null> {
 /**
  * Get offerings from RevenueCat
  */
-export async function fetchOfferings(): Promise<Offerings | null> {
+export async function fetchOfferings(): Promise<PurchasesOfferings | null> {
   try {
     if (!isInitialized) {
       logger.warn('⚠️ RevenueCat not initialized');
@@ -252,7 +255,7 @@ export async function restorePurchases(): Promise<boolean> {
 /**
  * Get current offerings (cached or fetch new)
  */
-export function getCurrentOfferings(): Offerings | null {
+export function getCurrentOfferings(): PurchasesOfferings | null {
   return currentOfferings;
 }
 
@@ -271,5 +274,6 @@ export function isRevenueCatInitialized(): boolean {
 }
 
 // Export for use in other modules
-export { Purchases, CustomerInfo, Offerings, PurchasesPackage };
+export { Purchases };
+export type { CustomerInfo, PurchasesPackage, PurchasesOfferings };
 
