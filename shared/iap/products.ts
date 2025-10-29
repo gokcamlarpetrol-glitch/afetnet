@@ -1,6 +1,9 @@
 // SHARED IAP PRODUCTS MODULE - NEW BUNDLE ID (com.gokhancamci.afetnetapp)
 // Single source of truth for all IAP product IDs across client and server
 // IMPORTANT: These are NEW product IDs for the NEW App Store submission
+// PRICING: Prices set in App Store Connect based on user's region
+// Turkey (TRY): Monthly 49.99, Yearly 499.99, Lifetime 999.99
+// International (USD): Monthly 9.99, Yearly 99.99, Lifetime 199.99
 
 export const IAP_PRODUCTS = {
   monthly: 'org.afetnetapp.premium.monthly',

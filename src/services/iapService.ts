@@ -22,7 +22,7 @@ import {
 
 // Server configuration
 const SERVER_BASE_URL = __DEV__ 
-  ? 'http://localhost:3001/api' 
+  ? 'https://afetnet-backend.onrender.com/api' 
   : 'https://afetnet-backend.onrender.com/api';
 
 // Type definitions

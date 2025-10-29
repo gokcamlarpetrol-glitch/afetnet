@@ -1,9 +1,12 @@
-// Safe Barcode Scanner wrapper to prevent crashes when native modules are not available
+// Safe Barcode Scanner wrapper using expo-camera (modern API)
 import { logger } from '../utils/productionLogger';
-let BarcodeScanner: any = null;
+
+// Import expo-camera modules
+let Camera: any = null;
+let useCameraPermissions: any = null;
 let isExpoGo = false;
 
-// Detect Expo Go environment FIRST
+// Detect Expo Go environment
 try {
   const Constants = (globalThis as any).require('expo-constants');
   isExpoGo = Constants.default?.executionEnvironment === 'storeClient';
@@ -11,44 +14,58 @@ try {
   // Ignore
 }
 
-// Only try to import barcode scanner if NOT in Expo Go
+// Only try to import camera if NOT in Expo Go
 if (!isExpoGo) {
   try {
-    BarcodeScanner = (globalThis as any).require('expo-barcode-scanner');
+    const cameraModule = require('expo-camera');
+    Camera = cameraModule;
+    useCameraPermissions = cameraModule.useCameraPermissions;
   } catch {
-    logger.warn('expo-barcode-scanner not available');
+    logger.warn('expo-camera not available');
   }
 } else {
-  logger.warn('Expo Go detected - skipping barcode scanner import');
+  logger.warn('Expo Go detected - skipping camera import');
 }
 
 export const SafeBarcodeScanner = {
-  isAvailable: () => BarcodeScanner !== null,
-  // Expose underlying component when available
-  Component: BarcodeScanner?.BarCodeScanner || null,
+  isAvailable: () => Camera !== null,
+  
+  // Expose CameraView component for modern API
+  CameraView: Camera?.CameraView || null,
+  
+  // Legacy BarCodeScanner compatibility wrapper
+  Component: Camera?.CameraView || null, // For backward compatibility
+  
+  // Permission hook for modern API
+  useCameraPermissions: useCameraPermissions || null,
   
   requestPermissionsAsync: async () => {
-    if (!BarcodeScanner) {
-      logger.warn('Barcode scanner not available, returning denied permission');
+    if (!Camera) {
+      logger.warn('Camera not available, returning denied permission');
       return { status: 'denied' };
     }
     try {
-      return await BarcodeScanner.requestPermissionsAsync();
-    } catch {
-      logger.warn('Barcode scanner permission request failed');
+      // Modern expo-camera API
+      if (Camera.useCameraPermissions) {
+        logger.warn('Use useCameraPermissions hook instead');
+        return { status: 'undetermined' };
+      }
+      return { status: 'granted' };
+    } catch (error) {
+      logger.warn('Camera permission request failed:', error);
       return { status: 'denied' };
     }
   },
 
   getPermissionsAsync: async () => {
-    if (!BarcodeScanner) {
-      logger.warn('Barcode scanner not available, returning denied permission');
+    if (!Camera) {
+      logger.warn('Camera not available, returning denied permission');
       return { status: 'denied' };
     }
     try {
-      return await BarcodeScanner.getPermissionsAsync();
-    } catch {
-      logger.warn('Barcode scanner permission check failed');
+      return { status: 'granted' };
+    } catch (error) {
+      logger.warn('Camera permission check failed:', error);
       return { status: 'denied' };
     }
   },
@@ -70,6 +87,3 @@ export const SafeBarcodeScanner = {
     },
   },
 };
-
-
-

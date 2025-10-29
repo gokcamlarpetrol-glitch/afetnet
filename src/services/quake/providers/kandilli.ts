@@ -195,39 +195,9 @@ export class KandilliProvider implements QuakeProvider {
   }
 
   private getMockData(): QuakeItem[] {
-    const now = Date.now();
-    return [
-      {
-        id: 'kandilli_mock_1',
-        time: now - 1800000, // 30 minutes ago
-        mag: 4.5,
-        place: 'Marmara Denizi, Türkiye',
-        lat: 40.7128,
-        lon: 29.0060,
-        depth: 12.8,
-        source: 'Kandilli',
-      },
-      {
-        id: 'kandilli_mock_2',
-        time: now - 5400000, // 1.5 hours ago
-        mag: 3.9,
-        place: 'Antalya, Türkiye',
-        lat: 36.8969,
-        lon: 30.7133,
-        depth: 7.2,
-        source: 'Kandilli',
-      },
-      {
-        id: 'kandilli_mock_3',
-        time: now - 9000000, // 2.5 hours ago
-        mag: 3.3,
-        place: 'Trabzon, Türkiye',
-        lat: 41.0015,
-        lon: 39.7178,
-        depth: 18.5,
-        source: 'Kandilli',
-      },
-    ];
+    logger.error('❌ Kandilli API returned no data, returning empty array');
+    // NO MOCK DATA - Return empty array if API fails
+    return [];
   }
 }
 

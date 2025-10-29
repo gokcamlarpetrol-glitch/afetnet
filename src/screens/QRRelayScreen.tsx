@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Alert, View, Text, Pressable } from 'react-native';
+import { Alert, View, Text, Pressable, StyleSheet } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { SafeBarcodeScanner } from '../ui/SafeBarcodeScanner';
 import { listInbox, appendInbox } from '../msg/store';
@@ -7,10 +7,11 @@ import { listInbox, appendInbox } from '../msg/store';
 export default function QRRelayScreen(){
   const [mode,setMode]=useState<'show'|'scan'>('show');
   const [msgs,setMsgs]=useState<any[]>([]);
+  const [scanned, setScanned] = useState(false);
 
   const BarcodeScannerComponent = useMemo(() => {
-    if (SafeBarcodeScanner.isAvailable()) {
-      return require('expo-barcode-scanner').BarCodeScanner;
+    if (SafeBarcodeScanner.isAvailable() && SafeBarcodeScanner.CameraView) {
+      return SafeBarcodeScanner.CameraView;
     }
     return null;
   }, []);
@@ -41,7 +42,13 @@ export default function QRRelayScreen(){
         </View>
       ) : (
         BarcodeScannerComponent ? (
-          <BarcodeScannerComponent onBarCodeScanned={onScan} style={{ flex:1 }}/>
+          <BarcodeScannerComponent 
+            onBarcodeScanned={scanned ? undefined : onScan}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr', 'ean13', 'ean8', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'itf14', 'datamatrix', 'aztec'],
+            }}
+            style={StyleSheet.absoluteFillObject}
+          />
         ) : (
           <View style={{ flex:1, justifyContent:'center', alignItems:'center' }}>
             <Text style={{ color:'white' }}>Barcode Scanner not available</Text>
