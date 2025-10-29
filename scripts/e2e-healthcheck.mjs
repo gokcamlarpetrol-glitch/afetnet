@@ -51,7 +51,7 @@ function discoverBackendUrl(){
   for(const f of files){
     if(fs.existsSync(f)){
       const txt = fs.readFileSync(f, 'utf8');
-      const m = txt.match(/https?:\/\/[^\s\"']+onrender\.com\/?/);
+      const m = txt.match(/https?:\/\/[^\s"']+onrender\.com\/?/);
       if(m) return m[0];
     }
   }
@@ -79,7 +79,7 @@ async function main(){
   const envKeys = [
     'AFAD_API_URL','APNS_BUNDLE_ID','APNS_KEY_ID','APNS_PRIVATE_KEY','APNS_TEAM_ID',
     'APPLE_SHARED_SECRET','DATABASE_URL','POSTGRES_URL','ENCRYPTION_SECRET_KEY',
-    'RC_IOS_KEY','REVENUECAT_API_KEY','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL'
+    'RC_IOS_KEY','REVENUECAT_API_KEY','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL',
   ];
   for(const k of envKeys){ pass(`${k}: ${process.env[k] ? 'present' : 'missing'}`); }
 
