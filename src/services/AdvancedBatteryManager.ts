@@ -513,3 +513,4 @@ export const advancedBatteryManager = new AdvancedBatteryManager();
 
 
 
+
