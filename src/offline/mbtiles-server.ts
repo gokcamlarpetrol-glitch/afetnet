@@ -131,7 +131,7 @@ export async function stopMbtilesServer(): Promise<void> {
 }
 
 export function localTileUrlTemplate(): string {
-  return `http://localhost:${serverPort}/tiles/{z}/{x}/{y}.png`;
+  return `http://127.0.0.1:${serverPort}/tiles/{z}/{x}/{y}.png`;
 }
 
 export async function currentFormat(): Promise<string> {

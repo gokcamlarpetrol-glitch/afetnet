@@ -133,39 +133,9 @@ export class AFADProvider implements QuakeProvider {
   }
 
   private getMockData(): QuakeItem[] {
-    const now = Date.now();
-    return [
-      {
-        id: 'afad_mock_1',
-        time: now - 3600000, // 1 hour ago
-        mag: 4.2,
-        place: 'İzmir, Türkiye',
-        lat: 38.4192,
-        lon: 27.1287,
-        depth: 10.5,
-        source: 'AFAD',
-      },
-      {
-        id: 'afad_mock_2',
-        time: now - 7200000, // 2 hours ago
-        mag: 3.8,
-        place: 'Ankara, Türkiye',
-        lat: 39.9334,
-        lon: 32.8597,
-        depth: 8.2,
-        source: 'AFAD',
-      },
-      {
-        id: 'afad_mock_3',
-        time: now - 10800000, // 3 hours ago
-        mag: 3.1,
-        place: 'İstanbul, Türkiye',
-        lat: 41.0082,
-        lon: 28.9784,
-        depth: 15.3,
-        source: 'AFAD',
-      },
-    ];
+    logger.error('❌ AFAD API returned no data, returning empty array');
+    // NO MOCK DATA - Return empty array if API fails
+    return [];
   }
 }
 

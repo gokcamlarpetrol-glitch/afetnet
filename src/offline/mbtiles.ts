@@ -52,8 +52,8 @@ export class MBTiles {
         logger.debug('✅ MBTiles database opened successfully');
 
       } catch (sqliteError) {
-        logger.warn('SQLite not available, using mock implementation:', sqliteError);
-        this.setupMockData();
+        logger.error('SQLite not available:', sqliteError);
+        throw new Error('Offline maps require SQLite. Please ensure react-native-quick-sqlite is properly installed.');
       }
 
     } catch (error) {
@@ -98,32 +98,20 @@ export class MBTiles {
             resolve();
           },
           (error: any) => {
-            logger.warn('Failed to load metadata, using defaults:', error);
-            this.setupMockData();
-            resolve();
+            logger.error('Failed to load metadata:', error);
+            reject(error);
           }
         );
       });
     });
   }
 
-  private setupMockData(): void {
-    this.metadata = {
-      name: 'Mock Offline Map',
-      description: 'Mock MBTiles for testing',
-      minzoom: 8,
-      maxzoom: 16,
-      format: 'png',
-      type: 'overlay',
-    };
-    logger.debug('📋 Using mock metadata');
-  }
 
   async getTile(z: number, x: number, y: number): Promise<Buffer | null> {
     try {
       if (!this.isOpen) {
-        logger.warn('MBTiles database not open');
-        return this.getMockTile(z, x, y);
+        logger.error('MBTiles database not open');
+        throw new Error('MBTiles database not initialized');
       }
 
       // Convert XYZ to TMS coordinates
@@ -131,7 +119,7 @@ export class MBTiles {
 
       return new Promise((resolve, reject) => {
         if (!this.db) {
-          resolve(this.getMockTile(z, x, y));
+          reject(new Error('Database not initialized'));
           return;
         }
 
@@ -146,12 +134,12 @@ export class MBTiles {
                 resolve(Buffer.from(tileData, 'base64'));
               } else {
                 logger.debug(`⚠️ Tile not found: ${z}/${x}/${y}`);
-                resolve(this.getMockTile(z, x, y));
+                resolve(null);
               }
             },
             (error: any) => {
-              logger.warn('Failed to get tile from database:', error);
-              resolve(this.getMockTile(z, x, y));
+              logger.error('Failed to get tile from database:', error);
+              reject(error);
             }
           );
         });
@@ -159,26 +147,8 @@ export class MBTiles {
 
     } catch (error) {
       logger.error('❌ Failed to get tile:', error);
-      return this.getMockTile(z, x, y);
+      throw error;
     }
-  }
-
-  private getMockTile(z: number, x: number, y: number): Buffer {
-    // Generate a simple colored tile based on coordinates
-    const color = `hsl(${(x * 73 + y * 137) % 360}, 70%, 60%)`;
-
-    // Create a simple SVG tile
-    const svg = `
-      <svg width="256" height="256" xmlns="http://www.w3.org/2000/svg">
-        <rect width="256" height="256" fill="${color}"/>
-        <text x="128" y="128" text-anchor="middle" fill="white" font-family="Arial" font-size="12">
-          ${z}/${x}/${y}
-        </text>
-      </svg>
-    `;
-
-    // For mock purposes, return a placeholder buffer
-    return Buffer.from(`mock-tile-${z}-${x}-${y}`);
   }
 
   async getMetadata(): Promise<MBTilesMetadata> {

@@ -6,9 +6,14 @@ export class USGSProvider implements QuakeProvider {
 
   async fetchRecent(): Promise<QuakeItem[]> {
     try {
-      // USGS Earthquake API for Turkey region
+      // Get last 7 days of earthquakes worldwide
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+      const startTime = startDate.toISOString().split('T')[0];
+      
+      // USGS Earthquake API - Worldwide coverage
       const response = await fetch(
-        'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2024-01-01&minmagnitude=2.5&maxlatitude=42.0&minlatitude=35.0&maxlongitude=45.0&minlongitude=25.0&orderby=time&limit=100',
+        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&minmagnitude=2.5&orderby=time&limit=1000`,
         {
           headers: {
             'Accept': 'application/json',
@@ -24,13 +29,15 @@ export class USGSProvider implements QuakeProvider {
       const data = await response.json();
       
       if (!data || !data.features) {
-        return this.getMockData();
+        logger.error('USGS API returned no features');
+        return [];
       }
 
+      logger.info(`✅ USGS: Fetched ${data.features.length} earthquakes`);
       return this.parseUSGSData(data.features);
     } catch (error) {
-      logger.warn('USGS fetch failed:', error);
-      return this.getMockData();
+      logger.error('USGS fetch failed:', error);
+      return [];
     }
   }
 
@@ -81,39 +88,9 @@ export class USGSProvider implements QuakeProvider {
   }
 
   private getMockData(): QuakeItem[] {
-    const now = Date.now();
-    return [
-      {
-        id: 'usgs_mock_1',
-        time: now - 2400000, // 40 minutes ago
-        mag: 4.1,
-        place: 'Turkey',
-        lat: 37.0662,
-        lon: 37.3833,
-        depth: 9.7,
-        source: 'USGS',
-      },
-      {
-        id: 'usgs_mock_2',
-        time: now - 4800000, // 80 minutes ago
-        mag: 3.7,
-        place: 'Turkey',
-        lat: 39.9334,
-        lon: 32.8597,
-        depth: 11.2,
-        source: 'USGS',
-      },
-      {
-        id: 'usgs_mock_3',
-        time: now - 7200000, // 2 hours ago
-        mag: 3.2,
-        place: 'Turkey',
-        lat: 41.0082,
-        lon: 28.9784,
-        depth: 14.8,
-        source: 'USGS',
-      },
-    ];
+    logger.error('❌ USGS API returned no data, returning empty array');
+    // NO MOCK DATA - Return empty array if API fails
+    return [];
   }
 }
 

@@ -22,7 +22,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-secure-store",
     "expo-location",
     "expo-notifications",
-    "expo-barcode-scanner",
+    [
+      "expo-camera",
+      {
+        cameraPermission: "AfetNet, QR kodları okumak için kameraya erişir.",
+      }
+    ],
     "expo-font",
     "expo-localization",
     "expo-maps",
@@ -38,7 +43,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     ...config.ios,
     buildNumber: "1",
-    bundleIdentifier: "com.gokhancamci.afetnetapp",
+          bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     infoPlist: {
       ...(config.ios?.infoPlist || {}),
@@ -48,10 +53,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSCameraUsageDescription: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
       NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.",
       UIBackgroundModes: [
-        "bluetooth-central",
-        "bluetooth-peripheral",
+        "fetch",
+        "remote-notification",
         "processing",
         "location",
+        "bluetooth-central",
+        "bluetooth-peripheral",
       ],
       ITSAppUsesNonExemptEncryption: false,
     },
@@ -65,13 +72,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "com.apple.developer.location.push": true,
       "com.apple.developer.bluetooth-central": true,
       "com.apple.developer.bluetooth-peripheral": true,
-      "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
+            "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
       "aps-environment": "production",
     },
   },
   android: {
     ...config.android,
-    package: "com.gokhancamci.afetnetapp",
+          package: "com.gokhancamci.afetnetapp",
     versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",

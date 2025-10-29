@@ -25,6 +25,7 @@ export default function PremiumActiveScreen() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<PremiumPlanId>(IAP_PRODUCTS.monthly);
   const [initError, setInitError] = useState<string | null>(null);
+  const [storeProducts, setStoreProducts] = useState<any[]>([]);
   
   // Use premium store
   const { isPremium, currentPlan, subscriptionEndDate } = usePremium();
@@ -45,8 +46,11 @@ export default function PremiumActiveScreen() {
       if (success) {
         logger.info('✅ IAP initialized successfully');
 
-        // Fetch available products
+        // Fetch available products from App Store
         const products = await iapService.getAvailableProducts();
+        
+        // Store products with real prices from App Store
+        setStoreProducts(products);
 
         logger.info('📦 Products loaded:', products.length);
       } else {
@@ -357,35 +361,44 @@ export default function PremiumActiveScreen() {
         <View style={styles.premiumPlansSection}>
           <Text style={styles.sectionTitle}>💎 Premium Planlar</Text>
           
-          {Object.entries(PREMIUM_PLANS).map(([planId, plan]) => (
-            <Pressable
-              key={planId}
-              style={[
-                styles.premiumPlanCard,
-                selectedPlan === planId && styles.selectedPlanCard,
-              ]}
-              onPress={() => setSelectedPlan(planId as PremiumPlanId)}
-              disabled={isLoading}
-            >
-              <View style={styles.planHeader}>
-                <View style={styles.planInfo}>
-                  <Text style={styles.planTitle}>{plan.title}</Text>
-                  <Text style={styles.planDescription}>{plan.description}</Text>
+          {Object.entries(PREMIUM_PLANS).map(([planId, plan]) => {
+            // Find real product from App Store with actual price
+            const storeProduct = storeProducts.find(p => p.productId === planId);
+            
+            return (
+              <Pressable
+                key={planId}
+                style={[
+                  styles.premiumPlanCard,
+                  selectedPlan === planId && styles.selectedPlanCard,
+                ]}
+                onPress={() => setSelectedPlan(planId as PremiumPlanId)}
+                disabled={isLoading}
+              >
+                <View style={styles.planHeader}>
+                  <View style={styles.planInfo}>
+                    <Text style={styles.planTitle}>{plan.title}</Text>
+                    <Text style={styles.planDescription}>{plan.description}</Text>
+                  </View>
+                  <View style={styles.priceSection}>
+                    <Text style={styles.planPrice}>
+                      {storeProduct?.price || plan.price}
+                    </Text>
+                    <Text style={styles.planCurrency}>
+                      {storeProduct?.currencyCode || plan.currency}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.priceSection}>
-                  <Text style={styles.planPrice}>₺{plan.price}</Text>
-                  <Text style={styles.planCurrency}>{plan.currency}</Text>
-                </View>
-              </View>
-              
-              {selectedPlan === planId && (
-                <View style={styles.selectedIndicator}>
-                  <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                  <Text style={styles.selectedText}>Seçildi</Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
+                
+                {selectedPlan === planId && (
+                  <View style={styles.selectedIndicator}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                    <Text style={styles.selectedText}>Seçildi</Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Comprehensive Features Showcase */}
@@ -532,7 +545,10 @@ export default function PremiumActiveScreen() {
           ) : (
             <>
               <Text style={styles.purchaseButtonText}>
-                Premium Satın Al - ₺{PREMIUM_PLANS[selectedPlan].price}
+                Premium Satın Al - {
+                  storeProducts.find(p => p.productId === selectedPlan)?.price || 
+                  PREMIUM_PLANS[selectedPlan].price
+                }
               </Text>
               <Text style={styles.purchaseButtonSubtext}>
                 {PREMIUM_PLANS[selectedPlan].description}

@@ -258,7 +258,13 @@ export default function MapScreen(){
         </View>
       )}
 
-      <ExpoMap style={{ flex:1 }}>
+      <ExpoMap 
+        style={{ flex:1 }}
+        mapType="standard"
+        showsMyLocation={true}
+        showsUserLocation={true}
+        followsUserLocation={true}
+      >
         {useLocal && (
           <ExpoMap.TileOverlay urlTemplate={localTileUrlTemplate()} zIndex={-1} maximumZ={18} flipY={false} />
         )}
