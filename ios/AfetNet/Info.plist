@@ -59,6 +59,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string></string>
 	<key>NSCameraUsageDescription</key>
 	<string>AfetNet, QR kodları okumak için kameraya erişir.</string>
 	<key>NSContactsUsageDescription</key>
@@ -68,9 +70,7 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your location</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.</string>
+	<string>AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.</string>
 	<key>NSMotionUsageDescription</key>
