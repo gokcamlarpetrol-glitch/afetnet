@@ -60,9 +60,9 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>AfetNet, yakınınızdaki cihazlarla iletişim kurmak ve afet anında çevrimdışı mesh ağ iletişimi sağlamak için Bluetooth'u kullanır.</string>
+	<string>AfetNet, yakınınızdaki cihazlarla iletişim kurmak ve afet anında çevrimdışı/mesh mesajlaşmayı sağlamak için Bluetooth'u kullanır.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>AfetNet, mesh ağ iletişimi için Bluetooth LE advertising (yayın) yaparak yakındaki cihazların sizi bulmasını sağlar.</string>
+	<string>AfetNet, afet anında mesh iletişim için Bluetooth üzerinden kendisini erişilebilir hale getirir (peripheral rolü).</string>
 	<key>NSBluetoothWhileInUseUsageDescription</key>
 	<string>AfetNet, yakınınızdaki cihazlarla iletişim kurarak afet anında çevrimdışı mesh ağ iletişimi sağlamak için Bluetooth'u kullanır.</string>
 	<key>NSCameraUsageDescription</key>
