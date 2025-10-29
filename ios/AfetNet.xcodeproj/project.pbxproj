@@ -23,6 +23,7 @@
 		1C55EB307CF56E493C434EC0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = AfetNet/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3A82FC145BC01AE290F85C76 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-AfetNet/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		8DCD74C07219A4C9C0A71413 /* libPods-AfetNet.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-AfetNet.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9AC60C022EB26DDE00E8394D /* AfetNetRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = AfetNetRelease.entitlements; path = AfetNet/AfetNetRelease.entitlements; sourceTree = "<group>"; };
 		9CCB3072A7A1F79B83B2490D /* Pods-AfetNet.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-AfetNet.release.xcconfig"; path = "Target Support Files/Pods-AfetNet/Pods-AfetNet.release.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = AfetNet/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -47,6 +48,7 @@
 		13B07FAE1A68108700A75B9A /* AfetNet */ = {
 			isa = PBXGroup;
 			children = (
+				9AC60C022EB26DDE00E8394D /* AfetNetRelease.entitlements */,
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				F11748442D0722820044C1D9 /* AfetNet-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
@@ -378,7 +380,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = AfetNet/AfetNet.entitlements;
+				CODE_SIGN_ENTITLEMENTS = AfetNet/AfetNetDebug.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
@@ -419,7 +421,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = AfetNet/AfetNet.entitlements;
+				CODE_SIGN_ENTITLEMENTS = AfetNet/AfetNetRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
