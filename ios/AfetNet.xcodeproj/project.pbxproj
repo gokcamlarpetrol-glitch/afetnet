@@ -585,11 +585,11 @@
 					com.apple.LocationServices = {
 						enabled = 1;
 					};
-					com.apple.PersonalVPN = {
-						enabled = 0;
-					};
 					com.apple.InAppPurchase = {
 						enabled = 1;
+					};
+					com.apple.PersonalVPN = {
+						enabled = 0;
 					};
 				};
 			};
