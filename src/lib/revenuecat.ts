@@ -21,9 +21,9 @@ let currentOfferings: PurchasesOfferings | null = null;
 
 // Product ID mapping (fallback)
 export const PRODUCT_IDS = {
-  MONTHLY: 'org.afetnetapp.premium.monthly',
-  YEARLY: 'org.afetnetapp.premium.yearly',
-  LIFETIME: 'org.afetnetapp.premium.lifetime',
+  MONTHLY: 'org.afetapp.premium.monthly',
+  YEARLY: 'org.afetapp.premium.yearly',
+  LIFETIME: 'org.afetapp.premium.lifetime',
 } as const;
 
 export interface RevenueCatConfig {
