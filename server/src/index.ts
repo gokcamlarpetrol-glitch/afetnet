@@ -7,6 +7,8 @@ import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
+import eewRoutes from './routes/eew';
+import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
 
@@ -27,6 +29,7 @@ app.use(express.json());
 // Routes
 app.use('/api', iapRoutes);
 app.use('/push', pushRoutes);
+app.use('/api', eewRoutes);
 
 // Health check with database status
 app.get('/health', async (req, res) => {
@@ -82,6 +85,8 @@ app.listen(PORT, async () => {
   console.log(`   POST /push/unregister`);
   console.log(`   GET  /push/health`);
   console.log(`   GET  /push/tick`);
+  console.log(`   GET  /api/eew/health`);
+  console.log(`   POST /api/eew/test`);
   
   // Test database connection
   const dbConnected = await pingDb();
@@ -94,6 +99,15 @@ app.listen(PORT, async () => {
   earthquakeDetectionService; // Auto-starts monitoring
   earthquakeWarningService.startMonitoring();
   console.log('✅ Earthquake services started');
+
+  // Start EEW providers if enabled
+  try{
+    await startEEW(async (_evt)=>{
+      // Hook for later: integrate with push sender / topic selection
+      // Intentionally left as no-op to avoid altering existing push system
+    });
+    console.log('✅ EEW service initialized (MODE=%s)', process.env.EEW_PROVIDER_MODE||'poll');
+  }catch(err){ console.warn('⚠️ EEW init skipped:', err); }
 });
 
 export default app;

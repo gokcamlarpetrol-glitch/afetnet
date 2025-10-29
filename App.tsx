@@ -22,8 +22,15 @@ import { networkIntelligenceEngine } from './src/services/NetworkIntelligenceEng
 import { disasterRecoveryManager } from './src/services/DisasterRecoveryManager';
 import { earthquakeWarningService } from './src/services/EarthquakeWarningService';
 import { initializeRevenueCat } from './src/lib/revenuecat';
+import { setEEWFeedConfig, startEEW } from './src/eew/feed';
+import CountdownModal from './src/eew/CountdownModal';
+import { useEEWListener } from './src/eew/useEEW';
+import Constants from 'expo-constants';
+import { ensureNativeAlarmChannel, initBackgroundMessaging } from './src/native/NativeAlarm';
 
 export default function App() {
+  const EEW_ENABLED = (Constants?.expoConfig as any)?.extra?.EEW_ENABLED === true || process.env.EEW_ENABLED === 'true';
+  const EEW_NATIVE_ALARM = (Constants?.expoConfig as any)?.extra?.EEW_NATIVE_ALARM === true || process.env.EEW_NATIVE_ALARM === 'true';
   useEffect(() => {
     if (__DEV__) {
       try { 
@@ -67,6 +74,30 @@ export default function App() {
         // Start disaster recovery manager
         await disasterRecoveryManager.initialize();
 
+        if (EEW_ENABLED) {
+          // Configure and start Early Earthquake Warning (EEW) feeds
+          // Auto-detection of region-based WS will happen in startEEW()
+          setEEWFeedConfig({
+            WS_URLS: [], // Manual WS URLs (if any)
+            POLL_URLS: [
+              'https://deprem.afad.gov.tr/EventService/GetEventsByFilter',
+              'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=time&limit=200'
+            ],
+            POLL_INTERVAL_SEC: 30,
+            // Region-based WS URLs (will be auto-selected based on user location)
+            EEW_WS_TR_PRIMARY: process.env.EEW_WS_TR_PRIMARY || (Constants?.expoConfig as any)?.extra?.EEW_WS_TR_PRIMARY,
+            EEW_WS_TR_FALLBACK: process.env.EEW_WS_TR_FALLBACK || (Constants?.expoConfig as any)?.extra?.EEW_WS_TR_FALLBACK,
+            EEW_WS_GLOBAL_PRIMARY: process.env.EEW_WS_GLOBAL_PRIMARY || (Constants?.expoConfig as any)?.extra?.EEW_WS_GLOBAL_PRIMARY,
+            EEW_WS_GLOBAL_FALLBACK: process.env.EEW_WS_GLOBAL_FALLBACK || (Constants?.expoConfig as any)?.extra?.EEW_WS_GLOBAL_FALLBACK,
+            EEW_PROXY_WS: process.env.EEW_PROXY_WS || (Constants?.expoConfig as any)?.extra?.EEW_PROXY_WS,
+          });
+          await startEEW();
+          if (EEW_NATIVE_ALARM) {
+            await ensureNativeAlarmChannel();
+            initBackgroundMessaging();
+          }
+        }
+
         if (__DEV__) {
           console.log('AfetNet - Sistemler başlatıldı');
         }
@@ -93,6 +124,8 @@ export default function App() {
       });
     };
   }, []);
+  // EEW push listener only if enabled
+  if (EEW_ENABLED) { useEEWListener(); }
 
   return (
     <ErrorBoundary>
@@ -102,6 +135,7 @@ export default function App() {
           <NotificationInitializer />
           <ComprehensiveFeaturesInitializer />
           <EarthquakeWarningModal />
+          {EEW_ENABLED ? <CountdownModal /> : null}
           <AppNavigator />
         </SafeAreaProvider>
       </GestureHandlerRootView>

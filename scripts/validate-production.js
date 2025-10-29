@@ -13,9 +13,9 @@ import fetch from 'node-fetch';
 
 // Valid product IDs (only these are allowed)
 const VALID_PRODUCTS = [
-  'org.afetnetapp.premium.monthly',
-  'org.afetnetapp.premium.yearly',
-  'org.afetnetapp.premium.lifetime',
+  'org.afetapp.premium.monthly',
+  'org.afetapp.premium.yearly',
+  'org.afetapp.premium.lifetime',
 ];
 
 // Required icon sizes for App Store

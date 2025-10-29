@@ -39,7 +39,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>3</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
@@ -83,6 +83,12 @@
       <string>location</string>
       <string>bluetooth-central</string>
       <string>bluetooth-peripheral</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+      <string>BG_FLUSH</string>
+      <string>AFN_QUAKE_POLL</string>
+      <string>afetnet-mesh-sync</string>
     </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
