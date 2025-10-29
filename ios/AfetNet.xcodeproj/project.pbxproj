@@ -400,7 +400,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = AfetNet/AfetNet.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3H4SWQ8VJL;
@@ -568,32 +568,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-	};
-	attributes = {
-		TargetAttributes = {
-			13B07F861A680F5B00A75B9A = {
-				SystemCapabilities = {
-					com.apple.BackgroundModes = {
-						enabled = 1;
-					};
-					com.apple.Push = {
-						enabled = 1;
-					};
-					com.apple.BluetoothLE = {
-						enabled = 1;
-					};
-					com.apple.LocationServices = {
-						enabled = 1;
-					};
-					com.apple.InAppPurchase = {
-						enabled = 1;
-					};
-					com.apple.PersonalVPN = {
-						enabled = 0;
-					};
-				};
-			};
-		};
 	};
 	rootObject = 83CBB9F71A601CBA00E9B192 /* Project object */;
 }
