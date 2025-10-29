@@ -25,6 +25,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "jest",
+    "healthcheck": "node scripts/e2e-healthcheck.mjs",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "postinstall": "if [ \"$EAS_BUILD\" != \"true\" ]; then echo 'Local postinstall complete'; else echo 'Skipping postinstall on EAS'; fi",
