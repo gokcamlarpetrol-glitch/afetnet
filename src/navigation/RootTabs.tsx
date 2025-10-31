@@ -3,7 +3,7 @@ import { logger } from "../utils/productionLogger";
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 // Navigation handled by parent component
-import MapOffline from '../screens/MapOffline';
+// import MapOffline from '../screens/MapOffline';
 import { View, Text, Pressable } from 'react-native';
 
 // Available screens
@@ -18,49 +18,23 @@ import { usePremiumFeatures } from '../store/premium';
 
 const Tab = createBottomTabNavigator();
 
-// Premium Gate Component - Shows premium required message
-function PremiumGate({ children, featureName }: { children: React.ReactNode; featureName: string }) {
-  const { canUseFeature } = usePremiumFeatures();
-  // Navigation handled by parent component
-  const navigation = { navigate: () => {} } as any;
-  
-  if (canUseFeature(featureName)) {
-    return <>{children}</>;
-  }
-  
+// PremiumGate kaldırıldı; artık sekmeye basınca premium değilse Paywall'a yönlendirilir
+
+function LockedOverlay({ navigation }: { navigation: any }) {
   return (
-    <View style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-      <Ionicons name="lock-closed" size={64} color="#f59e0b" />
-      <Text style={{ color: '#ffffff', fontSize: 24, fontWeight: '800', marginTop: 16, textAlign: 'center' }}>
-        Premium Gerekli
-      </Text>
-      <Text style={{ color: '#94a3b8', fontSize: 16, marginTop: 8, textAlign: 'center', lineHeight: 24 }}>
-        Bu özelliği kullanmak için Premium satın almanız gerekiyor.
-      </Text>
-      <Text style={{ color: '#64748b', fontSize: 14, marginTop: 16, textAlign: 'center' }}>
-        Sadece deprem bildirimleri ücretsizdir.
-      </Text>
-      <Pressable 
-        style={{ 
-          backgroundColor: '#10b981', 
-          paddingHorizontal: 32, 
-          paddingVertical: 16, 
-          borderRadius: 12, 
-          marginTop: 24, 
-        }}
-        onPress={() => {
-          // Navigate to premium screen using root navigator
-          try {
-            navigation.getParent()?.navigate('Premium');
-          } catch (error) {
-            logger.info('Navigation error:', error);
-          }
-        }}
-      >
-        <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '800' }}>
-          Premium Satın Al
+    <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="auto">
+      <View style={{ flex: 1 }} />
+      <View style={{ padding: 16, backgroundColor: 'rgba(15,23,42,0.9)', borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
+        <Text style={{ color: '#e2e8f0', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>
+          Bu ekranı görüntüleyebilirsiniz; kullanmak için Premium gerekir.
         </Text>
-      </Pressable>
+        <Pressable
+          onPress={() => navigation.navigate('Paywall')}
+          style={{ backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center' }}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Premium’a Geç</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -107,7 +81,7 @@ export default function RootTabs() {
         {() => <HomeScreen />}
       </Tab.Screen>
       
-      {/* 2. HARİTA - PREMIUM */}
+      {/* 2. HARİTA - PREMIUM (görünür, premium değilse etkileşim kilitli) */}
       <Tab.Screen
         name="Harita"
         options={{
@@ -116,40 +90,22 @@ export default function RootTabs() {
             <Ionicons
               name={focused ? 'map' : 'map-outline'}
               size={24}
-              color={isPremium ? color : '#6b7280'}
+              color={color}
             />
           ),
         }}
       >
-        {() => (
-          <PremiumGate featureName="advanced_maps">
+        {({ navigation }) => (
+          <View style={{ flex: 1 }}>
             <MapScreen />
-          </PremiumGate>
+            {isPremium ? null : <LockedOverlay navigation={navigation} />}
+          </View>
         )}
       </Tab.Screen>
 
-      {/* 2.1 OFFLINE HARİTA - PREMIUM */}
-      <Tab.Screen
-        name="OfflineHarita"
-        options={{
-          tabBarLabel: 'Offline',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'map' : 'map-outline'}
-              size={20}
-              color={isPremium ? color : '#6b7280'}
-            />
-          ),
-        }}
-      >
-        {() => (
-          <PremiumGate featureName="offline_maps">
-            <MapOffline />
-          </PremiumGate>
-        )}
-      </Tab.Screen>
+      {/* Offline ayrı bir sekme olarak gösterilmiyor; Harita içinde erişilir */}
       
-      {/* 3. MESAJLAR - PREMIUM */}
+      {/* 3. MESAJLAR - PREMIUM (görünür, premium değilse etkileşim kilitli) */}
       <Tab.Screen 
         name="Messages" 
         options={{
@@ -158,19 +114,20 @@ export default function RootTabs() {
             <Ionicons 
               name={focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline'} 
               size={24} 
-              color={isPremium ? color : '#6b7280'} 
+              color={color} 
             />
           ),
         }}
       >
-        {() => (
-          <PremiumGate featureName="p2p_messaging">
+        {({ navigation }) => (
+          <View style={{ flex: 1 }}>
             <MessagesScreen />
-          </PremiumGate>
+            {isPremium ? null : <LockedOverlay navigation={navigation} />}
+          </View>
         )}
       </Tab.Screen>
       
-      {/* 4. AİLE - PREMIUM */}
+      {/* 4. AİLE - PREMIUM (görünür, premium değilse etkileşim kilitli) */}
       <Tab.Screen 
         name="Family" 
         options={{
@@ -179,15 +136,16 @@ export default function RootTabs() {
             <Ionicons 
               name={focused ? 'people' : 'people-outline'} 
               size={24} 
-              color={isPremium ? color : '#6b7280'} 
+              color={color} 
             />
           ),
         }}
       >
-        {() => (
-          <PremiumGate featureName="family_tracking">
+        {({ navigation }) => (
+          <View style={{ flex: 1 }}>
             <FamilyScreen />
-          </PremiumGate>
+            {isPremium ? null : <LockedOverlay navigation={navigation} />}
+          </View>
         )}
       </Tab.Screen>
       

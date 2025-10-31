@@ -70,7 +70,7 @@ export default function BearingScreen(){
         }}
         ListEmptyComponent={<Text style={{ color:'#64748b' }}>Takım konumu yok (aynı PIN gerekli).</Text>}
       />
-      <Text style={{ color:'#64748b', fontSize:12 }}>Not: 20 m altı "yakında" kabul edilir; ok ileri (↑) olduğunda doğrudan önünüzde.</Text>
+      <Text style={{ color:'#64748b', fontSize:12 }}>Not: 20 m altı yakın kabul edilir; ok ileri (↑) olduğunda hedef tam önünüzdedir.</Text>
     </View>
   );
 }

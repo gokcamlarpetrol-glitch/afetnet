@@ -62,8 +62,9 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
     return unsubscribe;
   }, []);
 
-  // Demo veriler ekle (ilk yükleme)
+  // Demo veriler ekle (ilk yükleme) - Sadece development modunda
   useEffect(() => {
+    if (!__DEV__) return; // Production'da demo veriler yok
     // Eğer hiç mesaj yoksa demo veriler ekle
     if (contacts.length === 0) {
       // Demo kişiler ekle

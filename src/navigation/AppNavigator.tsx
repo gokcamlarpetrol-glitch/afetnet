@@ -24,46 +24,22 @@ export default function AppNavigator() {
         <Stack.Screen
           name="Paywall"
           component={Paywall}
-          options={{
-            headerShown: true,
-            title: 'Premium',
-            headerStyle: { backgroundColor: '#0f172a' },
-            headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' },
-          }}
+          options={{ headerShown: false }}
         />
         <Stack.Screen 
           name="QRScanner" 
           component={QRScanner}
-          options={{ 
-            headerShown: true, 
-            title: 'QR Kod Tara',
-            headerStyle: { backgroundColor: '#0f172a' },
-            headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' },
-          }}
+          options={{ headerShown: false }}
         />
         <Stack.Screen
           name="MapOffline"
           component={MapOffline}
-          options={{
-            headerShown: true,
-            title: 'Offline Harita',
-            headerStyle: { backgroundColor: '#0f172a' },
-            headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' },
-          }}
+          options={{ headerShown: false }}
         />
         <Stack.Screen
           name="Premium"
           component={PremiumActiveScreen}
-          options={{
-            headerShown: true,
-            title: 'Premium',
-            headerStyle: { backgroundColor: '#0f172a' },
-            headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' },
-          }}
+          options={{ headerShown: false }}
         />
       </Stack.Navigator>
     </NavigationContainer>
