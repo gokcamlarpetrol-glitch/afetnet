@@ -1,0 +1,30 @@
+name: CI Rules-Aware Lint & Test
+
+on:
+  pull_request:
+
+jobs:
+  rules_guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rules & Secrets Guard
+        uses: cursor-ai/rules-check@latest
+        with:
+          ruleset: ".cursor/rules"
+
+      - name: Health Check
+        run: npm ci || flutter pub get
+
+      - name: Lint & Test
+        run: |
+          if [ -f "package.json" ]; then npm run lint && npm test; fi
+          if [ -f "pubspec.yaml" ]; then flutter analyze && flutter test; fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: ./logs/
+

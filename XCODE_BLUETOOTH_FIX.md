@@ -90,3 +90,6 @@ Entitlements dosyalarında `bluetooth-central` ve `bluetooth-peripheral` var, am
 
 **ŞU AN EN ÖNEMLİ ADIM:** Background Modes altındaki "Acts as a Bluetooth LE accessory" seçeneğini **işaretleyin** ✅
 
+
+
+

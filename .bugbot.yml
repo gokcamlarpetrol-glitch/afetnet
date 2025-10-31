@@ -1,0 +1,11 @@
+version: 2
+bugbot:
+  focus:
+    - security
+    - performance
+    - documentation
+  auto_review: true
+  auto_fix: true
+  thresholds:
+    large_pr_lines: 800
+

@@ -192,3 +192,6 @@ Eğer hiçbir yöntem çalışmazsa:
 4. **Central + Peripheral rolleri görününce → İŞARETLEYİN**
 5. **Save → Profile yenile → Xcode'da tekrar ekle**
 
+
+
+

@@ -131,3 +131,6 @@ Otomatik signing açıkken Xcode bunu otomatik yapar.
 4. Xcode → Preferences → Accounts → Download Profiles
 5. Capability'leri kaldırıp tekrar ekleyin (Xcode'un senkronize olması için)
 
+
+
+

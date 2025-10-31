@@ -140,3 +140,6 @@ Ya:
 **Eğer hala hata varsa:**
 - Developer Portal'da yeni profil oluşturun (yukarıdaki adımlar)
 
+
+
+

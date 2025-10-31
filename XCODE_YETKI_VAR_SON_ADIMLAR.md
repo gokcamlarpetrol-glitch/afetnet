@@ -168,3 +168,6 @@ Yetki varsa → Xcode capability eklerken dialog açılacak → "Enable All" tı
 
 **Dialog'larda "Enable All" tıklamayı unutmayın! Bu, Xcode'a yetki verir.**
 
+
+
+

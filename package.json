@@ -1,6 +1,6 @@
 {
   "name": "afetnet",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "AfetNet - Emergency Communication App",
   "main": "index.ts",
   "packageManager": "npm@10.7.0",
@@ -22,6 +22,8 @@
     "test:iap": "node scripts/test-iap.js",
     "verify:iap": "node scripts/verify-iap-system.js",
     "validate:production": "node scripts/validate-production.js",
+    "iap:check": "node scripts/verify-revenuecat.js || node scripts/verify-revenuecat.cjs",
+    "pre-submit": "bash scripts/pre_submit_check.sh && npm run iap:check && node scripts/release-check.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "jest",

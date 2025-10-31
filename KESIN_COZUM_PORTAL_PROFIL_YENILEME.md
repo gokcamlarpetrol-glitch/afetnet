@@ -187,3 +187,6 @@ Developer Portal'da **Bluetooth LE → Configure → Central + Peripheral** kesi
 
 Bu olmadan profil entitlement'ları içermez → Hata devam eder.
 
+
+
+

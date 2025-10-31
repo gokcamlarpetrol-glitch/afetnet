@@ -244,3 +244,6 @@ echo "✅ Temizlendi"
 
 **Detaylı adımlar yukarıda. Her adımı sırayla uygulayın!**
 
+
+
+

@@ -153,3 +153,6 @@ Bu yüzden **ÖNCE Developer Portal'da açmalısınız**, sonra Xcode'a geri dö
 3. **Save → Profile yenile**
 4. **Xcode'da capability'yi tekrar ekleyin** → Roller görünecek!
 
+
+
+

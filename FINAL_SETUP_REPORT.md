@@ -175,3 +175,6 @@ CODE_SIGN_STYLE = Automatic
 
 **🎯 KOD TARAFI TAMAM! Şimdi manuel adımları (a)-(d) yapın.**
 
+
+
+
