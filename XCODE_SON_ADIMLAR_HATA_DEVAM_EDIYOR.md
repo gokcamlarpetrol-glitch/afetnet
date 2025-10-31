@@ -145,3 +145,7 @@ Bu seçeneği işaretledikten sonra:
 
 
 
+
+
+
+

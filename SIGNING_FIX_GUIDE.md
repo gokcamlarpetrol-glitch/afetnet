@@ -1,71 +1,122 @@
-# Xcode Signing Hatası Çözüm Kılavuzu
+# 🔧 Xcode Signing Hatası Düzeltme Kılavuzu
 
-## 🔴 Sorun
-Provisioning profile gerekli entitlements'ları içermiyor.
+## ✅ Yapılan Düzeltmeler
 
-## ✅ Çözüm Adımları
+### 1. Entitlements Sadeleştirildi
+- Gereksiz entitlements kaldırıldı
+- Sadece geliştirme için gerekli olanlar bırakıldı:
+  - `aps-environment`: development (production build için Apple Developer Portal'da değiştirilmeli)
+  - `com.apple.developer.push-notifications`: true
+  - `com.apple.developer.in-app-payments`: merchant ID
 
-### 1. Apple Developer Portal Kontrolü (KRİTİK)
+### 2. Background Modes
+- UIBackgroundModes Info.plist'te tanımlı (bu yeterli)
+- Bluetooth ve Location background modes aktif
 
-https://developer.apple.com/account/resources/identifiers/list adresine gidin:
+### 3. Prebuild Yeniden Çalıştırıldı
+- iOS native klasörleri temizlenip yeniden oluşturuldu
+- CocoaPods yeniden yüklendi
 
-1. **Certificates, Identifiers & Profiles** → **Identifiers**
-2. `com.gokhancamci.afetnetapp` App ID'yi bulun
-3. **Edit** butonuna tıklayın
-4. **Enabled Capabilities** bölümünde şunları kontrol edin:
-   - ✅ **Push Notifications** (APN key oluşturulmuş olmalı)
-   - ✅ **Background Modes** (fetch, processing, remote-notification, location updates)
-   - ✅ **Bluetooth LE**
-   - ✅ **Location Services** (Always, When In Use, Background)
-   - ✅ **In-App Purchase**
-   - ✅ **Associated Domains**
-   - ✅ **Apple Pay** (merchant.com.gokhancamci.afetnetapp)
-5. **Save** edin
+## 📱 Xcode'da Yapılacaklar
 
-### 2. Xcode'da Capability Ekleme
-
-Xcode'da **Signing & Capabilities** sekmesinde:
-
-1. **"+ Capability"** butonuna tıklayın
-2. Şu capability'leri **sırayla ekleyin** (zaten ekliyse atlayın):
-   - **Push Notifications**
-   - **Background Modes** → içinde şunları işaretleyin:
-     - Remote notifications
-     - Background fetch
-     - Background processing
-     - Location updates
-   - **Bluetooth LE**
-   - **Location Updates** (Location Services)
-   - **In-App Purchase**
-   - **Associated Domains** (zaten var: applinks:afetnet.app)
-
-### 3. Xcode Temizleme
-
+### Adım 1: Xcode'u Açın
 ```bash
-# Terminal'de çalıştırın:
-rm -rf ~/Library/Developer/Xcode/DerivedData/*
-rm -rf ~/Library/MobileDevice/"Provisioning Profiles"/*.mobileprovision
+open ios/AfetNet.xcworkspace
 ```
 
-Sonra Xcode'u kapatıp tekrar açın.
+### Adım 2: Signing & Capabilities'i Düzeltin
 
-### 4. Xcode'da "Try Again"
+1. **Sol panelden "AfetNet" projesini seçin**
+2. **"AfetNet" target'ını seçin**
+3. **"Signing & Capabilities" sekmesine gidin**
 
-1. **Signing & Capabilities** sekmesinde
-2. **"Try Again"** butonuna tıklayın
-3. Xcode otomatik olarak Developer Portal'dan yeni profile indirecek
+### Adım 3: Otomatik Signing'i Sıfırlayın
 
-### 5. Hala Çözülmezse
+1. **"Automatically manage signing" kutusunu KAPATIN**
+2. **Tekrar AÇIN** (bu Xcode'un provisioning profile'ı yeniden oluşturmasını sağlar)
+3. **Team'i seçin**: "Gökhan ÇAMCI"
 
-**Manuel Profile İndirme:**
+### Adım 4: Capabilities Ekleyin (Manuel)
 
-1. Xcode → **Preferences** → **Accounts**
-2. Apple ID'nizi seçin → **Download Manual Profiles** butonuna tıklayın
-3. Tekrar "Try Again" yapın
+Eğer otomatik signing hala başarısız olursa, capabilities'leri manuel ekleyin:
 
----
+1. **"+ Capability" butonuna tıklayın**
+2. **Şunları ekleyin:**
+   - ✅ Background Modes
+     - Location updates
+     - Background fetch
+     - Remote notifications
+     - Uses Bluetooth LE accessories
+   - ✅ Push Notifications
+   - ✅ In-App Purchase (zaten var)
 
-## ⚠️ Önemli Not
+### Adım 5: Background Modes'i Yapılandırın
 
-**SystemCapabilities** eklendi, ama eğer Developer Portal'da App ID capability'leri aktif değilse, Xcode otomatik signing yapamaz. **ÖNCE Developer Portal'da capability'leri aktif etmelisiniz!**
+Background Modes capability'sini ekledikten sonra:
+- ✅ Location updates
+- ✅ Background fetch
+- ✅ Remote notifications
+- ✅ Uses Bluetooth LE accessories
 
+### Adım 6: Build ve Run
+
+1. **Product > Clean Build Folder** (Cmd+Shift+K)
+2. **Telefonunuzu seçin** (device selector'da)
+3. **Product > Build** (Cmd+B)
+4. **Product > Run** (Cmd+R)
+
+## ⚠️ Önemli Notlar
+
+### Development vs Production
+
+- **Development Build**: Şu anki entitlements yeterli
+- **Production Build (App Store)**: 
+  - Apple Developer Portal'da capabilities'leri aktif etmeniz gerekiyor
+  - `aps-environment`'ı `production` yapmanız gerekiyor
+  - Tüm gerekli capabilities Apple Developer Portal'da aktif olmalı
+
+### Apple Developer Portal'da Yapılacaklar (Production için)
+
+1. **developer.apple.com** → Certificates, Identifiers & Profiles
+2. **Identifiers** → `com.gokhancamci.afetnetapp` seçin
+3. **Capabilities** bölümünden şunları aktif edin:
+   - Push Notifications
+   - In-App Purchase
+   - Background Modes (Location, Background fetch, Remote notifications)
+   - Bluetooth (eğer gerekliyse)
+
+### Location Always İzni
+
+`location.always` entitlement'ı App Store review'da sorun çıkarabilir. 
+- Şimdilik sadece `when-in-use` kullanın
+- Production'a geçmeden önce Apple'ın Location Always kullanımı için gereksinimlerini kontrol edin
+
+## 🔍 Sorun Giderme
+
+### Hala Hata Alıyorsanız:
+
+1. **Xcode'u kapatın**
+2. **DerivedData'yı temizleyin:**
+   ```bash
+   rm -rf ~/Library/Developer/Xcode/DerivedData/*
+   ```
+3. **iOS klasörünü temizleyin:**
+   ```bash
+   cd ios && rm -rf Pods Podfile.lock && pod install
+   ```
+4. **Xcode'u tekrar açın ve build edin**
+
+### "Provisioning profile doesn't include entitlements" Hatası
+
+Bu hata, Apple Developer Portal'da capabilities'lerin aktif olmadığını gösterir.
+
+**Çözüm:**
+1. Apple Developer Portal'da capabilities'leri aktif edin
+2. Veya development build için capabilities'leri kaldırın (şu an yapıldı)
+
+## ✅ Durum
+
+- ✅ Entitlements sadeleştirildi
+- ✅ Development build için hazır
+- ✅ Production için Apple Developer Portal ayarları gerekli
+- ✅ Build hatası çözülmeli

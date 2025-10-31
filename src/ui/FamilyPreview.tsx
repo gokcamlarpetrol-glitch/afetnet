@@ -1,11 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { useFamily } from '../store/familyStore';
+import { useFamily } from '../store/family';
 
 type NavigationProp = any;
 
 export default function FamilyPreview() {
-  const { members } = useFamily();
+  const { list: members } = useFamily(state => ({ list: state.list }));
   const navigation = require('@react-navigation/native').useNavigation() as NavigationProp;
   const top = members.slice(0, 2);
   return (
@@ -22,7 +22,7 @@ export default function FamilyPreview() {
         top.map(m => (
           <View key={m.id} style={styles.item}>
             <Text style={styles.name}>{m.name}</Text>
-            <Text style={styles.state}>{m.state ?? '—'}</Text>
+            <Text style={styles.state}>{m.status ?? '—'}</Text>
           </View>
         ))
       )}

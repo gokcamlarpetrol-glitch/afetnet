@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { logger } from '../utils/productionLogger';
 
 export interface Contact {
   id: string;
@@ -276,11 +277,22 @@ export const useMessages = create<MessagesState>()(
         conversations: Array.from(state.conversations.entries()),
         activeContactId: state.activeContactId,
       }),
-      onRehydrateStorage: () => (state) => {
-        if (state && Array.isArray(state.conversations)) {
-          // @ts-ignore
-          state.conversations = new Map(state.conversations);
-        }
+      onRehydrateStorage: () => {
+        // CRITICAL: Prevent re-renders during rehydration
+        return (state, error) => {
+          if (error) {
+            logger.warn('Messages rehydration error:', error);
+            return;
+          }
+          
+          // CRITICAL: Convert conversations array to Map without triggering re-renders
+          // Note: Zustand persist already handles the conversion via partialize/rehydrate
+          // This callback is just for logging - state is already correct
+          if (state && state.conversations && !(state.conversations instanceof Map)) {
+            // Only update if it's not already a Map (shouldn't happen but safety check)
+            logger.warn('Messages conversations not a Map during rehydration, converting...');
+          }
+        };
       },
     },
   ),

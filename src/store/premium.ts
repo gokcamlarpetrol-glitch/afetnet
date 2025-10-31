@@ -1,4 +1,5 @@
 // PREMIUM STORE - ACTIVE IAP IMPLEMENTATION
+import React from 'react';
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { iapService } from '../services/iapService';
@@ -195,7 +196,22 @@ export const usePremium = create<PremiumState & PremiumActions>((set, get) => ({
 
 // Premium feature access helpers - STRICT PREMIUM GATING
 export const usePremiumFeatures = () => {
-  const { isPremium, currentPlan } = usePremium();
+  // CRITICAL FIX: Use getState() to prevent infinite loops from selectors
+  const [isPremium, setIsPremium] = React.useState(usePremium.getState().isPremium);
+  const [currentPlan, setCurrentPlan] = React.useState(usePremium.getState().currentPlan);
+  
+  React.useEffect(() => {
+    // Poll store state instead of using selector to prevent infinite loops
+    const checkPremium = () => {
+      const state = usePremium.getState();
+      setIsPremium(state.isPremium);
+      setCurrentPlan(state.currentPlan);
+    };
+    
+    checkPremium();
+    const interval = setInterval(checkPremium, 1000);
+    return () => clearInterval(interval);
+  }, []); // CRITICAL: Empty deps to prevent infinite loop
   
   const canUseFeature = (feature: string): boolean => {
     // FREE FEATURES - Only earthquake notifications are free

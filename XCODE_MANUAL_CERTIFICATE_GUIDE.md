@@ -134,3 +134,7 @@ Otomatik signing açıkken Xcode bunu otomatik yapar.
 
 
 
+
+
+
+

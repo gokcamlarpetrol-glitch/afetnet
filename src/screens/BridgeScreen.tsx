@@ -23,7 +23,7 @@ export default function BridgeScreen(){
           </View>
         ))}
       </View>
-      <Text style={{ color:'#94a3b8', fontSize:12, marginTop:8 }}>Not: WFD/LoRa bağlantıları geliştirilme aşamasındadır.</Text>
+      <Text style={{ color:'#94a3b8', fontSize:12, marginTop:8 }}>Köprü modu, BLE mesh ağını Wi-Fi Direct veya LoRa ile genişletir.</Text>
     </ScrollView>
   );
 }

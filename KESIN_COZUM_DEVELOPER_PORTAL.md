@@ -155,3 +155,7 @@ Developer Portal'da capability'leri açıp, profilleri yeniledikten sonra:
 
 
 
+
+
+
+

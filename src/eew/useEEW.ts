@@ -3,12 +3,13 @@ import * as Notifications from 'expo-notifications';
 import { useEEWStore } from './store';
 
 export function useEEWListener() {
-  const setActive = useEEWStore((s) => s.setActive);
   useEffect(() => {
     const sub = Notifications.addNotificationReceivedListener((n) => {
       try {
         const data: any = n.request?.content?.data;
         if (data?.type === 'EEW') {
+          // CRITICAL FIX: Use getState() instead of selector to prevent infinite loops
+          const { setActive } = useEEWStore.getState();
           setActive({
             eventId: String(data.eventId || 'EEW'),
             etaSec: Number(data.etaSec || 0),
@@ -23,7 +24,7 @@ export function useEEWListener() {
       }
     });
     return () => sub.remove();
-  }, [setActive]);
+  }, []); // CRITICAL: Empty deps - no re-renders
 }
 
 

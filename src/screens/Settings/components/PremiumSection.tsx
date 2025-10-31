@@ -133,14 +133,38 @@ export const PremiumSection = () => {
 
           <TouchableOpacity
             style={styles.premiumButton}
-            onPress={() => navigation.navigate('Paywall')}
+            onPress={() => {
+              try {
+                navigation.navigate('Paywall');
+              } catch (error) {
+                if (__DEV__) {
+                  console.error('Navigation error:', error);
+                }
+              }
+            }}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Premium abonelik satın al"
           >
             <Ionicons name="star" size={20} color="#fff" />
             <Text style={styles.premiumButtonText}>Premium Satın Al</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.premiumButton, { marginTop: 12, backgroundColor: 'transparent', borderWidth: 1, borderColor: '#3b82f6' }]}
-            onPress={() => navigation.navigate('Paywall')}
+            onPress={async () => {
+              try {
+                // Import restorePurchases from revenuecat
+                const { restorePurchases } = await import('../../../lib/revenuecat');
+                await restorePurchases();
+              } catch (error) {
+                if (__DEV__) {
+                  console.error('Restore error:', error);
+                }
+              }
+            }}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Satın alımları geri yükle"
           >
             <Ionicons name="refresh" size={20} color="#3b82f6" />
             <Text style={[styles.premiumButtonText, { color: '#3b82f6' }]}>Satın Alımları Geri Yükle</Text>

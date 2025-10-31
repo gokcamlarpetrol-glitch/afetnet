@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Alert,
   Dimensions,
@@ -24,6 +24,9 @@ import { postJSON } from '../utils/fetchWithTimeout';
 import { logger } from '../utils/productionLogger';
 import { criticalAlarmSystem } from '../services/alerts/CriticalAlarmSystem';
 import { notifyQuake } from '../alerts/notify';
+import { broadcastSOS, broadcastTeamLocation } from '../ble/bridge';
+import { offlineMessaging } from '../services/OfflineMessaging';
+import * as Battery from 'expo-battery';
 
 // Navigation prop'u opsiyonel yap
 interface HomeSimpleProps {
@@ -34,19 +37,28 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sendingSOS, setSendingSOS] = useState(false);
-  const { list: familyList } = useFamily();
-  const { items: queueItems } = useQueue();
+  const { list: familyList } = useFamily(state => ({ list: state.list }));
+  const { items: queueItems } = useQueue(state => ({ items: state.items }));
   const { items: earthquakes, loading: quakesLoading, refresh: refreshQuakes } = useQuakes();
   const { isPremium, canUseFeature } = usePremiumFeatures();
   
-  // Deprem verilerini yenile ve kritik alarmları kontrol et
+  // CRITICAL: refreshQuakes is now stable (never changes), safe to use directly
+  // No need for ref wrapper anymore
   useEffect(() => {
+    // Initial fetch
     refreshQuakes();
-    const interval = (globalThis as any).setInterval(refreshQuakes, 60000); // Her dakika yenile
+    
+    // Set up interval for periodic refresh
+    const interval = (globalThis as any).setInterval(() => {
+      refreshQuakes();
+    }, 60000); // Her dakika yenile
+    
     return () => (globalThis as any).clearInterval(interval);
-  }, []);
+  }, []); // CRITICAL: Empty deps - refreshQuakes is stable, won't cause re-renders
 
-  // CRITICAL: Monitor new earthquakes and trigger alarms
+  // CRITICAL: Monitor new earthquakes and trigger alarms - Optimized with useMemo and debounce
+  const latestQuakeRef = useRef<{ id: string; time: number } | null>(null);
+  
   useEffect(() => {
     if (earthquakes.length === 0) return;
 
@@ -54,9 +66,18 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
     const latestQuake = earthquakes[0];
     if (!latestQuake) return;
 
+    // CRITICAL: Debounce check - only trigger if this is a different/new earthquake
+    const lastProcessed = latestQuakeRef.current;
+    if (lastProcessed && lastProcessed.id === latestQuake.id && lastProcessed.time === latestQuake.time) {
+      return; // Already processed this earthquake
+    }
+
     // Check if this is a new earthquake (within last 5 minutes)
     const quakeAge = Date.now() - latestQuake.time;
     if (quakeAge > 5 * 60 * 1000) return; // Older than 5 minutes, skip
+
+    // Mark as processed
+    latestQuakeRef.current = { id: latestQuake.id || String(latestQuake.time), time: latestQuake.time };
 
     const magnitude = latestQuake.mag || 0;
     
@@ -121,13 +142,14 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
       }
 
       // CRITICAL: Send SOS to backend
+      const sosDataRaw = typeof data === 'object' && data !== null ? data : {};
       const sosData = {
-        ...(typeof data === 'object' && data !== null ? data : {}),
+        ...sosDataRaw,
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy || 0,
         timestamp: Date.now(),
-      };
+      } as typeof sosDataRaw & { latitude: number; longitude: number; accuracy: number; timestamp: number; note?: string; people?: number; priority?: 'low' | 'med' | 'high' };
 
       // CRITICAL: Check network connectivity
       const networkState = await NetInfo.fetch();
@@ -150,8 +172,29 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
         
         // CRITICAL: Broadcast SOS via Bluetooth mesh
         try {
-          // await offlineMessageManager.sendMessage(JSON.stringify(sosMessage) as any);
-          logger.info('SOS message prepared for offline mesh');
+          // Get battery level for SOS message
+          const batteryLevel = await Battery.getBatteryLevelAsync();
+          const batteryPercent = Math.round((batteryLevel || 0) * 100);
+          
+          // Broadcast SOS via BLE bridge
+          await broadcastSOS(() => batteryPercent, [
+            sosData.note || 'Acil yardım gerekiyor',
+            `${sosData.people || 1} kişi`,
+            `Öncelik: ${sosData.priority || 'high'}`,
+          ]);
+          
+          // Also send via offline messaging system
+          await offlineMessaging.sendMessage('sos_broadcast', JSON.stringify({
+            type: 'sos',
+            lat: sosData.latitude,
+            lon: sosData.longitude,
+            people: sosData.people || 1,
+            priority: sosData.priority || 'high',
+            note: sosData.note || 'Acil yardım gerekiyor',
+            timestamp: sosData.timestamp,
+            battery: batteryPercent,
+          }), 'sos');
+          
           logger.info('SOS sent via offline mesh network', { component: 'HomeSimple' });
           
           Alert.alert(
@@ -274,9 +317,16 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                   borderRadius: 8,
                 }}
                 onPress={() => {
-                  // Navigate to premium screen
-                  navigation?.navigate('Premium');
+                  // Navigate to Paywall screen
+                  try {
+                    navigation?.navigate('Paywall');
+                  } catch (error) {
+                    logger.error('Navigation error:', error);
+                  }
                 }}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Premium abonelik satın al"
               >
                 <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '700' }}>
                   Satın Al
@@ -587,8 +637,17 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
 
             {earthquakes.length > 3 && (
               <Pressable 
-                onPress={() => navigateTo('Diagnostics')}
+                onPress={() => {
+                  try {
+                    navigation?.navigate('AllEarthquakes');
+                  } catch (error) {
+                    logger.error('Navigation error:', error);
+                    Alert.alert('Hata', 'Depremler ekranına gidilemedi');
+                  }
+                }}
                 style={{ marginTop: 8, alignItems: 'center' }}
+                accessibilityRole="button"
+                accessibilityLabel="Tüm depremleri gör"
               >
                 <Text style={{ color: '#fb923c', fontSize: 12, fontWeight: '600' }}>
                   +{earthquakes.length - 3} deprem daha → Tümünü Gör
@@ -610,7 +669,13 @@ export default function HomeSimple({ navigation }: HomeSimpleProps) {
                   { 
                     text: 'Premium Satın Al', 
                     style: 'default',
-                    onPress: () => navigation?.navigate('Premium'),
+                    onPress: () => {
+                      try {
+                        navigation?.navigate('Paywall');
+                      } catch (error) {
+                        logger.error('Navigation error:', error);
+                      }
+                    },
                   },
                 ],
               );

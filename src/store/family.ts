@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { logger } from '../utils/productionLogger';
 
 export type FamilyMember = {
   id: string;
@@ -254,6 +255,15 @@ export const useFamily = create<State>()(
       name: 'afn/family/v2',
       storage: createJSONStorage(() => AsyncStorage),
       version: 2,
+      onRehydrateStorage: () => {
+        // CRITICAL: Prevent re-renders during rehydration
+        return (state, error) => {
+          if (error) {
+            logger.warn('Family rehydration error:', error);
+          }
+          // No state mutation here - just logging
+        };
+      },
     },
   ),
 );

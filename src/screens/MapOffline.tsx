@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { logger } from "../utils/productionLogger";
 import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
 import { openDbFromUri, startMbtilesServer, stopMbtilesServer, localTileUrlTemplate } from '../offline/mbtiles-server';
@@ -19,7 +20,7 @@ try {
   // expo-maps not available - fallback to alternative map solution
 }
 
-export default function MapOffline() {
+export default function MapOffline({ navigation }: { navigation?: any }) {
   const [tileServerActive, setTileServerActive] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isOnline, setIsOnline] = useState(true);
@@ -243,8 +244,18 @@ export default function MapOffline() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>🗺️ Offline Harita</Text>
-        <Text style={styles.subtitle}>Çevrimdışı harita görüntüleme</Text>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => navigation?.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Geri"
+        >
+          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>🗺️ Offline Harita</Text>
+          <Text style={styles.subtitle}>Çevrimdışı harita görüntüleme</Text>
+        </View>
 
         {/* Emergency Mode Banner */}
         {emergencyMode && (
@@ -514,10 +525,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   header: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
     padding: 16,
     backgroundColor: '#111827',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginRight: 8,
   },
   title: {
     color: '#ffffff',

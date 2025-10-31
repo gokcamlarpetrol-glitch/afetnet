@@ -21,7 +21,7 @@ export function useOffMesh() {
     setStats(offMeshRouter.getStats());
     setPeers(offMeshRouter.getPeers());
     setRecentEvents(meshStore.getRecentEvents(20));
-  }, []);
+  }, []); // CRITICAL: Empty deps - updateStats doesn't depend on anything
 
   useEffect(() => {
     // Initial update
@@ -37,7 +37,7 @@ export function useOffMesh() {
       (globalThis as any).clearInterval(interval);
       unsubscribePeers();
     };
-  }, [updateStats]);
+  }, []); // CRITICAL: Empty deps - run only once on mount, updateStats is stable
 
   const startMesh = useCallback(async (topic: string) => {
     try {

@@ -195,3 +195,7 @@ Eğer hiçbir yöntem çalışmazsa:
 
 
 
+
+
+
+

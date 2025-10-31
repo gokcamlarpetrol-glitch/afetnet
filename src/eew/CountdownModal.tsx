@@ -3,9 +3,21 @@ import { Modal, View, Text, Platform } from 'react-native';
 import { useEEWStore } from './store';
 
 export default function CountdownModal() {
-  const active = useEEWStore((s) => s.active);
-  const clear = useEEWStore((s) => s.clear);
+  // CRITICAL FIX: Use getState pattern to prevent infinite loops from selectors
+  const [active, setActive] = useState<ReturnType<typeof useEEWStore.getState>['active']>(undefined);
   const [left, setLeft] = useState(0);
+
+  useEffect(() => {
+    // Poll store state instead of using selector
+    const checkStore = () => {
+      const currentActive = useEEWStore.getState().active;
+      setActive(currentActive); // Always update to latest
+    };
+    
+    checkStore(); // Check immediately
+    const interval = setInterval(checkStore, 100);
+    return () => clearInterval(interval);
+  }, []); // CRITICAL: Empty deps to prevent infinite loop
 
   useEffect(() => {
     if (!active) { return; }
@@ -15,6 +27,8 @@ export default function CountdownModal() {
   }, [active?.eventId]);
 
   useEffect(() => { if (active && left === 0) { /* could vibrate or focus modal */ } }, [left]);
+
+  const clear = () => useEEWStore.getState().clear();
 
   return (
     <Modal visible={!!active} animationType="fade" presentationStyle="overFullScreen" onRequestClose={clear}>

@@ -251,6 +251,15 @@ export const useAppSettings = create<AppSettingsState>()(
       migrate: (persistedState: any, version: number) => {
         return { ...defaultSettings, ...persistedState };
       },
+      onRehydrateStorage: () => {
+        // CRITICAL: Prevent re-renders during rehydration
+        return (state, error) => {
+          if (error) {
+            logger.warn('App settings rehydration error:', error);
+          }
+          // No state mutation here - just logging
+        };
+      },
     },
   ),
 );

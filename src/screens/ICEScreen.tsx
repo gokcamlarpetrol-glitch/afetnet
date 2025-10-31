@@ -11,8 +11,12 @@ export default function ICEScreen() {
   useEffect(() => { (async () => { setData(await loadICE()); })(); }, []);
 
   async function onSave() {
+    if (!txt.name || txt.name.trim().length === 0) {
+      Alert.alert('ICE', 'Lütfen isim girin.');
+      return;
+    }
     const d: ICE = {
-      name: txt.name || '',
+      name: txt.name.trim(),
       blood: txt.blood?.trim(),
       allergies: txt.allergies?.trim(),
       meds: txt.meds?.trim(),
@@ -21,6 +25,7 @@ export default function ICEScreen() {
     await saveICE(d);
     setData(d);
     setEdit(false);
+    Alert.alert('ICE', 'Bilgiler kaydedildi.');
   }
 
   const wrap = { flex: 1, backgroundColor: '#0f172a', padding: 16 as const };

@@ -696,9 +696,17 @@ export const useComprehensiveFeatures = create<ComprehensiveFeatureState>()(
       name: 'afn/comprehensive-features/v1',
       storage: createJSONStorage(() => AsyncStorage),
       version: 1,
-       
       migrate: (persistedState: any, version: number) => {
         return { ...defaultComprehensiveSettings, ...persistedState };
+      },
+      onRehydrateStorage: () => {
+        // CRITICAL: Prevent re-renders during rehydration
+        return (state, error) => {
+          if (error) {
+            logger.warn('Comprehensive features rehydration error:', error);
+          }
+          // No state mutation here - just logging
+        };
       },
     },
   ),
