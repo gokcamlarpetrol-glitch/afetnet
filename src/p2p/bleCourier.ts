@@ -250,7 +250,7 @@ async function handleDevice(dev: any){
       if((bundle as any).kind && ((bundle as any).kind.startsWith('fac_'))){
         try{
           // TODO: Implement occupancy handling
-          console.log('Occupancy bundle received:', bundle);
+          logger.info('Occupancy bundle received', bundle);
         }catch{ /* ignore occupancy errors */ }
       }
       

@@ -1068,7 +1068,7 @@ export default function Diagnostics() {
     }
           // TODO: Implement setRows
           // TODO: Implement setRows for diagnostics display
-          console.log('Diagnostics data loaded:', out);
+          logger.info('Diagnostics data loaded', out);
 
     // Compute suggestions
     const testResults: Record<string, boolean> = {};
