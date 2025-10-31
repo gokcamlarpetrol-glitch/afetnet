@@ -8,17 +8,8 @@ public class AppDelegate: ExpoAppDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     // Let ExpoAppDelegate handle complete initialization sequence
-    // This ensures autoSetupPrepare is called before autoSetupStart
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    
-    // Ensure window is key and visible (required by Expo Dev Launcher)
-    // ExpoAppDelegate creates the window, but we need to make it key/visible
-    if self.window == nil {
-      self.window = UIWindow(frame: UIScreen.main.bounds)
-    }
-    self.window?.makeKeyAndVisible()
-    
-    return result
+    // This includes window creation, autoSetupPrepare, and autoSetupStart
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   // Linking API methods - preserve for deep linking support
