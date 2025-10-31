@@ -4,28 +4,35 @@ import UIKit
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
-  // Window property required by Expo Dev Launcher
-  public var window: UIWindow?
+  // Window property with lazy initialization
+  // This ensures window exists when Expo Dev Launcher needs it,
+  // but doesn't interfere with ExpoAppDelegate's initialization sequence
+  private var _window: UIWindow?
+  public override var window: UIWindow? {
+    get {
+      if _window == nil {
+        _window = UIWindow(frame: UIScreen.main.bounds)
+        _window?.rootViewController = UIViewController()
+      }
+      return _window
+    }
+    set {
+      _window = newValue
+    }
+  }
   
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Create window BEFORE super call so Expo Dev Launcher can access it
-    // Expo Dev Launcher checks UIApplication.shared.delegate?.window during autoSetupStart
-    if self.window == nil {
-      self.window = UIWindow(frame: UIScreen.main.bounds)
-      // Set a temporary root view controller so window is properly initialized
-      self.window?.rootViewController = UIViewController()
-      // Make window key and visible BEFORE super call
-      // Expo Dev Launcher requires keyWindow during autoSetupStart
-      self.window?.makeKeyAndVisible()
-    }
-    
-    // Let ExpoAppDelegate handle React Native initialization
-    // This will trigger autoSetupPrepare and autoSetupStart
-    // Expo Dev Launcher will access window during autoSetupStart
+    // Let ExpoAppDelegate handle complete initialization sequence:
+    // 1. autoSetupPrepare (creates ReactDelegate)
+    // 2. autoSetupStart (accesses window property via lazy getter)
+    // Window will be created lazily when Expo Dev Launcher accesses it
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    
+    // After Expo setup completes, ensure window is key and visible
+    self.window?.makeKeyAndVisible()
     
     return result
   }
