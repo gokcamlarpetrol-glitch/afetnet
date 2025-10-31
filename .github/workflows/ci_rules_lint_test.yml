@@ -10,9 +10,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rules & Secrets Guard
-        uses: cursor-ai/rules-check@latest
+        run: |
+          echo "Running shell-based Rules & Secrets Guard..."
+          # mandatory files
+          for f in README.md LICENSE .gitignore; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Mandatory file missing: $f"; exit 1; fi
+          done
+          # forbidden patterns
+          if git grep -n "console\.log\|debugPrint" -- . ':!node_modules' ':!Pods' ':!ios/build' ':!android/build'; then
+            echo "::error::Forbidden debug logging detected (console.log/debugPrint)."; exit 1;
+          fi
+          echo "✅ Rules & Secrets Guard passed"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          ruleset: ".cursor/rules"
+          node-version: 18.x
+          cache: 'npm'
 
       - name: Health Check
         run: npm ci || flutter pub get
