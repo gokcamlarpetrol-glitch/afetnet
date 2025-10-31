@@ -11,15 +11,20 @@ public class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Create and make window key/visible BEFORE super call
-    // Expo Dev Launcher checks for keyWindow during autoSetupStart
+    // Create window BEFORE super call so Expo Dev Launcher can access it
+    // Expo Dev Launcher checks UIApplication.shared.delegate?.window during autoSetupStart
     if self.window == nil {
       self.window = UIWindow(frame: UIScreen.main.bounds)
+      // Set a temporary root view controller so window is properly initialized
+      self.window?.rootViewController = UIViewController()
+      // Make window key and visible BEFORE super call
+      // Expo Dev Launcher requires keyWindow during autoSetupStart
+      self.window?.makeKeyAndVisible()
     }
-    self.window?.makeKeyAndVisible()
     
     // Let ExpoAppDelegate handle React Native initialization
     // This will trigger autoSetupPrepare and autoSetupStart
+    // Expo Dev Launcher will access window during autoSetupStart
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     
     return result
