@@ -72,7 +72,7 @@ export class KandilliProvider {
               time: date.getTime(),
               latitude,
               longitude,
-              source: 'Kandilli',
+              source: 'KANDILLI',
             });
           }
         } catch (parseError) {
