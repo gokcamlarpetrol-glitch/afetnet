@@ -1,6 +1,5 @@
 import Expo
 import ExpoModulesCore
-import React
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
@@ -8,10 +7,12 @@ public class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Let ExpoAppDelegate handle complete initialization sequence first
+    // Let ExpoAppDelegate handle complete initialization sequence
+    // This ensures autoSetupPrepare is called before autoSetupStart
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     
     // Ensure window is key and visible (required by Expo Dev Launcher)
+    // ExpoAppDelegate creates the window, but we need to make it key/visible
     if self.window == nil {
       self.window = UIWindow(frame: UIScreen.main.bounds)
     }
@@ -20,22 +21,12 @@ public class AppDelegate: ExpoAppDelegate {
     return result
   }
 
-  // Preserve custom bundle URL for expo-dev-client
-  public override func sourceURL(for bridge: RCTBridge) -> URL? {
-    #if DEBUG
-    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry")
-    #else
-    return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
-    #endif
-  }
-
-  // Preserve Linking API methods
+  // Linking API methods - preserve for deep linking support
   public override func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-    return super.application(app, open: url, options: options) || RCTLinkingManager.application(app, open: url, options: options)
+    return super.application(app, open: url, options: options)
   }
 
   public override func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-    let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
-    return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+    return super.application(application, continue: userActivity, restorationHandler: restorationHandler)
   }
 }
