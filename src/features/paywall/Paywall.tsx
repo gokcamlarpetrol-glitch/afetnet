@@ -23,7 +23,7 @@ import {
 import { usePremium } from '../premium/usePremium';
 import { logger } from '../../utils/productionLogger';
 
-export default function Paywall() {
+export default function Paywall({ navigation }: { navigation?: any }) {
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const { isPremium, isLoading: isPremiumLoading } = usePremium();
@@ -57,7 +57,7 @@ export default function Paywall() {
   // Handle purchase
   const handlePurchase = useCallback(async () => {
     if (!selectedPackageId || !currentOffering) {
-      Alert.alert('⚠️ Selection Required', 'Please select a subscription plan.');
+      Alert.alert('⚠️ Seçim Gerekli', 'Lütfen bir abonelik planı seçin.');
       return;
     }
 
@@ -66,43 +66,81 @@ export default function Paywall() {
     );
 
     if (!packageToPurchase) {
-      Alert.alert('❌ Error', 'Selected package not found.');
+      Alert.alert('❌ Hata', 'Seçilen paket bulunamadı.');
+      return;
+    }
+
+    if (isProcessing) {
+      logger.warn('Purchase already in progress');
       return;
     }
 
     try {
       setIsProcessing(true);
+      logger.info('🛒 Starting purchase for package:', packageToPurchase.identifier);
 
-      const success = await purchasePackage(packageToPurchase);
+      // Purchase package - purchasePackage already handles alerts internally
+      const success = await purchasePackage(
+        packageToPurchase,
+        () => {
+          // Success callback - Premium status will be updated via listener
+          logger.info('✅ Purchase successful, premium should be active');
+          // Refresh premium status
+          if (isPremium !== undefined) {
+            // Status will update automatically via listener
+          }
+        },
+        (error) => {
+          // Error callback - purchasePackage already shows alert
+          logger.error('❌ Purchase failed:', error);
+        }
+      );
 
+      // Note: purchasePackage already shows alerts, so we don't need to show again
+      // But we can log the result
       if (success) {
-        Alert.alert('✅ Success', 'Premium activated successfully!');
+        logger.info('✅ Purchase completed successfully');
       }
     } catch (error: any) {
       logger.error('❌ Purchase error:', error);
-      Alert.alert('❌ Error', error.message || 'Purchase failed.');
+      // Only show alert if purchasePackage didn't handle it
+      if (error.message && !error.userCancelled && !error.purchaseAlreadyOwned) {
+        Alert.alert('❌ Hata', error.message || 'Satın alma başarısız oldu.');
+      }
     } finally {
       setIsProcessing(false);
     }
-  }, [selectedPackageId, currentOffering]);
+  }, [selectedPackageId, currentOffering, isProcessing, isPremium]);
 
   // Handle restore
   const handleRestore = useCallback(async () => {
+    if (isProcessing) {
+      logger.warn('Restore already in progress');
+      return;
+    }
+
     try {
       setIsProcessing(true);
+      logger.info('🔄 Starting restore purchases...');
 
       const success = await restorePurchases();
 
-      if (success && !isPremium) {
-        Alert.alert('✅ Restored', 'Your purchases have been restored.');
+      // restorePurchases already shows alerts internally
+      if (success) {
+        logger.info('✅ Purchases restored successfully');
+      } else {
+        logger.info('ℹ️ No purchases found to restore');
       }
     } catch (error: any) {
       logger.error('❌ Restore error:', error);
-      Alert.alert('❌ Error', error.message || 'Restore failed.');
+      // restorePurchases already shows alert, but show additional info if needed
+      if (error.message && !error.message.includes('No active purchases')) {
+        Alert.alert('❌ Hata', error.message || 'Satın alımlar geri yüklenemedi.');
+      }
     } finally {
       setIsProcessing(false);
     }
-  }, [isPremium]);
+  }, [isPremium, isProcessing]);
 
   // Loading state
   if (isPremiumLoading || !currentOffering) {
@@ -110,7 +148,7 @@ export default function Paywall() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3B82F6" />
-          <Text style={styles.loadingText}>Loading subscription options...</Text>
+          <Text style={styles.loadingText}>Abonelik seçenekleri yükleniyor...</Text>
         </View>
       </SafeAreaView>
     );
@@ -120,22 +158,34 @@ export default function Paywall() {
   if (isPremium) {
     return (
       <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => navigation?.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="Geri"
+          >
+            <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          </Pressable>
+          <Text style={styles.headerTitle}>Premium</Text>
+          <View style={{ width: 40 }} />
+        </View>
         <ScrollView style={styles.premiumActiveContainer} showsVerticalScrollIndicator={false}>
           <View style={styles.premiumHeader}>
             <Ionicons name="checkmark-circle" size={64} color="#10B981" />
-            <Text style={styles.premiumTitle}>Premium Active</Text>
-            <Text style={styles.premiumSubtitle}>You have full access to all premium features</Text>
+          <Text style={styles.premiumTitle}>Premium Aktif</Text>
+          <Text style={styles.premiumSubtitle}>Tüm premium özelliklere tam erişiminiz var</Text>
           </View>
 
           <View style={styles.featuresList}>
-            <Text style={styles.featuresTitle}>Premium Features:</Text>
+            <Text style={styles.featuresTitle}>Premium Özellikler:</Text>
             {[
-              'Offline Maps',
-              'BLES Mesh Communication',
-              'Earthquake Early Warning',
-              'Family Tracking',
-              'Advanced Location Services',
-              'Priority Support',
+              'Offline Haritalar',
+              'BLE Mesh İletişim',
+              'Deprem Erken Uyarı',
+              'Aile Takibi',
+              'Gelişmiş Konum Servisleri',
+              'Öncelikli Destek',
             ].map((feature, index) => (
               <View key={index} style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color="#10B981" />
@@ -150,7 +200,7 @@ export default function Paywall() {
             disabled={isProcessing}
           >
             <Text style={styles.restoreButtonText}>
-              {isProcessing ? 'Restoring...' : 'Refresh Purchases'}
+              {isProcessing ? 'Yenileniyor...' : 'Satın Alımları Yenile'}
             </Text>
           </Pressable>
         </ScrollView>
@@ -171,10 +221,22 @@ export default function Paywall() {
   // Display packages
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => navigation?.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Geri"
+        >
+          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Premium'a Geç</Text>
+        <View style={{ width: 40 }} />
+      </View>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Premium Subscription</Text>
-          <Text style={styles.subtitle}>Unlock all premium features</Text>
+        <View style={styles.contentHeader}>
+          <Text style={styles.title}>Premium Abonelik</Text>
+          <Text style={styles.subtitle}>Tüm premium özelliklerin kilidini aç</Text>
         </View>
 
         {/* Monthly Plan */}
@@ -184,8 +246,15 @@ export default function Paywall() {
               styles.planCard,
               selectedPackageId === monthly.identifier && styles.selectedPlan,
             ]}
-            onPress={() => setSelectedPackageId(monthly.identifier)}
+            onPress={() => {
+              if (!isProcessing) {
+                setSelectedPackageId(monthly.identifier);
+              }
+            }}
             disabled={isProcessing}
+            accessibilityRole="button"
+            accessibilityLabel={`${monthly.product.title} planını seç`}
+            accessibilityState={{ selected: selectedPackageId === monthly.identifier, disabled: isProcessing }}
           >
             <View style={styles.planInfo}>
               <Text style={styles.planTitle}>{monthly.product.title}</Text>
@@ -207,8 +276,15 @@ export default function Paywall() {
               styles.planCard,
               selectedPackageId === yearly.identifier && styles.selectedPlan,
             ]}
-            onPress={() => setSelectedPackageId(yearly.identifier)}
+            onPress={() => {
+              if (!isProcessing) {
+                setSelectedPackageId(yearly.identifier);
+              }
+            }}
             disabled={isProcessing}
+            accessibilityRole="button"
+            accessibilityLabel={`${yearly.product.title} planını seç`}
+            accessibilityState={{ selected: selectedPackageId === yearly.identifier, disabled: isProcessing }}
           >
             <View style={styles.planInfo}>
               <Text style={styles.planTitle}>{yearly.product.title}</Text>
@@ -230,8 +306,15 @@ export default function Paywall() {
               styles.planCard,
               selectedPackageId === lifetime.identifier && styles.selectedPlan,
             ]}
-            onPress={() => setSelectedPackageId(lifetime.identifier)}
+            onPress={() => {
+              if (!isProcessing) {
+                setSelectedPackageId(lifetime.identifier);
+              }
+            }}
             disabled={isProcessing}
+            accessibilityRole="button"
+            accessibilityLabel={`${lifetime.product.title} planını seç`}
+            accessibilityState={{ selected: selectedPackageId === lifetime.identifier, disabled: isProcessing }}
           >
             <View style={styles.planInfo}>
               <Text style={styles.planTitle}>{lifetime.product.title}</Text>
@@ -248,33 +331,39 @@ export default function Paywall() {
 
         {/* Purchase Button */}
         <Pressable
-          style={[styles.purchaseButton, isProcessing && styles.disabledButton]}
+          style={[styles.purchaseButton, (isProcessing || !selectedPackageId) && styles.disabledButton]}
           onPress={handlePurchase}
           disabled={isProcessing || !selectedPackageId}
+          accessibilityRole="button"
+          accessibilityLabel="Premium abonelik satın al"
+          accessibilityState={{ disabled: isProcessing || !selectedPackageId }}
         >
           {isProcessing ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.purchaseButtonText}>
-              Subscribe Now
+              Abone Ol
             </Text>
           )}
         </Pressable>
 
         {/* Restore Button */}
         <Pressable
-          style={styles.restoreButton}
+          style={[styles.restoreButton, isProcessing && styles.disabledButton]}
           onPress={handleRestore}
           disabled={isProcessing}
+          accessibilityRole="button"
+          accessibilityLabel="Satın alımları geri yükle"
+          accessibilityState={{ disabled: isProcessing }}
         >
           <Text style={styles.restoreButtonText}>
-            {isProcessing ? 'Restoring...' : 'Restore Purchases'}
+            {isProcessing ? 'Geri yükleniyor...' : 'Satın Alımları Geri Yükle'}
           </Text>
         </Pressable>
 
         {/* Terms */}
         <Text style={styles.termsText}>
-          Subscription will be charged to your Apple ID account. Subscription automatically renews unless canceled at least 24 hours before the end of the current period. Manage subscriptions in Account Settings.
+          Abonelik Apple ID hesabınızdan ücretlendirilecektir. Abonelik, mevcut dönemin sonundan en az 24 saat önce iptal edilmediği sürece otomatik olarak yenilenir. Abonelikleri Hesap Ayarları'ndan yönetebilirsiniz.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -285,6 +374,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F172A',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   loadingContainer: {
     flex: 1,
@@ -299,7 +408,7 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  header: {
+  contentHeader: {
     padding: 24,
     alignItems: 'center',
   },

@@ -82,15 +82,9 @@ export class USGSProvider implements QuakeProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      logger.warn('USGS parsing failed:', error);
-      return this.getMockData();
+      logger.error('❌ USGS parsing failed:', error);
+      return [];
     }
-  }
-
-  private getMockData(): QuakeItem[] {
-    logger.error('❌ USGS API returned no data, returning empty array');
-    // NO MOCK DATA - Return empty array if API fails
-    return [];
   }
 }
 

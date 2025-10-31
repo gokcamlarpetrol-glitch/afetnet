@@ -162,3 +162,7 @@ Detaylı rehber: `XCODE_TUM_OZELLIKLER_AKTIF_REHBERI.md`
 
 
 
+
+
+
+

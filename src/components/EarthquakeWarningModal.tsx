@@ -49,7 +49,7 @@ export default function EarthquakeWarningModal() {
     
     const interval = setInterval(checkWarning, 1000);
     return () => clearInterval(interval);
-  }, [visible]);
+  }, []); // CRITICAL FIX: Empty deps to prevent infinite loop
   
   useEffect(() => {
     if (warning && warning.isActive) {

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { logger } from '../utils/productionLogger';
 
 export type ProviderKey = 'USGS' | 'AFAD' | 'KANDILLI';
 export type RegionFilter = 
@@ -101,7 +102,6 @@ const defaultSettings: Settings = {
 
 export const useSettings = create<SettingsState>()(
   persist(
-     
     (set, get) => ({
       ...defaultSettings,
       
@@ -117,10 +117,18 @@ export const useSettings = create<SettingsState>()(
       name: 'afn/settings/v1',
       storage: createJSONStorage(() => AsyncStorage),
       version: 1,
-       
       migrate: (persistedState: any, version: number) => {
         // Handle migrations if needed
         return ensureDefaults(persistedState || {});
+      },
+      onRehydrateStorage: () => {
+        // CRITICAL: Prevent re-renders during rehydration
+        return (state, error) => {
+          if (error) {
+            logger.warn('Settings rehydration error:', error);
+          }
+          // No state mutation here - just logging
+        };
       },
     },
   ),

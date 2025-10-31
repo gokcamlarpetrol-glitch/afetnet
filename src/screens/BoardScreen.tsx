@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, FlatList } from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, Alert } from 'react-native';
 import { BoardPost, listBoard, addBoard } from '../board/store';
 import { quantizeLatLng } from '../geo/coarse';
 import * as Location from 'expo-location';
+import { logger } from '../utils/productionLogger';
 
 function makeId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 
@@ -11,16 +12,41 @@ export default function BoardScreen(){
   const [text,setText]=useState('');
   const [kind,setKind]=useState<BoardPost['kind']>('announcement');
 
-  async function load(){ setList(await listBoard()); }
+  async function load(){ 
+    try {
+      setList(await listBoard()); 
+    } catch (error) {
+      logger.error('Failed to load board:', error);
+      Alert.alert('Hata', 'Pano yüklenemedi.');
+    }
+  }
   useEffect(()=>{ load(); },[]);
 
   async function post(){
-    if(!text.trim()) {return;}
-    let q:any={}; try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ const qll=quantizeLatLng(p.coords.latitude,p.coords.longitude); q={ qlat:qll.lat, qlng:qll.lng }; } }catch{
-      // Ignore location errors
+    if(!text.trim()) {
+      Alert.alert('Pano', 'Lütfen bir mesaj yazın.');
+      return;
     }
-    const item: BoardPost = { id: makeId(), ts: Date.now(), kind, text: text.trim().slice(0,180), ttlSec: 24*3600, ...q };
-    await addBoard(item); setText(''); await load();
+    try {
+      let q:any={}; 
+      try { 
+        const p = await Location.getLastKnownPositionAsync({}); 
+        if(p){ 
+          const qll=quantizeLatLng(p.coords.latitude,p.coords.longitude); 
+          q={ qlat:qll.lat, qlng:qll.lng }; 
+        } 
+      } catch {
+        // Ignore location errors
+      }
+      const item: BoardPost = { id: makeId(), ts: Date.now(), kind, text: text.trim().slice(0,180), ttlSec: 24*3600, ...q };
+      await addBoard(item); 
+      setText(''); 
+      await load();
+      Alert.alert('Pano', 'Mesaj yayınlandı.');
+    } catch (error) {
+      logger.error('Failed to post to board:', error);
+      Alert.alert('Hata', 'Mesaj yayınlanamadı.');
+    }
   }
 
   return (

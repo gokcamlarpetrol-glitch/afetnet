@@ -69,6 +69,12 @@ class OfflineMessagingSystem {
   private networkTopology: Map<string, Set<string>> = new Map(); // deviceId -> connectedDevices
 
   async start(): Promise<void> {
+    // Prevent double initialization
+    if (this.isActive) {
+      logger.debug('⚠️ Offline messaging already active, skipping start');
+      return;
+    }
+
     logger.debug('🚀 Starting offline messaging system...');
 
     try {
@@ -91,11 +97,12 @@ class OfflineMessagingSystem {
       this.startAckProcessing();
 
       this.isActive = true;
-      logger.debug('✅ Ultra-reliable offline messaging system started');
+      logger.info('✅ Ultra-reliable offline messaging system started');
 
     } catch (error) {
       logger.error('❌ Failed to start offline messaging system:', error);
-      throw error;
+      // Don't throw - allow app to continue without offline messaging
+      this.isActive = false;
     }
   }
 

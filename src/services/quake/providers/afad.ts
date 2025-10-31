@@ -36,15 +36,14 @@ export class AFADProvider implements QuakeProvider {
       const data = await response.json();
       
       if (!data || !data.eventList) {
-        // Fallback to mock data if API structure changes
-        return this.getMockData();
+        logger.error('❌ AFAD API returned invalid structure');
+        return [];
       }
 
       return this.parseAFADData(data.eventList);
     } catch (error) {
-      logger.warn('AFAD fetch failed:', error);
-      // Return mock data for development/testing
-      return this.getMockData();
+      logger.error('❌ AFAD fetch failed:', error);
+      return [];
     }
   }
 
@@ -87,8 +86,8 @@ export class AFADProvider implements QuakeProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      logger.warn('AFAD parsing failed:', error);
-      return this.getMockData();
+      logger.error('❌ AFAD parsing failed:', error);
+      return [];
     }
   }
 
@@ -130,12 +129,6 @@ export class AFADProvider implements QuakeProvider {
   private parseLocation(location?: string, district?: string, city?: string): string {
     const parts = [location, district, city].filter(Boolean);
     return parts.join(', ') || 'Türkiye';
-  }
-
-  private getMockData(): QuakeItem[] {
-    logger.error('❌ AFAD API returned no data, returning empty array');
-    // NO MOCK DATA - Return empty array if API fails
-    return [];
   }
 }
 

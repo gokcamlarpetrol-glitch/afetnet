@@ -62,18 +62,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ],
       ITSAppUsesNonExemptEncryption: false,
     },
+    // Entitlements - Development için minimal
+    // Apple Developer Portal'da capabilities aktif edilmedikçe çoğu entitlement hata verir
+    // Background modes Info.plist'te UIBackgroundModes ile tanımlı (yeterli)
     entitlements: {
-      "com.apple.developer.push-notifications": true,
-      "com.apple.developer.remote-notification": true,
-      "com.apple.developer.background-fetch": true,
-      "com.apple.developer.location.background": true,
-      "com.apple.developer.location.always": true,
-      "com.apple.developer.location.when-in-use": true,
-      "com.apple.developer.location.push": true,
-      "com.apple.developer.bluetooth-central": true,
-      "com.apple.developer.bluetooth-peripheral": true,
-            "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
-      "aps-environment": "production",
+      "aps-environment": "development", // Development için "development"
+      "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
+      // Push notifications - Apple Developer Portal'da aktif edildiyse true yapın
+      // "com.apple.developer.push-notifications": true,
     },
   },
   android: {

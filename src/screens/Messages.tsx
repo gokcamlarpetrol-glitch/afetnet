@@ -33,8 +33,8 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
   const [emergencyMode, setEmergencyMode] = useState(false);
   const [batteryHealth, setBatteryHealth] = useState<any>(null);
   const [powerSavings, setPowerSavings] = useState<any>(null);
-  const { items: queueItems } = useQueue();
-  const { list: familyList } = useFamily();
+  const { items: queueItems } = useQueue(state => ({ items: state.items }));
+  const { list: familyList } = useFamily(state => ({ list: state.list }));
   
   // Gerçek message store'u kullan
   const {
@@ -172,22 +172,9 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
     }
   };
 
-  // Offline messaging system başlat
+  // Offline messaging system - App.tsx'te zaten başlatılıyor
+  // Burada sadece data update ve cleanup yapıyoruz
   useEffect(() => {
-    const startOfflineMessaging = async () => {
-      try {
-        await offlineMessaging.start();
-        logger.debug('Offline messaging system started');
-        
-        // Update stats and contacts
-        updateOfflineData();
-      } catch (error) {
-        logger.error('Failed to start offline messaging:', error);
-      }
-    };
-
-    startOfflineMessaging();
-
     // Update offline data every 10 seconds
     const updateInterval = setInterval(updateOfflineData, 10000);
 
@@ -201,16 +188,16 @@ export default function Messages({ navigation }: { navigation?: NavigationProp }
       logger.debug(`Battery mode changed: ${profile.level}% (${profile.state})`);
     });
 
-    // Initial battery data update
+    // Initial data updates
+    updateOfflineData();
     updateBatteryData();
 
     return () => {
-      // Cleanup offline messaging
-      offlineMessaging.stop();
+      // CRITICAL: Don't stop offlineMessaging here - it's managed globally in App.tsx
+      // Only cleanup local intervals
       clearInterval(updateInterval);
       clearInterval(batteryInterval);
       unsubscribeBattery();
-      logger.debug('Offline messaging system stopped');
     };
   }, []);
 

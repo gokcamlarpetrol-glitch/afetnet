@@ -188,3 +188,7 @@ Eğer siz team owner iseniz ve başka birine yetki vermek istiyorsanız:
 
 
 
+
+
+
+

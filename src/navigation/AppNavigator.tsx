@@ -5,6 +5,7 @@ import PremiumActiveScreen from '../screens/PremiumActive';
 import Paywall from '../features/paywall/Paywall';
 import QRScanner from '../screens/QRScanner';
 import MapOffline from '../screens/MapOffline';
+import AllEarthquakes from '../screens/AllEarthquakes';
 import { offlineSyncManager } from '../services/OfflineSyncManager';
 
 const Stack = createStackNavigator();
@@ -39,6 +40,11 @@ export default function AppNavigator() {
         <Stack.Screen
           name="Premium"
           component={PremiumActiveScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="AllEarthquakes"
+          component={AllEarthquakes}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

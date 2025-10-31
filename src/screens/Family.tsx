@@ -26,7 +26,17 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
     generateMyAfnId,
     getOnlineMembers,
     getNeedHelpMembers,
-  } = useFamily();
+  } = useFamily(state => ({
+    list: state.list,
+    myAfnId: state.myAfnId,
+    add: state.add,
+    update: state.update,
+    remove: state.remove,
+    addByAfnId: state.addByAfnId,
+    generateMyAfnId: state.generateMyAfnId,
+    getOnlineMembers: state.getOnlineMembers,
+    getNeedHelpMembers: state.getNeedHelpMembers,
+  }));
 
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);

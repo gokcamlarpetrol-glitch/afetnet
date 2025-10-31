@@ -84,3 +84,7 @@ Capability'leri kaldırıp tekrar eklemek, Xcode'a **"bu capability'leri yeniden
 
 
 
+
+
+
+
