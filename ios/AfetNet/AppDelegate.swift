@@ -1,15 +1,28 @@
 import Expo
 import ExpoModulesCore
+import UIKit
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
+  // Window property required by Expo Dev Launcher
+  public var window: UIWindow?
+  
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Let ExpoAppDelegate handle complete initialization sequence
-    // This includes window creation, autoSetupPrepare, and autoSetupStart
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // Create and make window key/visible BEFORE super call
+    // Expo Dev Launcher checks for keyWindow during autoSetupStart
+    if self.window == nil {
+      self.window = UIWindow(frame: UIScreen.main.bounds)
+    }
+    self.window?.makeKeyAndVisible()
+    
+    // Let ExpoAppDelegate handle React Native initialization
+    // This will trigger autoSetupPrepare and autoSetupStart
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    
+    return result
   }
 
   // Linking API methods - preserve for deep linking support
