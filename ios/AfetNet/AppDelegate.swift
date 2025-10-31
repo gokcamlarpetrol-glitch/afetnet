@@ -21,8 +21,18 @@ public class AppDelegate: ExpoAppDelegate {
     reactNativeFactory = factory
     bindReactNativeFactory(factory)
 
-    // Let ExpoAppDelegate manage window & scene lifecycle and React Native startup.
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // Ensure window exists and is key & visible for Expo Dev Launcher
+    if window == nil {
+      window = UIWindow(frame: UIScreen.main.bounds)
+    }
+    
+    // Call super to let ExpoAppDelegate handle React Native startup
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    
+    // Make window key and visible after Expo setup
+    window?.makeKeyAndVisible()
+    
+    return result
   }
 
   // Linking API
