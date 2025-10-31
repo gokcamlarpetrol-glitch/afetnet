@@ -4,35 +4,29 @@ import UIKit
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
-  // Window property with lazy initialization
-  // This ensures window exists when Expo Dev Launcher needs it,
-  // but doesn't interfere with ExpoAppDelegate's initialization sequence
-  // Note: No 'override' because ExpoAppDelegate doesn't define window property
-  private var _window: UIWindow?
-  public var window: UIWindow? {
-    get {
-      if _window == nil {
-        _window = UIWindow(frame: UIScreen.main.bounds)
-        _window?.rootViewController = UIViewController()
-      }
-      return _window
-    }
-    set {
-      _window = newValue
-    }
-  }
+  // Window property required by Expo Dev Launcher
+  // Created before super call so it exists when Expo Dev Launcher accesses it
+  // But NOT made key/visible until after Expo initialization completes
+  public var window: UIWindow?
   
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Let ExpoAppDelegate handle complete initialization sequence:
+    // Create window BEFORE super call so Expo Dev Launcher can access it
+    // But do NOT call makeKeyAndVisible() yet - this preserves Expo's initialization order
+    // ExpoAppDelegate will call:
     // 1. autoSetupPrepare (creates ReactDelegate)
-    // 2. autoSetupStart (accesses window property via lazy getter)
-    // Window will be created lazily when Expo Dev Launcher accesses it
+    // 2. autoSetupStart (uses window) - requires window to exist
+    // Do NOT set rootViewController - let Expo handle that
+    if self.window == nil {
+      self.window = UIWindow(frame: UIScreen.main.bounds)
+    }
+    
+    // Let ExpoAppDelegate handle complete initialization sequence
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     
-    // After Expo setup completes, ensure window is key and visible
+    // After Expo setup completes (autoSetupPrepare and autoSetupStart), make window key and visible
     self.window?.makeKeyAndVisible()
     
     return result
