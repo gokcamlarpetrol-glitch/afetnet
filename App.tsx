@@ -26,6 +26,7 @@ import { setEEWFeedConfig, startEEW } from './src/eew/feed';
 import CountdownModal from './src/eew/CountdownModal';
 import { useEEWListener } from './src/eew/useEEW';
 import Constants from 'expo-constants';
+import { logger } from './src/utils/productionLogger';
 import { ensureNativeAlarmChannel, initBackgroundMessaging } from './src/native/NativeAlarm';
 import { FEATURES } from './src/config/flags';
 
@@ -99,9 +100,7 @@ export default function App() {
           }
         }
 
-        if (__DEV__) {
-          console.log('AfetNet - Sistemler başlatıldı');
-        }
+        logger.info('AfetNet - Sistemler başlatıldı');
       } catch (error) {
         if (__DEV__) {
           console.error('AfetNet - Servis başlatma hatası:', error);
