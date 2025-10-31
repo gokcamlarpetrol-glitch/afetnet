@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, Text, TouchableOpacity, View, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import * as Nav from '@react-navigation/native';
 import { usePremium } from '../../../store/premium';
 import PremiumActiveScreen from '../../PremiumActive';
 
 export const PremiumSection = () => {
   const { isPremium } = usePremium();
-  const navigation = useNavigation<any>();
+  const navigation = (Nav as any).useNavigation?.() || { navigate: () => {} };
 
   if (!isPremium) {
     return (
