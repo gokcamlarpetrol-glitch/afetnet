@@ -7,8 +7,9 @@ public class AppDelegate: ExpoAppDelegate {
   // Window property with lazy initialization
   // This ensures window exists when Expo Dev Launcher needs it,
   // but doesn't interfere with ExpoAppDelegate's initialization sequence
+  // Note: No 'override' because ExpoAppDelegate doesn't define window property
   private var _window: UIWindow?
-  public override var window: UIWindow? {
+  public var window: UIWindow? {
     get {
       if _window == nil {
         _window = UIWindow(frame: UIScreen.main.bounds)
