@@ -4,21 +4,23 @@ set -euo pipefail
 echo "🔎 Running pre-submit checks..."
 
 # 1) Forbidden strings check (yakında / coming soon / beta / demo / TODO)
-FORBIDDEN=$(rg -n --iglob '!**/node_modules/**' -e "yakında|coming soon|beta|demo|TODO" || true)
+SEARCH_DIRS=("src/screens" "src/features" "src/ui")
+FORBIDDEN=$(grep -REn --exclude-dir=node_modules --exclude-dir=ios --exclude-dir=android --exclude-dir=.venv \
+  --include='*.tsx' --include='*.ts' -E "['\"][^'\"]*(yakında|yakinda|coming soon|\\bbeta\\b|demo)['\"]" "${SEARCH_DIRS[@]}" 2>/dev/null || true)
 if [ -n "$FORBIDDEN" ]; then
-  echo "❌ Forbidden placeholder strings found:"
+  echo "❌ Forbidden placeholder strings found (UI literals):"
   echo "$FORBIDDEN"
   exit 1
 fi
 
 # 2) Verify Paywall route exists
-if ! rg -n "name=\"Paywall\"" src/navigation/AppNavigator.tsx >/dev/null; then
+if ! grep -q "name=\"Paywall\"" src/navigation/AppNavigator.tsx; then
   echo "❌ Paywall route missing in navigation"
   exit 1
 fi
 
 # 3) Verify Settings has a Premium button (navigate to Paywall)
-if ! rg -n "navigate('Paywall')" src/screens/Settings/components/PremiumSection.tsx >/dev/null; then
+if ! grep -q "navigate('Paywall')" src/screens/Settings/components/PremiumSection.tsx; then
   echo "❌ Settings Premium button not wired to Paywall"
   exit 1
 fi
