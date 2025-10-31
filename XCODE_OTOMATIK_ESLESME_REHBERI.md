@@ -158,3 +158,6 @@ Kod tarafı hazır. Şimdi Xcode'da capability'leri ekleyip "Automatically manag
 
 Xcode capability'leri ekleyince otomatik olarak Developer Portal'a da eklenecek (yetki varsa).
 
+
+
+

@@ -1,0 +1,95 @@
+---
+description: Performance best practices for mobile UIs optimized for React Native
+globs: ["src/**/*.tsx", "app/**/*.tsx", "src/screens/**/*.tsx"]
+alwaysApply: false
+---
+
+# Performance Rules
+
+## Avoiding Unnecessary Re-renders
+
+* Memoize expensive components with React.memo()
+* Use useCallback for event handlers passed to children
+* Use useMemo for computed values derived from props/state
+* Don't over-memoize; profile performance first
+* Structure Zustand stores to prevent unnecessary updates
+
+## List Performance
+
+* Use FlatList or SectionList instead of ScrollView + map
+* Implement getItemLayout when items have consistent sizes
+* Use removeClippedSubviews for better memory usage
+* Set initialNumToRender, maxToRenderPerBatch, and windowSize appropriately
+* Paginate long lists; don't render all items at once
+
+## Deferring Heavy Work
+
+* Move heavy computations off the main thread
+* Batch state updates to prevent multiple renders
+* Use useMemo/useCallback for expensive operations
+* Debounce rapid-fire events (search, scroll)
+* Consider Web Workers for CPU-intensive tasks
+
+## Image Optimization
+
+* Compress images before including in app
+* Use WebP format where supported
+* Cache network images with expo-image
+* Provide proper image dimensions to prevent layout shifts
+* Lazy load images outside viewport
+* Use placeholder images while loading
+
+## Lazy Navigation
+
+* Lazy load screens with React.lazy() + Suspense
+* Split bundle for non-critical screens
+* Don't import entire libraries if only using subset
+* Use dynamic imports for feature modules
+
+## Network Performance
+
+* Batch network requests when possible
+* Implement request caching
+* Use Network Intelligence Engine
+* Handle offline scenarios gracefully
+* Compress payloads and use efficient serialization
+
+## Mobile-Specific Optimizations
+
+* Reduce bridge calls by batching native operations
+* Cache native module results when appropriate
+* Be battery-conscious with background tasks
+* Profile memory usage on low-end devices
+* Monitor bundle size and optimize accordingly
+
+## Bundle Size
+
+* Analyze bundle with expo-analyze
+* Remove unused dependencies
+* Use tree-shaking where possible
+* Split vendor bundles from app code
+* Monitor bundle size growth over time
+
+## Animation Performance
+
+* Use react-native-reanimated for performant animations
+* Use native driver whenever possible (useNativeDriver: true)
+* Avoid animating layout properties
+* Keep animations at 60fps
+* Use worklets for complex animations
+
+## Battery Conservation
+
+* Minimize background tasks
+* Use expo-task-manager wisely
+* Implement power-saving modes
+* Batch sensor readings
+* Monitor battery impact
+
+## Memory Management
+
+* Be aware of memory limits (iOS ~1.5GB, Android varies)
+* Unsubscribe from listeners in cleanup
+* Clear large data structures when not needed
+* Use WeakMap/WeakSet for caches that should GC
+* Profile memory usage regularly

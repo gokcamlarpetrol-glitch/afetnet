@@ -151,3 +151,6 @@ open /Applications/Xcode.app
 
 **🎯 İLK DENENMESİ GEREKEN: Yöntem 1 (En etkili)**
 
+
+
+

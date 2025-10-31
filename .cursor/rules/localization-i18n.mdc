@@ -1,0 +1,148 @@
+---
+description: Internationalization and accessibility guidelines for multi-language support
+globs: ["src/i18n/**/*", "src/screens/**/*.tsx", "src/components/**/*.tsx"]
+alwaysApply: false
+---
+
+# Localization & Internationalization
+
+## i18n Framework
+
+* Use i18next and react-i18next for string management
+* Use expo-localization for React Native locale detection
+* Configuration in `src/i18n/index.ts` and `src/i18n/runtime.ts`
+* Translation files: `src/i18n/tr.json` (Turkish), `src/i18n/en.json` (English)
+
+## String Management
+
+* NEVER hardcode user-facing strings; ALWAYS use t() from useTranslation()
+* All user-facing text must be translatable
+* Example:
+  ```typescript
+  const { t } = useTranslation();
+  <Text>{t('common.save')}</Text>
+  ```
+
+## Language Support
+
+* Support TR (Turkish) and EN (English) as minimum
+* Structure i18n keys by feature for organization
+* Example key structure: `feature.action.element` like `eew.warning.title`
+* Keep keys descriptive and hierarchical
+
+## Key Organization
+
+* Group translations by feature/module
+* Use consistent naming conventions
+* Example structure:
+  ```json
+  {
+    "common": { "save": "Save", "cancel": "Cancel" },
+    "eew": { "warning": { "title": "Earthquake Warning" } }
+  }
+  ```
+
+## Pluralization
+
+* Handle pluralization properly with i18next
+* Use i18next's built-in plural forms
+* Example: `count: {{count}} item` vs `count_plural: {{count}} items`
+* Support languages with complex plural rules
+
+## Variable Interpolation
+
+* Use variable interpolation for dynamic content
+* Example: `t('welcome', { name: user.name })`
+* Escape user-generated content in translations
+* Use proper i18next interpolation syntax
+
+## Testing All Languages
+
+* Test ALL supported languages before release
+* Check text overflow in different languages
+* Ensure UI doesn't break with long translations
+* Test RTL languages if supported
+
+## RTL Support
+
+* Prepare for future RTL (Right-to-Left) language support
+* Use Flexbox start/end instead of left/right
+* Test layout for RTL languages (Arabic, Hebrew)
+* Consider text alignment for mixed LTR/RTL content
+
+## Accessibility with Translations
+
+* Ensure screen readers work properly with translated content
+* Add accessibility labels via i18n
+* Example: `accessibilityLabel={t('button.submit.label')}`
+* Test screen readers with all supported languages
+
+## Locale Detection
+
+* Use expo-localization to detect device locale
+* Fallback to default language if unsupported
+* Allow users to change language in settings
+* Persist language preference
+
+## Translation Workflow
+
+* Extract all strings to translation files
+* Keep translation files in sync with code changes
+* Review translations for accuracy and context
+* Use translation management tools if needed
+
+## Date and Time Formatting
+
+* Format dates and times based on locale
+* Use i18next for date formatting
+* Respect locale-specific date formats
+* Example: MM/DD/YYYY vs DD/MM/YYYY
+
+## Number Formatting
+
+* Format numbers according to locale
+* Handle decimal separators (., vs ,)
+* Format currency with proper symbols
+* Use locale-aware formatting libraries
+
+## Cultural Adaptation
+
+* Consider cultural differences in UI elements
+* Adapt colors and icons for different cultures
+* Consider local business practices
+* Test with users from target locales
+
+## Missing Translations
+
+* Provide fallback to default language for missing translations
+* Log missing translation keys in development
+* Implement translation completion checks
+* Don't ship incomplete translations
+
+## Dynamic Language Switching
+
+* Support runtime language switching
+* Reload UI when language changes
+* Handle state preservation during language switch
+* Update all displayed text immediately
+
+## Translation Keys
+
+* Use descriptive, unambiguous keys
+* Keep keys stable across versions
+* Document key usage if needed
+* Group related keys together
+
+## Developer Experience
+
+* Create translation helpers and type safety if possible
+* Auto-generate translation keys from usage
+* Validate translation completeness in CI
+* Provide translation review tools
+
+## Localization Testing
+
+* Test all UI states in all languages
+* Test with long/short translations
+* Verify text doesn't overflow
+* Check proper character rendering

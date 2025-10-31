@@ -36,6 +36,21 @@ class ReleaseChecker {
     // 4. Apple Store Compliance
     await this.checkAppleStoreCompliance();
 
+    // 4.1 Placeholder Scan
+    const placeholderScan = this.scanForbiddenPlaceholders();
+    this.checks.push({
+      category: 'Placeholder Scan',
+      checks: [
+        {
+          name: 'Forbidden strings (yakında/coming soon/beta/demo/TODO)',
+          status: placeholderScan.count === 0 ? 'pass' : 'fail',
+          message: placeholderScan.count === 0
+            ? 'No forbidden placeholder strings found'
+            : `Found in ${placeholderScan.count} files (e.g., ${placeholderScan.samples.join(', ')})`,
+        },
+      ],
+    });
+
     // 5. Feature Integration
     await this.checkFeatureIntegration();
 
@@ -431,6 +446,28 @@ class ReleaseChecker {
       category: 'Apple Store Compliance',
       checks,
     });
+  }
+
+  // Additional rule: scan for forbidden placeholder strings that cause 2.2 rejections
+  private scanForbiddenPlaceholders(): { count: number; samples: string[] } {
+    const root = process.cwd();
+    const files = this.findFilesRecursively(root, ['.ts', '.tsx', '.md', '.json']);
+    const forbidden = /(yakında|coming\s+soon|\bbeta\b|\bdemo\b|TODO)/i;
+    const samples: string[] = [];
+    let count = 0;
+    for (const file of files) {
+      if (file.includes('node_modules')) continue;
+      try {
+        const content = fs.readFileSync(file, 'utf8');
+        const m = content.match(forbidden);
+        if (m) {
+          count++;
+          samples.push(`${file}`);
+          if (samples.length >= 5) break;
+        }
+      } catch {}
+    }
+    return { count, samples };
   }
 
   private async checkFeatureIntegration(): Promise<void> {

@@ -27,6 +27,7 @@ import CountdownModal from './src/eew/CountdownModal';
 import { useEEWListener } from './src/eew/useEEW';
 import Constants from 'expo-constants';
 import { ensureNativeAlarmChannel, initBackgroundMessaging } from './src/native/NativeAlarm';
+import { FEATURES } from './src/config/flags';
 
 export default function App() {
   const EEW_ENABLED = (Constants?.expoConfig as any)?.extra?.EEW_ENABLED === true || process.env.EEW_ENABLED === 'true';
@@ -133,7 +134,7 @@ export default function App() {
         <SafeAreaProvider>
           <SettingsInitializer />
           <NotificationInitializer />
-          <ComprehensiveFeaturesInitializer />
+          {FEATURES.comprehensiveFeatures ? <ComprehensiveFeaturesInitializer /> : null}
           <EarthquakeWarningModal />
           {EEW_ENABLED ? <CountdownModal /> : null}
           <AppNavigator />

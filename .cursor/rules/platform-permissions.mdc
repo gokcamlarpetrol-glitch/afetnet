@@ -1,0 +1,149 @@
+---
+description: iOS and Android permissions and entitlements management
+globs: ["ios/**/*", "android/**/*", "app.config.ts", "src/**/*permissions*.ts"]
+alwaysApply: false
+---
+
+# Platform Permissions
+
+## iOS Info.plist Usage Descriptions
+
+* Add usage descriptions for ALL required permissions in Info.plist
+* Provide clear, user-friendly explanations
+* Required descriptions:
+  * NSBluetoothAlwaysUsageDescription - Bluetooth connectivity for mesh networking
+  * NSBluetoothPeripheralUsageDescription - Bluetooth peripheral for beacon broadcasting
+  * NSLocationWhenInUseUsageDescription - Location for proximity features
+  * NSLocationAlwaysAndWhenInUseUsageDescription - Location for background tracking
+  * NSCameraUsageDescription - Camera for evidence capture
+  * NSPhotoLibraryUsageDescription - Photo library access for evidence
+  * NSMicrophoneUsageDescription - Microphone for audio features
+  * NSContactsUsageDescription - Contacts for SOS feature
+
+## iOS Entitlements
+
+* Configure background modes in entitlements for essential features
+* Required background modes:
+  * `location` - Background location tracking
+  * `audio` - Audio processing for emergency alerts
+  * `bluetooth-central` - BLE central mode for scanning
+  * `bluetooth-peripheral` - BLE peripheral mode for advertising
+* Match entitlements in app.config.ts and Info.plist
+
+## Android Manifest Permissions
+
+* Declare permissions in AndroidManifest.xml
+* Required permissions:
+  * BLUETOOTH, BLUETOOTH_ADMIN, BLUETOOTH_SCAN, BLUETOOTH_ADVERTISE (Android 12+)
+  * ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION
+  * CAMERA
+  * READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+  * RECORD_AUDIO
+  * READ_CONTACTS (optional for SOS)
+  * VIBRATE for haptic feedback
+
+## Runtime Permission Requests
+
+* Request permissions at runtime using expo-permissions or native prompts
+* Don't request all permissions at once; request when needed
+* Provide context before requesting (why the permission is needed)
+* Use `src/ble/permissions.ts` for BLE permission checking
+* Example: Check permissions before BLE scan/advertise operations
+
+## Graceful Degradation
+
+* App MUST function with denied permissions (offline mode)
+* Don't block user access; provide fallback features
+* Show clear indicators when features are unavailable due to permissions
+* Explain how to enable permissions in settings
+
+## Permission Rationale
+
+* Document permission rationale in user-facing modals
+* Explain how permission improves emergency response
+* Provide examples of permission usage
+* Show benefits of granting permission
+
+## React Native Threading Model
+
+* Be aware of React Native's threading model during permission requests
+* Permission dialogs are native and may block JavaScript thread
+* Handle permission callbacks properly
+* Don't assume permission result is immediate
+
+## Testing Permission Flows
+
+* Test permission flows thoroughly on both platforms
+* Test permission grant, deny, and "don't ask again" scenarios
+* Test app behavior with partial permissions
+* Verify permission state checks work correctly
+
+## Permission State Management
+
+* Store permission states appropriately
+* Check permission status before operations
+* Re-check permissions if user switches to background/foreground
+* Provide settings UI to manage permissions
+
+## iOS Permission Best Practices
+
+* Request permissions at the right time (not on app launch)
+* Group related permissions together
+* Use sequential permission requests
+* Handle "Settings" redirect if permission denied
+
+## Android Permission Best Practices
+
+* Request permissions on Android 6+ (runtime permissions)
+* Support both old and new Android permission models
+* Handle permission groups properly
+* Use Android 12+ Bluetooth permission model
+
+## Background Permissions
+
+* Request background permissions only when necessary
+* Explain background usage clearly to users
+* Implement proper background task management
+* Use expo-task-manager for background tasks: `src/background/`
+
+## Permission Monitoring
+
+* Monitor permission grant/denial rates
+* Track which permissions users most commonly grant/deny
+* Adjust permission request timing based on data
+* Iterate on permission UI/UX
+
+## Permission Documentation
+
+* Document all required permissions in app stores
+* Explain permission usage in privacy policy
+* Provide permission troubleshooting guides
+* List permissions in app description
+
+## Cross-Platform Considerations
+
+* Handle iOS vs Android permission differences
+* Use Platform.select() for platform-specific permission handling
+* Test on multiple iOS and Android versions
+* Support Android 12+ Bluetooth permission changes
+
+## Emergency Permissions
+
+* Prioritize emergency-critical permissions
+* Request emergency permissions immediately when needed
+* Don't require non-critical permissions for core emergency features
+* Ensure SOS works even with minimal permissions
+
+## Permission Status Checks
+
+* Use `expo-permissions` or native APIs to check permission status
+* Implement permission status checking utilities
+* Cache permission status appropriately
+* Invalidate cache when permission state might change
+
+## User Education
+
+* Educate users about permission importance for emergency features
+* Show permission impact on app functionality
+* Provide in-app permission management
+* Link to platform-specific permission help

@@ -185,3 +185,6 @@ Eğer siz team owner iseniz ve başka birine yetki vermek istiyorsanız:
 
 **Eğer hepsi ✅ ise → Xcode capability eklediğinizde dialog açılacak → "Enable All" tıklayın**
 
+
+
+

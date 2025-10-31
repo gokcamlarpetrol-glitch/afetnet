@@ -118,3 +118,6 @@ CODE_SIGN_STYLE = Automatic
 
 **🎯 SONUÇ:** Tüm değişiklikler uygulandı. Peripheral rolü kaldırıldı, Central rolü aktif. Şimdi Developer Portal'da Bluetooth LE Peripheral'ı kapatıp profili yenilemeniz gerekiyor.
 
+
+
+

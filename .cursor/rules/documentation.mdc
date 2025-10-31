@@ -1,0 +1,130 @@
+---
+description: Documentation and commit standards for consistent communication
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Documentation & Commit Standards
+
+## Conventional Commits
+
+* Use Conventional Commits for all commit messages
+* Format: `<type>(<scope>): <subject>`
+* Types:
+  * `feat` - new feature
+  * `fix` - bug fix
+  * `hotfix` - critical production fix
+  * `chore` - maintenance tasks
+  * `docs` - documentation changes
+  * `perf` - performance improvements
+  * `test` - test additions/changes
+  * `refactor` - code refactoring
+  * `style` - code style changes
+  * `emergency` - emergency feature updates
+
+## Commit Message Examples
+
+* `feat(eew): add countdown modal for earthquake warnings`
+* `fix(ble): handle mesh disconnection gracefully`
+* `hotfix(security): patch critical encryption vulnerability`
+* `docs(readme): update installation instructions`
+* `perf(list): optimize FlatList rendering for large datasets`
+* `chore(deps): update React Native to 0.81.5`
+
+## Scope Examples
+
+* `eew` - Earthquake Early Warning features
+* `ble` - Bluetooth and mesh networking
+* `offline` - Offline-first functionality
+* `security` - Security and encryption
+* `ui` - User interface components
+* `android` - Android-specific changes
+* `ios` - iOS-specific changes
+
+## Documentation Updates
+
+* Update README when behavior changes
+* Include CHANGELOG entry for user-visible changes
+* Document breaking changes clearly with migration guide
+* Update architecture docs when structure changes
+* Keep API documentation current
+
+## Code Comments
+
+* Write self-documenting code when possible
+* Comment WHY, not WHAT
+* Document complex algorithms and business logic
+* Add JSDoc comments for public APIs
+* Keep comments up to date with code
+
+## README Maintenance
+
+* Keep installation instructions current
+* Document environment variables and setup
+* Include troubleshooting section
+* Add screenshots for UI features
+* Link to relevant documentation
+
+## Feature Documentation
+
+* Document new features in feature directories
+* Include usage examples
+* Document configuration options
+* Explain integration with other modules
+* Keep examples current
+
+## CHANGELOG Entries
+
+* Add entry for each user-visible change
+* Group by type (Added, Changed, Fixed, Removed)
+* Include migration notes for breaking changes
+* Link to PRs when applicable
+* Maintain reverse chronological order
+
+## Architecture Documentation
+
+* Document architectural decisions
+* Explain offline-first design patterns
+* Document mesh networking protocols
+* Describe security implementation
+* Keep diagrams up to date
+
+## API Documentation
+
+* Document public APIs thoroughly
+* Include parameter and return types
+* Provide usage examples
+* Document error conditions
+* Explain side effects and async behavior
+
+## Emergency App Documentation
+
+* Document emergency communication protocols
+* Explain BLE mesh topology
+* Document EEW integration
+* Describe offline fallback mechanisms
+* Keep disaster recovery runbooks current
+
+## Inline Documentation
+
+* Add comments for non-obvious code
+* Explain workarounds and hacks
+* Document performance optimizations
+* Note security considerations
+* Reference related code
+
+## User Documentation
+
+* Write user-facing docs in plain language
+* Include step-by-step instructions
+* Add troubleshooting guidance
+* Provide examples of common use cases
+* Update help text for UI changes
+
+## Bugbot Documentation
+
+* Tag PRs with appropriate labels
+* Provide clear PR descriptions
+* Include reproduction steps for bugs
+* Document testing performed
+* Link to related issues

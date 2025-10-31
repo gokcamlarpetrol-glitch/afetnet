@@ -45,7 +45,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSMinimumSystemVersion</key>
@@ -60,13 +60,15 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>AfetNet, yakınınızdaki cihazlarla iletişim kurmak ve afet anında çevrimdışı/mesh mesajlaşmayı sağlamak için Bluetooth'u kullanır.</string>
+	<string>AfetNet, afet anında yakındaki cihazlarla çevrimdışı/mesh iletişim kurmak için Bluetooth’u kullanır.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>AfetNet, afet anında mesh iletişim için Bluetooth üzerinden kendisini erişilebilir hale getirir (peripheral rolü).</string>
+	<string>AfetNet, çevrimdışı iletişim için Bluetooth üzerinden diğer cihazlara erişim sağlar (peripheral rolü).</string>
 	<key>NSBluetoothWhileInUseUsageDescription</key>
 	<string>AfetNet, yakınınızdaki cihazlarla iletişim kurarak afet anında çevrimdışı mesh ağ iletişimi sağlamak için Bluetooth'u kullanır.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>AfetNet, QR kodları okumak ve görsel rapor oluşturmak için kamerayı kullanır.</string>
+ 	<key>NSLocationWhenInUseUsageDescription</key>
+ 	<string>AfetNet, afet anında çevrenizdeki cihazları ve yardımları haritada gösterebilmek için konum bilginizi kullanır.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>AfetNet, acil durumlarda aile bireylerinizin veya arkadaşlarınızın iletişim bilgilerini görüntülemek için rehbere erişim ister.</string>
 	<key>NSFaceIDUsageDescription</key>
@@ -80,17 +82,17 @@
 	<key>NSMotionUsageDescription</key>
 	<string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to save photos</string>
+	<string>AfetNet, oluşturduğunuz görselleri ve raporları fotoğraf albümüne kaydetmek için izin ister.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your photos</string>
+	<string>AfetNet, yardım içeriklerini kaydetmek ve paylaşmak için fotoğraflarınıza erişir.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>remote-notification</string>
 		<string>fetch</string>
 		<string>processing</string>
 		<string>location</string>
+		<string>remote-notification</string>
 		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
 	</array>

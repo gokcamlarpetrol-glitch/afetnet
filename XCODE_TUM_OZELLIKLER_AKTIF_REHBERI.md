@@ -243,3 +243,4 @@ SystemCapabilities = {
 
 **✅ Kod tarafında her şey hazır. Şimdi Xcode UI'da capability'leri ekleyip işaretlemeniz gerekiyor!**
 
+

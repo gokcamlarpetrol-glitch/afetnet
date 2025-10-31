@@ -152,3 +152,6 @@ Developer Portal'da capability'leri açıp, profilleri yeniledikten sonra:
 
 **NOT:** Bu işlem her capability değişikliğinde tekrarlanmalı. Developer Portal'da açmadığınız capability'ler Xcode'da görünmez ve profil oluşturulamaz.
 
+
+
+

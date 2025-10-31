@@ -194,3 +194,6 @@ Xcode eşleştirdikten sonra Developer Portal'da kontrol edin:
 
 Xcode otomatik olarak Developer Portal'a eşleştirecek!
 
+
+
+

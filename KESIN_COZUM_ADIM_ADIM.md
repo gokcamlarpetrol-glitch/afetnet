@@ -167,3 +167,6 @@ Bu seçenek işaretli değilse → `bluetooth-central` ve `bluetooth-peripheral`
 
 **🎯 ŞU AN YAPIN: Xcode'u açın ve Adım 2'yi takip edin!**
 
+
+
+

@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, Text, TouchableOpacity, View, StyleSheet } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { usePremium } from '../../../store/premium';
 import PremiumActiveScreen from '../../PremiumActive';
 
 export const PremiumSection = () => {
   const { isPremium } = usePremium();
+  const navigation = useNavigation<any>();
 
   if (!isPremium) {
     return (
@@ -129,9 +131,19 @@ export const PremiumSection = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.premiumButton}>
+          <TouchableOpacity
+            style={styles.premiumButton}
+            onPress={() => navigation.navigate('Paywall')}
+          >
             <Ionicons name="star" size={20} color="#fff" />
             <Text style={styles.premiumButtonText}>Premium Satın Al</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.premiumButton, { marginTop: 12, backgroundColor: 'transparent', borderWidth: 1, borderColor: '#3b82f6' }]}
+            onPress={() => navigation.navigate('Paywall')}
+          >
+            <Ionicons name="refresh" size={20} color="#3b82f6" />
+            <Text style={[styles.premiumButtonText, { color: '#3b82f6' }]}>Satın Alımları Geri Yükle</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
