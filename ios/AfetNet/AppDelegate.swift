@@ -4,29 +4,25 @@ import UIKit
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
-  // Window property required by Expo Dev Launcher
-  // Created before super call so it exists when Expo Dev Launcher accesses it
-  // But NOT made key/visible until after Expo initialization completes
+  // Window property - ExpoAppDelegate will manage it internally
+  // We only declare it so UIApplication.shared.delegate?.window works
   public var window: UIWindow?
   
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Create window BEFORE super call so Expo Dev Launcher can access it
-    // But do NOT call makeKeyAndVisible() yet - this preserves Expo's initialization order
-    // ExpoAppDelegate will call:
-    // 1. autoSetupPrepare (creates ReactDelegate)
-    // 2. autoSetupStart (uses window) - requires window to exist
-    // Do NOT set rootViewController - let Expo handle that
+    // CRITICAL: Let ExpoAppDelegate handle complete initialization FIRST
+    // This ensures autoSetupPrepare is called before autoSetupStart
+    // ExpoAppDelegate will create and configure window internally
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    
+    // After Expo setup completes (autoSetupPrepare and autoSetupStart have finished),
+    // ensure window exists and is key/visible
+    // ExpoAppDelegate may have created window, but if not, create it
     if self.window == nil {
       self.window = UIWindow(frame: UIScreen.main.bounds)
     }
-    
-    // Let ExpoAppDelegate handle complete initialization sequence
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    
-    // After Expo setup completes (autoSetupPrepare and autoSetupStart), make window key and visible
     self.window?.makeKeyAndVisible()
     
     return result
