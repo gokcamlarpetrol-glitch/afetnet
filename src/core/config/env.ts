@@ -44,5 +44,17 @@ export const ENV = {
   PRIVACY_POLICY_URL: getEnvVar('PRIVACY_POLICY_URL', 'https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html'),
   TERMS_OF_SERVICE_URL: getEnvVar('TERMS_OF_SERVICE_URL', 'https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html'),
   SUPPORT_EMAIL: getEnvVar('SUPPORT_EMAIL', 'support@afetnet.app'),
+  
+  // Backend API
+  API_BASE_URL: getEnvVar('API_BASE_URL', 'https://afetnet-backend.onrender.com'),
+  
+  // EEW WebSocket URLs
+  EEW_WS_TR_PRIMARY: getEnvVar('EEW_WS_TR_PRIMARY', 'wss://eew.afad.gov.tr/ws'),
+  EEW_WS_TR_FALLBACK: getEnvVar('EEW_WS_TR_FALLBACK', 'wss://eew.kandilli.org/ws'),
+  EEW_WS_GLOBAL_PRIMARY: getEnvVar('EEW_WS_GLOBAL_PRIMARY', 'wss://earthquake.usgs.gov/ws/eew'),
+  EEW_PROXY_WS: getEnvVar('EEW_PROXY_WS', 'wss://afetnet-backend.onrender.com/eew'),
+  
+  // Map Tiles
+  MAP_TILE_URL: getEnvVar('MAP_TILE_URL', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),
 };
 
