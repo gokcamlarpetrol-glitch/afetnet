@@ -6,11 +6,11 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
-import HomeScreen from '../screens/HomeScreen';
-import MapScreen from '../screens/MapScreen';
-import FamilyScreen from '../screens/FamilyScreen';
-import MessagesScreen from '../screens/MessagesScreen';
-import SettingsScreen from '../screens/SettingsScreen';
+import HomeScreen from '../screens/home';
+import MapScreen from '../screens/map';
+import FamilyScreen from '../screens/family';
+import MessagesScreen from '../screens/messages';
+import SettingsScreen from '../screens/settings';
 
 const Tab = createBottomTabNavigator();
 
