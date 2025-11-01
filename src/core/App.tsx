@@ -12,12 +12,12 @@ import { initializeApp, shutdownApp } from './init';
 import ErrorBoundary from '../../src/ui/ErrorBoundary';
 
 // Screens
-import HomeScreen from './screens/HomeScreen';
-import MapScreen from './screens/MapScreen';
-import FamilyScreen from './screens/FamilyScreen';
-import MessagesScreen from './screens/MessagesScreen';
-import SettingsScreen from './screens/SettingsScreen';
-import PaywallScreen from './screens/PaywallScreen';
+import HomeScreen from './screens/home';
+import MapScreen from './screens/map';
+import FamilyScreen from './screens/family';
+import MessagesScreen from './screens/messages';
+import SettingsScreen from './screens/settings';
+import PaywallScreen from './screens/paywall';
 
 // Navigation
 import MainTabs from './navigation/MainTabs';
