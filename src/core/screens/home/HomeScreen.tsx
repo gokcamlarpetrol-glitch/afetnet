@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, StyleSheet, Pressable } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, StyleSheet, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing } from '../../theme';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
@@ -16,6 +16,8 @@ import StatsCard from '../../components/cards/StatsCard';
 import MeshStatusCard from '../../components/cards/MeshStatusCard';
 import StatusBadge from '../../components/badges/StatusBadge';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import SOSModal, { SOSData } from '../../components/modals/SOSModal';
+import { apiClient } from '../../api/client';
 
 export default function HomeScreen({ navigation }: any) {
   const [sosModalVisible, setSosModalVisible] = useState(false);
@@ -42,7 +44,30 @@ export default function HomeScreen({ navigation }: any) {
 
   const handleSOSPress = () => {
     setSosModalVisible(true);
-    // TODO: Open SOS modal
+  };
+
+  const handleSOSSubmit = async (data: SOSData) => {
+    try {
+      // Send to backend
+      if (isOnline) {
+        await apiClient.post('/sos/send', data);
+        Alert.alert('SOS Gönderildi', 'Acil yardım çağrınız alındı ve kurtarma ekipleriyle paylaşıldı!');
+      } else {
+        // Offline - send via BLE mesh
+        const { sendMessage } = useMesh();
+        await sendMessage(JSON.stringify({
+          type: 'sos',
+          ...data,
+          timestamp: Date.now(),
+        }));
+        Alert.alert('SOS Gönderildi', 'SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderildi.');
+      }
+      
+      setSosModalVisible(false);
+    } catch (error) {
+      console.error('SOS error:', error);
+      Alert.alert('Hata', 'SOS gönderilemedi. Lütfen tekrar deneyin.');
+    }
   };
 
   const handleEarthquakePress = (earthquake: any) => {
@@ -214,6 +239,13 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
       </ScrollView>
+
+      {/* SOS Modal */}
+      <SOSModal
+        visible={sosModalVisible}
+        onClose={() => setSosModalVisible(false)}
+        onSubmit={handleSOSSubmit}
+      />
     </View>
   );
 }
