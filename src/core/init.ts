@@ -9,6 +9,7 @@ import { notificationService } from './services/NotificationService';
 import { premiumService } from './services/PremiumService';
 import { firebaseService } from './services/FirebaseService';
 import { locationService } from './services/LocationService';
+import { eewService } from './services/EEWService';
 
 let isInitialized = false;
 let isInitializing = false;
@@ -44,13 +45,17 @@ export async function initializeApp() {
     console.log('[Init] Step 5/6: Starting earthquake service...');
     await earthquakeService.start();
 
-    // Step 6: BLE Mesh Service
-    console.log('[Init] Step 6/6: Starting BLE mesh...');
-    await bleMeshService.start();
+        // Step 6: BLE Mesh Service
+        console.log('[Init] Step 6/7: Starting BLE mesh...');
+        await bleMeshService.start();
 
-    isInitialized = true;
-    isInitializing = false;
-    console.log('[Init] ✅ App initialized successfully');
+        // Step 7: EEW Service
+        console.log('[Init] Step 7/7: Starting EEW service...');
+        await eewService.start();
+
+        isInitialized = true;
+        isInitializing = false;
+        console.log('[Init] ✅ App initialized successfully');
 
   } catch (error) {
     console.error('[Init] ❌ Initialization error:', error);
