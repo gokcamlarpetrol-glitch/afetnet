@@ -1,3 +1,4 @@
+import { logger } from '../utils/productionLogger';
 // STARTER EXTRACT - PRODUCTION READY
 // Extracts starter map data for offline use
 
@@ -21,18 +22,18 @@ export class StarterExtract {
 
   async extract(): Promise<boolean> {
     try {
-      console.log('Starting map extraction...');
-      console.log('Bounds:', this.options.bounds);
-      console.log('Zoom levels:', this.options.zoomLevels);
-      console.log('Output path:', this.options.outputPath);
+      logger.info('Starting map extraction...');
+      logger.debug('Bounds', this.options.bounds);
+      logger.debug('Zoom levels', this.options.zoomLevels);
+      logger.debug('Output path', this.options.outputPath);
 
       // Mock extraction process
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      console.log('Map extraction completed successfully');
+      logger.info('Map extraction completed successfully');
       return true;
     } catch (error) {
-      console.error('Map extraction failed:', error);
+      logger.error('Map extraction failed', error);
       return false;
     }
   }
@@ -43,7 +44,7 @@ export class StarterExtract {
   }
 
   async cancel(): Promise<void> {
-    console.log('Map extraction cancelled');
+    logger.warn('Map extraction cancelled');
   }
 }
 

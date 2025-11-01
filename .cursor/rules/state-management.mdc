@@ -1,0 +1,133 @@
+---
+description: State management patterns using Zustand and Context API
+globs: ["src/store/**/*.ts", "src/services/**/*.ts", "src/**/*.{ts,tsx}"]
+alwaysApply: false
+---
+
+# State Management
+
+## Zustand for Global State
+
+* Use Zustand for global state management (already integrated)
+* Store definitions in `src/store/` directory
+* Example stores: `beacon/store.ts`, `board/store.ts`, `datapack/store.ts`, `disasterRecovery/store.ts`
+* Create focused, feature-specific stores rather than monolithic state
+
+## Store Structure
+
+* Keep stores focused on specific features or domains
+* Use selector patterns to prevent unnecessary re-renders
+* Example:
+  ```typescript
+  const useBeaconStore = () => useStore(state => state.beacons);
+  const count = useStore(state => state.count); // not entire store
+  ```
+
+## Minimize Local State
+
+* Minimize useState; prefer derived state and memoization when possible
+* Use local state only for UI-only concerns (input values, toggle states)
+* Move shared state to Zustand stores or Context
+
+## Context API Usage
+
+* Use Context API for theme, i18n, and feature flags
+* Avoid prop drilling beyond 2 levels using context
+* Create context providers for cross-cutting concerns
+* Example: ThemeContext, I18nContext, FeatureFlagContext
+
+## State Colocation
+
+* Keep state as close as possible to where it's used
+* Don't lift state higher than necessary
+* Use local state for truly local UI state
+
+## Store Organization
+
+* Structure stores to prevent unnecessary re-renders
+* Separate concerns: UI state vs domain state vs caching state
+* Use slices or modules for large stores
+* See existing stores in `src/store/` for patterns
+
+## Async State Handling
+
+* Handle loading, error, and success states explicitly
+* Use clear naming: `isLoading`, `error`, `data`
+* Pattern:
+  ```typescript
+  interface State {
+    data: Data | null;
+    isLoading: boolean;
+    error: Error | null;
+  }
+  ```
+
+## Derived State
+
+* Use computed/derived values instead of storing duplicates
+* Use selectors with memoization for derived state
+* Example: Don't store both firstName + lastName and fullName; compute fullName
+
+## State Immutability
+
+* Always update state immutably in Zustand stores
+* Use spread operator or libraries like Immer if needed
+* Example: `set({ count: state.count + 1 })` not `state.count++`
+
+## Store Initialization
+
+* Initialize stores with default values
+* Load persisted state in initialization
+* Use persistent middleware for stores that need persistence
+* Example: AsyncStorage integration for offline-first apps
+
+## State Persistence
+
+* Persist critical state to AsyncStorage or SQLite
+* Use secure storage (expo-secure-store) for sensitive data
+* Implement state recovery on app restart
+* See `src/bootstrap/` for initialization patterns
+
+## Store Actions
+
+* Define actions as methods on store objects
+* Keep actions focused and single-purpose
+* Use async/await properly in actions
+* Example:
+  ```typescript
+  const useStore = create((set, get) => ({
+    data: null,
+    loadData: async () => {
+      const data = await fetchData();
+      set({ data });
+    }
+  }));
+  ```
+
+## State Testing
+
+* Test store logic independently from components
+* Mock store in component tests
+* Test state transitions and edge cases
+* Keep stores pure and predictable
+
+## Reactive Updates
+
+* Use store subscriptions only when necessary
+* Prefer selector subscriptions for specific updates
+* Clean up subscriptions in useEffect cleanup
+* Example: `const unsubscribe = useStore.subscribe(...)`
+
+## Error State
+
+* Handle errors in state management
+* Store error state in stores or context
+* Provide error boundaries for critical state updates
+* Show user-friendly error messages
+
+## Performance Considerations
+
+* Avoid unnecessary re-renders from store changes
+* Use shallow comparison for object/array updates
+* Profile store performance with React DevTools
+* Batch multiple state updates when possible

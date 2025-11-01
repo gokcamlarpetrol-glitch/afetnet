@@ -20,7 +20,7 @@ const webhookTests = [
         transactionId: 'test_renewal_123',
         expiresDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnetapp.premium.monthly',
+        productId: 'org.afetapp.premium.monthly',
       },
     },
   },
@@ -31,7 +31,7 @@ const webhookTests = [
       data: {
         transactionId: 'test_status_change_123',
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnetapp.premium.yearly',
+        productId: 'org.afetapp.premium.yearly',
         autoRenewStatus: 'true',
       },
     },
@@ -43,7 +43,7 @@ const webhookTests = [
       data: {
         transactionId: 'test_expired_123',
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnetapp.premium.monthly',
+        productId: 'org.afetapp.premium.monthly',
       },
     },
   },
@@ -54,7 +54,7 @@ const webhookTests = [
       data: {
         transactionId: 'test_refund_123',
         originalTransactionId: 'test_original_123',
-        productId: 'org.afetnetapp.premium.lifetime',
+        productId: 'org.afetapp.premium.lifetime',
       },
     },
   },

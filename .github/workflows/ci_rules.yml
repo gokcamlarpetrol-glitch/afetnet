@@ -1,0 +1,171 @@
+name: CI Rules-Aware
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main, master, develop]
+
+jobs:
+  rules-check:
+    name: Rules & Secrets Guard
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Detect secrets in diff
+        id: secrets-check
+        run: |
+          echo "Checking for secrets in PR diff..."
+          
+          # Get changed files in PR
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # Patterns to detect secrets
+          SECRET_PATTERNS=".env|GoogleService-Info.plist|google-services.json|keystore|\.p8$|\.pem$|\.key$|api_key|secret_key|private_key"
+          
+          VIOLATIONS=""
+          for file in $CHANGED_FILES; do
+            if echo "$file" | grep -qE "$SECRET_PATTERNS"; then
+              VIOLATIONS="${VIOLATIONS}\n❌ SECRET DETECTED: $file"
+            fi
+          done
+          
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::$VIOLATIONS"
+            echo "::error::Secrets detected! Never commit .env, keystores, or API keys."
+            exit 1
+          fi
+          
+          echo "✅ No secrets detected"
+      
+      - name: PR size check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ADDED=$(git diff --numstat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | awk '{added+=$1} END {print added}')
+            DELETED=$(git diff --numstat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | awk '{deleted+=$2} END {print deleted}')
+            TOTAL=$((ADDED + DELETED))
+            
+            echo "PR Stats: +$ADDED -$DELETED = $TOTAL total lines"
+            
+            if [ "$TOTAL" -gt 800 ]; then
+              echo "::warning::PR size ($TOTAL lines) exceeds 800 lines. Consider splitting into smaller PRs."
+            else
+              echo "✅ PR size OK ($TOTAL lines)"
+            fi
+          fi
+      
+      - name: Check permissions documentation
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+            
+            # Check if Android or iOS permission files changed
+            PERM_CHANGED=$(echo "$CHANGED_FILES" | grep -E "(AndroidManifest\.xml|Info\.plist|entitlements)" || true)
+            
+            if [ -n "$PERM_CHANGED" ]; then
+              echo "::notice::Permission files changed. Ensure docs/permissions.md is updated if adding new permissions."
+            fi
+          fi
+      
+      - name: Rules summary
+        run: |
+          echo "## 📋 Rules Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Secrets guard: PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Bugbot Focus Areas:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Security: secrets check" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance: large PRs" >> $GITHUB_STEP_SUMMARY
+          echo "- Documentation: permissions" >> $GITHUB_STEP_SUMMARY
+
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    needs: health-check
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run typecheck
+        run: npm run typecheck
+      
+      - name: Run linter
+        run: npm run lint
+      
+      - name: Run tests
+        run: npm run test -- --coverage --ci --watchAll=false
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          file: ./coverage/coverage-final.json
+          fail_ci_if_error: false
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage/
+          retention-days: 7
+      
+      - name: CI results summary
+        if: always()
+        run: |
+          echo "## 🧪 CI Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All checks completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Bugbot should focus on:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Code quality and best practices" >> $GITHUB_STEP_SUMMARY
+          echo "- Test coverage and edge cases" >> $GITHUB_STEP_SUMMARY
+          echo "- Security patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance optimization opportunities" >> $GITHUB_STEP_SUMMARY
+
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    needs: rules-check
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run health check
+        run: npm run healthcheck
+

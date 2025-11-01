@@ -1,0 +1,110 @@
+---
+description: React Native and Expo core conventions based on official best practices
+globs: ["src/**/*.{ts,tsx}", "App.tsx", "app/**/*.{ts,tsx}"]
+alwaysApply: false
+---
+
+# React Native & Expo Conventions
+
+## Component Structure
+
+* Use functional components with hooks EXCLUSIVELY; NO class components
+* Structure files: exported component → subcomponents → helpers → static content → types
+* Keep components focused and single-purpose
+
+## Function Declarations
+
+* Use "function" keyword for pure functions and complex logic
+* Use const arrow functions for event handlers and callbacks
+* Example: `function calculateDistance(lat1, lat2) { ... }` vs `const handlePress = () => { ... }`
+
+## Naming Conventions
+
+* camelCase for variables and functions: `isFetchingData`, `handleUserInput`, `userProfile`
+* PascalCase for components: `UserProfile`, `ChatScreen`, `EmergencyAlert`
+* Event handlers: prefix with "handle" - `handlePress`, `handleChange`, `handleSubmit`
+
+## Early Returns
+
+* Use early returns for cleaner conditional code
+* Avoid nested if-else chains
+* Example:
+  ```typescript
+  if (!data) return null;
+  if (error) return <ErrorView />;
+  return <SuccessView data={data} />;
+  ```
+
+## JSX Patterns
+
+* Avoid unnecessary curly braces in JSX conditionals
+* Use concise syntax: `{condition && <Component />}` or `{condition ? <A /> : <B />}`
+* Prefer declarative JSX over imperative code
+* Keep JSX readable and nested max 2-3 levels
+
+## Expo Documentation
+
+* Follow official Expo documentation: https://docs.expo.dev/
+* Use Expo modules for cross-platform features (camera, location, notifications)
+* Leverage Expo's dev client for development builds
+
+## Hooks Best Practices
+
+* Use hooks at the top level of components, never inside loops or conditions
+* Create custom hooks for reusable logic: `useEEW()`, `useCompass()`, `usePDRFuse()`
+* Example custom hooks in `src/hooks/`: `useCompass.ts`, `useEEW.ts`, `usePWave.ts`
+
+## Component Composition
+
+* Favor composition over inheritance
+* Extract reusable logic into custom hooks
+* Create small, focused components
+* Use children prop for composable UI
+
+## Props Interface
+
+* Define clear prop interfaces using TypeScript
+* Keep props minimal and well-typed
+* Use destructuring in function parameters
+* Example: `const Button: React.FC<{ onPress: () => void; label: string }> = ({ onPress, label }) => ...`
+
+## Memoization Strategy
+
+* Use React.memo() for components with static or infrequent prop changes
+* Use useMemo for expensive calculations
+* Use useCallback for event handlers passed to child components
+* Don't over-memoize; profile performance first
+
+## State Management
+
+* Use local state (useState) for UI-only state
+* Use Zustand stores for global state (see `src/store/`)
+* Use Context API for theme, i18n, feature flags
+* Avoid prop drilling beyond 2 levels
+
+## Platform Detection
+
+* Use Platform.select() for platform-specific values
+* Use .android.ts and .ios.ts files for platform-specific code
+* Example: `Platform.select({ ios: 50, android: 60 })`
+
+## Navigation
+
+* Use react-navigation for routing and navigation
+* Follow navigation best practices in `src/navigation/`
+* Support deep linking and universal links
+* Use navigation options for proper header/screen configuration
+
+## Error Boundaries
+
+* Wrap app with ErrorBoundary: `src/ui/ErrorBoundary.tsx`
+* Use error boundaries for component error isolation
+* Display user-friendly error messages
+
+## Clean Code Principles
+
+* Write self-documenting code with clear names
+* Keep functions small and focused
+* Avoid deep nesting (max 3 levels)
+* Use early returns and guard clauses
+* Comment WHY, not WHAT

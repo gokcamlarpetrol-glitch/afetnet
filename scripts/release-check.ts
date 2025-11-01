@@ -6,7 +6,12 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../app/core/utils/logger';
+// Lightweight logger for script output
+const logger = {
+  info: (...args: any[]) => console.log(...args),
+  warn: (...args: any[]) => console.warn(...args),
+  error: (...args: any[]) => console.error(...args),
+};
 
 interface ReleaseCheck {
   category: string;
@@ -35,6 +40,21 @@ class ReleaseChecker {
 
     // 4. Apple Store Compliance
     await this.checkAppleStoreCompliance();
+
+    // 4.1 Placeholder Scan
+    const placeholderScan = this.scanForbiddenPlaceholders();
+    this.checks.push({
+      category: 'Placeholder Scan',
+      checks: [
+        {
+          name: 'Forbidden strings (yakında/coming soon/beta/demo/TODO)',
+          status: placeholderScan.count === 0 ? 'pass' : 'fail',
+          message: placeholderScan.count === 0
+            ? 'No forbidden placeholder strings found'
+            : `Found in ${placeholderScan.count} files (e.g., ${placeholderScan.samples.join(', ')})`,
+        },
+      ],
+    });
 
     // 5. Feature Integration
     await this.checkFeatureIntegration();
@@ -433,6 +453,60 @@ class ReleaseChecker {
     });
   }
 
+  /**
+   * Validate package version and build metadata follow expected format.
+   * Returns issues array if problems detected. This does not mutate files.
+   */
+  private async validateVersionBump(): Promise<{ valid: boolean; issues: string[] }>{
+    const issues: string[] = [];
+    try {
+      const pkgRaw = fs.readFileSync('package.json', 'utf8');
+      const pkg = JSON.parse(pkgRaw);
+      const version: unknown = pkg.version;
+      const buildNumber: unknown = pkg.buildNumber ?? pkg.expo?.ios?.buildNumber ?? pkg.expo?.android?.versionCode;
+
+      // semver x.y.z where x,y,z are non-negative integers
+      const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+].*)?$/;
+      if (typeof version !== 'string' || !semverRe.test(version)) {
+        issues.push(`Invalid semver in package.json: ${String(version)}`);
+      }
+
+      if (buildNumber !== undefined) {
+        const bn = Number(buildNumber);
+        if (!Number.isFinite(bn) || bn <= 0) {
+          issues.push(`Invalid buildNumber: ${String(buildNumber)}`);
+        }
+      }
+
+      return { valid: issues.length === 0, issues };
+    } catch (e: any) {
+      issues.push(`Failed to read package.json: ${e?.message || String(e)}`);
+      return { valid: false, issues };
+    }
+  }
+
+  // Additional rule: scan for forbidden placeholder strings that cause 2.2 rejections
+  private scanForbiddenPlaceholders(): { count: number; samples: string[] } {
+    const root = process.cwd();
+    const files = this.findFilesRecursively(root, ['.ts', '.tsx', '.md', '.json']);
+    const forbidden = /(yakında|coming\s+soon|\bbeta\b|\bdemo\b|TODO)/i;
+    const samples: string[] = [];
+    let count = 0;
+    for (const file of files) {
+      if (file.includes('node_modules')) continue;
+      try {
+        const content = fs.readFileSync(file, 'utf8');
+        const m = content.match(forbidden);
+        if (m) {
+          count++;
+          samples.push(`${file}`);
+          if (samples.length >= 5) break;
+        }
+      } catch {}
+    }
+    return { count, samples };
+  }
+
   private async checkFeatureIntegration(): Promise<void> {
     const checks: ReleaseCheck['checks'] = [];
 
@@ -675,10 +749,9 @@ async function main() {
 // Export for use in other scripts
 export { ReleaseChecker };
 
-// Run if called directly
-if (require.main === module) {
-  main().catch(error => {
-    console.error('Fatal error:', error);
-    process.exit(1);
-  });
-}
+// Run if called directly (ESM-compatible)
+// eslint-disable-next-line @typescript-eslint/no-floating-promises
+main().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});

@@ -1,0 +1,96 @@
+---
+description: TypeScript excellence standards for mobile development with strict typing
+globs: ["src/**/*.{ts,tsx}", "**/*.ts", "**/*.tsx", "App.tsx"]
+alwaysApply: true
+---
+
+# TypeScript Best Practices
+
+## Core TypeScript Usage
+
+* Use TypeScript for ALL code in the project
+* Prefer interfaces over type aliases for extendable contracts and better error messages
+* Define interfaces for component props, function parameters, and return types
+* Example: `interface Props { title: string; onPress: () => void; }`
+
+## Avoid Enums
+
+* Do NOT use enums; use const objects or maps instead for better type inference and tree-shaking
+* Example: `const Status = { ACTIVE: 'active', INACTIVE: 'inactive' } as const`
+* Prefer union types: `type Status = 'active' | 'inactive'`
+
+## Strict Mode Configuration
+
+* Enable strict mode in tsconfig.json for better type safety
+* Note: Current config has strict disabled but handle undefined explicitly
+* When strict is enabled, use `?` optional chaining and nullish coalescing `??`
+
+## React Component Typing
+
+* Use `React.FC<Props>` or explicit function typing for components
+* Example: `const MyComponent: React.FC<Props> = ({ title }) => <View>{title}</View>`
+* Or: `function MyComponent(props: Props) { return <View>{props.title}</View> }`
+
+## Avoid Any Type
+
+* NEVER use `any`; use `unknown` and narrow with type guards
+* Create type guards: `function isUser(value: unknown): value is User { ... }`
+* Use type assertions sparingly and safely: `as Type` or `<Type>value`
+
+## Type Organization
+
+* Define types in feature-specific `types.ts` files (e.g., `src/eew/types.ts`, `src/family/types.ts`)
+* Keep types close to where they're used
+* Export shared types from a single source when used across modules
+
+## Discriminated Unions
+
+* Use discriminated unions for message/event types with common 'type' field
+* Example: `type Event = { type: 'MESSAGE', payload: string } | { type: 'ERROR', code: number }`
+
+## Naming Conventions
+
+* Use descriptive variable names with auxiliary verbs: `isLoading`, `hasError`, `canConnect`, `shouldRetry`
+* Use clear names: `userProfile` instead of `user`, `deviceLocation` instead of `location`
+* Prefix boolean variables with `is`, `has`, `can`, `should`
+
+## Utility Types
+
+* Leverage TypeScript utility types: `Partial<T>`, `Pick<T, K>`, `Omit<T, K>`, `Record<K, V>`
+* Use `Partial` for optional updates: `function updateUser(id: string, changes: Partial<User>)`
+* Use `Pick` to select properties: `type UserBasic = Pick<User, 'id' | 'name'>`
+
+## Function Typing
+
+* Use explicit return types for public functions
+* Allow inference for internal/private functions
+* Example: `async function fetchUser(id: string): Promise<User> { ... }`
+
+## Async/Await Patterns
+
+* Always type async functions: `async function loadData(): Promise<Data>`
+* Handle Promise errors with try/catch
+* Use `Promise.all()` for parallel operations: `await Promise.all([promise1, promise2])`
+
+## Import/Export Patterns
+
+* Use named exports for most exports
+* Use default exports only for React components
+* Example: `export const calculateDistance = () => ...` then `import { calculateDistance } from './util'`
+
+## Type Guards and Narrowing
+
+* Create type guards to narrow union types
+* Example: `function isEEWEvent(event: Event): event is EEWEvent { return event.type === 'EEW' }`
+* Use `instanceof` for class checks
+
+## Readonly Modifiers
+
+* Use `readonly` for immutable data structures
+* Example: `interface Config { readonly apiUrl: string; readonly timeout: number }`
+* Prefer `Readonly<T>` utility type for entire objects
+
+## Project References
+
+* Current baseUrl: `.` with paths `@/*` → `src/*` and `@shared/*` → `shared/*`
+* Use path aliases instead of relative imports: `@/components/Button` not `../../components/Button`

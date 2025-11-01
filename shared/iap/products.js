@@ -5,9 +5,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logPremiumStatus = exports.logProductDetection = exports.PRODUCT_CONFIG = exports.isValidProduct = exports.isLifetimeProduct = exports.isSubscriptionProduct = exports.LIFETIME_PRODUCTS = exports.SUBSCRIPTION_PRODUCTS = exports.IAP_PRODUCT_IDS = exports.IAP_PRODUCTS = void 0;
 exports.IAP_PRODUCTS = {
-    monthly: 'org.afetnetapp.premium.monthly',
-    yearly: 'org.afetnetapp.premium.yearly',
-    lifetime: 'org.afetnetapp.premium.lifetime',
+    monthly: 'org.afetapp.premium.monthly',
+    yearly: 'org.afetapp.premium.yearly',
+    lifetime: 'org.afetapp.premium.lifetime',
 };
 exports.IAP_PRODUCT_IDS = Object.values(exports.IAP_PRODUCTS);
 // Product categories

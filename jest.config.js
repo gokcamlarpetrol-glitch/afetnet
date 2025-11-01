@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   preset: 'react-native',
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   transformIgnorePatterns: [

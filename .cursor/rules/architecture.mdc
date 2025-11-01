@@ -1,0 +1,68 @@
+---
+description: Core architectural patterns for disaster-resilient mobile apps with offline-first design
+globs: ["src/**/*.{ts,tsx}", "App.tsx", "app/**/*.{ts,tsx}", "domain/**/*.ts"]
+alwaysApply: false
+---
+
+# Architecture Guidelines
+
+## Offline-First Architecture
+
+* Implement offline-first design with local SQLite database and message queue systems
+* Use `src/db/core.ts` and `src/queue/` for persistent offline data
+* Ensure critical operations work without network connectivity
+* Sync data when connectivity is restored via `src/services/OfflineSyncManager`
+
+## Service-Oriented Design
+
+* Follow the service-oriented pattern: managers, stores, services
+* Structure: UI (`src/screens/`) → Services (`src/services/`) → Store (`src/store/` + Zustand) → DB/Storage (`src/db/`)
+* Example services: `militaryGradeSecurity`, `advancedLocationManager`, `networkIntelligenceEngine`, `disasterRecoveryManager`
+
+## Path Aliases
+
+* Use `@/` for src imports (configured in tsconfig.json)
+* Use `@shared/` for shared modules between platforms
+* Example: `import { something } from '@/components/Component'` instead of relative paths
+
+## Feature-First Organization
+
+* Group related components, hooks, types, and styles by feature
+* Example: `src/eew/` contains CountdownModal.tsx, store.ts, types.ts, useEEW.ts
+* Keep feature modules self-contained and loosely coupled
+
+## Component Modularity
+
+* Apply single responsibility principle to all components
+* Break down large components into smaller, reusable pieces
+* Keep components focused on one task
+* Export subcomponents separately when reused
+
+## Platform-Specific Code
+
+* Use `.android.ts` and `.ios.ts` file extensions for platform-specific implementations
+* Use `Platform.select()` for simple platform differences
+* See `src/ble/ble.android.ts` and `src/ble/ble.ios.ts` for examples
+
+## Directory Structure
+
+```
+src/
+  ├── screens/        # UI screens (147 files - React components)
+  ├── services/       # Business logic services (58 files)
+  ├── store/          # Zustand state stores (23 files)
+  ├── db/             # Database layer (SQLite)
+  ├── crypto/         # Encryption and security
+  ├── ble/            # Bluetooth Low Energy
+  ├── mesh/           # Mesh networking
+  ├── eew/            # Earthquake Early Warning
+  ├── components/     # Reusable UI components
+  └── lib/            # Utility libraries
+```
+
+## Module Boundaries
+
+* UI components should NOT import services directly
+* Services should communicate via stores or events
+* Shared utilities go in `src/lib/` or `src/utils/`
+* Domain logic in `app/domain/` for shared business rules

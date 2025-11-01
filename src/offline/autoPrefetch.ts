@@ -2,6 +2,7 @@
 // Automatically prefetches tiles for offline use
 
 import { TileManager } from './tileManager';
+import { logger } from '../utils/productionLogger';
 import { getTilesInBounds, deg2num } from './tiles';
 
 export interface PrefetchOptions {
@@ -54,9 +55,9 @@ export class AutoPrefetch {
         await this.tileManager.getTile(tile.z, tile.x, tile.y);
       }
 
-      console.log(`Prefetched ${limitedTiles.length} tiles for location ${lat}, ${lon}`);
+      logger.info(`Prefetched ${limitedTiles.length} tiles for location`, { lat, lon });
     } catch (error) {
-      console.error('AutoPrefetch error:', error);
+      logger.error('AutoPrefetch error', error);
     }
   }
 
@@ -66,7 +67,7 @@ export class AutoPrefetch {
         await this.prefetchForLocation(point.lat, point.lon);
       }
     } catch (error) {
-      console.error('Route prefetch error:', error);
+      logger.error('Route prefetch error', error);
     }
   }
 }

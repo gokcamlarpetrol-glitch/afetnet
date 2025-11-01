@@ -62,18 +62,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ],
       ITSAppUsesNonExemptEncryption: false,
     },
+    // Entitlements - Development için minimal
+    // Apple Developer Portal'da capabilities aktif edilmedikçe çoğu entitlement hata verir
+    // Background modes Info.plist'te UIBackgroundModes ile tanımlı (yeterli)
     entitlements: {
-      "com.apple.developer.push-notifications": true,
-      "com.apple.developer.remote-notification": true,
-      "com.apple.developer.background-fetch": true,
-      "com.apple.developer.location.background": true,
-      "com.apple.developer.location.always": true,
-      "com.apple.developer.location.when-in-use": true,
-      "com.apple.developer.location.push": true,
-      "com.apple.developer.bluetooth-central": true,
-      "com.apple.developer.bluetooth-peripheral": true,
-            "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
-      "aps-environment": "production",
+      "aps-environment": "development", // Development için "development"
+      "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
+      // Push notifications - Apple Developer Portal'da aktif edildiyse true yapın
+      // "com.apple.developer.push-notifications": true,
     },
   },
   android: {
@@ -100,6 +96,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },
     devClient: true,
+    EEW_ENABLED: process.env.EEW_ENABLED === 'true' ? true : false,
+    EEW_NATIVE_ALARM: process.env.EEW_NATIVE_ALARM === 'true' ? true : false,
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app",

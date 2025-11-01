@@ -1,0 +1,165 @@
+---
+description: Error handling and resilience patterns for React Native mobile apps
+globs: ["src/**/*.{ts,tsx}", "App.tsx", "src/ui/ErrorBoundary.tsx"]
+alwaysApply: true
+---
+
+# Error Handling & Resilience
+
+## Async Operation Wrapping
+
+* Wrap ALL async operations in try/catch blocks, especially native modules
+* Handle promises properly with try/catch or .catch()
+* Example:
+  ```typescript
+  try {
+    const result = await fetchData();
+  } catch (error) {
+    handleError(error);
+  }
+  ```
+
+## Error Boundary
+
+* Use ErrorBoundary (`src/ui/ErrorBoundary.tsx`) for React component errors
+* App.tsx already wraps with ErrorBoundary
+* Create specific error boundaries for feature modules
+* Display user-friendly fallback UI
+
+## Early Returns and Guard Clauses
+
+* Handle errors and edge cases at the beginning of functions
+* Use guard clauses for preconditions and invalid states
+* Example:
+  ```typescript
+  if (!data) return null;
+  if (error) return <ErrorView error={error} />;
+  // main logic here
+  ```
+
+## Production-Safe Logging
+
+* Use `src/diagnostics/autoLog.ts` for production-safe logging
+* Do NOT use console.log in production; wrap with __DEV__ guards
+* Log errors to crash reporting service in production
+* Example:
+  ```typescript
+  if (__DEV__) {
+    console.log('Debug info');
+  } else {
+    logToService('Info');
+  }
+  ```
+
+## Crash Reporting
+
+* Integrate Sentry or Firebase Crashlytics for production error tracking
+* Capture stack traces and context for debugging
+* Notify developers of critical errors
+* Monitor error rates and trends
+
+## User-Friendly Errors
+
+* Translate ALL error messages via i18n
+* Show actionable error messages to users
+* Example: "Connection failed. Please check your internet." not "Error: ECONNREFUSED"
+* Provide retry options for recoverable errors
+
+## Custom Error Types
+
+* Create custom error types for consistent error handling
+* Differentiate between error types: ValidationError, NetworkError, AuthError
+* Example:
+  ```typescript
+  class NetworkError extends Error {
+    constructor(message: string, public code: string) {
+      super(message);
+      this.name = 'NetworkError';
+    }
+  }
+  ```
+
+## Error Propagation
+
+* Propagate errors up the call stack appropriately
+* Catch errors at the right level (UI vs service vs domain)
+* Don't swallow errors silently without logging
+* Use error boundaries to catch React errors
+
+## Native Module Errors
+
+* Handle errors from native modules carefully
+* Wrap native calls in try/catch with error boundaries
+* Provide fallbacks for native module failures
+* Examples: BLE, location, camera, sensors
+
+## Network Error Handling
+
+* Handle network failures gracefully
+* Implement retry logic with exponential backoff
+* Show offline indicators
+* Use Network Intelligence Engine: `src/services/NetworkIntelligenceEngine`
+
+## Validation Errors
+
+* Validate inputs and provide clear error messages
+* Use type guards and validation libraries
+* Show field-level error messages in forms
+* Prevent invalid data from entering the system
+
+## Async State Errors
+
+* Handle errors in async state management
+* Store error state properly in stores
+* Show error UI based on state
+* Allow users to retry failed operations
+
+## Background Task Errors
+
+* Handle errors in background tasks: `src/background/`
+* Log background task failures
+* Retry failed background operations appropriately
+* Notify users of critical background failures
+
+## Graceful Degradation
+
+* App should function with denied permissions
+* Provide fallback features when hardware unavailable
+* Handle missing dependencies gracefully
+* Implement offline mode when network fails
+
+## Error Recovery
+
+* Implement automatic retry for transient errors
+* Provide manual retry options for users
+* Reset state on retry
+* Clear error state on successful retry
+
+## Error Context
+
+* Capture relevant context with errors
+* Include user actions, state, and environment
+* Use structured logging for better debugging
+* Preserve stack traces
+
+## Development Error Handling
+
+* Show detailed errors in development (__DEV__)
+* Use React DevTools for error inspection
+* Enable Redux DevTools for state debugging
+* Provide helpful error messages during development
+
+## Testing Error Cases
+
+* Test error scenarios thoroughly
+* Mock error conditions in tests
+* Test error boundaries
+* Test recovery flows
+* Use Jest for error testing: `src/**/*.test.ts`
+
+## Monitoring and Alerts
+
+* Monitor error rates in production
+* Set up alerts for critical errors
+* Track error trends over time
+* Review error logs regularly

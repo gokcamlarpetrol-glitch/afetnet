@@ -9,6 +9,7 @@ import { safeStringify } from './safeStringify';
 declare const console: {
    
   log: (...args: any[]) => void;
+  info?: (...args: any[]) => void;
   warn: (...args: any[]) => void;
   error: (...args: any[]) => void;
   debug?: (...args: any[]) => void;
@@ -21,7 +22,7 @@ export const logger = {
     if (isDevelopment) {
       // Use console to avoid recursion
        
-      console.log(`[INFO] ${message}`, typeof data === 'object' ? safeStringify(data) : (data ?? ''));
+      console.info?.(`[INFO] ${message}`, typeof data === 'object' ? safeStringify(data) : (data ?? ''));
     }
   },
 
@@ -57,7 +58,7 @@ export const logger = {
     productDetected: (productId: string) => {
       if (isDevelopment) {
          
-        console.log(`✅ Premium product detected: ${productId}`);
+        console.info?.(`✅ Premium product detected: ${productId}`);
       }
     },
 
@@ -66,14 +67,14 @@ export const logger = {
         const status = isPremium ? 'ACTIVE' : 'INACTIVE';
         const productInfo = productId ? ` (Product: ${productId})` : '';
          
-        console.log(`📊 Premium Status: ${status}${productInfo}`);
+        console.info?.(`📊 Premium Status: ${status}${productInfo}`);
       }
     },
 
     purchaseSuccess: (productId: string, transactionId?: string) => {
       if (isDevelopment) {
          
-        console.log(`💳 Purchase successful: ${productId}${transactionId ? ` (${transactionId})` : ''}`);
+        console.info?.(`💳 Purchase successful: ${productId}${transactionId ? ` (${transactionId})` : ''}`);
       }
     },
 
@@ -87,7 +88,7 @@ export const logger = {
     restoreSuccess: (count: number) => {
       if (isDevelopment) {
          
-        console.log(`🔄 Restore successful: ${count} purchases restored`);
+        console.info?.(`🔄 Restore successful: ${count} purchases restored`);
       }
     },
 
@@ -101,7 +102,7 @@ export const logger = {
     verificationSuccess: (productId: string) => {
       if (isDevelopment) {
          
-        console.log(`✅ Receipt verification passed: ${productId}`);
+        console.info?.(`✅ Receipt verification passed: ${productId}`);
       }
     },
 
@@ -122,7 +123,7 @@ export const logger = {
     webhookReceived: (type: string, transactionId: string) => {
       if (isDevelopment) {
          
-        console.log(`🔔 Webhook received: ${type} for ${transactionId}`);
+        console.info?.(`🔔 Webhook received: ${type} for ${transactionId}`);
       }
     },
   },
