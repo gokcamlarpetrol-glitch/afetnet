@@ -165,3 +165,6 @@ Xcode capability'leri ekleyince otomatik olarak Developer Portal'a da eklenecek 
 
 
 
+
+
+

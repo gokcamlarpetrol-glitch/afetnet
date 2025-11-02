@@ -2,19 +2,25 @@
  * NOTIFICATION SERVICE - Simple Notification Management
  */
 
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { createLogger } from '../utils/logger';
 
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+const logger = createLogger('NotificationService');
+
+// Lazy import notifications to avoid early initialization
+let Notifications: any = null;
+
+function getNotifications() {
+  if (!Notifications) {
+    try {
+      Notifications = require('expo-notifications');
+    } catch (error) {
+      logger.error('expo-notifications not available:', error);
+      return null;
+    }
+  }
+  return Notifications;
+}
 
 class NotificationService {
   private isInitialized = false;
@@ -22,9 +28,30 @@ class NotificationService {
   async initialize() {
     if (this.isInitialized) return;
 
-    console.log('[NotificationService] Initializing...');
+    if (__DEV__) logger.info('Initializing...');
 
     try {
+      const Notifications = getNotifications();
+      if (!Notifications) {
+        logger.warn('Notifications not available - skipping initialization');
+        return;
+      }
+
+      // Set notification handler
+      try {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+          }),
+        });
+      } catch (error) {
+        logger.error('Failed to set notification handler:', error);
+      }
+
       // Request permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -35,7 +62,7 @@ class NotificationService {
       }
 
       if (finalStatus !== 'granted') {
-        console.warn('[NotificationService] Permission not granted');
+        if (__DEV__) logger.warn('Permission not granted');
         return;
       }
 
@@ -63,15 +90,18 @@ class NotificationService {
       }
 
       this.isInitialized = true;
-      console.log('[NotificationService] Initialized successfully');
+      if (__DEV__) logger.info('Initialized successfully');
 
     } catch (error) {
-      console.error('[NotificationService] Initialization error:', error);
+      logger.error('Initialization error:', error);
     }
   }
 
   async showEarthquakeNotification(magnitude: number, location: string) {
     try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `🚨 Deprem: ${magnitude.toFixed(1)}`,
@@ -83,12 +113,15 @@ class NotificationService {
         trigger: null, // Show immediately
       });
     } catch (error) {
-      console.error('[NotificationService] Earthquake notification error:', error);
+      logger.error('Earthquake notification error:', error);
     }
   }
 
   async showSOSNotification(from: string) {
     try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title: '🆘 Acil Durum',
@@ -100,12 +133,15 @@ class NotificationService {
         trigger: null,
       });
     } catch (error) {
-      console.error('[NotificationService] SOS notification error:', error);
+      logger.error('SOS notification error:', error);
     }
   }
 
   async showMessageNotification(from: string, content: string) {
     try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `💬 ${from}`,
@@ -116,7 +152,7 @@ class NotificationService {
         trigger: null,
       });
     } catch (error) {
-      console.error('[NotificationService] Message notification error:', error);
+      logger.error('Message notification error:', error);
     }
   }
 }

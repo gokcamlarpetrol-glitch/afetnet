@@ -32,17 +32,17 @@ export default function Input({ label, error, style, ...props }: InputProps) {
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: spacing.md,
+    marginBottom: 12,
   },
   label: {
     ...typography.caption,
     color: colors.text.tertiary,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   input: {
     backgroundColor: colors.background.input,
-    borderRadius: borderRadius.sm,
-    padding: spacing.md,
+    borderRadius: 8,
+    padding: 12,
     color: colors.text.primary,
     ...typography.body,
     borderWidth: 1,
@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
   error: {
     ...typography.small,
     color: colors.status.danger,
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
 });
 

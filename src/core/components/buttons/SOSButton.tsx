@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: spacing.xl,
+    marginVertical: 20,
   },
   pulseRing: {
     position: 'absolute',
@@ -148,10 +148,10 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.lg,
+    padding: 16,
   },
   iconContainer: {
-    marginBottom: spacing.sm,
+    marginBottom: 8,
   },
   text: {
     ...typography.h3,
@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: '900',
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
 });
 

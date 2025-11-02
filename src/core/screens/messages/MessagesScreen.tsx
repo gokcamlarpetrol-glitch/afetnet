@@ -1,5 +1,6 @@
 /**
- * MESSAGES SCREEN - Offline Messaging (PREMIUM)
+ * MESSAGES SCREEN - Premium Design
+ * Modern offline messaging interface
  */
 
 import React, { useEffect, useState } from 'react';
@@ -9,15 +10,28 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
+  TextInput,
+  StatusBar,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useMessageStore, Conversation } from '../../stores/messageStore';
 import { usePremiumStore } from '../../stores/premiumStore';
 import PremiumGate from '../../components/PremiumGate';
+import { colors, typography, spacing, borderRadius } from '../../theme';
+import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
+import * as haptics from '../../utils/haptics';
+import MessageTemplates from './MessageTemplates';
 
-export default function MessagesScreen() {
+
+export default function MessagesScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [isPremium, setIsPremium] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -28,61 +42,137 @@ export default function MessagesScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  const renderConversation = ({ item }: { item: Conversation }) => {
-    const date = new Date(item.lastMessageTime);
-    const timeStr = date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const filteredConversations = conversations.filter(conv =>
+    conv.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    conv.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-    return (
-      <Pressable style={styles.conversationCard}>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={24} color="#64748b" />
-        </View>
-        <View style={styles.conversationInfo}>
-          <View style={styles.conversationHeader}>
-            <Text style={styles.userName}>{item.userName}</Text>
-            <Text style={styles.time}>{timeStr}</Text>
-          </View>
-          <View style={styles.messagePreview}>
-            <Text style={styles.lastMessage} numberOfLines={1}>
-              {item.lastMessage}
-            </Text>
-            {item.unreadCount > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadText}>{item.unreadCount}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </Pressable>
+  const handleDeleteConversation = (userId: string) => {
+    Alert.alert(
+      'Konuşmayı Sil',
+      'Bu konuşmayı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.',
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Sil',
+          onPress: () => {
+            useMessageStore.getState().deleteConversation(userId);
+          },
+          style: 'destructive',
+        },
+      ]
     );
   };
+  
+  const handleNewMessage = () => {
+    haptics.impactMedium();
+    // Navigate to a new message screen or show a modal
+    Alert.alert('Yeni Mesaj', 'Yeni bir konuşma başlatma özelliği yakında eklenecek.');
+  };
+
+  const renderConversation = ({ item, index }: { item: Conversation; index: number }) => (
+    <SwipeableConversationCard
+      item={item}
+      index={index}
+      onPress={() => useMessageStore.getState().deleteConversation(item.userId)}
+      onDelete={() => handleDeleteConversation(item.userId)}
+    />
+  );
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Mesajlar</Text>
-        <Text style={styles.headerSubtitle}>
-          {conversations.length} konuşma • Offline
-        </Text>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Mesajlar</Text>
+          <Text style={styles.headerSubtitle}>
+            {conversations.length} konuşma • Offline
+          </Text>
+        </View>
+        <Pressable style={styles.headerButton}>
+          <Ionicons name="add-circle" size={28} color={colors.brand.primary} />
+        </Pressable>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <LinearGradient
+          colors={['#1e293b', '#0f172a']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.searchBar}
+        >
+          <Ionicons name="search" size={20} color={colors.text.tertiary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Mesajlarda ara..."
+            placeholderTextColor={colors.text.tertiary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={20} color={colors.text.tertiary} />
+            </Pressable>
+          )}
+        </LinearGradient>
+      </View>
+
+      {/* Quick Message Templates */}
+      <MessageTemplates />
+
+      {/* Conversations Header */}
+      <View style={styles.conversationsHeader}>
+        <Text style={styles.conversationsTitle}>Konuşmalar</Text>
+        <Text style={styles.conversationsCount}>{filteredConversations.length}</Text>
       </View>
 
       {/* Conversation List */}
       <FlatList
-        data={conversations}
+        data={filteredConversations}
         renderItem={renderConversation}
         keyExtractor={(item) => item.userId}
         contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles" size={64} color="#475569" />
+            <LinearGradient
+              colors={['#1e293b', '#0f172a']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.emptyIcon}
+            >
+              <Ionicons name="chatbubbles-outline" size={64} color={colors.brand.primary} />
+            </LinearGradient>
             <Text style={styles.emptyText}>Henüz mesaj yok</Text>
             <Text style={styles.emptySubtext}>
-              Yakındaki cihazlarla BLE üzerinden mesajlaşabilirsiniz
+              Yakındaki cihazlarla BLE mesh ağı üzerinden mesajlaşabilirsiniz
             </Text>
+            <Pressable style={styles.emptyButton}>
+              <LinearGradient
+                colors={['#3b82f6', '#2563eb', '#1e40af']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.emptyButtonGradient}
+              >
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.emptyButtonText}>İlk Mesajı Gönder</Text>
+              </LinearGradient>
+            </Pressable>
           </View>
         }
       />
+
+      <Pressable style={styles.fab} onPress={handleNewMessage}>
+        <LinearGradient
+          colors={[colors.brand.primary, colors.brand.secondary]}
+          style={styles.fabGradient}
+        >
+          <Ionicons name="add" size={32} color="#fff" />
+        </LinearGradient>
+      </Pressable>
 
       {/* Premium Gate */}
       {!isPremium && <PremiumGate featureName="Mesajlaşma" />}
@@ -93,45 +183,108 @@ export default function MessagesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.background.primary,
   },
   header: {
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: '#1e293b',
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: colors.background.primary,
+  },
+  headerContent: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#f1f5f9',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: 14,
     color: '#94a3b8',
-    marginTop: 4,
+    marginTop: 2,
+  },
+  headerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#fff',
+    paddingVertical: 4,
+  },
+  conversationsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  conversationsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  conversationsCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.secondary,
   },
   listContent: {
     padding: 16,
+    paddingBottom: 100,
   },
   conversationCard: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1e293b',
-    borderRadius: 12,
+    borderRadius: 20,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#334155',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#334155',
+  avatarGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    borderWidth: 2,
+    borderColor: colors.brand.primary + '30',
   },
   conversationInfo: {
     flex: 1,
@@ -143,13 +296,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   userName: {
-    color: '#f1f5f9',
     fontSize: 16,
     fontWeight: '600',
+    color: '#fff',
   },
   time: {
-    color: '#64748b',
-    fontSize: 12,
+    fontSize: 13,
+    color: '#94a3b8',
   },
   messagePreview: {
     flexDirection: 'row',
@@ -158,38 +311,99 @@ const styles = StyleSheet.create({
   },
   lastMessage: {
     flex: 1,
-    color: '#94a3b8',
     fontSize: 14,
+    color: '#94a3b8',
   },
   unreadBadge: {
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    minWidth: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 24,
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   unreadText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 32 * 2,
+  },
+  emptyIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: colors.brand.primary + '30',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   emptyText: {
-    color: '#64748b',
-    fontSize: 16,
-    marginTop: 16,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
   },
   emptySubtext: {
-    color: '#475569',
-    fontSize: 14,
-    marginTop: 8,
+    fontSize: 15,
+    color: '#94a3b8',
     textAlign: 'center',
-    paddingHorizontal: 32,
+    marginBottom: 20,
+    paddingHorizontal: 20,
+    lineHeight: 22,
+  },
+  emptyButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  emptyButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 16 + 50, // Adjust for tab bar
+    right: 16,
+    borderRadius: 30,
+    width: 60,
+    height: 60,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 8,
+  },
+  fabGradient: {
+    flex: 1,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
-

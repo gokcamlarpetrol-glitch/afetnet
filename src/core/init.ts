@@ -10,6 +10,23 @@ import { premiumService } from './services/PremiumService';
 import { firebaseService } from './services/FirebaseService';
 import { locationService } from './services/LocationService';
 import { eewService } from './services/EEWService';
+import { seismicSensorService } from './services/SeismicSensorService';
+import { enkazDetectionService } from './services/EnkazDetectionService';
+import { multiChannelAlertService } from './services/MultiChannelAlertService';
+import { cellBroadcastService } from './services/CellBroadcastService';
+import { accessibilityService } from './services/AccessibilityService';
+// import { institutionalIntegrationService } from './services/InstitutionalIntegrationService'; // DISABLED
+import { publicAPIService } from './services/PublicAPIService';
+import { regionalRiskService } from './services/RegionalRiskService';
+import { impactPredictionService } from './services/ImpactPredictionService';
+import { whistleService } from './services/WhistleService';
+import { flashlightService } from './services/FlashlightService';
+import { voiceCommandService } from './services/VoiceCommandService';
+import { offlineMapService } from './services/OfflineMapService';
+import { useHealthProfileStore } from './stores/healthProfileStore';
+import { createLogger } from './utils/logger';
+
+const logger = createLogger('Init');
 
 let isInitialized = false;
 let isInitializing = false;
@@ -17,60 +34,148 @@ let isInitializing = false;
 export async function initializeApp() {
   // Prevent double initialization
   if (isInitialized || isInitializing) {
-    console.log('[Init] Already initialized or initializing');
     return;
   }
 
   isInitializing = true;
-  console.log('[Init] Starting app initialization...');
 
   try {
-    // Step 1: Notification Service
-    console.log('[Init] Step 1/6: Initializing notifications...');
-    await notificationService.initialize();
+    // Step 1: Notification Service & Multi-Channel Alert Service
+    try {
+      await notificationService.initialize();
+      await multiChannelAlertService.initialize();
+    } catch (error) {
+      logger.error('Notification services failed:', error);
+    }
 
     // Step 2: Firebase Service
-    console.log('[Init] Step 2/6: Initializing Firebase...');
-    await firebaseService.initialize();
+    try {
+      await firebaseService.initialize();
+    } catch (error) {
+      logger.error('Firebase failed:', error);
+    }
 
     // Step 3: Location Service
-    console.log('[Init] Step 3/6: Initializing location...');
-    await locationService.initialize();
+    try {
+      await locationService.initialize();
+    } catch (error) {
+      logger.error('Location service failed:', error);
+    }
 
     // Step 4: Premium Service
-    console.log('[Init] Step 4/6: Initializing premium...');
-    await premiumService.initialize();
+    try {
+      await premiumService.initialize();
+    } catch (error) {
+      logger.error('Premium service failed:', error);
+    }
 
-    // Step 5: Earthquake Service
-    console.log('[Init] Step 5/6: Starting earthquake service...');
-    await earthquakeService.start();
+    // Step 5: Earthquake Service (CRITICAL)
+    try {
+      await earthquakeService.start();
+    } catch (error) {
+      logger.error('⚠️ CRITICAL: Earthquake service failed:', error);
+    }
 
-        // Step 6: BLE Mesh Service
-        console.log('[Init] Step 6/7: Starting BLE mesh...');
-        await bleMeshService.start();
+    // Step 6: BLE Mesh Service
+    try {
+      await bleMeshService.start();
+    } catch (error) {
+      logger.error('BLE Mesh failed:', error);
+    }
 
-        // Step 7: EEW Service
-        console.log('[Init] Step 7/7: Starting EEW service...');
-        await eewService.start();
+    // Step 7: EEW Service
+    // DISABLED - WebSocket endpoints are not real, causing 491 errors
+    // Will be re-enabled when we have real EEW WebSocket endpoints
+    // try {
+    //   if (__DEV__) {
+    //     logger.info('Step 7/15: Starting EEW service...');
+    //   }
+    //   await eewService.start();
+    // } catch (error) {
+    //   logger.error('EEW service failed to start:', error);
+    //   // Continue without EEW
+    // }
 
-        isInitialized = true;
-        isInitializing = false;
-        console.log('[Init] ✅ App initialized successfully');
+    // Step 8: Cell Broadcast Service
+    try {
+      await cellBroadcastService.initialize();
+    } catch (error) {
+      logger.error('Cell broadcast failed:', error);
+    }
 
-  } catch (error) {
-    console.error('[Init] ❌ Initialization error:', error);
+    // Step 9: Accessibility Service
+    try {
+      await accessibilityService.initialize();
+    } catch (error) {
+      logger.error('Accessibility failed:', error);
+    }
+
+    // Step 10: Institutional Integration Service
+    // DISABLED - All API calls disabled, EarthquakeService handles AFAD
+    // try {
+    //   await institutionalIntegrationService.initialize();
+    // } catch (error) {
+    //   logger.error('Institutional integration failed:', error);
+    // }
+
+    // Step 11: Public API Service
+    try {
+      await publicAPIService.initialize();
+    } catch (error) {
+      logger.error('Public API failed:', error);
+    }
+
+    // Step 12: Regional Risk Service
+    try {
+      await regionalRiskService.initialize();
+    } catch (error) {
+      logger.error('Regional risk failed:', error);
+    }
+
+    // Step 13: Impact Prediction Service
+    try {
+      await impactPredictionService.initialize();
+    } catch (error) {
+      logger.error('Impact prediction failed:', error);
+    }
+
+    // Step 14: Enkaz Detection Service (Emergency)
+    try {
+      await enkazDetectionService.start();
+    } catch (error) {
+      logger.error('Enkaz detection failed:', error);
+    }
+
+    // Step 15: Seismic Sensor Service
+    // DISABLED - Too many false positives, will be re-enabled after optimization
+
+    // Step 16: Life-Saving Services
+    try {
+      await whistleService.initialize();
+      await flashlightService.initialize();
+      await voiceCommandService.initialize();
+      await offlineMapService.initialize();
+      await useHealthProfileStore.getState().loadProfile();
+    } catch (error) {
+      logger.error('Life-saving services failed:', error);
+    }
+
+    isInitialized = true;
     isInitializing = false;
-    // Continue anyway - app should work with degraded functionality
+  } catch (error) {
+    logger.error('❌ CRITICAL: Init failed:', error);
+    isInitializing = false;
   }
 }
 
 export function shutdownApp() {
-  console.log('[Init] Shutting down...');
-  
   earthquakeService.stop();
   bleMeshService.stop();
+  // eewService.stop(); // Disabled
+  cellBroadcastService.stop();
+  // seismicSensorService.stop(); // Disabled
+  enkazDetectionService.stop();
   
   isInitialized = false;
-  console.log('[Init] Shutdown complete');
 }
 

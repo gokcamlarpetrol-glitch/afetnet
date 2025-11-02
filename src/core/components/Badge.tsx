@@ -23,9 +23,9 @@ export default function Badge({ children, variant = 'default', style }: BadgePro
 
 const styles = StyleSheet.create({
   badge: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
     alignSelf: 'flex-start',
   },
   text: {

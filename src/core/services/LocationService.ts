@@ -4,6 +4,9 @@
 
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('LocationService');
 
 export interface LocationCoords {
   latitude: number;
@@ -20,14 +23,14 @@ class LocationService {
   async initialize() {
     if (this.isInitialized) return;
 
-    console.log('[LocationService] Initializing...');
+    if (__DEV__) logger.info('[LocationService] Initializing...');
 
     try {
       // Request foreground permission
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
       
       if (foregroundStatus !== 'granted') {
-        console.warn('[LocationService] Foreground permission not granted');
+        if (__DEV__) logger.warn('Foreground permission not granted');
         return;
       }
 
@@ -37,7 +40,7 @@ class LocationService {
       if (Platform.OS === 'ios') {
         const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
         if (backgroundStatus !== 'granted') {
-          console.warn('[LocationService] Background permission not granted');
+          if (__DEV__) logger.warn('Background permission not granted');
         }
       }
 
@@ -45,16 +48,16 @@ class LocationService {
       await this.updateLocation();
 
       this.isInitialized = true;
-      console.log('[LocationService] Initialized successfully');
+      if (__DEV__) logger.info('Initialized successfully');
 
     } catch (error) {
-      console.error('[LocationService] Initialization error:', error);
+      logger.error('Initialization error:', error);
     }
   }
 
   async updateLocation(): Promise<LocationCoords | null> {
     if (!this.hasPermission) {
-      console.warn('[LocationService] No permission');
+      if (__DEV__) logger.warn('No permission');
       return null;
     }
 
@@ -70,11 +73,11 @@ class LocationService {
         timestamp: location.timestamp,
       };
 
-      console.log('[LocationService] Location updated:', this.currentLocation);
+      if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;
 
     } catch (error) {
-      console.error('[LocationService] Update location error:', error);
+      logger.error('Update location error:', error);
       return null;
     }
   }
@@ -85,7 +88,7 @@ class LocationService {
 
   async startWatchingLocation(callback: (location: LocationCoords) => void) {
     if (!this.hasPermission) {
-      console.warn('[LocationService] No permission');
+      if (__DEV__) logger.warn('No permission');
       return null;
     }
 
@@ -111,7 +114,7 @@ class LocationService {
 
       return subscription;
     } catch (error) {
-      console.error('[LocationService] Watch location error:', error);
+      logger.error('Watch location error:', error);
       return null;
     }
   }

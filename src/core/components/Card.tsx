@@ -29,9 +29,9 @@ export default function Card({ children, style, variant = 'default' }: CardProps
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
   },
   elevated: {
     shadowColor: '#000',

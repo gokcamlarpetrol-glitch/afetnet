@@ -5,6 +5,9 @@
 
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
+import { createLogger } from './logger';
+
+const logger = createLogger('Device');
 
 const DEVICE_ID_KEY = 'afetnet_device_id';
 
@@ -29,7 +32,7 @@ export async function getDeviceId(): Promise<string> {
 
     return deviceId;
   } catch (error) {
-    console.error('[Device] Error getting device ID:', error);
+    logger.error('Error getting device ID:', error);
     // Fallback to random ID (not persisted)
     return `AFN-${Math.random().toString(36).slice(2, 10)}`;
   }
@@ -42,7 +45,7 @@ export async function clearDeviceId(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(DEVICE_ID_KEY);
   } catch (error) {
-    console.error('[Device] Error clearing device ID:', error);
+    logger.error('Error clearing device ID:', error);
   }
 }
 

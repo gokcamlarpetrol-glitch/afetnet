@@ -7,6 +7,9 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../theme';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('ErrorBoundary');
 
 interface Props {
   children: ReactNode;
@@ -34,11 +37,23 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+    logger.error('Caught error:', error, errorInfo);
     
     // In production, send to crash reporting service
     if (!__DEV__) {
-      // TODO: Send to Sentry/Firebase Crashlytics
+      try {
+        // Send to crash reporting service (Firebase Crashlytics, Sentry, etc.)
+        // Example: Crashlytics.recordError(error);
+        // For now, log to production logger
+        console.error('[PRODUCTION ERROR]', {
+          error: error.toString(),
+          stack: error.stack,
+          componentStack: errorInfo.componentStack,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (reportError) {
+        // Silently fail if crash reporting fails
+      }
     }
   }
 
@@ -94,7 +109,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.xl,
+    padding: 20,
   },
   content: {
     alignItems: 'center',
@@ -103,20 +118,20 @@ const styles = StyleSheet.create({
   title: {
     ...typography.h2,
     color: colors.text.primary,
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
+    marginTop: 20,
+    marginBottom: 12,
   },
   message: {
     ...typography.body,
     color: colors.text.secondary,
     textAlign: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: 20,
   },
   errorBox: {
     backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.sm,
-    padding: spacing.md,
-    marginBottom: spacing.xl,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
     width: '100%',
   },
   errorText: {
@@ -126,9 +141,9 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: colors.brand.primary,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
   buttonPressed: {
     opacity: 0.8,

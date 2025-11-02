@@ -21,6 +21,7 @@ const FEATURES = [
   { icon: 'notifications', title: 'Öncelikli Bildirimler', description: 'Acil durum bildirimleri' },
 ];
 
+
 export default function PaywallScreen({ navigation }: any) {
   return (
     <View style={styles.container}>

@@ -175,3 +175,6 @@ Yetki varsa → Xcode capability eklerken dialog açılacak → "Enable All" tı
 
 
 
+
+
+

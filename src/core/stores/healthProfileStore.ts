@@ -1,0 +1,224 @@
+/**
+ * HEALTH PROFILE STORE - Critical Medical Information
+ * Stores blood type, allergies, chronic conditions, emergency medications
+ * Accessible offline for rescue teams
+ */
+
+import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '../utils/logger';
+
+export interface EmergencyContact {
+  id: string;
+  name: string;
+  relationship: string;
+  phone: string;
+}
+
+export interface HealthProfile {
+  bloodType: string; // A+, A-, B+, B-, AB+, AB-, O+, O-
+  allergies: string[]; // e.g., ['Penisilin', 'Fıstık']
+  chronicConditions: string[]; // e.g., ['Diyabet', 'Hipertansiyon']
+  medications: string[]; // e.g., ['İnsülin', 'Aspirin']
+  emergencyContacts: EmergencyContact[];
+  notes: string; // Additional medical notes
+  lastUpdated: number;
+}
+
+interface HealthProfileState {
+  profile: HealthProfile;
+  isLoaded: boolean;
+  
+  // Actions
+  setBloodType: (bloodType: string) => void;
+  addAllergy: (allergy: string) => void;
+  removeAllergy: (allergy: string) => void;
+  addCondition: (condition: string) => void;
+  removeCondition: (condition: string) => void;
+  addMedication: (medication: string) => void;
+  removeMedication: (medication: string) => void;
+  addEmergencyContact: (contact: EmergencyContact) => void;
+  removeEmergencyContact: (contactId: string) => void;
+  updateEmergencyContact: (contactId: string, updates: Partial<EmergencyContact>) => void;
+  setNotes: (notes: string) => void;
+  loadProfile: () => Promise<void>;
+  saveProfile: () => Promise<void>;
+  clearProfile: () => Promise<void>;
+}
+
+const DEFAULT_PROFILE: HealthProfile = {
+  bloodType: '',
+  allergies: [],
+  chronicConditions: [],
+  medications: [],
+  emergencyContacts: [],
+  notes: '',
+  lastUpdated: Date.now(),
+};
+
+const STORAGE_KEY = '@afetnet:health_profile';
+
+export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
+  profile: DEFAULT_PROFILE,
+  isLoaded: false,
+
+  setBloodType: (bloodType) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        bloodType,
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  addAllergy: (allergy) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        allergies: [...state.profile.allergies, allergy],
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  removeAllergy: (allergy) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        allergies: state.profile.allergies.filter((a) => a !== allergy),
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  addCondition: (condition) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        chronicConditions: [...state.profile.chronicConditions, condition],
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  removeCondition: (condition) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        chronicConditions: state.profile.chronicConditions.filter((c) => c !== condition),
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  addMedication: (medication) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        medications: [...state.profile.medications, medication],
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  removeMedication: (medication) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        medications: state.profile.medications.filter((m) => m !== medication),
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  addEmergencyContact: (contact) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        emergencyContacts: [...state.profile.emergencyContacts, contact],
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  removeEmergencyContact: (contactId) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        emergencyContacts: state.profile.emergencyContacts.filter((c) => c.id !== contactId),
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  updateEmergencyContact: (contactId, updates) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        emergencyContacts: state.profile.emergencyContacts.map((c) =>
+          c.id === contactId ? { ...c, ...updates } : c
+        ),
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  setNotes: (notes) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        notes,
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  loadProfile: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const profile = JSON.parse(stored);
+        set({ profile, isLoaded: true });
+        logger.info('HealthProfile loaded');
+      } else {
+        set({ isLoaded: true });
+      }
+    } catch (error) {
+      logger.error('HealthProfile load failed:', error);
+      set({ isLoaded: true });
+    }
+  },
+
+  saveProfile: async () => {
+    try {
+      const { profile } = get();
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      logger.info('HealthProfile saved');
+    } catch (error) {
+      logger.error('HealthProfile save failed:', error);
+    }
+  },
+
+  clearProfile: async () => {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      set({ profile: DEFAULT_PROFILE });
+      logger.info('HealthProfile cleared');
+    } catch (error) {
+      logger.error('HealthProfile clear failed:', error);
+    }
+  },
+}));
+
