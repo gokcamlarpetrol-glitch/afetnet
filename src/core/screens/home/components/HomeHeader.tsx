@@ -83,9 +83,24 @@ export default function HomeHeader() {
               isLooping
               shouldPlay
               isMuted
-              onLoad={() => setVideoLoaded(true)}
-              onError={(error) => console.error('Video error:', error)}
+              onLoad={() => {
+                setVideoLoaded(true);
+                console.log('✅ Video yüklendi');
+              }}
+              onError={(error) => {
+                console.error('❌ Video hatası:', error);
+                setVideoLoaded(false);
+              }}
             />
+            {/* Fallback: Video yüklenene kadar gradient göster */}
+            {!videoLoaded && (
+              <View style={styles.videoFallback}>
+                <LinearGradient
+                  colors={['#3b82f6', '#1d4ed8', '#1e40af']}
+                  style={StyleSheet.absoluteFill}
+                />
+              </View>
+            )}
           </View>
         </Animated.View>
         
@@ -210,5 +225,10 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontWeight: '800',
     letterSpacing: 0.8,
+  },
+  videoFallback: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 32,
+    overflow: 'hidden',
   },
 });
