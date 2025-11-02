@@ -25,7 +25,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
 
   // Filter earthquakes within 500km of Istanbul
   const nearbyEarthquakes = useMemo(() => {
-    return earthquakes
+    const filtered = earthquakes
       .filter((eq) => {
         const distance = calculateDistance(
           ISTANBUL_LAT,
@@ -36,6 +36,18 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
         return distance <= NEARBY_RADIUS_KM;
       })
       .sort((a, b) => b.time - a.time); // Newest first
+    
+    console.log('🗺️ Deprem Monitör Kartı:', {
+      toplamDeprem: earthquakes.length,
+      istanbulYakin: filtered.length,
+      enSonDeprem: filtered[0] ? {
+        location: filtered[0].location,
+        magnitude: filtered[0].magnitude,
+        time: new Date(filtered[0].time).toLocaleString('tr-TR')
+      } : null
+    });
+    
+    return filtered;
   }, [earthquakes]);
 
   const last24Hours = nearbyEarthquakes.filter((eq) => {

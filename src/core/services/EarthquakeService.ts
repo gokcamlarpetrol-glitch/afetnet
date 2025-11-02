@@ -71,6 +71,13 @@ class EarthquakeService {
         const latestEq = uniqueEarthquakes[0];
         const lastCheckedEq = await AsyncStorage.getItem('last_checked_earthquake');
         
+        console.log('🔝 EN SON DEPREM:', {
+          location: latestEq.location,
+          magnitude: latestEq.magnitude,
+          time: new Date(latestEq.time).toLocaleString('tr-TR'),
+          zamanFarki: Math.round((Date.now() - latestEq.time) / 60000) + ' dakika önce'
+        });
+        
         // Trigger auto check-in for new significant earthquakes (magnitude >= 4.0)
         if (latestEq.magnitude >= 4.0 && latestEq.id !== lastCheckedEq) {
           await AsyncStorage.setItem('last_checked_earthquake', latestEq.id);
@@ -79,6 +86,7 @@ class EarthquakeService {
         }
         
         store.setItems(uniqueEarthquakes);
+        console.log(`✅ Store güncellendi: ${uniqueEarthquakes.length} deprem`);
         await this.saveToCache(uniqueEarthquakes);
       } else {
         // Try cache if no new data
@@ -127,13 +135,16 @@ class EarthquakeService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-      // AFAD API v2 - Son 7 gün (daha güvenilir)
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const startDate = sevenDaysAgo.toISOString().split('T')[0];
+      // AFAD API v2 - Son 24 saat (GERÇEK ZAMANLI)
+      const oneDayAgo = new Date();
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+      const startDate = oneDayAgo.toISOString().split('T')[0];
       const endDate = new Date().toISOString().split('T')[0];
       
       const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+      
+      console.log('📡 AFAD API çağrılıyor:', url);
+      console.log('📅 Tarih aralığı:', startDate, 'dan', endDate, 'a kadar');
 
       const response = await fetch(url, {
         method: 'GET',
@@ -155,9 +166,18 @@ class EarthquakeService {
       // AFAD apiv2 returns array directly
       const events = Array.isArray(data) ? data : [];
       
+      console.log(`✅ AFAD'dan ${events.length} deprem verisi alındı`);
+      
       if (events.length === 0) {
+        console.warn('⚠️ AFAD API boş veri döndü!');
         return [];
       }
+      
+      // İlk 3 depremi logla
+      console.log('📊 İlk 3 deprem:');
+      events.slice(0, 3).forEach((eq: any, i: number) => {
+        console.log(`  ${i + 1}. ${eq.location} - Büyüklük: ${eq.mag} - Tarih: ${eq.eventDate}`);
+      });
       
       const earthquakes = events.map((item: any) => {
         // AFAD apiv2 format

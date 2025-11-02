@@ -54,7 +54,7 @@ export default function StatusCard() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['rgba(99, 102, 241, 0.2)', 'rgba(79, 70, 229, 0.15)']}
+        colors={['rgba(99, 102, 241, 0.12)', 'rgba(79, 70, 229, 0.08)']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradient}
@@ -104,7 +104,7 @@ export default function StatusCard() {
                   },
                 ]}
               >
-                <Ionicons name="checkmark-circle" size={16} color={colors.status.success} />
+                <Ionicons name="checkmark-circle" size={14} color={colors.status.success} />
                 <Text style={styles.featureText}>{feature.text}</Text>
               </Animated.View>
             ))}
@@ -118,20 +118,21 @@ export default function StatusCard() {
 const styles = StyleSheet.create({
   container: {
     marginBottom: 16,
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   gradient: {
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.3)',
-    borderRadius: 20,
-    minHeight: 60,
+    padding: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(99, 102, 241, 0.2)',
+    borderRadius: 16,
+    minHeight: 50,
+    backgroundColor: 'rgba(99, 102, 241, 0.05)',
   },
   header: {
     flexDirection: 'row',
@@ -151,28 +152,29 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   title: {
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
     color: colors.text.primary,
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
     flex: 1,
   },
   featuresList: {
-    gap: 8,
-    marginTop: 12,
+    gap: 6,
+    marginTop: 10,
     overflow: 'hidden',
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 2,
+    gap: 8,
+    paddingVertical: 1,
   },
   featureText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
     color: colors.text.primary,
-    letterSpacing: -0.2,
+    letterSpacing: -0.1,
     flex: 1,
+    opacity: 0.9,
   },
 });
