@@ -1,15 +1,19 @@
 /**
  * EARTHQUAKE SERVICE - Clean Implementation
- * Fetches earthquake data from AFAD/USGS and updates store
+ * Fetches earthquake data from AFAD/USGS/Kandilli and updates store
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useEarthquakeStore, Earthquake } from '../stores/earthquakeStore';
+import { createLogger } from '../utils/logger';
+import { autoCheckinService } from './AutoCheckinService';
+
+const logger = createLogger('EarthquakeService');
 
 const CACHE_KEY = 'afetnet_earthquakes_cache';
 const LAST_FETCH_KEY = 'afetnet_earthquakes_last_fetch';
-const POLL_INTERVAL = 60000; // 60 seconds
+const POLL_INTERVAL = 30000; // 30 seconds - Real-time AFAD updates
 
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
@@ -19,7 +23,6 @@ class EarthquakeService {
     if (this.isRunning) return;
     
     this.isRunning = true;
-    console.log('[EarthquakeService] Starting...');
     
     // Initial fetch
     await this.fetchEarthquakes();
@@ -36,100 +39,195 @@ class EarthquakeService {
       this.intervalId = null;
     }
     this.isRunning = false;
-    console.log('[EarthquakeService] Stopped');
   }
 
   async fetchEarthquakes() {
     const store = useEarthquakeStore.getState();
     store.setLoading(true);
+    store.setError(null); // Clear previous errors
 
     try {
-      // Check network
-      const netInfo = await NetInfo.fetch();
-      
-      if (!netInfo.isConnected) {
-        // Load from cache
-        const cached = await this.loadFromCache();
-        if (cached) {
-          store.setItems(cached);
-          store.setError('Çevrimdışı - önbellek kullanılıyor');
-        } else {
-          store.setError('İnternet bağlantısı yok');
-        }
-        return;
+      let earthquakes: Earthquake[] = [];
+
+      // 1. AFAD (Turkey - Primary source)
+      const afadData = await this.fetchFromAFAD();
+      if (afadData.length > 0) {
+        earthquakes.push(...afadData);
       }
 
-      // Fetch from AFAD
-      const earthquakes = await this.fetchFromAFAD();
+      // 2. USGS - DISABLED for Turkey-only mode
+      // Will be re-enabled for global earthquake view
       
-      if (earthquakes.length > 0) {
-        store.setItems(earthquakes);
-        await this.saveToCache(earthquakes);
+      // 3. Kandilli - DISABLED (HTTP endpoint doesn't work in React Native)
+      // Will be re-enabled when we have a proper API or proxy
+
+      // Deduplicate based on similar location and time (within 5 minutes and 10km)
+      const uniqueEarthquakes = this.deduplicateEarthquakes(earthquakes);
+
+      // Sort by time (newest first)
+      uniqueEarthquakes.sort((a, b) => b.time - a.time);
+
+      if (uniqueEarthquakes.length > 0) {
+        const latestEq = uniqueEarthquakes[0];
+        const lastCheckedEq = await AsyncStorage.getItem('last_checked_earthquake');
+        
+        // Trigger auto check-in for new significant earthquakes (magnitude >= 4.0)
+        if (latestEq.magnitude >= 4.0 && latestEq.id !== lastCheckedEq) {
+          await AsyncStorage.setItem('last_checked_earthquake', latestEq.id);
+          logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
+          autoCheckinService.startCheckIn(latestEq.magnitude);
+        }
+        
+        store.setItems(uniqueEarthquakes);
+        await this.saveToCache(uniqueEarthquakes);
       } else {
-        // Fallback to USGS
-        const usgsData = await this.fetchFromUSGS();
-        store.setItems(usgsData);
-        await this.saveToCache(usgsData);
+        // Try cache if no new data
+        const cached = await this.loadFromCache();
+        if (cached && cached.length > 0) {
+          store.setItems(cached);
+        } else {
+          store.setError('Deprem verisi alınamadı. İnternet bağlantınızı kontrol edin.');
+        }
       }
-      
     } catch (error) {
-      console.error('[EarthquakeService] Error:', error);
-      
-      // Try to load from cache on error
+      // Try cache on error
       const cached = await this.loadFromCache();
-      if (cached) {
+      if (cached && cached.length > 0) {
         store.setItems(cached);
-        store.setError('Veri alınamadı - önbellek kullanılıyor');
       } else {
-        store.setError('Deprem verileri yüklenemedi');
+        store.setError('Deprem verisi alınamadı. Lütfen tekrar deneyin.');
       }
     } finally {
       store.setLoading(false);
     }
   }
 
+  private deduplicateEarthquakes(earthquakes: Earthquake[]): Earthquake[] {
+    const unique: Earthquake[] = [];
+    const seen = new Set<string>();
+
+    for (const eq of earthquakes) {
+      // Create a key based on rounded location and time
+      const timeKey = Math.floor(eq.time / (5 * 60 * 1000)); // 5 minute buckets
+      const latKey = Math.round(eq.latitude * 100); // ~1km precision
+      const lonKey = Math.round(eq.longitude * 100);
+      const key = `${timeKey}-${latKey}-${lonKey}-${Math.round(eq.magnitude * 10)}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(eq);
+      }
+    }
+
+    return unique;
+  }
+
   private async fetchFromAFAD(): Promise<Earthquake[]> {
     try {
-      const response = await fetch(
-        'https://deprem.afad.gov.tr/EventService/GetEventsByFilter',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            StartDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-            EndDate: new Date().toISOString(),
-          }),
-        }
-      );
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-      if (!response.ok) throw new Error('AFAD request failed');
+      // AFAD API v2 - Son 7 gün (daha güvenilir)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const startDate = sevenDaysAgo.toISOString().split('T')[0];
+      const endDate = new Date().toISOString().split('T')[0];
+      
+      const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'AfetNet/1.0',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return [];
+      }
 
       const data = await response.json();
       
-      return (data || []).map((item: any) => ({
-        id: `afad-${item.eventID || item.eventId || Date.now()}`,
-        magnitude: parseFloat(item.magnitude || item.mag || 0),
-        location: item.location || item.yer || 'Bilinmiyor',
-        depth: parseFloat(item.depth || item.derinlik || 0),
-        time: new Date(item.date || item.tarih || Date.now()).getTime(),
-        latitude: parseFloat(item.latitude || item.lat || 0),
-        longitude: parseFloat(item.longitude || item.lng || 0),
-        source: 'AFAD' as const,
-      })).filter((eq: Earthquake) => eq.magnitude > 0);
+      // AFAD apiv2 returns array directly
+      const events = Array.isArray(data) ? data : [];
+      
+      if (events.length === 0) {
+        return [];
+      }
+      
+      const earthquakes = events.map((item: any) => {
+        // AFAD apiv2 format
+        const eventDate = item.eventDate || item.date || item.originTime;
+        const magnitude = parseFloat(item.mag || item.magnitude || item.ml || '0');
+        
+        // Location parsing
+        const locationParts = [
+          item.location,
+          item.ilce,
+          item.sehir,
+          item.title,
+          item.place
+        ].filter(Boolean);
+        
+        const location = locationParts.length > 0 
+          ? locationParts.join(', ') 
+          : 'Türkiye';
+        
+        return {
+          id: `afad-${item.eventID || item.eventId || item.id || Date.now()}-${Math.random()}`,
+          magnitude,
+          location,
+          depth: parseFloat(item.depth || item.derinlik || '10'),
+          time: eventDate ? new Date(eventDate).getTime() : Date.now(),
+          latitude: parseFloat(item.geojson?.coordinates?.[1] || item.latitude || item.lat || '0'),
+          longitude: parseFloat(item.geojson?.coordinates?.[0] || item.longitude || item.lng || '0'),
+          source: 'AFAD' as const,
+        };
+      })
+      .filter((eq: Earthquake) => 
+        eq.latitude !== 0 && 
+        eq.longitude !== 0 &&
+        eq.magnitude >= 1.0 // Minimum 1.0 magnitude
+      )
+      .sort((a, b) => b.time - a.time) // Newest first
+      .slice(0, 100); // Max 100
+
+      return earthquakes;
       
     } catch (error) {
-      console.error('[EarthquakeService] AFAD fetch error:', error);
+      // Silent fail - return empty array, cache will be used
       return [];
     }
   }
 
   private async fetchFromUSGS(): Promise<Earthquake[]> {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const startTime = new Date(oneDayAgo).toISOString();
+      
       const response = await fetch(
-        'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=time&limit=100'
+        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&minmagnitude=3.0&orderby=time&limit=500`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'AfetNet/1.0',
+          },
+          signal: controller.signal,
+        }
       );
 
-      if (!response.ok) throw new Error('USGS request failed');
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return [];
+      }
 
       const data = await response.json();
       
@@ -142,19 +240,24 @@ class EarthquakeService {
         latitude: feature.geometry.coordinates[1] || 0,
         longitude: feature.geometry.coordinates[0] || 0,
         source: 'USGS' as const,
-      })).filter((eq: Earthquake) => eq.magnitude > 0);
+      })).filter((eq: Earthquake) => eq.magnitude >= 3.0);
       
     } catch (error) {
-      console.error('[EarthquakeService] USGS fetch error:', error);
       return [];
     }
+  }
+
+  private async fetchFromKandilli(): Promise<Earthquake[]> {
+    // DISABLED: Kandilli HTTP endpoint doesn't work in React Native
+    return [];
   }
 
   private async saveToCache(earthquakes: Earthquake[]) {
     try {
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(earthquakes));
+      await AsyncStorage.setItem(LAST_FETCH_KEY, String(Date.now()));
     } catch (error) {
-      console.error('[EarthquakeService] Cache save error:', error);
+      logger.error('Cache save error:', error);
     }
   }
 
@@ -163,7 +266,77 @@ class EarthquakeService {
       const cached = await AsyncStorage.getItem(CACHE_KEY);
       return cached ? JSON.parse(cached) : null;
     } catch (error) {
-      console.error('[EarthquakeService] Cache load error:', error);
+      logger.error('Cache load error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch detailed earthquake data from AFAD API
+   * Real-time data for Apple compliance
+   */
+  async fetchEarthquakeDetail(eventID: string): Promise<Earthquake | null> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      // Try AFAD API v2 event detail endpoint
+      const url = `https://deprem.afad.gov.tr/apiv2/event/${eventID}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'AfetNet/1.0',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        // If detail endpoint fails, try to find it in the list
+        return await this.findEarthquakeInList(eventID);
+      }
+
+      const data = await response.json();
+
+      if (!data) {
+        return null;
+      }
+
+      // Parse AFAD detail response
+      const earthquake: Earthquake = {
+        id: `afad-${data.eventID || data.eventId || eventID}`,
+        magnitude: parseFloat(data.mag || data.magnitude || data.ml || '0'),
+        location: data.location || data.title || data.place || 'Türkiye',
+        depth: parseFloat(data.depth || data.derinlik || '10'),
+        time: data.eventDate ? new Date(data.eventDate).getTime() : Date.now(),
+        latitude: parseFloat(data.geojson?.coordinates?.[1] || data.latitude || data.lat || '0'),
+        longitude: parseFloat(data.geojson?.coordinates?.[0] || data.longitude || data.lng || '0'),
+        source: 'AFAD' as const,
+      };
+
+      return earthquake;
+    } catch (error) {
+      logger.error('Earthquake detail fetch error:', error);
+      // Fallback: Try to find in cached list
+      return await this.findEarthquakeInList(eventID);
+    }
+  }
+
+  /**
+   * Find earthquake in cached list by eventID
+   */
+  private async findEarthquakeInList(eventID: string): Promise<Earthquake | null> {
+    try {
+      const cached = await this.loadFromCache();
+      if (!cached) return null;
+
+      // Find earthquake with matching eventID
+      const earthquake = cached.find(eq => eq.id.includes(eventID));
+      return earthquake || null;
+    } catch (error) {
       return null;
     }
   }

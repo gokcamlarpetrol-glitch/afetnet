@@ -31,8 +31,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    borderRadius: 16,
+    padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 120,
@@ -45,13 +45,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 12,
   },
   value: {
     ...typography.h1,
     color: colors.text.primary,
     fontWeight: '800',
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   label: {
     ...typography.caption,

@@ -49,6 +49,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ...(config.ios?.infoPlist || {}),
       NSLocationWhenInUseUsageDescription: "AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.",
       NSLocationAlwaysAndWhenInUseUsageDescription: "AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.",
+      NSBluetoothAlwaysUsageDescription: "AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.",
+      NSBluetoothPeripheralUsageDescription: "AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.",
       NSMicrophoneUsageDescription: "AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.",
       NSCameraUsageDescription: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
       NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.",

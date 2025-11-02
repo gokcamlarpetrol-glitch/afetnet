@@ -13,9 +13,17 @@ interface MeshStatusCardProps {
   peerCount: number;
   status: 'online' | 'offline';
   onPress?: () => void;
+  messageCount?: number;
+  earthquakeCount?: number;
 }
 
-export default function MeshStatusCard({ peerCount, status, onPress }: MeshStatusCardProps) {
+export default function MeshStatusCard({ 
+  peerCount, 
+  status, 
+  onPress,
+  messageCount = 0,
+  earthquakeCount = 0,
+}: MeshStatusCardProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -39,7 +47,7 @@ export default function MeshStatusCard({ peerCount, status, onPress }: MeshStatu
       <View style={styles.stats}>
         <View style={styles.statItem}>
           <Ionicons name="wifi-outline" size={20} color={colors.text.tertiary} />
-          <Text style={styles.statValue}>0</Text>
+          <Text style={styles.statValue}>{messageCount}</Text>
           <Text style={styles.statLabel}>Mesaj</Text>
         </View>
 
@@ -51,7 +59,7 @@ export default function MeshStatusCard({ peerCount, status, onPress }: MeshStatu
 
         <View style={styles.statItem}>
           <Ionicons name="pulse-outline" size={20} color={colors.text.tertiary} />
-          <Text style={styles.statValue}>3</Text>
+          <Text style={styles.statValue}>{earthquakeCount}</Text>
           <Text style={styles.statLabel}>Deprem</Text>
         </View>
       </View>
@@ -75,9 +83,9 @@ export default function MeshStatusCard({ peerCount, status, onPress }: MeshStatu
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border.primary,
   },
@@ -88,7 +96,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: 16,
   },
   titleRow: {
     flexDirection: 'row',
@@ -97,12 +105,12 @@ const styles = StyleSheet.create({
   title: {
     ...typography.h4,
     color: colors.text.primary,
-    marginLeft: spacing.sm,
+    marginLeft: 8,
   },
   stats: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: spacing.lg,
+    marginBottom: 16,
   },
   statItem: {
     alignItems: 'center',
@@ -111,33 +119,33 @@ const styles = StyleSheet.create({
     ...typography.h2,
     color: colors.text.primary,
     fontWeight: '700',
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
   statLabel: {
     ...typography.caption,
     color: colors.text.tertiary,
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: spacing.md,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border.primary,
   },
   footerIcon: {
-    marginLeft: spacing.lg,
+    marginLeft: 16,
   },
   footerText: {
     ...typography.caption,
     color: colors.text.secondary,
-    marginLeft: spacing.xs,
+    marginLeft: 4,
   },
   footerLink: {
     ...typography.caption,
     color: colors.brand.primary,
     fontWeight: '600',
-    marginRight: spacing.xs,
+    marginRight: 4,
   },
 });
 

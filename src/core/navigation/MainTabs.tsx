@@ -1,5 +1,6 @@
 /**
  * MAIN TABS - Bottom Tab Navigation
+ * Header gizli, sadece tab bar
  */
 
 import React from 'react';
@@ -38,10 +39,11 @@ export default function MainTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarLabel: 'Deprem',
+          headerShown: false, // Her ekran için ayrı ayrı gizle
+          tabBarLabel: 'Ana Sayfa',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'pulse' : 'pulse-outline'}
+              name={focused ? 'home' : 'home-outline'}
               size={24}
               color={color}
             />
@@ -52,6 +54,7 @@ export default function MainTabs() {
         name="Map"
         component={MapScreen}
         options={{
+          headerShown: false,
           tabBarLabel: 'Harita',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
@@ -66,6 +69,7 @@ export default function MainTabs() {
         name="Family"
         component={FamilyScreen}
         options={{
+          headerShown: false,
           tabBarLabel: 'Aile',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
@@ -80,6 +84,7 @@ export default function MainTabs() {
         name="Messages"
         component={MessagesScreen}
         options={{
+          headerShown: false,
           tabBarLabel: 'Mesajlar',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
@@ -94,6 +99,7 @@ export default function MainTabs() {
         name="Settings"
         component={SettingsScreen}
         options={{
+          headerShown: false,
           tabBarLabel: 'Ayarlar',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
@@ -107,4 +113,3 @@ export default function MainTabs() {
     </Tab.Navigator>
   );
 }
-

@@ -9,6 +9,7 @@ import { bleMeshService } from '../services/BLEMeshService';
 export function useMesh() {
   const peers = useMeshStore(state => state.peers);
   const messages = useMeshStore(state => state.messages);
+  const isConnected = useMeshStore(state => state.isConnected);
 
   const sendMessage = async (message: string, targetId?: string) => {
     return bleMeshService.sendMessage(message, targetId);
@@ -18,7 +19,7 @@ export function useMesh() {
     peers,
     messages,
     sendMessage,
-    isConnected: peers.length > 0,
+    isConnected,
   };
 }
 

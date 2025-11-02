@@ -8,13 +8,13 @@ import { create } from 'zustand';
 export interface FamilyMember {
   id: string;
   name: string;
-  phone?: string;
-  status: 'safe' | 'need-help' | 'unknown';
+  status: 'safe' | 'need-help' | 'unknown' | 'critical';
   lastSeen: number;
+  latitude: number;
+  longitude: number;
   location?: {
     latitude: number;
     longitude: number;
-    timestamp: number;
   };
   deviceId?: string; // BLE mesh device ID
 }

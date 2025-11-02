@@ -6,6 +6,9 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('PremiumGate');
 
 interface PremiumGateProps {
   featureName: string;
@@ -29,7 +32,7 @@ export default function PremiumGate({ featureName }: PremiumGateProps) {
           style={styles.upgradeButton}
           onPress={() => {
             // Navigation will be handled by parent component
-            console.log('Premium upgrade requested');
+            if (__DEV__) logger.info('Premium upgrade requested');
           }}
         >
           <Ionicons name="star" size={20} color="#fff" />

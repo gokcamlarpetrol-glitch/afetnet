@@ -9,16 +9,24 @@ export type ActiveEEW = {
   source: string;
 };
 
+type EEWConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
 type EEWState = {
   active?: ActiveEEW;
+  connectionStatus: EEWConnectionStatus;
+  lastError: string | null;
   setActive: (a: ActiveEEW) => void;
+  setStatus: (status: EEWConnectionStatus, error?: string | null) => void;
   clear: () => void;
 };
 
 export const useEEWStore = create<EEWState>((set) => ({
   active: undefined,
+  connectionStatus: 'disconnected',
+  lastError: null,
   setActive: (a) => set({ active: a }),
-  clear: () => set({ active: undefined }),
+  setStatus: (status, error = null) => set({ connectionStatus: status, lastError: error }),
+  clear: () => set({ active: undefined, connectionStatus: 'disconnected', lastError: null }),
 }));
 
 import * as FileSystem from 'expo-file-system';

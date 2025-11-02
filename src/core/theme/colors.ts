@@ -1,81 +1,160 @@
 /**
- * COLOR SYSTEM - Premium Dark Theme
- * Based on old design, enhanced for premium feel
+ * AFETNET COLOR PALETTE - Midnight Professional
+ * Unicorn-grade premium design system
+ * Inspired by: Stripe, Linear, Arc Browser
  */
 
 export const colors = {
-  // Background layers
+  // Background Colors (Dark Theme)
   background: {
-    primary: '#0f172a',      // Main background
-    secondary: '#1e293b',    // Card background
-    tertiary: '#1f2937',     // Button background
-    input: '#111827',        // Input background
-    modal: '#0b1220',        // Modal background
-    overlay: 'rgba(15, 23, 42, 0.95)', // Overlay
+    primary: '#0a0e1a',    // Ultra dark blue-black
+    secondary: '#0f1419',  // Dark slate
+    elevated: '#1a1f2e',   // Elevated surfaces
+    card: '#141824',       // Card backgrounds
+    overlay: 'rgba(10, 14, 26, 0.95)', // Dark overlay
+    input: '#1a1f2e',      // Input background
   },
 
-  // Text colors
+  // Text Colors
   text: {
-    primary: '#ffffff',      // Main text
-    secondary: '#e5e7eb',    // Secondary text
-    tertiary: '#94a3b8',     // Tertiary text
-    muted: '#64748b',        // Muted text
-    disabled: '#475569',     // Disabled text
+    primary: '#ffffff',    // Pure white
+    secondary: '#a0aec0',  // Cool gray
+    tertiary: '#718096',   // Muted gray
+    disabled: '#4a5568',   // Very muted
+    muted: '#718096',      // Alias for tertiary
   },
 
-  // Brand colors
-  brand: {
-    primary: '#3b82f6',      // Blue
-    secondary: '#2563eb',    // Dark blue
-    accent: '#60a5fa',       // Light blue
+  // Accent Colors
+  accent: {
+    primary: '#3b82f6',    // Electric blue (trust, tech)
+    secondary: '#60a5fa',  // Light blue
+    glow: 'rgba(59, 130, 246, 0.15)', // Blue glow
   },
 
-  // Status colors
+  // Emergency Colors
+  emergency: {
+    critical: '#ef4444',   // Bright red (emergency)
+    warning: '#f59e0b',    // Amber (warning)
+    safe: '#10b981',       // Emerald (safe)
+    gradient: ['#dc2626', '#991b1b', '#7f1d1d'], // Deep red gradient
+    glow: 'rgba(239, 68, 68, 0.3)',
+  },
+
+  // Status Colors
   status: {
-    success: '#10b981',      // Green
-    warning: '#f59e0b',      // Yellow/Orange
-    danger: '#ef4444',       // Red
-    info: '#3b82f6',         // Blue
+    online: '#10b981',     // Emerald
+    offline: '#64748b',    // Slate
+    mesh: '#3b82f6',       // Blue
+    alert: '#f59e0b',      // Amber
+    success: '#10b981',
+    info: '#3b82f6',
   },
 
-  // Earthquake magnitude colors
+  // Semantic Feature Colors
+  mesh: {
+    primary: '#3b82f6',    // Blue (not green!)
+    secondary: '#2563eb',
+    glow: 'rgba(59, 130, 246, 0.2)',
+    gradient: ['#1e3a8a', '#2563eb', '#3b82f6'], // Deep blue gradient
+  },
+
+  offline: {
+    primary: '#6366f1',    // Indigo
+    secondary: '#4f46e5',
+    glow: 'rgba(99, 102, 241, 0.15)',
+    gradient: ['#4338ca', '#6366f1'], // Indigo gradient
+  },
+
   earthquake: {
-    minor: '#eab308',        // Yellow (< 4.0)
-    moderate: '#f97316',     // Orange (4.0-5.0)
-    strong: '#ef4444',       // Red (> 5.0)
+    primary: '#3b82f6',
+    major: '#ef4444',      // Red for major earthquakes (>= 5.0)
+    moderate: '#f97316',   // Orange for moderate (4.0-4.9)
+    minor: '#eab308',      // Yellow for minor (< 4.0)
+    strong: '#dc2626',
+    accent: '#60a5fa',
+    gradient: ['#1e3a8a', '#3b82f6'], // Blue gradient
   },
 
-  // Triage colors
-  triage: {
-    red: '#ef4444',          // Critical
-    yellow: '#f59e0b',       // Delayed
-    green: '#10b981',        // Minor
-    black: '#6b7280',        // Deceased
-  },
-
-  // Border colors
+  // Border Colors
   border: {
-    primary: '#334155',
-    secondary: '#444',
-    light: '#475569',
+    light: 'rgba(255, 255, 255, 0.1)',
+    medium: 'rgba(255, 255, 255, 0.15)',
+    heavy: 'rgba(255, 255, 255, 0.2)',
+    primary: 'rgba(59, 130, 246, 0.3)',
   },
 
-  // Semantic colors
-  online: '#22c55e',         // Online status
-  offline: '#64748b',        // Offline status
-  premium: '#fbbf24',        // Premium gold
-  free: '#94a3b8',           // Free tier
+  // Brand Colors (for backward compatibility)
+  brand: {
+    primary: '#3b82f6',
+    main: '#3b82f6',
+    secondary: '#60a5fa',
+  },
 
-  // Gradient colors for premium elements
-  gradient: {
-    start: '#3b82f6',
-    middle: '#2563eb',
-    end: '#1e40af',
+  // Primary/Secondary (aliases)
+  primary: {
+    main: '#3b82f6',
+    light: '#60a5fa',
+    dark: '#2563eb',
+  },
+
+  secondary: {
+    main: '#6366f1',
+    light: '#818cf8',
+    dark: '#4f46e5',
+  },
+
+  // Danger/Warning/Success
+  danger: {
+    main: '#ef4444',
+    light: '#f87171',
+    dark: '#dc2626',
+  },
+
+  warning: {
+    main: '#f59e0b',
+    light: '#fbbf24',
+    dark: '#d97706',
+  },
+
+  success: {
+    main: '#10b981',
+    light: '#34d399',
+    dark: '#059669',
+  },
+
+  info: {
+    main: '#3b82f6',
+    light: '#60a5fa',
+    dark: '#2563eb',
+  },
+
+  // Gradients (Pre-defined for consistency)
+  gradients: {
+    emergency: ['#dc2626', '#991b1b', '#7f1d1d'],
+    mesh: ['#1e3a8a', '#2563eb', '#3b82f6'],
+    offline: ['#4338ca', '#6366f1'],
+    earthquake: ['#1e3a8a', '#3b82f6'],
+    header: ['rgba(26, 31, 46, 0.8)', 'transparent'],
+    card: ['#141824', '#1a1f2e'],
+  },
+
+  // Glassmorphism Effects
+  glass: {
+    light: 'rgba(255, 255, 255, 0.05)',
+    medium: 'rgba(255, 255, 255, 0.08)',
+    heavy: 'rgba(255, 255, 255, 0.12)',
+    border: 'rgba(255, 255, 255, 0.15)',
+    backdrop: 'rgba(10, 14, 26, 0.8)',
+  },
+
+  // Magnitude Colors (Earthquake Severity)
+  magnitude: {
+    low: '#eab308',        // Yellow (< 4.0)
+    medium: '#f97316',     // Orange (4.0 - 4.9)
+    high: '#ef4444',       // Red (5.0 - 5.9)
+    critical: '#dc2626',   // Dark red (>= 6.0)
   },
 };
 
-// Helper function for opacity
-export const withOpacity = (color: string, opacity: number): string => {
-  return `${color}${Math.round(opacity * 255).toString(16).padStart(2, '0')}`;
-};
-
+// Export individual color groups for convenience
+export const { background, text, accent, emergency, status, mesh, offline, earthquake, border, brand, gradients, glass } = colors;

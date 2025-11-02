@@ -6,23 +6,22 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "node": "20.11.1"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "node": "20.11.1"
     },
     "production": {
       "autoIncrement": true,
       "ios": {
         "simulator": false
       },
-      "node": "18.18.2",
-      "env": {
-        "EXPO_NO_TELEMETRY": "1",
-        "NPM_CONFIG_FUND": "false",
-        "NPM_CONFIG_AUDIT": "false",
-        "NPM_CONFIG_OPTIONAL": "false"
-      }
+      "node": "20.11.1"
     }
   },
   "submit": {

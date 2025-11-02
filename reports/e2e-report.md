@@ -27,7 +27,7 @@
 
 ### GitHub Pages
 
-- ✅ privacy-policy.html 200 (0.30s)
+- ✅ privacy-policy.html 200 (0.38s)
 - ✅ terms-of-service.html 200 (0.31s)
 
 ### Backend health

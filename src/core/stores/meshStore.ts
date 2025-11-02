@@ -10,7 +10,6 @@ export interface MeshPeer {
   name: string;
   rssi: number;
   lastSeen: number;
-  connected: boolean;
 }
 
 export interface MeshMessage {
@@ -26,8 +25,9 @@ export interface MeshMessage {
 }
 
 interface MeshState {
-  peers: MeshPeer[];
+  peers: Record<string, MeshPeer>;
   messages: MeshMessage[];
+  isConnected: boolean;
   isScanning: boolean;
   isAdvertising: boolean;
   myDeviceId: string | null;
@@ -39,10 +39,11 @@ interface MeshState {
 }
 
 interface MeshActions {
-  setPeers: (peers: MeshPeer[]) => void;
+  setPeers: (peers: Record<string, MeshPeer>) => void;
   addPeer: (peer: MeshPeer) => void;
   removePeer: (peerId: string) => void;
   updatePeer: (peerId: string, updates: Partial<MeshPeer>) => void;
+  setConnected: (isConnected: boolean) => void;
   
   addMessage: (message: MeshMessage) => void;
   markMessageDelivered: (messageId: string) => void;
@@ -57,8 +58,9 @@ interface MeshActions {
 }
 
 const initialState: MeshState = {
-  peers: [],
+  peers: {},
   messages: [],
+  isConnected: false,
   isScanning: false,
   isAdvertising: false,
   myDeviceId: null,
@@ -76,9 +78,8 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
   
   addPeer: (peer) => {
     const { peers } = get();
-    const exists = peers.find(p => p.id === peer.id);
-    if (!exists) {
-      set({ peers: [...peers, peer] });
+    if (!peers[peer.id]) {
+      set({ peers: { ...peers, [peer.id]: peer } });
       get().incrementStat('peersDiscovered');
     } else {
       get().updatePeer(peer.id, peer);
@@ -87,15 +88,21 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
   
   removePeer: (peerId) => {
     const { peers } = get();
-    set({ peers: peers.filter(p => p.id !== peerId) });
+    const newPeers = { ...peers };
+    delete newPeers[peerId];
+    set({ peers: newPeers });
   },
   
   updatePeer: (peerId, updates) => {
     const { peers } = get();
-    set({
-      peers: peers.map(p => p.id === peerId ? { ...p, ...updates } : p)
-    });
+    if (peers[peerId]) {
+      set({
+        peers: { ...peers, [peerId]: { ...peers[peerId], ...updates } }
+      });
+    }
   },
+  
+  setConnected: (isConnected) => set({ isConnected }),
   
   addMessage: (message) => {
     const { messages } = get();

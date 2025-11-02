@@ -4,6 +4,9 @@
  */
 
 import NetInfo from '@react-native-community/netinfo';
+import { createLogger } from './logger';
+
+const logger = createLogger('Network');
 
 /**
  * Check if device is connected to internet
@@ -13,7 +16,7 @@ export async function isConnected(): Promise<boolean> {
     const state = await NetInfo.fetch();
     return state.isConnected ?? false;
   } catch (error) {
-    console.error('[Network] Error checking connection:', error);
+      logger.error('Error checking connection:', error);
     return false;
   }
 }
@@ -49,7 +52,7 @@ export async function retryWithBackoff<T>(
       return await fn();
     } catch (error) {
       lastError = error as Error;
-      console.warn(`[Network] Retry ${i + 1}/${maxRetries} failed:`, error);
+      if (__DEV__) logger.warn(`Retry ${i + 1}/${maxRetries} failed:`, error);
 
       if (i < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, i);

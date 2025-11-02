@@ -8,81 +8,182 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import { useMeshStore, MeshPeer, MeshMessage } from '../stores/meshStore';
 import * as Crypto from 'expo-crypto';
 import { Buffer } from 'buffer';
+import { createLogger } from '../utils/logger';
+import { validateMessageContent, sanitizeString } from '../utils/validation';
+
+const logger = createLogger('BLEMeshService');
 
 const SERVICE_UUID = '0000180A-0000-1000-8000-00805F9B34FB';
 const CHARACTERISTIC_UUID = '00002A29-0000-1000-8000-00805F9B34FB';
 const SCAN_DURATION = 5000; // 5 seconds
 const SCAN_INTERVAL = 10000; // 10 seconds
 
+type MessageCallback = (message: MeshMessage) => void;
+
 class BLEMeshService {
-  private manager: BleManager;
+  private manager: BleManager | null = null;
   private isRunning = false;
   private scanTimer: NodeJS.Timeout | null = null;
+  private connectTimer: NodeJS.Timeout | null = null;
+  private advertisingTimer: NodeJS.Timeout | null = null;
   private myDeviceId: string | null = null;
   private messageQueue: MeshMessage[] = [];
+  private messageCallbacks: MessageCallback[] = [];
+  private deviceSubscriptions: Map<string, any> = new Map();
 
   constructor() {
-    this.manager = new BleManager();
+    // Don't initialize BleManager here - wait for start() to be called
+  }
+
+  private getManager(): BleManager | null {
+    try {
+      if (!this.manager) {
+        this.manager = new BleManager();
+        if (__DEV__) logger.info('BLE Manager created successfully');
+      }
+      return this.manager;
+    } catch (error) {
+      logger.error('BLE Manager creation failed:', error);
+      return null;
+    }
+  }
+
+  onMessage(callback: MessageCallback) {
+    this.messageCallbacks.push(callback);
+    return () => {
+      const index = this.messageCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.messageCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  private notifyMessageCallbacks(message: MeshMessage) {
+    for (const callback of this.messageCallbacks) {
+      try {
+        callback(message);
+      } catch (error) {
+        logger.error('Message callback error:', error);
+      }
+    }
   }
 
   async start() {
     if (this.isRunning) return;
 
-    console.log('[BLEMeshService] Starting...');
+    if (__DEV__) logger.info('Starting...');
 
     try {
+      // Get or create BLE manager
+      const manager = this.getManager();
+      if (!manager) {
+        logger.warn('BLE not available - mesh networking disabled');
+        return;
+      }
+
       // Request permissions
       await this.requestPermissions();
 
       // Check BLE state
-      const state = await this.manager.state();
+      const state = await manager.state();
       if (state !== State.PoweredOn) {
-        console.warn('[BLEMeshService] Bluetooth is not powered on');
+        if (__DEV__) logger.warn('Bluetooth is not powered on');
         return;
       }
 
       // Generate device ID
       this.myDeviceId = await this.getDeviceId();
       useMeshStore.getState().setMyDeviceId(this.myDeviceId);
+      
+      if (__DEV__) logger.info('Device ID:', this.myDeviceId);
 
       this.isRunning = true;
 
       // Start scanning cycle
       this.startScanCycle();
 
-      console.log('[BLEMeshService] Started successfully');
+      if (__DEV__) logger.info('Started successfully');
     } catch (error) {
-      console.error('[BLEMeshService] Start error:', error);
+      logger.error('Start error:', error);
+      // Don't throw - allow app to continue without BLE
     }
   }
 
   stop() {
     if (!this.isRunning) return;
 
-    console.log('[BLEMeshService] Stopping...');
+    if (__DEV__) logger.info('Stopping...');
 
     this.isRunning = false;
 
+    // Clear all timers to prevent memory leaks
     if (this.scanTimer) {
       clearTimeout(this.scanTimer);
       this.scanTimer = null;
     }
 
-    this.manager.stopDeviceScan();
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
+
+    if (this.advertisingTimer) {
+      clearTimeout(this.advertisingTimer);
+      this.advertisingTimer = null;
+    }
+
+    // Unsubscribe from all device notifications
+    this.deviceSubscriptions.forEach((subscription, deviceId) => {
+      try {
+        if (subscription && typeof subscription.remove === 'function') {
+          subscription.remove();
+        }
+      } catch (error) {
+        logger.error(`Failed to remove subscription for ${deviceId}:`, error);
+      }
+    });
+    this.deviceSubscriptions.clear();
+
+    if (this.manager) {
+      try {
+        this.manager.stopDeviceScan();
+      } catch (error) {
+        logger.error('Stop scan error:', error);
+      }
+    }
     useMeshStore.getState().setScanning(false);
+  }
+
+  getMyDeviceId(): string | null {
+    return this.myDeviceId;
   }
 
   async sendMessage(content: string, to?: string) {
     if (!this.myDeviceId) {
-      console.error('[BLEMeshService] Cannot send message: no device ID');
+      logger.error('Cannot send message: no device ID');
       return;
     }
+
+    // Validate and sanitize content
+    if (!validateMessageContent(content)) {
+      logger.error('Invalid message content');
+      return;
+    }
+
+    const sanitizedContent = sanitizeString(content, 5000);
+    if (!sanitizedContent) {
+      logger.error('Message content is empty after sanitization');
+      return;
+    }
+
+    // Sanitize 'to' field if provided
+    const sanitizedTo = to ? sanitizeString(to, 50) : undefined;
 
     const message: MeshMessage = {
       id: await Crypto.randomUUID(),
       from: this.myDeviceId,
-      to,
-      content,
+      to: sanitizedTo,
+      content: sanitizedContent,
       type: 'text',
       timestamp: Date.now(),
       ttl: 5,
@@ -97,7 +198,7 @@ class BLEMeshService {
     useMeshStore.getState().addMessage(message);
     useMeshStore.getState().incrementStat('messagesSent');
 
-    console.log('[BLEMeshService] Message queued:', message.id);
+    if (__DEV__) logger.info('Message queued:', message.id);
   }
 
   async sendSOS() {
@@ -118,7 +219,7 @@ class BLEMeshService {
     useMeshStore.getState().addMessage(message);
     useMeshStore.getState().incrementStat('messagesSent');
 
-    console.log('[BLEMeshService] SOS sent:', message.id);
+    if (__DEV__) logger.info('SOS sent:', message.id);
   }
 
   private async requestPermissions() {
@@ -139,9 +240,29 @@ class BLEMeshService {
   }
 
   private async getDeviceId(): Promise<string> {
-    // Generate or retrieve device ID
-    const uuid = await Crypto.randomUUID();
-    return `AFN-${uuid.slice(0, 8)}`;
+    // Use AsyncStorage to persist device ID
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const storedId = await AsyncStorage.getItem('ble_device_id');
+      
+      if (storedId) {
+        if (__DEV__) logger.info('Using stored device ID:', storedId);
+        return storedId;
+      }
+      
+      // Generate new ID
+      const uuid = await Crypto.randomUUID();
+      const newId = `AFN-${uuid.slice(0, 8)}`;
+      await AsyncStorage.setItem('ble_device_id', newId);
+      
+      if (__DEV__) logger.info('Generated new device ID:', newId);
+      return newId;
+    } catch (error) {
+      logger.error('Device ID generation error:', error);
+      // Fallback to random ID (won't persist)
+      const uuid = await Crypto.randomUUID();
+      return `AFN-${uuid.slice(0, 8)}`;
+    }
   }
 
   private startScanCycle() {
@@ -157,66 +278,82 @@ class BLEMeshService {
   }
 
   private scan() {
-    console.log('[BLEMeshService] Starting scan...');
+    const manager = this.manager;
+    if (!manager) {
+      logger.warn('Cannot scan: BLE manager not available');
+      return;
+    }
+
+    if (__DEV__) logger.info('Starting scan...');
     useMeshStore.getState().setScanning(true);
 
     const discoveredDevices = new Map<string, Device>();
 
-    this.manager.startDeviceScan(
-      null, // Scan for all devices
-      { allowDuplicates: true },
-      (error, device) => {
-        if (error) {
-          console.error('[BLEMeshService] Scan error:', error);
-          return;
+    try {
+      manager.startDeviceScan(
+        null, // Scan for all devices
+        { allowDuplicates: true },
+        (error, device) => {
+          if (error) {
+            logger.error('Scan error:', error);
+            return;
+          }
+
+          if (device && device.name && device.name.startsWith('AFN-')) {
+            discoveredDevices.set(device.id, device);
+
+            const peer: MeshPeer = {
+              id: device.id,
+              name: device.name,
+              rssi: device.rssi || -100,
+              lastSeen: Date.now(),
+            };
+
+            useMeshStore.getState().addPeer(peer);
+          }
         }
+      );
 
-        if (device && device.name && device.name.startsWith('AFN-')) {
-          discoveredDevices.set(device.id, device);
-
-          const peer: MeshPeer = {
-            id: device.id,
-            name: device.name,
-            rssi: device.rssi || -100,
-            lastSeen: Date.now(),
-            connected: false,
-          };
-
-          useMeshStore.getState().addPeer(peer);
+      // Stop scan after duration
+      setTimeout(() => {
+        if (manager) {
+          try {
+            manager.stopDeviceScan();
+          } catch (error) {
+            logger.error('Stop scan error:', error);
+          }
         }
-      }
-    );
+        useMeshStore.getState().setScanning(false);
+        if (__DEV__) logger.info('Scan stopped. Found', discoveredDevices.size, 'peers');
 
-    // Stop scan after duration
-    setTimeout(() => {
-      this.manager.stopDeviceScan();
+        // Try to connect to discovered devices
+        this.connectToPeers(Array.from(discoveredDevices.values()));
+      }, SCAN_DURATION);
+    } catch (error) {
+      logger.error('Scan start error:', error);
       useMeshStore.getState().setScanning(false);
-      console.log('[BLEMeshService] Scan stopped. Found', discoveredDevices.size, 'peers');
-
-      // Try to connect to discovered devices
-      this.connectToPeers(Array.from(discoveredDevices.values()));
-    }, SCAN_DURATION);
+    }
   }
 
   private async connectToPeers(devices: Device[]) {
     for (const device of devices.slice(0, 3)) { // Connect to max 3 peers
       try {
-        console.log('[BLEMeshService] Connecting to', device.name);
+        if (__DEV__) logger.info('Connecting to', device.name);
         
         const connected = await device.connect({ timeout: 5000 });
         await connected.discoverAllServicesAndCharacteristics();
 
-        useMeshStore.getState().updatePeer(device.id, { connected: true });
+        useMeshStore.getState().setConnected(true);
 
         // Exchange messages
         await this.exchangeMessages(connected);
 
         // Disconnect
         await connected.cancelConnection();
-        useMeshStore.getState().updatePeer(device.id, { connected: false });
+        useMeshStore.getState().setConnected(false);
 
       } catch (error) {
-        console.error('[BLEMeshService] Connection error:', error);
+        logger.error('Connection error:', error);
       }
     }
   }
@@ -241,11 +378,11 @@ class BLEMeshService {
               useMeshStore.getState().markMessageDelivered(message.id);
               useMeshStore.getState().incrementStat('messagesSent');
               
-              console.log('[BLEMeshService] Message sent:', message.id);
+              if (__DEV__) logger.info('Message sent:', message.id);
             }
           }
         } catch (writeError) {
-          console.error('[BLEMeshService] Write error:', writeError);
+          logger.error('Write error:', writeError);
           // Keep in queue for retry
           continue;
         }
@@ -271,16 +408,19 @@ class BLEMeshService {
               useMeshStore.getState().addMessage(incomingMessage);
               useMeshStore.getState().incrementStat('messagesReceived');
               
-              console.log('[BLEMeshService] Message received:', incomingMessage.id);
+              // Notify callbacks
+              this.notifyMessageCallbacks(incomingMessage);
+              
+              if (__DEV__) logger.info('Message received:', incomingMessage.id);
             }
           }
         }
       } catch (readError) {
-        console.error('[BLEMeshService] Read error:', readError);
+        logger.error('Read error:', readError);
       }
 
     } catch (error) {
-      console.error('[BLEMeshService] Message exchange error:', error);
+      logger.error('Message exchange error:', error);
     }
   }
 }

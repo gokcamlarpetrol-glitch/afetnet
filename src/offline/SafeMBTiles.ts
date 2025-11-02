@@ -14,7 +14,9 @@ export class SafeMBTiles {
       this.isOpen = true;
       return true;
     } catch (error) {
-      console.error('SafeMBTiles open error:', error);
+      if (__DEV__) {
+        console.error('SafeMBTiles open error:', error);
+      }
       this.isOpen = false;
       return false;
     }
@@ -28,7 +30,9 @@ export class SafeMBTiles {
     try {
       return await this.mbtiles.getTile(z, x, y);
     } catch (error) {
-      console.error('SafeMBTiles getTile error:', error);
+      if (__DEV__) {
+        console.error('SafeMBTiles getTile error:', error);
+      }
       return null;
     }
   }
@@ -41,7 +45,9 @@ export class SafeMBTiles {
     try {
       return await this.mbtiles.getMetadata();
     } catch (error) {
-      console.error('SafeMBTiles getMetadata error:', error);
+      if (__DEV__) {
+        console.error('SafeMBTiles getMetadata error:', error);
+      }
       return null;
     }
   }
@@ -51,7 +57,9 @@ export class SafeMBTiles {
       try {
         await this.mbtiles.close();
       } catch (error) {
-        console.error('SafeMBTiles close error:', error);
+        if (__DEV__) {
+          console.error('SafeMBTiles close error:', error);
+        }
       }
       this.mbtiles = null;
     }

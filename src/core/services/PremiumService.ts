@@ -5,8 +5,12 @@
 import Purchases, { PurchasesOffering } from 'react-native-purchases';
 import { Platform } from 'react-native';
 import { usePremiumStore } from '../stores/premiumStore';
+import { useTrialStore } from '../stores/trialStore';
 import { APP_CONFIG } from '../config/app';
 import { ENV } from '../config/env';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('PremiumService');
 
 // RevenueCat API Keys from environment
 const REVENUECAT_API_KEY_IOS = ENV.RC_IOS_KEY;
@@ -22,30 +26,37 @@ class PremiumService {
   async initialize() {
     if (this.isInitialized) return;
 
-    console.log('[PremiumService] Initializing...');
+    if (__DEV__) logger.info('Initializing...');
 
     try {
+      // Initialize trial first
+      await useTrialStore.getState().initializeTrial();
+
       const apiKey = Platform.OS === 'ios' ? REVENUECAT_API_KEY_IOS : REVENUECAT_API_KEY_ANDROID;
       
       if (!apiKey) {
-        console.warn('[PremiumService] RevenueCat API key not found. Premium features disabled.');
-        usePremiumStore.getState().setPremium(false);
+        if (__DEV__) logger.warn('RevenueCat API key not found. Using trial only.');
+        // Check trial status
+        const isTrialActive = useTrialStore.getState().checkTrialStatus();
+        usePremiumStore.getState().setPremium(isTrialActive);
+        this.isInitialized = true;
         return;
       }
 
       // Configure RevenueCat
       Purchases.configure({ apiKey });
 
-      // Check current status
+      // Check current status (includes trial check)
       await this.checkPremiumStatus();
 
       this.isInitialized = true;
-      console.log('[PremiumService] Initialized successfully');
+      if (__DEV__) logger.info('Initialized successfully');
 
     } catch (error) {
-      console.error('[PremiumService] Initialization error:', error);
-      // Set as free user on error
-      usePremiumStore.getState().setPremium(false);
+      logger.error('Initialization error:', error);
+      // Check trial as fallback
+      const isTrialActive = useTrialStore.getState().checkTrialStatus();
+      usePremiumStore.getState().setPremium(isTrialActive);
     }
   }
 
@@ -53,26 +64,34 @@ class PremiumService {
     try {
       usePremiumStore.getState().setLoading(true);
 
+      // First check if user has paid subscription
       const customerInfo = await Purchases.getCustomerInfo();
-      const isPremium = typeof customerInfo.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
+      const hasPaidSubscription = typeof customerInfo.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
 
-      if (isPremium) {
+      if (hasPaidSubscription) {
         const entitlement = customerInfo.entitlements.active[ENTITLEMENT_ID];
         const expiresAt = entitlement.expirationDate 
           ? new Date(entitlement.expirationDate).getTime()
           : null;
 
         usePremiumStore.getState().setPremium(true, 'monthly', expiresAt || undefined);
-      } else {
-        usePremiumStore.getState().setPremium(false);
+        return true;
       }
 
-      return isPremium;
+      // If no paid subscription, check trial
+      const isTrialActive = useTrialStore.getState().checkTrialStatus();
+      usePremiumStore.getState().setPremium(isTrialActive);
+
+      return isTrialActive;
 
     } catch (error) {
-      console.error('[PremiumService] Status check error:', error);
-      usePremiumStore.getState().setPremium(false);
-      return false;
+      logger.error('Status check error:', error);
+      
+      // On error, check trial as fallback
+      const isTrialActive = useTrialStore.getState().checkTrialStatus();
+      usePremiumStore.getState().setPremium(isTrialActive);
+      
+      return isTrialActive;
     } finally {
       usePremiumStore.getState().setLoading(false);
     }
@@ -83,7 +102,7 @@ class PremiumService {
       const offerings = await Purchases.getOfferings();
       return offerings.current;
     } catch (error) {
-      console.error('[PremiumService] Get offerings error:', error);
+      logger.error('Get offerings error:', error);
       return null;
     }
   }
@@ -116,7 +135,7 @@ class PremiumService {
       return isPremium;
 
     } catch (error) {
-      console.error('[PremiumService] Purchase error:', error);
+      logger.error('Purchase error:', error);
       return false;
     } finally {
       usePremiumStore.getState().setLoading(false);
@@ -144,7 +163,7 @@ class PremiumService {
       return isPremium;
 
     } catch (error) {
-      console.error('[PremiumService] Restore error:', error);
+      logger.error('Restore error:', error);
       return false;
     } finally {
       usePremiumStore.getState().setLoading(false);

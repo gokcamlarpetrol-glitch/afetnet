@@ -7,29 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		030CB51009DC9C5290354A99 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4D5B2B5C5925A34CC37C6F10 /* PrivacyInfo.xcprivacy */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		1496EBF829C6C65B76B7631E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3C95F5F8443CAA556ABFD8AE /* PrivacyInfo.xcprivacy */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		B45C7BB055585C42283D38FF /* libPods-AfetNet.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 385341D6A544C8BDC8CE11A2 /* libPods-AfetNet.a */; };
+		9E41849219ED08FBBBAF4E34 /* libPods-AfetNet.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FD5CC65EBFB2AF7063EC32A2 /* libPods-AfetNet.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		EA505493AD8C500BC798DB4F /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB888DD8F01175C75BF4A7E /* ExpoModulesProvider.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		F69B647C1CDA325F983709CD /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BFB1DAAA766C53E84ADF32 /* ExpoModulesProvider.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0DB888DD8F01175C75BF4A7E /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-AfetNet/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		016D7BCF10327E826FFEDA48 /* Pods-AfetNet.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-AfetNet.debug.xcconfig"; path = "Target Support Files/Pods-AfetNet/Pods-AfetNet.debug.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* AfetNet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AfetNet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = AfetNet/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = AfetNet/Info.plist; sourceTree = "<group>"; };
-		385341D6A544C8BDC8CE11A2 /* libPods-AfetNet.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-AfetNet.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		3D2E5881A28480B0C5519227 /* Pods-AfetNet.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-AfetNet.debug.xcconfig"; path = "Target Support Files/Pods-AfetNet/Pods-AfetNet.debug.xcconfig"; sourceTree = "<group>"; };
-		4D5B2B5C5925A34CC37C6F10 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = AfetNet/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3C95F5F8443CAA556ABFD8AE /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = AfetNet/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = AfetNet/SplashScreen.storyboard; sourceTree = "<group>"; };
+		B5BFB1DAAA766C53E84ADF32 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-AfetNet/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		CBDDB3794EB828E75ED7B112 /* Pods-AfetNet.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-AfetNet.release.xcconfig"; path = "Target Support Files/Pods-AfetNet/Pods-AfetNet.release.xcconfig"; sourceTree = "<group>"; };
+		D65C936980FEA467947E0C86 /* Pods-AfetNet.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-AfetNet.release.xcconfig"; path = "Target Support Files/Pods-AfetNet/Pods-AfetNet.release.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = AfetNet/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* AfetNet-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "AfetNet-Bridging-Header.h"; path = "AfetNet/AfetNet-Bridging-Header.h"; sourceTree = "<group>"; };
+		FD5CC65EBFB2AF7063EC32A2 /* libPods-AfetNet.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-AfetNet.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,21 +37,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B45C7BB055585C42283D38FF /* libPods-AfetNet.a in Frameworks */,
+				9E41849219ED08FBBBAF4E34 /* libPods-AfetNet.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		048E94AB21ED9D839CA6358F /* AfetNet */ = {
-			isa = PBXGroup;
-			children = (
-				0DB888DD8F01175C75BF4A7E /* ExpoModulesProvider.swift */,
-			);
-			name = AfetNet;
-			sourceTree = "<group>";
-		};
 		13B07FAE1A68108700A75B9A /* AfetNet */ = {
 			isa = PBXGroup;
 			children = (
@@ -61,7 +53,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				4D5B2B5C5925A34CC37C6F10 /* PrivacyInfo.xcprivacy */,
+				3C95F5F8443CAA556ABFD8AE /* PrivacyInfo.xcprivacy */,
 			);
 			name = AfetNet;
 			sourceTree = "<group>";
@@ -70,9 +62,18 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				385341D6A544C8BDC8CE11A2 /* libPods-AfetNet.a */,
+				FD5CC65EBFB2AF7063EC32A2 /* libPods-AfetNet.a */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		37D25C4BEF7279EEC38703D1 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				016D7BCF10327E826FFEDA48 /* Pods-AfetNet.debug.xcconfig */,
+				D65C936980FEA467947E0C86 /* Pods-AfetNet.release.xcconfig */,
+			);
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -89,8 +90,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				A355DAE03A1AC5FE3332B21B /* Pods */,
-				F826A7C90AE206BCE391FE61 /* ExpoModulesProviders */,
+				37D25C4BEF7279EEC38703D1 /* Pods */,
+				B1EE3E8B7C6C13B0C13FE397 /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -105,13 +106,12 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		A355DAE03A1AC5FE3332B21B /* Pods */ = {
+		B1EE3E8B7C6C13B0C13FE397 /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				3D2E5881A28480B0C5519227 /* Pods-AfetNet.debug.xcconfig */,
-				CBDDB3794EB828E75ED7B112 /* Pods-AfetNet.release.xcconfig */,
+				C461506EE20943465A501FC7 /* AfetNet */,
 			);
-			path = Pods;
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -123,12 +123,12 @@
 			path = AfetNet/Supporting;
 			sourceTree = "<group>";
 		};
-		F826A7C90AE206BCE391FE61 /* ExpoModulesProviders */ = {
+		C461506EE20943465A501FC7 /* AfetNet */ = {
 			isa = PBXGroup;
 			children = (
-				048E94AB21ED9D839CA6358F /* AfetNet */,
+				B5BFB1DAAA766C53E84ADF32 /* ExpoModulesProvider.swift */,
 			);
-			name = ExpoModulesProviders;
+			name = AfetNet;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -139,13 +139,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "AfetNet" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				CCA45A18BF452AAB4DF74A5D /* [Expo] Configure project */,
+				AEDBC0DF5E2516F1DA8696A0 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				2B14710CA4D2E7D90B7BCCC4 /* [CP] Embed Pods Frameworks */,
+				1336333EBEF57D4206E37EF1 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -195,7 +195,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				030CB51009DC9C5290354A99 /* PrivacyInfo.xcprivacy in Resources */,
+				1496EBF829C6C65B76B7631E /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,7 +241,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		2B14710CA4D2E7D90B7BCCC4 /* [CP] Embed Pods Frameworks */ = {
+		1336333EBEF57D4206E37EF1 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -287,6 +287,7 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/RevenueCat/RevenueCat.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-launcher/EXDevLauncher.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-menu/EXDevMenu.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/react-native-maps/ReactNativeMapsPrivacy.bundle",
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
@@ -307,13 +308,14 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RevenueCat.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevLauncher.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevMenu.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ReactNativeMapsPrivacy.bundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-AfetNet/Pods-AfetNet-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		CCA45A18BF452AAB4DF74A5D /* [Expo] Configure project */ = {
+		AEDBC0DF5E2516F1DA8696A0 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -345,7 +347,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				EA505493AD8C500BC798DB4F /* ExpoModulesProvider.swift in Sources */,
+				F69B647C1CDA325F983709CD /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -354,7 +356,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3D2E5881A28480B0C5519227 /* Pods-AfetNet.debug.xcconfig */;
+			baseConfigurationReference = 016D7BCF10327E826FFEDA48 /* Pods-AfetNet.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -391,7 +393,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CBDDB3794EB828E75ED7B112 /* Pods-AfetNet.release.xcconfig */;
+			baseConfigurationReference = D65C936980FEA467947E0C86 /* Pods-AfetNet.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

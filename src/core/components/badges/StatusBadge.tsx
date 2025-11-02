@@ -58,16 +58,16 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
     alignSelf: 'flex-start',
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: spacing.sm,
+    marginRight: 8,
   },
   text: {
     ...typography.badge,

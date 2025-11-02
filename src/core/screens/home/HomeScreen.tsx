@@ -1,250 +1,148 @@
 /**
- * HOME SCREEN
- * Main screen with earthquake list, SOS button, and mesh status
- * Based on old HomeSimple.tsx design
+ * HOME SCREEN - Unicorn Premium Design
+ * Midnight Professional theme
  */
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, StyleSheet, Pressable, Alert } from 'react-native';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl, StatusBar, Animated, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, typography, spacing } from '../../theme';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
-import { useMesh } from '../../hooks/useMesh';
-import EarthquakeCard from '../../components/cards/EarthquakeCard';
-import SOSButton from '../../components/buttons/SOSButton';
-import StatsCard from '../../components/cards/StatsCard';
-import MeshStatusCard from '../../components/cards/MeshStatusCard';
-import StatusBadge from '../../components/badges/StatusBadge';
-import { useNetworkStatus } from '../../hooks/useNetworkStatus';
-import SOSModal, { SOSData } from '../../components/modals/SOSModal';
-import { apiClient } from '../../api/client';
+import HomeHeader from './components/HomeHeader';
+import StatusCard from './components/StatusCard';
+import MeshNetworkPanel from './components/MeshNetworkPanel';
+import EarthquakeMonitorCard from './components/EarthquakeMonitorCard';
+import EmergencyButton from './components/EmergencyButton';
+import FeatureGrid from './components/FeatureGrid';
+import SOSModal from '../../components/SOSModal';
+import * as haptics from '../../utils/haptics';
+import { colors, spacing } from '../../theme';
+import { voiceCommandService } from '../../services/VoiceCommandService';
 
 export default function HomeScreen({ navigation }: any) {
-  const [sosModalVisible, setSosModalVisible] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  
   const { earthquakes, loading, refresh } = useEarthquakes();
-  const { peers, messages, isConnected } = useMesh();
-  const { isOnline } = useNetworkStatus();
+  const [refreshing, setRefreshing] = useState(false);
+  const [showSOSModal, setShowSOSModal] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-  // Auto-refresh earthquakes every minute
+  // Entrance animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      refresh();
-    }, 60000);
+    // Initial load
+    refresh();
+    
+    // Entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    
+    return () => {
+      // Cleanup
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [refresh]);
-
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    haptics.impactLight();
     await refresh();
     setRefreshing(false);
-  };
+  }, [refresh]);
 
-  const handleSOSPress = () => {
-    setSosModalVisible(true);
-  };
+  const handleViewAllEarthquakes = useCallback(() => {
+    haptics.impactLight();
+    navigation?.navigate?.('AllEarthquakes');
+  }, [navigation]);
 
-  const handleSOSSubmit = async (data: SOSData) => {
-    try {
-      // Send to backend
-      if (isOnline) {
-        await apiClient.post('/sos/send', data);
-        Alert.alert('SOS Gönderildi', 'Acil yardım çağrınız alındı ve kurtarma ekipleriyle paylaşıldı!');
-      } else {
-        // Offline - send via BLE mesh
-        const { sendMessage } = useMesh();
-        await sendMessage(JSON.stringify({
-          type: 'sos',
-          ...data,
-          timestamp: Date.now(),
-        }));
-        Alert.alert('SOS Gönderildi', 'SOS sinyaliniz Bluetooth mesh ağı üzerinden yakındaki cihazlara gönderildi.');
-      }
-      
-      setSosModalVisible(false);
-    } catch (error) {
-      console.error('SOS error:', error);
-      Alert.alert('Hata', 'SOS gönderilemedi. Lütfen tekrar deneyin.');
-    }
-  };
+  const handleSOSPress = useCallback(() => {
+    haptics.impactHeavy();
+    setShowSOSModal(true);
+  }, []);
 
-  const handleEarthquakePress = (earthquake: any) => {
-    // TODO: Navigate to earthquake details
-    console.log('Earthquake pressed:', earthquake);
-  };
+  const handleSOSConfirm = useCallback(() => {
+    // SOS sent
+  }, []);
 
-  const handleViewAllEarthquakes = () => {
-    navigation.navigate('AllEarthquakes');
-  };
-
-  const latestEarthquakes = earthquakes.slice(0, 3);
+  const handleSOSClose = useCallback(() => {
+    setShowSOSModal(false);
+  }, []);
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>AfetNet</Text>
-          <Text style={styles.headerSubtitle}>Hayat Kurtaran Teknoloji</Text>
-        </View>
-        <StatusBadge status={isOnline ? 'online' : 'offline'} />
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.brand.primary}
-            colors={[colors.brand.primary]}
-          />
-        }
+      <StatusBar 
+        barStyle="light-content" 
+        backgroundColor={colors.background.primary}
+        translucent={false}
+      />
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+        }}
       >
-        {/* Offline Support Banner */}
-        <View style={styles.banner}>
-          <View style={styles.bannerIcon}>
-            <Ionicons name="shield-checkmark" size={24} color={colors.brand.primary} />
-          </View>
-          <View style={styles.bannerContent}>
-            <Text style={styles.bannerTitle}>Tam Offline Çalışma Desteği</Text>
-            <Text style={styles.bannerText}>
-              İnternet olmadan Bluetooth mesh ağı ile iletişim. Deprem erken uyarı, aile takibi, SOS bildirimi ve harita desteği.
-            </Text>
-          </View>
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing || loading}
+              onRefresh={onRefresh}
+              tintColor={colors.accent.primary}
+            />
+          }
+        >
+          <HomeHeader />
+          <StatusCard />
+          <MeshNetworkPanel />
+          <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
+          <EmergencyButton onPress={handleSOSPress} />
+          <FeatureGrid navigation={navigation} />
+        </ScrollView>
+      </Animated.View>
 
-        {/* Mesh Status Card */}
-        <MeshStatusCard
-          peerCount={peers.length}
-          status={isConnected ? 'online' : 'offline'}
-          onPress={() => {/* TODO: Navigate to mesh details */}}
-        />
-
-        {/* SOS Button */}
-        <SOSButton onPress={handleSOSPress} />
-
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <StatsCard
-            icon="chatbubble-outline"
-            value={messages.length}
-            label="Mesaj"
-            color={colors.status.info}
+      {/* Voice Command Floating Button */}
+      <TouchableOpacity
+        style={styles.voiceButton}
+        onPress={async () => {
+          haptics.impactMedium();
+          if (isListening) {
+            await voiceCommandService.stopListening();
+            setIsListening(false);
+          } else {
+            await voiceCommandService.startListening();
+            setIsListening(true);
+          }
+        }}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={isListening ? ['#10b981', '#059669'] : ['#6366f1', '#4f46e5']}
+          style={styles.voiceButtonGradient}
+        >
+          <Ionicons 
+            name={isListening ? 'mic' : 'mic-outline'} 
+            size={28} 
+            color="#ffffff" 
           />
-          <StatsCard
-            icon="people-outline"
-            value={peers.length}
-            label="Kişi"
-            color={colors.status.success}
-          />
-          <StatsCard
-            icon="pulse-outline"
-            value={earthquakes.length}
-            label="Deprem"
-            color={colors.status.warning}
-          />
-        </View>
+        </LinearGradient>
+      </TouchableOpacity>
 
-        {/* Earthquake Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <Ionicons name="pulse" size={24} color={colors.status.danger} />
-              <Text style={styles.sectionTitle}>Deprem İzleme Sistemi Aktif</Text>
-            </View>
-            <StatusBadge status="active" text="CANLI" />
-          </View>
-
-          <View style={styles.earthquakeInfo}>
-            <View style={styles.earthquakeInfoItem}>
-              <Text style={styles.earthquakeInfoLabel}>Son 24 Saat</Text>
-              <Text style={styles.earthquakeInfoValue}>3</Text>
-            </View>
-            <View style={styles.earthquakeInfoItem}>
-              <Text style={styles.earthquakeInfoLabel}>En Büyük</Text>
-              <Text style={styles.earthquakeInfoValue}>4.2 ML</Text>
-            </View>
-            <View style={styles.earthquakeInfoItem}>
-              <Text style={styles.earthquakeInfoLabel}>Toplam</Text>
-              <Text style={styles.earthquakeInfoValue}>3</Text>
-            </View>
-          </View>
-
-          <Text style={styles.earthquakeSource}>AFAD ve Kandilli verilerine bağlı</Text>
-        </View>
-
-        {/* Latest Earthquakes */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Son Depremler</Text>
-            <Pressable onPress={handleViewAllEarthquakes}>
-              <View style={styles.viewAllButton}>
-                <Ionicons name="refresh-circle" size={20} color={colors.brand.primary} />
-              </View>
-            </Pressable>
-          </View>
-
-          {loading && earthquakes.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="hourglass-outline" size={48} color={colors.text.muted} />
-              <Text style={styles.emptyText}>Deprem verileri yükleniyor...</Text>
-            </View>
-          ) : latestEarthquakes.length > 0 ? (
-            <>
-              {latestEarthquakes.map((earthquake) => (
-                <EarthquakeCard
-                  key={earthquake.id}
-                  earthquake={earthquake}
-                  onPress={() => handleEarthquakePress(earthquake)}
-                />
-              ))}
-              <Pressable onPress={handleViewAllEarthquakes} style={styles.viewAllLink}>
-                <Text style={styles.viewAllText}>Tüm Depremleri Gör</Text>
-                <Ionicons name="arrow-forward" size={20} color={colors.brand.primary} />
-              </Pressable>
-            </>
-          ) : (
-            <View style={styles.emptyState}>
-              <Ionicons name="checkmark-circle-outline" size={48} color={colors.status.success} />
-              <Text style={styles.emptyText}>Son 24 saatte önemli deprem kaydedilmedi</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Quick Access */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Hızlı Erişim</Text>
-          <View style={styles.quickAccessGrid}>
-            <Pressable style={styles.quickAccessItem}>
-              <Ionicons name="map-outline" size={32} color={colors.brand.primary} />
-              <Text style={styles.quickAccessText}>Offline Harita</Text>
-            </Pressable>
-            <Pressable style={styles.quickAccessItem}>
-              <Ionicons name="people-outline" size={32} color={colors.status.success} />
-              <Text style={styles.quickAccessText}>Aile Takibi</Text>
-            </Pressable>
-            <Pressable style={styles.quickAccessItem}>
-              <Ionicons name="chatbubbles-outline" size={32} color={colors.status.info} />
-              <Text style={styles.quickAccessText}>Mesajlar</Text>
-            </Pressable>
-            <Pressable style={styles.quickAccessItem}>
-              <Ionicons name="settings-outline" size={32} color={colors.text.tertiary} />
-              <Text style={styles.quickAccessText}>Ayarlar</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* SOS Modal */}
       <SOSModal
-        visible={sosModalVisible}
-        onClose={() => setSosModalVisible(false)}
-        onSubmit={handleSOSSubmit}
+        visible={showSOSModal}
+        onClose={handleSOSClose}
+        onConfirm={handleSOSConfirm}
       />
     </View>
   );
@@ -255,162 +153,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background.primary,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.xl,
-    paddingTop: 60,
-    backgroundColor: colors.background.secondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.primary,
-  },
-  headerTitle: {
-    ...typography.h1,
-    color: colors.text.primary,
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    marginTop: spacing.xs,
-  },
-  scrollView: {
-    flex: 1,
-  },
   content: {
-    padding: spacing.lg,
-    paddingBottom: 100,
+    paddingHorizontal: 20,
+    paddingBottom: 120,
   },
-  banner: {
-    flexDirection: 'row',
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border.primary,
+  voiceButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  bannerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.brand.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-  },
-  bannerContent: {
-    flex: 1,
-  },
-  bannerTitle: {
-    ...typography.h4,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  bannerText: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    lineHeight: 20,
-  },
-  section: {
-    marginBottom: spacing.xl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  sectionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  sectionTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
-    marginLeft: spacing.sm,
-  },
-  earthquakeInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  earthquakeInfoItem: {
-    alignItems: 'center',
-  },
-  earthquakeInfoLabel: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    marginBottom: spacing.xs,
-  },
-  earthquakeInfoValue: {
-    ...typography.h2,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  earthquakeSource: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  viewAllButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.brand.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  viewAllLink: {
-    flexDirection: 'row',
+  voiceButtonGradient: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-  },
-  viewAllText: {
-    ...typography.body,
-    color: colors.brand.primary,
-    fontWeight: '600',
-    marginRight: spacing.sm,
-  },
-  emptyState: {
-    alignItems: 'center',
-    padding: spacing.xxl,
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.text.tertiary,
-    marginTop: spacing.md,
-    textAlign: 'center',
-  },
-  quickAccessGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  quickAccessItem: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
-    padding: spacing.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border.primary,
-  },
-  quickAccessText: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    marginTop: spacing.sm,
-    textAlign: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
 });
-

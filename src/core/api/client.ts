@@ -4,8 +4,9 @@
  */
 
 import { ENV } from '../config/env';
+import { sanitizeString } from '../utils/validation';
 
-const API_BASE_URL = 'https://api.afetnet.app';
+const API_BASE_URL = ENV.API_BASE_URL;
 const API_SECRET = ENV.FIREBASE_API_KEY; // Using Firebase key as API secret for now
 
 interface RequestOptions {
@@ -30,7 +31,13 @@ class APIClient {
       timeout = 10000,
     } = options;
 
-    const url = `${this.baseURL}${endpoint}`;
+    // Sanitize endpoint
+    const sanitizedEndpoint = sanitizeString(endpoint, 200).replace(/[^a-zA-Z0-9\/\-_]/g, '');
+    if (!sanitizedEndpoint || !sanitizedEndpoint.startsWith('/')) {
+      throw new Error('Invalid endpoint');
+    }
+
+    const url = `${this.baseURL}${sanitizedEndpoint}`;
     const timestamp = Date.now().toString();
 
     // Prepare request

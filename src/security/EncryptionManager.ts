@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '../utils/productionLogger';
 import CryptoJS from 'crypto-js';
-import { emergencyLogger } from '../services/logging/EmergencyLogger';
+// import { emergencyLogger } from '../services/logging/EmergencyLogger'; // REMOVED - file doesn't exist
 
 export interface EncryptionConfig {
   algorithm: string;
@@ -57,13 +57,11 @@ class EncryptionManager {
       }
 
       this.isInitialized = true;
-      emergencyLogger.logSystem('info', 'Encryption system initialized successfully');
       logger.debug('✅ Encryption system initialized');
 
       return true;
 
     } catch (error) {
-      emergencyLogger.logSystem('error', 'Failed to initialize encryption', { error: String(error) });
       logger.error('❌ Failed to initialize encryption:', error);
       return false;
     }
@@ -112,15 +110,10 @@ class EncryptionManager {
         checksum: checksum,
       };
 
-      emergencyLogger.logSecurity('info', 'Data encrypted successfully', { 
-        dataLength: data.length,
-        timestamp: encryptedData.timestamp, 
-      });
-
       return encryptedData;
 
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Encryption failed', { error: String(error) });
+      logger.error('Encryption failed:', error);
       throw new Error(`Encryption failed: ${error}`);
     }
   }
@@ -157,15 +150,10 @@ class EncryptionManager {
         throw new Error('Decryption resulted in empty string');
       }
 
-      emergencyLogger.logSecurity('info', 'Data decrypted successfully', { 
-        dataLength: decryptedString.length,
-        timestamp: encryptedData.timestamp, 
-      });
-
       return decryptedString;
 
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Decryption failed', { error: String(error) });
+      logger.error('Decryption failed:', error);
       throw new Error(`Decryption failed: ${error}`);
     }
   }
@@ -176,7 +164,7 @@ class EncryptionManager {
       const jsonString = JSON.stringify(obj);
       return await this.encrypt(jsonString);
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Object encryption failed', { error: String(error) });
+      logger.error('Object encryption failed:', error);
       throw error;
     }
   }
@@ -187,7 +175,7 @@ class EncryptionManager {
       const jsonString = await this.decrypt(encryptedData);
       return JSON.parse(jsonString);
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Object decryption failed', { error: String(error) });
+      logger.error('Object decryption failed:', error);
       throw error;
     }
   }
@@ -197,10 +185,8 @@ class EncryptionManager {
     try {
       const encryptedData = await this.encryptObject(data);
       await AsyncStorage.setItem(`secure_${key}`, JSON.stringify(encryptedData));
-      
-      emergencyLogger.logSecurity('info', 'Data stored securely', { key, dataType: typeof data });
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Secure storage failed', { error: String(error) });
+      logger.error('Secure storage failed:', error);
       throw error;
     }
   }
@@ -214,7 +200,7 @@ class EncryptionManager {
       const encryptedData: EncryptedData = JSON.parse(stored);
       return await this.decryptObject<T>(encryptedData);
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Secure retrieval failed', { error: String(error) });
+      logger.error('Secure retrieval failed:', error);
       return null;
     }
   }
@@ -229,7 +215,7 @@ class EncryptionManager {
       const combinedData = data + this.masterKey + this.deviceId;
       return CryptoJS.SHA256(combinedData).toString();
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Hash generation failed', { error: String(error) });
+      logger.error('Hash generation failed:', error);
       throw error;
     }
   }
@@ -240,7 +226,7 @@ class EncryptionManager {
       const actualHash = this.generateSecureHash(data);
       return actualHash === expectedHash;
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Integrity verification failed', { error: String(error) });
+      logger.error('Integrity verification failed:', error);
       return false;
     }
   }
@@ -254,10 +240,9 @@ class EncryptionManager {
       // Store channel key securely
       await this.secureStore(`channel_${channelId}`, { key: channelKey, peerId, createdAt: Date.now() });
       
-      emergencyLogger.logSecurity('info', 'Secure channel created', { channelId, peerId });
       return channelId;
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Secure channel creation failed', { error: String(error) });
+      logger.error('Secure channel creation failed:', error);
       throw error;
     }
   }
@@ -284,7 +269,7 @@ class EncryptionManager {
         checksum: CryptoJS.SHA256(encrypted.toString() + peerKey).toString(),
       };
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Peer encryption failed', { error: String(error) });
+      logger.error('Peer encryption failed:', error);
       throw error;
     }
   }
@@ -310,7 +295,7 @@ class EncryptionManager {
 
       return decrypted.toString(CryptoJS.enc.Utf8);
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Peer decryption failed', { error: String(error) });
+      logger.error('Peer decryption failed:', error);
       throw error;
     }
   }
@@ -330,10 +315,9 @@ class EncryptionManager {
       
       await AsyncStorage.multiRemove(secureKeys);
       
-      emergencyLogger.logSecurity('warn', 'All encrypted data wiped');
       logger.debug('✅ All encrypted data wiped');
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Data wipe failed', { error: String(error) });
+      logger.error('Data wipe failed:', error);
       throw error;
     }
   }
@@ -350,10 +334,8 @@ class EncryptionManager {
         keySize: this.encryptionConfig.keySize / 32,
         iterations: this.encryptionConfig.iterations,
       }).toString();
-
-      emergencyLogger.logSecurity('info', 'Device key generated');
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Device key generation failed', { error: String(error) });
+      logger.error('Device key generation failed:', error);
       throw error;
     }
   }
@@ -392,7 +374,7 @@ class EncryptionManager {
       
       return peerKey;
     } catch (error) {
-      emergencyLogger.logSecurity('error', 'Peer key retrieval failed', { error: String(error) });
+      logger.error('Peer key retrieval failed:', error);
       throw error;
     }
   }

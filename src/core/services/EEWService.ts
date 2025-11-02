@@ -6,6 +6,11 @@
 import NetInfo from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
 import * as Localization from 'expo-localization';
+import { createLogger } from '../utils/logger';
+import { multiChannelAlertService } from './MultiChannelAlertService';
+import { useEEWStore } from '../../eew/store';
+
+const logger = createLogger('EEWService');
 
 export interface EEWEvent {
   id: string;
@@ -30,6 +35,7 @@ class EEWService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
 
   // WebSocket URLs
   private wsUrls = {
@@ -46,18 +52,27 @@ class EEWService {
   ];
 
   async start() {
-    console.log('[EEWService] Starting...');
+    if (__DEV__) {
+      logger.info('Starting...');
+    }
 
     // Check network
     const netState = await NetInfo.fetch();
     if (!netState.isConnected) {
-      console.warn('[EEWService] No network connection');
+      if (__DEV__) {
+        logger.warn('No network connection');
+      }
       return;
     }
 
     // Detect region
     const region = await this.detectRegion();
-    console.log('[EEWService] Detected region:', region);
+    if (__DEV__) {
+      logger.info(`Detected region: ${region}`);
+    }
+
+    // Set status to connecting
+    useEEWStore.getState().setStatus('connecting');
 
     // Start WebSocket
     await this.startWebSocket(region);
@@ -70,15 +85,30 @@ class EEWService {
   }
 
   stop() {
-    console.log('[EEWService] Stopping...');
+    if (__DEV__) {
+      logger.info('Stopping...');
+    }
     
+    // Clear reconnect timeout
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    
+    // Clean up WebSocket listeners
     if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
 
     this.polling = false;
     this.reconnectAttempts = 0;
+    this.callbacks = [];
+    this.seenEvents.clear();
   }
 
   onEvent(callback: EEWCallback) {
@@ -120,7 +150,7 @@ class EEWService {
 
       return 'GLOBAL';
     } catch (error) {
-      console.error('[EEWService] Region detection failed:', error);
+      logger.error('Region detection failed:', error);
       return 'GLOBAL';
     }
   }
@@ -139,18 +169,42 @@ class EEWService {
 
     for (const url of urls) {
       try {
-        console.log('[EEWService] Connecting to:', url);
+        if (__DEV__) {
+          logger.info(`Connecting to: ${url}`);
+        }
+        
+        // Clean up existing WebSocket before creating new one
+        if (this.ws) {
+          this.ws.onopen = null;
+          this.ws.onmessage = null;
+          this.ws.onerror = null;
+          this.ws.onclose = null;
+          this.ws.close();
+          this.ws = null;
+        }
         
         this.ws = new WebSocket(url);
 
         this.ws.onopen = () => {
-          console.log('[EEWService] WebSocket connected');
+          if (__DEV__) {
+            logger.info('WebSocket connected');
+          }
           this.reconnectAttempts = 0;
+          useEEWStore.getState().setStatus('connected');
         };
 
         this.ws.onmessage = (event) => {
           try {
-            const data = JSON.parse(event.data);
+            // Validate response is JSON
+            const text = String(event.data);
+            if (!text.trim().startsWith('{') && !text.trim().startsWith('[')) {
+              if (__DEV__) {
+                logger.warn('Received non-JSON response:', text.substring(0, 100));
+              }
+              return;
+            }
+
+            const data = JSON.parse(text);
             const eewEvent = this.normalizeEvent(data);
             
             if (eewEvent && !this.seenEvents.has(eewEvent.id)) {
@@ -158,44 +212,92 @@ class EEWService {
               this.notifyCallbacks(eewEvent);
             }
           } catch (error) {
-            console.error('[EEWService] Message parse error:', error);
+            logger.error('Message parse error:', error);
           }
         };
 
-        this.ws.onerror = (error) => {
-          console.error('[EEWService] WebSocket error:', error);
+        this.ws.onerror = (errorEvent: any) => {
+          const errorMessage = errorEvent?.message || 'WebSocket error occurred';
+          logger.error('WebSocket error:', errorMessage);
+          useEEWStore.getState().setStatus('error', errorMessage);
         };
 
         this.ws.onclose = () => {
-          console.log('[EEWService] WebSocket closed');
+          if (__DEV__) {
+            logger.info('WebSocket closed');
+          }
+          
+          const currentWs = this.ws;
           this.ws = null;
-          this.handleReconnect();
+          
+          // Clean up event listeners
+          if (currentWs) {
+            currentWs.onopen = null;
+            currentWs.onmessage = null;
+            currentWs.onerror = null;
+            currentWs.onclose = null;
+          }
+          
+          // Only reconnect if not manually stopped
+          if (this.polling) {
+            this.handleReconnect();
+          } else {
+            useEEWStore.getState().setStatus('disconnected');
+          }
         };
 
-        // Successfully connected
-        break;
+        // Successfully connected, break the loop
+        return;
       } catch (error) {
-        console.error('[EEWService] WebSocket connection failed:', error);
-        this.ws = null;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown WebSocket connection error';
+        logger.error(`WebSocket connection failed for ${url}:`, errorMessage);
+        if (this.ws) {
+          this.ws.onopen = null;
+          this.ws.onmessage = null;
+          this.ws.onerror = null;
+          this.ws.onclose = null;
+          this.ws = null;
+        }
       }
     }
+    
+    // If all URLs fail
+    const finalError = `All WebSocket connection attempts failed for region ${region}.`;
+    logger.error(finalError);
+    useEEWStore.getState().setStatus('error', finalError);
   }
 
   private handleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[EEWService] Max reconnect attempts reached');
+      logger.error('Max reconnect attempts reached');
       return;
+    }
+
+    // Clear any existing reconnect timeout
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
     }
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * this.reconnectAttempts;
 
-    console.log(`[EEWService] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    if (__DEV__) {
+      logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    }
 
-    setTimeout(() => {
-      this.detectRegion().then((region) => {
-        this.startWebSocket(region);
-      });
+    useEEWStore.getState().setStatus('connecting', `Reconnecting... (Attempt ${this.reconnectAttempts})`);
+
+    this.reconnectTimeout = setTimeout(() => {
+      if (this.polling) {
+        this.detectRegion().then((region) => {
+          this.startWebSocket(region);
+        }).catch((error) => {
+          logger.error('Reconnect failed:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown reconnect error';
+          useEEWStore.getState().setStatus('error', `Reconnect failed: ${errorMessage}`);
+        });
+      }
+      this.reconnectTimeout = null;
     }, delay);
   }
 
@@ -206,8 +308,33 @@ class EEWService {
       if (netState.isConnected) {
         for (const url of this.pollUrls) {
           try {
-            const response = await fetch(url);
-            const data = await response.json();
+            const response = await fetch(url, {
+              headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'AfetNet/1.0',
+              },
+            });
+
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType?.includes('application/json')) {
+              if (__DEV__) {
+                logger.warn(`Non-JSON response from ${url}: ${contentType}`);
+              }
+              continue;
+            }
+
+            const text = await response.text();
+            
+            // Validate JSON before parsing
+            if (!text.trim().startsWith('{') && !text.trim().startsWith('[')) {
+              if (__DEV__) {
+                logger.warn(`Invalid JSON response from ${url}: ${text.substring(0, 100)}`);
+              }
+              continue;
+            }
+
+            const data = JSON.parse(text);
             const events = this.normalizeEvents(data);
 
             for (const event of events) {
@@ -217,7 +344,7 @@ class EEWService {
               }
             }
           } catch (error) {
-            console.error('[EEWService] Poll error:', error);
+            logger.error('Poll error:', error);
           }
         }
       }
@@ -254,7 +381,7 @@ class EEWService {
         certainty: data.certainty,
       };
     } catch (error) {
-      console.error('[EEWService] Event normalization error:', error);
+      logger.error('Event normalization error:', error);
       return null;
     }
   }
@@ -278,11 +405,44 @@ class EEWService {
   }
 
   private notifyCallbacks(event: EEWEvent) {
+    // Trigger multi-channel alert
+    const priority = event.certainty === 'high' ? 'critical' : 
+                     event.certainty === 'medium' ? 'high' : 'normal';
+    
+    const magnitude = event.magnitude || 0;
+    const etaText = event.etaSec ? `Tahmini süre: ${Math.round(event.etaSec)} saniye` : '';
+    
+    multiChannelAlertService.sendAlert({
+      title: magnitude >= 6.0 ? '🚨 KRİTİK DEPREM UYARISI' : 
+             magnitude >= 4.5 ? '⚠️ DEPREM UYARISI' : '📢 DEPREM UYARISI',
+      body: `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim(),
+      priority: priority as 'critical' | 'high' | 'normal' | 'low',
+      ttsText: `Deprem uyarısı! ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim(),
+      channels: {
+        pushNotification: true,
+        fullScreenAlert: magnitude >= 5.0,
+        alarmSound: magnitude >= 4.5,
+        vibration: true,
+        led: magnitude >= 6.0,
+        tts: true,
+      },
+      data: {
+        type: 'eew',
+        eventId: event.id,
+        magnitude,
+        location: { lat: event.latitude, lng: event.longitude },
+      },
+      duration: magnitude >= 6.0 ? 0 : 30, // Critical alerts stay until dismissed
+    }).catch(error => {
+      logger.error('Multi-channel alert error:', error);
+    });
+
+    // Notify callbacks
     for (const callback of this.callbacks) {
       try {
         callback(event);
       } catch (error) {
-        console.error('[EEWService] Callback error:', error);
+        logger.error('Callback error:', error);
       }
     }
   }

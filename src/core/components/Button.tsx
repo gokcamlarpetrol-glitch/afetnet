@@ -59,7 +59,7 @@ export default function Button({
 
 const styles = StyleSheet.create({
   button: {
-    borderRadius: borderRadius.md,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -86,16 +86,16 @@ const styles = StyleSheet.create({
 
   // Sizes
   small: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   medium: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   large: {
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.lg,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
 
   // States

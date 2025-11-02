@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import Card from '../../components/Card';
@@ -99,7 +99,14 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
             title={feature.title}
             description={feature.description}
             color={feature.color}
-            onPress={() => navigation.navigate(feature.screen)}
+            onPress={() => {
+              // Feature screens not implemented yet - show coming soon message
+              Alert.alert(
+                feature.title,
+                'Bu özellik yakında eklenecek! Şu anda geliştirme aşamasında.',
+                [{ text: 'Tamam' }]
+              );
+            }}
           />
         ))}
 
@@ -125,7 +132,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
   },
   header: {
-    padding: spacing.xl,
+    padding: 20,
     paddingTop: 60,
     backgroundColor: colors.background.secondary,
     borderBottomWidth: 1,
@@ -138,18 +145,18 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     ...typography.caption,
     color: colors.text.tertiary,
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
   content: {
-    padding: spacing.lg,
+    padding: 16,
   },
   featureCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.background.secondary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border.primary,
   },
@@ -159,10 +166,10 @@ const styles = StyleSheet.create({
   iconContainer: {
     width: 56,
     height: 56,
-    borderRadius: borderRadius.md,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.md,
+    marginRight: 12,
   },
   featureContent: {
     flex: 1,
@@ -170,24 +177,24 @@ const styles = StyleSheet.create({
   featureTitle: {
     ...typography.h4,
     color: colors.text.primary,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   featureDescription: {
     ...typography.caption,
     color: colors.text.tertiary,
   },
   infoCard: {
-    marginTop: spacing.lg,
+    marginTop: 16,
   },
   infoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 12,
   },
   infoTitle: {
     ...typography.h4,
     color: colors.text.primary,
-    marginLeft: spacing.sm,
+    marginLeft: 8,
   },
   infoText: {
     ...typography.body,

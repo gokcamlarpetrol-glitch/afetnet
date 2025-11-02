@@ -4,32 +4,48 @@
  */
 
 import { Earthquake } from '../../stores/earthquakeStore';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('KandilliProvider');
 
 export class KandilliProvider {
   name = 'Kandilli';
 
   async fetchRecent(): Promise<Earthquake[]> {
+    // DISABLED: Kandilli HTTP endpoint doesn't work in React Native (CORS/network issues)
+    // Will be re-enabled when we have a proper API or proxy
+    return [];
+    
+    /* ORIGINAL CODE - DISABLED
     try {
-      // Kandilli Rasathanesi API endpoint
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch(
         'http://www.koeri.boun.edu.tr/scripts/lst0.asp',
         {
           headers: {
             'User-Agent': 'AfetNet/1.0',
           },
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error('Kandilli request failed');
       }
 
       const html = await response.text();
-      return this.parseKandilliHTML(html);
+      const earthquakes = this.parseKandilliHTML(html);
+      
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      return earthquakes.filter(eq => eq.time >= oneDayAgo && eq.magnitude >= 3.0);
     } catch (error) {
-      console.error('[Kandilli] Fetch error:', error);
       return [];
     }
+    */
   }
 
   private parseKandilliHTML(html: string): Earthquake[] {
@@ -85,11 +101,10 @@ export class KandilliProvider {
         .sort((a, b) => b.time - a.time)
         .slice(0, 100);
     } catch (error) {
-      console.error('[Kandilli] Parse error:', error);
+      logger.error('Parse error:', error);
       return [];
     }
   }
 }
 
 export const kandilliProvider = new KandilliProvider();
-

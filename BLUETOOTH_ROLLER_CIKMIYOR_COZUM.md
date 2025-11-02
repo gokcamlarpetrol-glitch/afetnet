@@ -160,3 +160,6 @@ Bu yüzden **ÖNCE Developer Portal'da açmalısınız**, sonra Xcode'a geri dö
 
 
 
+
+
+

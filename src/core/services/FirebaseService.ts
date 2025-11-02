@@ -3,10 +3,33 @@
  * Firebase Cloud Messaging integration
  */
 
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { FIREBASE_CONFIG } from '../config/firebase';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('FirebaseService');
+
+// Lazy imports to avoid early initialization
+let Notifications: any = null;
+let Device: any = null;
+
+function getNotifications() {
+  if (!Notifications) {
+    try {
+      Notifications = require('expo-notifications');
+    } catch (e) { /* ignore */ }
+  }
+  return Notifications;
+}
+
+function getDevice() {
+  if (!Device) {
+    try {
+      Device = require('expo-device');
+    } catch (e) { /* ignore */ }
+  }
+  return Device;
+}
 
 class FirebaseService {
   private isInitialized = false;
@@ -15,9 +38,17 @@ class FirebaseService {
   async initialize() {
     if (this.isInitialized) return;
 
-    console.log('[FirebaseService] Initializing...');
+    if (__DEV__) logger.info('Initializing...');
 
     try {
+      const Notifications = getNotifications();
+      const Device = getDevice();
+      
+      if (!Notifications || !Device) {
+        logger.warn('Notifications or Device not available - Firebase disabled');
+        return;
+      }
+
       // Request notification permissions
       if (Device.isDevice) {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -29,7 +60,7 @@ class FirebaseService {
         }
 
         if (finalStatus !== 'granted') {
-          console.warn('[FirebaseService] Notification permission not granted');
+          if (__DEV__) logger.warn('Notification permission not granted');
           return;
         }
 
@@ -40,13 +71,13 @@ class FirebaseService {
           });
 
           this.pushToken = token.data;
-          console.log('[FirebaseService] Push token:', this.pushToken);
+          if (__DEV__) logger.info('Push token:', this.pushToken);
         } catch (tokenError) {
-          console.warn('[FirebaseService] Failed to get push token, continuing without it:', tokenError);
+          if (__DEV__) logger.warn('Failed to get push token, continuing without it:', tokenError);
           // Continue without push token - app will still work
         }
       } else {
-        console.warn('[FirebaseService] Not a physical device, skipping push token');
+        if (__DEV__) logger.warn('Not a physical device, skipping push token');
       }
 
       // Configure notification channels (Android)
@@ -73,10 +104,10 @@ class FirebaseService {
       }
 
       this.isInitialized = true;
-      console.log('[FirebaseService] Initialized successfully');
+      if (__DEV__) logger.info('Initialized successfully');
 
     } catch (error) {
-      console.error('[FirebaseService] Initialization error:', error);
+      logger.error('Initialization error:', error);
     }
   }
 
@@ -94,7 +125,7 @@ class FirebaseService {
         trigger: null,
       });
     } catch (error) {
-      console.error('[FirebaseService] Test notification error:', error);
+      logger.error('Test notification error:', error);
     }
   }
 }
