@@ -89,6 +89,7 @@
     "expo-sms": "~14.0.7",
     "expo-speech": "~14.0.7",
     "expo-task-manager": "~14.0.8",
+    "expo-video": "~3.0.12",
     "firebase": "^12.4.0",
     "firebase-admin": "^13.5.0",
     "hash.js": "^1.1.7",
