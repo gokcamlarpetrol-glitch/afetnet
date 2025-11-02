@@ -117,12 +117,15 @@ export default function HomeScreen({ navigation }: any) {
         style={styles.voiceButton}
         onPress={async () => {
           haptics.impactMedium();
+          console.log('🎤 Sesli komut butonu tıklandı, mevcut durum:', isListening);
           if (isListening) {
             await voiceCommandService.stopListening();
             setIsListening(false);
+            console.log('🎤 Sesli komut durduruldu');
           } else {
             await voiceCommandService.startListening();
             setIsListening(true);
+            console.log('🎤 Sesli komut başlatıldı');
           }
         }}
         activeOpacity={0.8}

@@ -194,16 +194,24 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
             {/* Glow effect */}
             <View style={styles.glow} />
             
-            {/* Icon */}
+            {/* Icon - Daha büyük */}
             <View style={styles.iconContainer}>
-              <Ionicons name="warning" size={56} color="#ffffff" />
+              <Ionicons name="warning" size={72} color="#ffffff" />
             </View>
             
-            {/* Text */}
-            <Text style={styles.mainTitle}>ACİL DURUM SOS</Text>
+            {/* Text - Referans tasarım */}
+            <Text style={styles.mainTitle}>ACİL DURUM / SOS</Text>
             <Text style={styles.mainSubtitle}>
-              {isPressed ? 'Basılı tutun...' : '3 saniye basılı tutun'}
+              {isPressed ? 'Basılı tutun...' : 'Anında yardım çağrısı gönder'}
             </Text>
+            
+            {/* Location Info */}
+            {!isPressed && (
+              <View style={styles.locationBadge}>
+                <Ionicons name="location" size={14} color="#ffffff" />
+                <Text style={styles.locationText}>Konumunuz otomatik gönderilir</Text>
+              </View>
+            )}
             
             {/* Progress bar */}
             {isPressed && (
@@ -281,21 +289,20 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   mainButtonWrapper: {
-    borderRadius: 24,
+    borderRadius: 28,
     shadowColor: '#ef4444',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5, // Daha belirgin shadow
+    shadowRadius: 24,
+    elevation: 16,
   },
   mainButton: {
-    minHeight: 180,
-    borderRadius: 24,
-    padding: 24,
+    minHeight: 200, // Daha büyük
+    borderRadius: 28, // Daha yuvarlak
+    padding: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(220, 38, 38, 0.3)',
+    borderWidth: 0, // Border kaldırıldı
     overflow: 'hidden',
   },
   glow: {
@@ -304,24 +311,50 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)', // Daha subtle glow
+    backgroundColor: 'rgba(239, 68, 68, 0.2)', // Biraz daha belirgin
   },
   iconContainer: {
-    marginBottom: 12,
+    marginBottom: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)', // Arka plan eklendi
+    borderRadius: 50,
+    width: 100,
+    height: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mainTitle: {
-    fontSize: 24,
+    fontSize: 28, // Daha büyük
     fontWeight: '900',
     color: '#ffffff',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   mainSubtitle: {
-    fontSize: 14,
+    fontSize: 15, // Biraz daha büyük
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
+    marginBottom: 12,
+  },
+  locationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 4,
+  },
+  locationText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#ffffff',
+    letterSpacing: 0.2,
   },
   progressContainer: {
     position: 'absolute',
