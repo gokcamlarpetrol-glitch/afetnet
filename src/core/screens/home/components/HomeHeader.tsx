@@ -7,25 +7,26 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
 import { colors, typography } from '../../../theme';
 
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
   const { isOnline } = useNetworkStatus();
-  const videoRef = useRef<Video>(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
+  
+  // expo-video player
+  const player = useVideoPlayer(require('../../../../../assets/videos/globe.mp4'), (player) => {
+    player.loop = true;
+    player.play();
+  });
   
   // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const badgePulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Load and play video
-    if (videoRef.current) {
-      videoRef.current.playAsync();
-    }
 
     // Subtle pulse animation
     Animated.loop(
@@ -75,21 +76,17 @@ export default function HomeHeader() {
           ]}
         >
           <View style={styles.videoWrapper}>
-            <Video
-              ref={videoRef}
-              source={require('../../../../../assets/videos/globe.mp4')}
+            <VideoView
+              player={player}
               style={styles.video}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              shouldPlay
-              isMuted
+              contentFit="cover"
+              nativeControls={false}
+              onLoadStart={() => {
+                console.log('📹 Video yüklenmeye başladı');
+              }}
               onLoad={() => {
                 setVideoLoaded(true);
                 console.log('✅ Video yüklendi');
-              }}
-              onError={(error) => {
-                console.error('❌ Video hatası:', error);
-                setVideoLoaded(false);
               }}
             />
             {/* Fallback: Video yüklenene kadar gradient göster */}

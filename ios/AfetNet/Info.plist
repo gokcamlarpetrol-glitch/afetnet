@@ -49,18 +49,14 @@
     <key>NSAppTransportSecurity</key>
     <dict>
       <key>NSAllowsArbitraryLoads</key>
-      <true/>
+      <false/>
       <key>NSAllowsLocalNetworking</key>
       <true/>
-      <key>NSExceptionDomains</key>
-      <dict>
-        <key>localhost</key>
-        <dict>
-          <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
-        </dict>
-      </dict>
     </dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.</string>
     <key>NSCameraUsageDescription</key>
     <string>AfetNet, QR kodları okumak için kameraya erişir.</string>
     <key>NSContactsUsageDescription</key>

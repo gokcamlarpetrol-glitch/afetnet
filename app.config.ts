@@ -31,6 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-font",
     "expo-localization",
     "expo-maps",
+    "expo-video",
     [
       "expo-build-properties",
       {

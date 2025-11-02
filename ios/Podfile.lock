@@ -286,6 +286,8 @@ PODS:
     - ExpoModulesCore
   - ExpoSpeech (14.0.7):
     - ExpoModulesCore
+  - ExpoVideo (3.0.12):
+    - ExpoModulesCore
   - EXTaskManager (14.0.8):
     - ExpoModulesCore
     - UMAppLoader
@@ -2406,6 +2408,7 @@ DEPENDENCIES:
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - ExpoSMS (from `../node_modules/expo-sms/ios`)
   - ExpoSpeech (from `../node_modules/expo-speech/ios`)
+  - ExpoVideo (from `../node_modules/expo-video/ios`)
   - EXTaskManager (from `../node_modules/expo-task-manager/ios`)
   - EXUpdatesInterface (from `../node_modules/expo-updates-interface/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2579,6 +2582,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-sms/ios"
   ExpoSpeech:
     :path: "../node_modules/expo-speech/ios"
+  ExpoVideo:
+    :path: "../node_modules/expo-video/ios"
   EXTaskManager:
     :path: "../node_modules/expo-task-manager/ios"
   EXUpdatesInterface:
@@ -2793,6 +2798,7 @@ SPEC CHECKSUMS:
   ExpoSharing: 032c01bb034319e2374badf082ae935be866d2e9
   ExpoSMS: 10cd15976285c7e42f91790d6584eea53dc4e026
   ExpoSpeech: 18a7f92a932028e16d3df1891377a8b626ab5cc0
+  ExpoVideo: 6907c4872886dce2720d3af20782eb6ee7734110
   EXTaskManager: cbbb80cbccea6487ccca0631809fbba2ed3e5271
   EXUpdatesInterface: 5adf50cb41e079c861da6d9b4b954c3db9a50734
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
