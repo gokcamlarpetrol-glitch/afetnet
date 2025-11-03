@@ -15,15 +15,18 @@ export function hasVectorSupport(): boolean {
   }
 }
 
-export const baseStyleLight = {
+const mapStyleUrl = process.env.EXPO_PUBLIC_MAP_STYLE_URL;
+
+export const baseStyleLight = mapStyleUrl ? mapStyleUrl : {
   version: 8,
   name: 'AfetNet Light',
   sources: {
-    'vector-local': {
-      type: 'vector' as const,
-      tiles: ['vector://local/{z}/{x}/{y}'],
+    'osm': {
+      type: 'raster' as const,
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
       minzoom: 0,
-      maxzoom: 14,
+      maxzoom: 19,
     },
   },
   layers: [
@@ -35,33 +38,9 @@ export const baseStyleLight = {
       },
     },
     {
-      id: 'roads',
-      type: 'line' as const,
-      source: 'vector-local',
-      'source-layer': 'roads',
-      paint: {
-        'line-color': '#666666',
-        'line-width': 1,
-      },
-    },
-    {
-      id: 'buildings',
-      type: 'fill' as const,
-      source: 'vector-local',
-      'source-layer': 'buildings',
-      paint: {
-        'fill-color': '#e0e0e0',
-        'fill-outline-color': '#cccccc',
-      },
-    },
-    {
-      id: 'water',
-      type: 'fill' as const,
-      source: 'vector-local',
-      'source-layer': 'water',
-      paint: {
-        'fill-color': '#b3d9ff',
-      },
+      id: 'osm',
+      type: 'raster' as const,
+      source: 'osm',
     },
   ],
 };

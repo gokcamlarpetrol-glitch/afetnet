@@ -11,33 +11,35 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { FamilyMember, useFamily } from '../store/family';
+import { FamilyContact } from '../family/types';
+import * as familyStore from '../family/store';
+import { useEffect } from 'react';
 
 import { NavigationProp } from '../types/interfaces';
 
 export default function FamilyScreen({ navigation }: { navigation?: NavigationProp }) {
-  const {
-    list,
-    myAfnId,
-    add,
-    update,
-    remove,
-    addByAfnId,
-    generateMyAfnId,
-    getOnlineMembers,
-    getNeedHelpMembers,
-  } = useFamily();
+  const [list, setList] = useState<FamilyContact[]>([]);
+  const [myAfnId, setMyAfnId] = useState<string>('');
+
+  useEffect(() => {
+    async function loadData() {
+      const family = await familyStore.loadFamily();
+      setList(family);
+      // NOTE: My AFN ID generation is not implemented, using a placeholder
+      setMyAfnId('AFN-XXXXXXXX');
+    }
+    loadData();
+  }, []);
 
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
+  const [selectedMember, setSelectedMember] = useState<FamilyContact | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Kendi AFN-ID'sini oluştur
-  const myId = myAfnId || generateMyAfnId();
+  const myId = myAfnId;
 
-  const onlineMembers = getOnlineMembers();
-  const needHelpMembers = getNeedHelpMembers();
+  const onlineMembers = list.filter(m => m.lastSeen && Date.now() - m.lastSeen < 1000 * 60 * 10);
+  const needHelpMembers = list.filter(m => m.status === 'need');
 
   const filteredMembers = list.filter(m =>
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -58,7 +60,7 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
           text: 'Ekle',
           onPress: async (afnId) => {
             if (!afnId) return;
-            
+
             Alert.prompt(
               'İsim',
               'Kişinin adını girin:',
@@ -68,23 +70,21 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                   text: 'Ekle',
                   onPress: async (name) => {
                     if (!name) return;
-                    
-                    const result = await addByAfnId(afnId.trim().toUpperCase(), name.trim());
-                    if (result.success) {
-                      Alert.alert('Başarılı', `${name} eklendi!`);
-                      setAddModalVisible(false);
-                    } else {
-                      Alert.alert('Hata', result.error || 'Kişi eklenemedi');
-                    }
+
+                    await familyStore.upsert({ afnId: afnId.trim().toUpperCase(), name: name.trim() });
+                    const family = await familyStore.loadFamily();
+                    setList(family);
+                    Alert.alert('Başarılı', `${name} eklendi!`);
+                    setAddModalVisible(false);
                   },
                 },
               ],
-              'plain-text',
+              'plain-text'
             );
           },
         },
       ],
-      'plain-text',
+      'plain-text'
     );
   };
 
@@ -96,22 +96,21 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
         { text: 'İptal', style: 'cancel' },
         {
           text: 'Ekle',
-          onPress: (name) => {
+          onPress: async (name) => {
             if (!name || !name.trim()) return;
-            add({
+            await familyStore.upsert({
               name: name.trim(),
               emoji: '🧑',
               status: 'unknown',
-              isVerified: false,
-              addedAt: Date.now(),
-              connectionMethod: 'manual',
             });
+            const family = await familyStore.loadFamily();
+            setList(family);
             Alert.alert('Başarılı', `${name} eklendi!`);
             setAddModalVisible(false);
           },
         },
       ],
-      'plain-text',
+      'plain-text'
     );
   };
 
@@ -124,16 +123,15 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
         {
           text: 'Kamera Aç',
           onPress: () => {
-            // QR Scanner aktif - gerçek implementasyon
             navigation?.navigate('QRScanner');
             setAddModalVisible(false);
           },
         },
-      ],
+      ]
     );
   };
 
-  const handleMemberPress = (member: FamilyMember) => {
+  const handleMemberPress = (member: FamilyContact) => {
     setSelectedMember(member);
     setDetailModalVisible(true);
   };
@@ -157,12 +155,14 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
           },
         },
         { text: 'Tamam' },
-      ],
+      ]
     );
   };
 
-  const handleStatusUpdate = (member: FamilyMember, status: FamilyMember['status']) => {
-    update(member.id, { status, lastSeen: Date.now() });
+  const handleStatusUpdate = async (member: FamilyContact, status: FamilyContact['status']) => {
+    await familyStore.upsert({ ...member, status, lastSeen: Date.now() });
+    const family = await familyStore.loadFamily();
+    setList(family);
     Alert.alert('Durum Güncellendi', `${member.name} durumu: ${status === 'ok' ? 'İyi' : status === 'need' ? 'Yardım' : 'Belirsiz'}`);
   };
 
@@ -766,8 +766,10 @@ export default function FamilyScreen({ navigation }: { navigation?: NavigationPr
                           {
                             text: 'Sil',
                             style: 'destructive',
-                            onPress: () => {
-                              remove(selectedMember.id);
+                            onPress: async () => {
+                              await familyStore.remove(selectedMember.id);
+                              const family = await familyStore.loadFamily();
+                              setList(family);
                               setDetailModalVisible(false);
                               Alert.alert('Silindi', `${selectedMember.name} silindi`);
                             },

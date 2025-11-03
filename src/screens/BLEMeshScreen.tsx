@@ -1,41 +1,25 @@
 import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, Alert, Pressable, ScrollView } from 'react-native';
-import { bleRelay, RelayMessage } from '../services/ble/bleRelay';
+import { meshDriver } from '../mesh/iface';
 import { logger } from '../utils/productionLogger';
+import { Buffer } from 'buffer';
 
 export default function BLEMeshScreen() {
   const [isActive, setIsActive] = useState(false);
-  const [messages, setMessages] = useState<RelayMessage[]>([]);
-  const [rssiSamples, setRssiSamples] = useState<any[]>([]);
-  const [seenCount, setSeenCount] = useState(0);
+  const [messages, setMessages] = useState<any[]>([]);
 
   useEffect(() => {
-    // Set up message listener
-    const unsubscribe = bleRelay.onMessage((message: RelayMessage) => {
-      setMessages(prev => [message, ...prev.slice(0, 49)]); // Keep last 50 messages
+    meshDriver.onMessage((data) => {
+      const message = JSON.parse(Buffer.from(data).toString());
+      setMessages(prev => [message, ...prev.slice(0, 49)]);
       logger.info('BLE Mesh message received', { type: message.type, id: message.id });
     });
-
-    // Update RSSI samples periodically
-    const rssiInterval = (globalThis as any).setInterval(() => {
-      setRssiSamples(bleRelay.getRSSISamples());
-    }, 5000);
-
-    // Update seen count periodically
-    const seenInterval = (globalThis as any).setInterval(() => {
-      setSeenCount(bleRelay.getSeenCount());
-    }, 2000);
-
-    return () => {
-      unsubscribe();
-      (globalThis as any).clearInterval(rssiInterval);
-      (globalThis as any).clearInterval(seenInterval);
-    };
   }, []);
 
   const startBLEMesh = async () => {
     try {
-      await bleRelay.startRelay('demo_identity_pub_key', true); // Enable adaptive mode
+      await meshDriver.start();
       setIsActive(true);
       Alert.alert('Başarılı', 'BLE Mesh Networking başlatıldı');
       logger.info('BLE Mesh networking started');
@@ -45,9 +29,9 @@ export default function BLEMeshScreen() {
     }
   };
 
-  const stopBLEMesh = async () => {
+  const stopBLEMesh = async ().
     try {
-      await bleRelay.stopRelay();
+      await meshDriver.stop();
       setIsActive(false);
       Alert.alert('Başarılı', 'BLE Mesh Networking durduruldu');
       logger.info('BLE Mesh networking stopped');
@@ -59,7 +43,7 @@ export default function BLEMeshScreen() {
 
   const sendTestMessage = async () => {
     try {
-      const testMessage: RelayMessage = {
+      const testMessage = {
         id: `test_${Date.now()}`,
         from: 'demo_identity_pub_key',
         ts: Date.now(),
@@ -67,8 +51,8 @@ export default function BLEMeshScreen() {
         ttl: 3,
         payload: 'Test mesajı',
       };
-
-      await bleRelay.sendDirect(testMessage);
+      const data = Buffer.from(JSON.stringify(testMessage));
+      await meshDriver.broadcast(data);
       Alert.alert('Başarılı', 'Test mesajı gönderildi');
       logger.info('Test message sent', { id: testMessage.id });
     } catch (error) {
@@ -79,7 +63,7 @@ export default function BLEMeshScreen() {
 
   const sendSOSMessage = async () => {
     try {
-      const sosMessage: RelayMessage = {
+      const sosMessage = {
         id: `sos_${Date.now()}`,
         from: 'demo_identity_pub_key',
         ts: Date.now(),
@@ -89,8 +73,8 @@ export default function BLEMeshScreen() {
         ttl: 5,
         payload: 'Acil durum - yardım istiyorum!',
       };
-
-      await bleRelay.sendDirect(sosMessage);
+      const data = Buffer.from(JSON.stringify(sosMessage));
+      await meshDriver.broadcast(data);
       Alert.alert('SOS Gönderildi', 'Acil durum mesajı BLE mesh ağına gönderildi');
       logger.info('SOS message sent', { id: sosMessage.id });
     } catch (error) {
@@ -100,11 +84,8 @@ export default function BLEMeshScreen() {
   };
 
   const clearMessages = () => {
-    bleRelay.clearCache();
     setMessages([]);
-    setRssiSamples([]);
-    setSeenCount(0);
-    Alert.alert('Temizlendi', 'Tüm mesajlar ve cache temizlendi');
+    Alert.alert('Temizlendi', 'Tüm mesajlar temizlendi');
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -128,16 +109,6 @@ export default function BLEMeshScreen() {
           <Text style={[styles.statusValue, { color: isActive ? '#4CAF50' : '#F44336' }]}>
             {isActive ? '🟢 Aktif' : '🔴 Durduruldu'}
           </Text>
-        </View>
-        
-        <View style={styles.statusItem}>
-          <Text style={styles.statusLabel}>Görülen Mesaj:</Text>
-          <Text style={styles.statusValue}>{seenCount}</Text>
-        </View>
-        
-        <View style={styles.statusItem}>
-          <Text style={styles.statusLabel}>RSSI Örnek:</Text>
-          <Text style={styles.statusValue}>{rssiSamples.length}</Text>
         </View>
         
         <View style={styles.statusItem}>

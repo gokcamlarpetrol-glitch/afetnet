@@ -22,6 +22,8 @@ import { networkIntelligenceEngine } from './src/services/NetworkIntelligenceEng
 import { disasterRecoveryManager } from './src/services/DisasterRecoveryManager';
 import { earthquakeWarningService } from './src/services/EarthquakeWarningService';
 import { initializeRevenueCat } from './src/lib/revenuecat';
+import { startEEW } from './src/eew/feed';
+import { pollQuakes } from './src/quake/fetchers';
 
 export default function App() {
   useEffect(() => {
@@ -66,6 +68,10 @@ export default function App() {
 
         // Start disaster recovery manager
         await disasterRecoveryManager.initialize();
+
+        // Start earthquake feeds
+        await startEEW();
+        await pollQuakes();
 
         if (__DEV__) {
           console.log('AfetNet - Sistemler başlatıldı');

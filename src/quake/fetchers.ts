@@ -1,14 +1,12 @@
 import NetInfo from '@react-native-community/netinfo';
 import { appendQuake, notifyQuake, Quake } from './store';
 
-// Endpoint'ler Ayarlar'dan değiştirilebilir.
-let cfg = {
-  AFAD_URL: 'https://deprem.afad.gov.tr/apiv2/event/latest',   // örnek JSON (uyarlamalı parse)
-  KANDILLI_URL: 'https://api.ornek.kandilli/last',              // yer tutucu; Ayarlar'dan güncellenebilir
+// URLs are configured via env vars
+const cfg = {
+  AFAD_URL: 'https://deprem.afad.gov.tr/apiv2/event/latest',
+  KANDILLI_URL: process.env.EXPO_PUBLIC_KANDILLI_URL || 'https://api.ornek.kandilli/last',
   USGS_URL: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',
 };
-
-export function setQuakeUrls(u: Partial<typeof cfg>){ cfg = { ...cfg, ...u }; }
 
 async function hasInternet(){ try{ const s=await NetInfo.fetch(); return !!s.isConnected; }catch{ return false; } }
 

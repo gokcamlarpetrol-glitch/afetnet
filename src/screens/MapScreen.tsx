@@ -5,6 +5,7 @@ import * as Beacon from '../ble/bridge';
 import { openDbFromUri } from '../offline/mbtiles-server';
 import { startMbtilesServer, stopMbtilesServer, localTileUrlTemplate } from '../offline/mbtiles-server';
 import { SafeMBTiles } from '../offline/SafeMBTiles';
+import { selectMBTiles, getMBTilesPath } from '../map/mbtiles';
 import { toENU } from '../map/localproj';
 import * as Location from 'expo-location';
 import { listPins } from '../map/pins';
@@ -19,6 +20,8 @@ import * as Haptics from 'expo-haptics';
 import * as Battery from 'expo-battery';
 import { offlineMessaging } from '../services/OfflineMessaging';
 import { logger } from '../utils/productionLogger';
+import { fetchHazards, listHazards } from '../hazard/store';
+import { HazardZone } from '../hazard/types';
 
 // Import expo-maps with fallback
 let ExpoMap: any = null;
@@ -50,6 +53,18 @@ export default function MapScreen(){
   const [showGoToTarget, setShowGoToTarget] = useState(false);
   const [trappedMode, setTrappedMode] = useState(false);
   const [showTrappedAlert, setShowTrappedAlert] = useState(false);
+  const [hazards, setHazards] = useState<HazardZone[]>([]);
+  const [showHazards, setShowHazards] = useState(true);
+  const [mbtilesPath, setMbtilesPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadHazards() {
+      await fetchHazards();
+      const zones = await listHazards();
+      setHazards(zones);
+    }
+    loadHazards();
+  }, []);
 
   // Offline messaging integration
   const [offlineStats, setOfflineStats] = useState({ total: 0, delivered: 0, pending: 0, sos: 0 });
@@ -57,8 +72,18 @@ export default function MapScreen(){
 
   // Network status monitoring
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsOnline(!!state.isConnected);
+    const unsubscribe = NetInfo.addEventListener(async (state) => {
+      const online = !!state.isConnected;
+      setIsOnline(online);
+      if (online) {
+        setUseLocal(false);
+      } else {
+        const path = await getMBTilesPath();
+        if (path) {
+          setMbtilesPath(path);
+          setUseLocal(true);
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -147,13 +172,13 @@ export default function MapScreen(){
 
   async function onImportMbtiles(){
     try{
-      const uri = await SafeMBTiles.pickMbtiles();
-      await openDbFromUri(uri);
-      await startMbtilesServer();
-      setUseLocal(true);
-      Alert.alert('Harita', 'Yerel tile sunucusu aktif.');
+      const uri = await selectMBTiles();
+      if (uri) {
+        setUseLocal(true);
+        Alert.alert('Harita', 'Yerel harita seçildi.');
+      }
     }catch(e:any){
-      if (String(e?.message) !== 'cancelled') {Alert.alert('Harita','İçe aktarılamadı.');}
+      Alert.alert('Harita','İçe aktarılamadı.');
     }
   }
 
@@ -265,10 +290,22 @@ export default function MapScreen(){
         showsUserLocation={true}
         followsUserLocation={true}
       >
-        {useLocal && (
-          <ExpoMap.TileOverlay urlTemplate={localTileUrlTemplate()} zIndex={-1} maximumZ={18} flipY={false} />
+        {useLocal && mbtilesPath && (
+          <ExpoMap.TileOverlay urlTemplate={`file://${mbtilesPath}/{z}/{x}/{y}.png`} zIndex={-1} maximumZ={18} flipY={true} />
         )}
         
+        {/* Hazard Zones */}
+        {showHazards && hazards.map((zone) => (
+          <ExpoMap.Circle
+            key={zone.id}
+            center={{ latitude: zone.center.lat, longitude: zone.center.lng }}
+            radius={zone.radius}
+            fillColor="rgba(255, 0, 0, 0.3)"
+            strokeColor="rgba(255, 0, 0, 0.8)"
+            strokeWidth={2}
+          />
+        ))}
+
         {/* Regular Pins */}
         {pins.map((pin) => (
           <ExpoMap.Marker
@@ -376,6 +413,14 @@ export default function MapScreen(){
         <Text style={{ color:'white' }}>Tümü</Text>
       </Pressable>
       
+      {/* Hazard Zone Toggle */}
+      <Pressable
+        onPress={() => setShowHazards(!showHazards)}
+        style={{ position:'absolute', right:16, top:202, backgroundColor: showHazards ? '#ef4444' : '#111827', padding:10, borderRadius:10 }}
+      >
+        <Text style={{ color:'white', fontWeight:'800' }}>{showHazards ? '🚨 Tehlike' : '🚨 Tehlike'}</Text>
+      </Pressable>
+
       {/* Offline Features Controls */}
       <Pressable 
         onPress={broadcastMyLocation} 

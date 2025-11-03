@@ -1,66 +1,92 @@
-// import { Platform } from "react-native"; // Not used
+import { BleManager, Device } from 'react-native-ble-plx';
+import BlePeripheral from 'react-native-ble-peripheral';
+import { Buffer } from 'buffer';
 import { logger } from '../utils/productionLogger';
-// import Constants from "expo-constants"; // Not used
-// import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID } from "./constants"; // Not used
-
-// Mock BLE Manager for Expo Go compatibility
-class MockBleManager {
-  async state() {
-    return 'PoweredOn';
-  }
-  
-  onStateChange() {
-    return { remove: () => {} };
-  }
-  
-  startDeviceScan() {}
-  
-  stopDeviceScan() {}
-  
-  connectToDevice() {
-    return Promise.reject(new Error('BLE not available in Expo Go'));
-  }
-}
-
-// Check if we're in Expo Go (no native modules available)
-const isExpoGo = () => {
-  // Simplified check without Constants
-  return typeof globalThis !== 'undefined' && (globalThis as any).location?.hostname === 'localhost';
-};
+import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID } from './constants';
 
 class AfetBle {
   private static _instance: AfetBle;
-  public manager: any;
-  
+  public manager: BleManager;
+  private devices: Map<string, Device> = new Map();
+  private onMessageCallback: ((message: string) => void) | null = null;
+
   private constructor() {
-    if (isExpoGo()) {
-      logger.debug('🔧 BLE Mock Mode: Expo Go detected');
-      this.manager = new MockBleManager();
-    } else {
-      try {
-        // Dynamic import for development builds
-        const { BleManager } = (globalThis as any).require('react-native-ble-plx');
-        this.manager = new BleManager({
-          restoreStateIdentifier: 'afetnet-ble',
-          restoreStateFunction: () => {},
-        });
-        logger.debug('🔧 BLE Native Mode: Development build detected');
-      } catch (error) {
-        logger.debug('🔧 BLE Mock Mode: Native module not available', error);
-        this.manager = new MockBleManager();
-      }
-    }
+    this.manager = new BleManager();
   }
-  
+
   static get instance() {
-    if (!this._instance) this._instance = new AfetBle();
+    if (!this._instance) {
+      this._instance = new AfetBle();
+    }
     return this._instance;
   }
-  
-  isMock() {
-    return isExpoGo();
+
+  public async start() {
+    await BlePeripheral.addService(AFETNET_SERVICE_UUID, true);
+    await BlePeripheral.addCharacteristicToService(AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID, 16 | 8, 8);
+    await BlePeripheral.start();
+
+    this.manager.onStateChange((state) => {
+      if (state === 'PoweredOn') {
+        this.scanAndConnect();
+      }
+    }, true);
+  }
+
+  public stop() {
+    BlePeripheral.stop();
+    this.manager.stopDeviceScan();
+    this.devices.forEach(device => this.manager.cancelDeviceConnection(device.id));
+  }
+
+  public onMessage(callback: (message: string) => void) {
+    this.onMessageCallback = callback;
+  }
+
+  public async broadcast(message: string) {
+    const data = Buffer.from(message).toString('base64');
+    BlePeripheral.updateValue(AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID, data);
+  }
+
+  private scanAndConnect() {
+    this.manager.startDeviceScan([AFETNET_SERVICE_UUID], null, (error, device) => {
+      if (error) {
+        logger.error('BLE scan error:', error);
+        return;
+      }
+
+      if (device && !this.devices.has(device.id)) {
+        this.devices.set(device.id, device);
+
+        device.connect()
+          .then(device => {
+            return device.discoverAllServicesAndCharacteristics();
+          })
+          .then(device => {
+            this.manager.monitorCharacteristicForDevice(
+              device.id,
+              AFETNET_SERVICE_UUID,
+              AFETNET_CHAR_MSG_UUID,
+              (error, characteristic) => {
+                if (error) {
+                  logger.error(`Failed to monitor characteristic for device ${device.id}:`, error);
+                  return;
+                }
+                if (characteristic?.value) {
+                  const message = Buffer.from(characteristic.value, 'base64').toString('utf8');
+                  if (this.onMessageCallback) {
+                    this.onMessageCallback(message);
+                  }
+                }
+              }
+            );
+          })
+          .catch(error => {
+            logger.error(`Failed to connect to device ${device.id}:`, error);
+          });
+      }
+    });
   }
 }
 
-export const ble = AfetBle.instance.manager;
-export const isBleMock = () => AfetBle.instance.isMock();
+export const bleManager = AfetBle.instance;

@@ -1,7 +1,37 @@
 import { Ionicons } from '@expo/vector-icons';
-import { TouchableOpacity, Text, View, StyleSheet } from 'react-native';
+import { Text, View, StyleSheet, Switch } from 'react-native';
+import { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const SETTINGS_KEY = 'afetnet/settings';
 
 export const NotificationSection = () => {
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [quakeAlertsEnabled, setQuakeAlertsEnabled] = useState(true);
+  const [locationAlertsEnabled, setLocationAlertsEnabled] = useState(true);
+
+  useEffect(() => {
+    async function loadSettings() {
+      const settingsStr = await AsyncStorage.getItem(SETTINGS_KEY);
+      if (settingsStr) {
+        const settings = JSON.parse(settingsStr);
+        setPushEnabled(settings.pushEnabled ?? true);
+        setSoundEnabled(settings.soundEnabled ?? true);
+        setQuakeAlertsEnabled(settings.quakeAlertsEnabled ?? true);
+        setLocationAlertsEnabled(settings.locationAlertsEnabled ?? true);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  async function updateSetting(key: string, value: boolean) {
+    const settingsStr = await AsyncStorage.getItem(SETTINGS_KEY);
+    const settings = settingsStr ? JSON.parse(settingsStr) : {};
+    settings[key] = value;
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
   return (
     <View style={styles.sectionContent}>
       <View style={styles.card}>
@@ -25,29 +55,29 @@ export const NotificationSection = () => {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.settingButton}>
+        <View style={styles.settingButton}>
           <Ionicons name="notifications-outline" size={20} color="#ef4444" />
           <Text style={styles.settingButtonText}>Push Bildirimleri</Text>
-          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-        </TouchableOpacity>
+          <Switch value={pushEnabled} onValueChange={v => { setPushEnabled(v); updateSetting('pushEnabled', v); }} />
+        </View>
 
-        <TouchableOpacity style={styles.settingButton}>
+        <View style={styles.settingButton}>
           <Ionicons name="volume-high" size={20} color="#f59e0b" />
           <Text style={styles.settingButtonText}>Ses ve Titreşim</Text>
-          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-        </TouchableOpacity>
+          <Switch value={soundEnabled} onValueChange={v => { setSoundEnabled(v); updateSetting('soundEnabled', v); }} />
+        </View>
 
-        <TouchableOpacity style={styles.settingButton}>
+        <View style={styles.settingButton}>
           <Ionicons name="earth" size={20} color="#8b5cf6" />
           <Text style={styles.settingButtonText}>Deprem Uyarıları</Text>
-          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-        </TouchableOpacity>
+          <Switch value={quakeAlertsEnabled} onValueChange={v => { setQuakeAlertsEnabled(v); updateSetting('quakeAlertsEnabled', v); }} />
+        </View>
 
-        <TouchableOpacity style={styles.settingButton}>
+        <View style={styles.settingButton}>
           <Ionicons name="location" size={20} color="#10b981" />
           <Text style={styles.settingButtonText}>Konum Bildirimleri</Text>
-          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-        </TouchableOpacity>
+          <Switch value={locationAlertsEnabled} onValueChange={v => { setLocationAlertsEnabled(v); updateSetting('locationAlertsEnabled', v); }} />
+        </View>
       </View>
     </View>
   );

@@ -17,13 +17,7 @@ import { SecuritySection } from './components/SecuritySection';
 import { DataSection } from './components/DataSection';
 
 export default function Settings() {
-  const { initializeSettings } = useAppSettings();
   const { isPremium } = usePremium();
-
-  // Initialize settings on component mount
-  useEffect(() => {
-    initializeSettings();
-  }, [initializeSettings]);
 
   // State management
   const [activeSection, setActiveSection] = useState(isPremium ? 'profile' : 'premium');

@@ -3,21 +3,24 @@ import { EEWAlert, EEWPush } from './types';
 import { pushEEW, notifyEEW } from './store';
 
 type Cfg = {
-  WS_URLS: string[];     // e.g. ["wss://eew.afad.gov.tr/ws", "wss://eew.kandilli.org/ws"]
-  POLL_URLS: string[];   // e.g. REST fallbacks
+  WS_URLS: string[];
+  POLL_URLS: string[];
   POLL_INTERVAL_SEC: number;
 };
+
+// Config loaded from env vars
+const wsUrls = process.env.EXPO_PUBLIC_EEW_WS_URLS?.split(',').filter(Boolean) ?? [];
+const pollUrls = process.env.EXPO_PUBLIC_EEW_POLL_URLS?.split(',').filter(Boolean) ?? [];
+
 let cfg: Cfg = {
-  WS_URLS: [],
-  POLL_URLS: [],
+  WS_URLS: wsUrls,
+  POLL_URLS: pollUrls,
   POLL_INTERVAL_SEC: 60,
 };
 
 let ws: any = null;
 let polling=false;
 const seen = new Set<string>();
-
-export function setEEWFeedConfig(c: Partial<Cfg>){ cfg = { ...cfg, ...c }; }
 
 export async function startEEW(){
   const net = await NetInfo.fetch().catch(()=>null);
