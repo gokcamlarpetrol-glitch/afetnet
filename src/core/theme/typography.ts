@@ -93,4 +93,24 @@ export const typography = {
     letterSpacing: 1,
     lineHeight: 22,
   },
+  buttonSmall: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    letterSpacing: 0.3,
+    lineHeight: 16,
+  },
+  
+  // Additional sizes
+  small: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  badge: {
+    fontSize: 10,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+    lineHeight: 12,
+  },
 };

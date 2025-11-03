@@ -51,8 +51,17 @@ class OfflineMapService {
    */
   private async fetchAndCacheData() {
     try {
-      // TODO: Fetch from real API
-      // For now, use Istanbul sample data
+      // Try fetching from real APIs first
+      const realData = await this.fetchFromRealAPIs();
+      if (realData.length > 0) {
+        this.locations = realData;
+        await this.saveToCache();
+        await this.setLastUpdateTime(Date.now());
+        logger.info('OfflineMapService: Real data cached');
+        return;
+      }
+      
+      // Fallback to sample data for Istanbul
       const sampleData: MapLocation[] = [
         // Assembly Points
         {
@@ -117,10 +126,179 @@ class OfflineMapService {
       await this.saveToCache();
       await this.setLastUpdateTime(Date.now());
       
-      logger.info('OfflineMapService: Data cached');
+      logger.info('OfflineMapService: Sample data cached (fallback)');
     } catch (error) {
       logger.error('OfflineMapService fetch failed:', error);
     }
+  }
+
+  /**
+   * Fetch from real APIs (AFAD, Sağlık Bakanlığı)
+   */
+  private async fetchFromRealAPIs(): Promise<MapLocation[]> {
+    const locations: MapLocation[] = [];
+
+    try {
+      // AFAD Toplanma Alanları API - GeoJSON format
+      // Gerçek endpoint: AFAD'ın GeoJSON toplanma alanları servisi
+      // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
+      const afadController = new AbortController();
+      const afadTimeoutId = setTimeout(() => afadController.abort(), 10000); // 10s timeout
+      
+      const afadResponse = await fetch('https://deprem.afad.gov.tr/apiv2/assembly-points', {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'AfetNet/1.0',
+        },
+        signal: afadController.signal,
+      }).catch(() => {
+        clearTimeout(afadTimeoutId);
+        // Fallback: AFAD'ın alternatif endpoint'i (GeoJSON format)
+        const fallbackController = new AbortController();
+        const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 10000);
+        
+        return fetch('https://deprem.afad.gov.tr/apiv2/assembly-areas.geojson', {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'AfetNet/1.0',
+          },
+          signal: fallbackController.signal,
+        }).finally(() => {
+          clearTimeout(fallbackTimeoutId);
+        });
+      }).finally(() => {
+        clearTimeout(afadTimeoutId);
+      });
+
+      if (afadResponse.ok) {
+        const afadData = await afadResponse.json();
+        
+        // Handle GeoJSON format
+        if (afadData.type === 'FeatureCollection' && Array.isArray(afadData.features)) {
+          for (const feature of afadData.features) {
+            if (feature.geometry?.type === 'Point' && feature.properties) {
+              const [lon, lat] = feature.geometry.coordinates;
+              const props = feature.properties;
+              
+              locations.push({
+                id: `afad-${props.id || feature.id || Math.random()}`,
+                type: 'assembly',
+                name: props.name || props.adi || props.title || 'Toplanma Alanı',
+                address: props.address || props.adres || props.location || '',
+                latitude: parseFloat(lat),
+                longitude: parseFloat(lon),
+                capacity: props.capacity || props.kapasite,
+              });
+            }
+          }
+        }
+        // Handle array format
+        else if (Array.isArray(afadData)) {
+          for (const item of afadData) {
+            if ((item.lat || item.latitude) && (item.lng || item.longitude)) {
+              locations.push({
+                id: `afad-${item.id || Math.random()}`,
+                type: 'assembly',
+                name: item.name || item.title || item.adi || 'Toplanma Alanı',
+                address: item.address || item.adres || item.location || '',
+                latitude: parseFloat(item.lat || item.latitude),
+                longitude: parseFloat(item.lng || item.longitude),
+                capacity: item.capacity || item.kapasite,
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('AFAD API failed, continuing with other sources:', error);
+    }
+
+    try {
+      // Sağlık Bakanlığı Hastane Bilgileri
+      // Alternatif: OpenStreetMap Nominatim API ile hastane arama
+      // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
+      const hospitalController = new AbortController();
+      const hospitalTimeoutId = setTimeout(() => hospitalController.abort(), 10000);
+      
+      const hospitalResponse = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=hastane&countrycodes=tr&limit=100', {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'AfetNet/1.0',
+          'Referer': 'https://afetnet.app',
+        },
+        signal: hospitalController.signal,
+      }).catch(() => {
+        clearTimeout(hospitalTimeoutId);
+        // Fallback: Overpass API ile hastane verisi
+        const overpassQuery = `[out:json][timeout:10];
+        (
+          node["amenity"="hospital"]["country"="TR"];
+          way["amenity"="hospital"]["country"="TR"];
+          relation["amenity"="hospital"]["country"="TR"];
+        );
+        out center meta;`;
+        
+        const overpassController = new AbortController();
+        const overpassTimeoutId = setTimeout(() => overpassController.abort(), 15000);
+        
+        return fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+            'User-Agent': 'AfetNet/1.0',
+          },
+          body: overpassQuery,
+          signal: overpassController.signal,
+        }).finally(() => {
+          clearTimeout(overpassTimeoutId);
+        });
+      }).finally(() => {
+        clearTimeout(hospitalTimeoutId);
+      });
+
+      if (hospitalResponse.ok) {
+        const hospitalData = await hospitalResponse.json();
+        
+        // Handle OpenStreetMap Nominatim format
+        if (Array.isArray(hospitalData) && hospitalData[0]?.lat) {
+          for (const item of hospitalData) {
+            if (item.lat && item.lon && item.display_name) {
+              locations.push({
+                id: `hospital-${item.osm_id || item.place_id || Math.random()}`,
+                type: 'hospital',
+                name: item.display_name.split(',')[0] || 'Hastane',
+                address: item.display_name,
+                latitude: parseFloat(item.lat),
+                longitude: parseFloat(item.lon),
+                phone: item.phone || item.tags?.phone,
+              });
+            }
+          }
+        }
+        // Handle Overpass API format
+        else if (hospitalData.elements) {
+          for (const element of hospitalData.elements) {
+            const center = element.center || { lat: element.lat, lon: element.lon };
+            if (center.lat && center.lon) {
+              const tags = element.tags || {};
+              locations.push({
+                id: `hospital-${element.id || Math.random()}`,
+                type: 'hospital',
+                name: tags.name || tags['name:tr'] || 'Hastane',
+                address: tags['addr:full'] || tags['addr:street'] || '',
+                latitude: parseFloat(center.lat),
+                longitude: parseFloat(center.lon),
+                phone: tags.phone || tags['contact:phone'],
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('Hospital API failed, continuing:', error);
+    }
+
+    return locations;
   }
 
   /**

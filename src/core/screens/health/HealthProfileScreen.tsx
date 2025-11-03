@@ -41,9 +41,9 @@ export default function HealthProfileScreen({ navigation }: any) {
     haptics.impactMedium();
 
     const emergencyContacts = [
-      { name: contact1Name, phone: contact1Phone, relation: 'Acil Kişi 1' },
-      { name: contact2Name, phone: contact2Phone, relation: 'Acil Kişi 2' },
-      { name: contact3Name, phone: contact3Phone, relation: 'Acil Kişi 3' },
+      { id: '1', name: contact1Name, phone: contact1Phone, relationship: 'Acil Kişi 1' },
+      { id: '2', name: contact2Name, phone: contact2Phone, relationship: 'Acil Kişi 2' },
+      { id: '3', name: contact3Name, phone: contact3Phone, relationship: 'Acil Kişi 3' },
     ].filter((c) => c.name && c.phone);
 
     await updateProfile({

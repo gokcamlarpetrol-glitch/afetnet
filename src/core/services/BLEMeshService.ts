@@ -10,6 +10,7 @@ import * as Crypto from 'expo-crypto';
 import { Buffer } from 'buffer';
 import { createLogger } from '../utils/logger';
 import { validateMessageContent, sanitizeString } from '../utils/validation';
+import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 
 const logger = createLogger('BLEMeshService');
 
@@ -99,10 +100,14 @@ class BLEMeshService {
 
       this.isRunning = true;
 
+      // Mark mesh as connected (active) - service is running
+      useMeshStore.getState().setConnected(true);
+      useMeshStore.getState().setAdvertising(true);
+
       // Start scanning cycle
       this.startScanCycle();
 
-      if (__DEV__) logger.info('Started successfully');
+      if (__DEV__) logger.info('Started successfully - Mesh network active');
     } catch (error) {
       logger.error('Start error:', error);
       // Don't throw - allow app to continue without BLE
@@ -152,6 +157,8 @@ class BLEMeshService {
       }
     }
     useMeshStore.getState().setScanning(false);
+    useMeshStore.getState().setConnected(false);
+    useMeshStore.getState().setAdvertising(false);
   }
 
   getMyDeviceId(): string | null {
@@ -240,28 +247,20 @@ class BLEMeshService {
   }
 
   private async getDeviceId(): Promise<string> {
-    // Use AsyncStorage to persist device ID
+    // Use centralized device ID from src/lib/device.ts
+    // This ensures the same ID is used across the entire app
+    // and is stored securely in SecureStore (device-specific, persistent)
     try {
-      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-      const storedId = await AsyncStorage.getItem('ble_device_id');
-      
-      if (storedId) {
-        if (__DEV__) logger.info('Using stored device ID:', storedId);
-        return storedId;
-      }
-      
-      // Generate new ID
-      const uuid = await Crypto.randomUUID();
-      const newId = `AFN-${uuid.slice(0, 8)}`;
-      await AsyncStorage.setItem('ble_device_id', newId);
-      
-      if (__DEV__) logger.info('Generated new device ID:', newId);
-      return newId;
+      const deviceId = await getDeviceIdFromLib();
+      if (__DEV__) logger.info('Using device ID from lib/device:', deviceId);
+      return deviceId;
     } catch (error) {
       logger.error('Device ID generation error:', error);
-      // Fallback to random ID (won't persist)
+      // Fallback to random ID if SecureStore completely fails
       const uuid = await Crypto.randomUUID();
-      return `AFN-${uuid.slice(0, 8)}`;
+      const fallbackId = `afn-${uuid.slice(0, 8)}`;
+      if (__DEV__) logger.warn('Using fallback device ID:', fallbackId);
+      return fallbackId;
     }
   }
 
@@ -343,14 +342,14 @@ class BLEMeshService {
         const connected = await device.connect({ timeout: 5000 });
         await connected.discoverAllServicesAndCharacteristics();
 
-        useMeshStore.getState().setConnected(true);
-
         // Exchange messages
         await this.exchangeMessages(connected);
 
-        // Disconnect
+        // Disconnect after message exchange
         await connected.cancelConnection();
-        useMeshStore.getState().setConnected(false);
+        
+        // Keep mesh as connected since service is still running
+        // Only set to false when service stops
 
       } catch (error) {
         logger.error('Connection error:', error);

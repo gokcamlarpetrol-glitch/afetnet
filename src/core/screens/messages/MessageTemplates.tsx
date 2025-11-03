@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMeshStore } from '../../stores/meshStore';
 import { colors, typography } from '../../theme';
-import { hapticFeedback } from '../../utils/haptics';
+import * as haptics from '../../utils/haptics';
 
 interface MessageTemplate {
   id: string;
@@ -61,10 +61,10 @@ export default function MessageTemplates() {
 
   const sendTemplate = async (template: MessageTemplate) => {
     try {
-      await hapticFeedback('medium');
+      haptics.impactMedium();
       
       // Broadcast via mesh
-      meshStore.broadcastMessage({
+      const messageContent = JSON.stringify({
         type: 'template',
         templateId: template.id,
         message: template.message,
@@ -72,16 +72,18 @@ export default function MessageTemplates() {
         timestamp: Date.now(),
       });
       
+      await meshStore.broadcastMessage(messageContent, 'text');
+      
       Alert.alert(
         'Mesaj Gönderildi',
         `"${template.title}" mesajı mesh ağına yayınlandı.`,
         [{ text: 'Tamam' }]
       );
       
-      await hapticFeedback('success');
+      haptics.notificationSuccess();
     } catch (error) {
       Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
-      await hapticFeedback('error');
+      haptics.notificationError();
     }
   };
 

@@ -30,6 +30,7 @@ interface MessageState {
 
 export interface MessageActions {
   addMessage: (message: Message) => void;
+  addConversation: (conversation: Conversation) => void;
   markAsDelivered: (messageId: string) => void;
   markAsRead: (messageId: string) => void;
   markConversationRead: (userId: string) => void;
@@ -49,6 +50,22 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
   addMessage: (message: Message) => {
     set((state) => ({ messages: [...state.messages, message] }));
     get().updateConversations();
+  },
+  addConversation: (conversation: Conversation) => {
+    set((state) => {
+      const exists = state.conversations.find(c => c.userId === conversation.userId);
+      if (exists) {
+        return state; // Don't add duplicate
+      }
+      // Ensure lastMessageTime is set
+      const conv: Conversation = {
+        ...conversation,
+        lastMessageTime: conversation.lastMessageTime || Date.now(),
+      };
+      return { 
+        conversations: [...state.conversations, conv]
+      };
+    });
   },
   markAsDelivered: (messageId: string) => {
     set((state) => ({

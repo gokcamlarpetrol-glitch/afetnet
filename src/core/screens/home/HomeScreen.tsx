@@ -18,6 +18,9 @@ import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
 import { colors, spacing } from '../../theme';
 import { voiceCommandService } from '../../services/VoiceCommandService';
+import { getSOSService } from '../../services/SOSService';
+import * as Location from 'expo-location';
+import { Alert } from 'react-native';
 
 export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, refresh } = useEarthquakes();
@@ -70,8 +73,61 @@ export default function HomeScreen({ navigation }: any) {
     setShowSOSModal(true);
   }, []);
 
-  const handleSOSConfirm = useCallback(() => {
-    // SOS sent
+  const handleSOSConfirm = useCallback(async () => {
+    try {
+      haptics.impactHeavy();
+      
+      // Get current location
+      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
+      try {
+        // Ensure Location module is available
+        if (!Location || typeof Location.requestForegroundPermissionsAsync !== 'function') {
+          throw new Error('Location module not available');
+        }
+        
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const position = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+          });
+          location = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy || 10,
+          };
+        }
+      } catch (locError) {
+        console.warn('Location error:', locError);
+        // Continue without location - SOS will still work
+      }
+
+      // Send SOS signal
+      const sosService = getSOSService();
+      await sosService.sendSOSSignal(
+        location,
+        'Acil yardım gerekiyor! Konum paylaşıldı.'
+      );
+
+      // Close modal
+      setShowSOSModal(false);
+
+      // Show success message
+      Alert.alert(
+        '🆘 SOS Gönderildi',
+        'Yardım çağrınız yakındaki kişilere ve yetkililere iletildi. Konumunuz otomatik paylaşılıyor.',
+        [{ text: 'Tamam', style: 'default' }]
+      );
+
+      haptics.notificationSuccess();
+    } catch (error) {
+      console.error('SOS send error:', error);
+      Alert.alert(
+        'Hata',
+        'SOS gönderilirken bir hata oluştu. Lütfen tekrar deneyin veya 112\'yi arayın.',
+        [{ text: 'Tamam' }]
+      );
+      haptics.notificationError();
+    }
   }, []);
 
   const handleSOSClose = useCallback(() => {

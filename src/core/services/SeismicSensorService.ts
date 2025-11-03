@@ -17,9 +17,9 @@ const logger = createLogger('SeismicSensorService');
 const SAMPLING_RATE = 100; // 100 Hz for earthquake detection
 const UPDATE_INTERVAL_MS = 1000 / SAMPLING_RATE; // 10ms
 
-// Detection thresholds - MUCH LESS SENSITIVE to prevent spam
-const P_WAVE_THRESHOLD = 0.30; // m/s² (30cm/s²) - very high threshold
-const S_WAVE_THRESHOLD = 0.50; // m/s² (50cm/s²) - very high threshold
+// Detection thresholds - INCREASED to prevent false positives
+const P_WAVE_THRESHOLD = 0.50; // m/s² (50cm/s²) - increased from 0.30
+const S_WAVE_THRESHOLD = 0.80; // m/s² (80cm/s²) - increased from 0.50
 const EARTHQUAKE_DURATION_MIN = 5000; // Minimum 5 seconds (very long)
 
 // False positive filters
@@ -324,7 +324,8 @@ class SeismicSensorService {
     this.currentEvent = event;
 
     if (__DEV__) {
-      logger.info(`Seismic event started: ${type}, magnitude: ${reading.magnitude.toFixed(4)}`);
+      const estimatedMag = this.estimateMagnitude(reading.magnitude);
+      logger.info(`Seismic event started: ${type}, acceleration: ${reading.magnitude.toFixed(4)} m/s², estimated magnitude: ${estimatedMag.toFixed(2)}`);
     }
   }
 
@@ -408,15 +409,18 @@ class SeismicSensorService {
   }
 
   private isFalsePositive(event: SeismicEvent): boolean {
+    // More aggressive false positive detection
+    
     // Check for car movement (consistent acceleration)
-    const recentReadings = this.readings.slice(-SAMPLING_RATE * 2); // Last 2 seconds
+    const recentReadings = this.readings.slice(-SAMPLING_RATE * 3); // Last 3 seconds (increased)
     const variance = this.calculateVariance(recentReadings.map(r => r.magnitude));
     
-    if (variance < 0.01 && event.maxMagnitude > CAR_THRESHOLD) {
+    // Stricter car detection: lower variance threshold
+    if (variance < 0.005 && event.maxMagnitude > CAR_THRESHOLD) { // Reduced from 0.01
       return true; // Consistent acceleration = car
     }
 
-    // Check for walking (periodic pattern)
+    // Check for walking (periodic pattern) - more sensitive
     if (this.isPeriodicPattern(recentReadings)) {
       return true; // Periodic = walking
     }
@@ -424,6 +428,26 @@ class SeismicSensorService {
     // Check for noise (too small)
     if (event.maxMagnitude < NOISE_THRESHOLD) {
       return true; // Too small = noise
+    }
+
+    // NEW: Check for too short duration (likely false positive)
+    const duration = Date.now() - event.startTime;
+    if (duration < 2000 && event.maxMagnitude < S_WAVE_THRESHOLD) { // Less than 2 seconds and weak
+      return true; // Too short and weak = false positive
+    }
+
+    // NEW: Check for isolated spike (single reading above threshold, then drops)
+    if (recentReadings.length >= SAMPLING_RATE) {
+      const lastSecond = recentReadings.slice(-SAMPLING_RATE);
+      const avgLastSecond = lastSecond.reduce((a, r) => a + r.magnitude, 0) / lastSecond.length;
+      if (event.maxMagnitude > 2 * avgLastSecond && avgLastSecond < P_WAVE_THRESHOLD) {
+        return true; // Isolated spike = false positive
+      }
+    }
+
+    // NEW: Check estimated magnitude - if it's implausibly high, it's likely false
+    if (event.estimatedMagnitude > 7.0) {
+      return true; // Phone sensors can't reliably detect M7+ earthquakes
     }
 
     return false;
@@ -464,10 +488,24 @@ class SeismicSensorService {
   }
 
   private estimateMagnitude(acceleration: number): number {
-    // Rough estimation: magnitude = log10(acceleration * 1000) + offset
-    // This is a simplified model - real ML would be more accurate
-    const magnitude = Math.log10(acceleration * 1000) + 2.0;
-    return Math.max(2.0, Math.min(8.0, magnitude)); // Clamp between 2.0 and 8.0
+    // More realistic estimation based on actual seismic relationships
+    // Acceleration in m/s² -> Richter magnitude approximation
+    // For phone sensors, acceleration values are typically 0.1-2.0 m/s²
+    // Real earthquakes: 0.1 m/s² ≈ M3, 1.0 m/s² ≈ M5, 10 m/s² ≈ M7
+    
+    if (acceleration < 0.1) {
+      return 2.0; // Below noise floor
+    }
+    
+    // Use a more conservative formula that doesn't overestimate
+    // Richter magnitude ≈ log10(max_acceleration_in_gal) - 0.3
+    // 1 gal = 0.01 m/s², so acceleration_in_gal = acceleration * 100
+    const accelerationInGal = acceleration * 100;
+    const magnitude = Math.log10(Math.max(1, accelerationInGal)) + 1.0; // More conservative offset
+    
+    // Clamp to realistic range for phone sensors (M2-M6)
+    // Phone accelerometers can't reliably detect M7+ earthquakes
+    return Math.max(2.0, Math.min(6.0, magnitude));
   }
 
   private calculateConfidence(event: SeismicEvent, duration: number): number {

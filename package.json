@@ -10,7 +10,8 @@
   "scripts": {
     "firebase:setup": "python3 scripts/firebase_setup.py",
     "start": "expo start",
-    "start:dev": "expo start --dev-client --clear --host tunnel",
+    "start:dev": "expo start --dev-client --clear",
+    "start:tunnel": "expo start --dev-client --clear --host tunnel",
     "start:lan": "expo start --dev-client --clear --host lan",
     "ios:release": "eas build -p ios --profile production",
     "android": "expo run:android",
@@ -89,7 +90,6 @@
     "expo-sms": "~14.0.7",
     "expo-speech": "~14.0.7",
     "expo-task-manager": "~14.0.8",
-    "expo-video": "~3.0.12",
     "firebase": "^12.4.0",
     "firebase-admin": "^13.5.0",
     "hash.js": "^1.1.7",

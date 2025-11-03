@@ -9,6 +9,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
+import { useFamilyStore } from '../../stores/familyStore';
+import { bleMeshService } from '../../services/BLEMeshService';
+import { isValidDeviceId } from '../../../lib/device';
 
 
 export default function AddFamilyMemberScreen({ navigation }: any) {
@@ -20,21 +23,70 @@ export default function AddFamilyMemberScreen({ navigation }: any) {
     if (scanned) return;
     setScanned(true);
     haptics.notificationSuccess();
-    Alert.alert('Üye Bulundu', `ID: ${data}\nBu üyeyi eklemek istiyor musunuz?`, [
+    
+    // Extract device ID from QR code
+    const deviceId = data.trim();
+    
+    // Validate QR code contains valid device ID
+    if (!isValidDeviceId(deviceId)) {
+      Alert.alert('Geçersiz QR Kod', 'QR kod geçerli bir device ID içermiyor. Lütfen geçerli bir QR kod tarayın.');
+      setScanned(false);
+      return;
+    }
+    
+    Alert.alert('Üye Bulundu', `ID: ${deviceId}\nBu üyeyi eklemek istiyor musunuz?`, [
       { text: 'İptal', onPress: () => setScanned(false), style: 'cancel' },
-      { text: 'Ekle', onPress: () => { /* Add member logic here */ navigation.goBack(); } },
+      { 
+        text: 'Ekle', 
+        onPress: async () => {
+          // Add member with device ID
+          await useFamilyStore.getState().addMember({
+            name: `Üye ${deviceId.slice(-4)}`, // Last 4 chars as name
+            status: 'unknown',
+            lastSeen: Date.now(),
+            latitude: 0,
+            longitude: 0,
+            deviceId: deviceId,
+          });
+          haptics.notificationSuccess();
+          navigation.goBack();
+        }
+      },
     ]);
   };
 
   const handleManualAdd = () => {
-    if (!manualId.trim()) {
+    const id = manualId.trim();
+    if (!id) {
       Alert.alert('Hata', 'Lütfen geçerli bir üye ID girin.');
       return;
     }
+    
+    // Validate ID format (should be afn-XXXXXXXX format)
+    if (!isValidDeviceId(id)) {
+      Alert.alert('Hata', 'Geçersiz ID formatı. ID "afn-" ile başlamalı ve 8 karakter içermeli (örn: afn-abc12345)');
+      return;
+    }
+    
     haptics.notificationSuccess();
-    Alert.alert('Üye Bulundu', `ID: ${manualId}\nBu üyeyi eklemek istiyor musunuz?`, [
+    Alert.alert('Üye Bulundu', `ID: ${id}\nBu üyeyi eklemek istiyor musunuz?`, [
       { text: 'İptal', style: 'cancel' },
-      { text: 'Ekle', onPress: () => { /* Add member logic here */ navigation.goBack(); } },
+      { 
+        text: 'Ekle', 
+        onPress: async () => {
+          // Add member with device ID
+          await useFamilyStore.getState().addMember({
+            name: `Üye ${id.slice(-4)}`, // Last 4 chars as name
+            status: 'unknown',
+            lastSeen: Date.now(),
+            latitude: 0,
+            longitude: 0,
+            deviceId: id,
+          });
+          haptics.notificationSuccess();
+          navigation.goBack();
+        }
+      },
     ]);
   };
 

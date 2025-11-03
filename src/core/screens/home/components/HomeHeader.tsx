@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { Video, ResizeMode } from 'expo-av';
 import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
 import { colors, typography } from '../../../theme';
 
@@ -15,12 +15,7 @@ export default function HomeHeader() {
   const insets = useSafeAreaInsets();
   const { isOnline } = useNetworkStatus();
   const [videoLoaded, setVideoLoaded] = useState(false);
-  
-  // expo-video player
-  const player = useVideoPlayer(require('../../../../../assets/videos/globe.mp4'), (player) => {
-    player.loop = true;
-    player.play();
-  });
+  const videoRef = useRef<Video>(null);
   
   // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -76,11 +71,14 @@ export default function HomeHeader() {
           ]}
         >
           <View style={styles.videoWrapper}>
-            <VideoView
-              player={player}
+            <Video
+              ref={videoRef}
+              source={require('../../../../../assets/videos/globe.mp4')}
               style={styles.video}
-              contentFit="cover"
-              nativeControls={false}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay
+              isLooping
+              isMuted
               onLoadStart={() => {
                 console.log('📹 Video yüklenmeye başladı');
               }}

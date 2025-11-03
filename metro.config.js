@@ -1,14 +1,12 @@
-import { getDefaultConfig } from '@expo/metro-config';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+const { getDefaultConfig } = require('@expo/metro-config');
+const path = require('path');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const projectRoot = __dirname;
 
-const config = getDefaultConfig(__dirname);
+const config = getDefaultConfig(projectRoot);
 
 // Add video support
 config.resolver.assetExts.push('mp4', 'mov', 'avi', 'mkv');
 
-export default config;
+module.exports = config;
 

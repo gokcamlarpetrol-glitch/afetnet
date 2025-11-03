@@ -66,15 +66,14 @@ export default function MessagesScreen({ navigation }: any) {
   
   const handleNewMessage = () => {
     haptics.impactMedium();
-    // Navigate to a new message screen or show a modal
-    Alert.alert('Yeni Mesaj', 'Yeni bir konuşma başlatma özelliği yakında eklenecek.');
+    navigation?.navigate('NewMessage');
   };
 
   const renderConversation = ({ item, index }: { item: Conversation; index: number }) => (
     <SwipeableConversationCard
       item={item}
       index={index}
-      onPress={() => useMessageStore.getState().deleteConversation(item.userId)}
+      onPress={() => navigation?.navigate('Conversation', { userId: item.userId })}
       onDelete={() => handleDeleteConversation(item.userId)}
     />
   );
@@ -91,7 +90,10 @@ export default function MessagesScreen({ navigation }: any) {
             {conversations.length} konuşma • Offline
           </Text>
         </View>
-        <Pressable style={styles.headerButton}>
+        <Pressable 
+          style={styles.headerButton}
+          onPress={handleNewMessage}
+        >
           <Ionicons name="add-circle" size={28} color={colors.brand.primary} />
         </Pressable>
       </View>
@@ -150,7 +152,7 @@ export default function MessagesScreen({ navigation }: any) {
             <Text style={styles.emptySubtext}>
               Yakındaki cihazlarla BLE mesh ağı üzerinden mesajlaşabilirsiniz
             </Text>
-            <Pressable style={styles.emptyButton}>
+            <Pressable style={styles.emptyButton} onPress={handleNewMessage}>
               <LinearGradient
                 colors={['#3b82f6', '#2563eb', '#1e40af']}
                 start={{ x: 0, y: 0 }}

@@ -13,6 +13,7 @@ export const colors = {
     card: '#141824',       // Card backgrounds
     overlay: 'rgba(10, 14, 26, 0.95)', // Dark overlay
     input: '#1a1f2e',      // Input background
+    tertiary: '#1a1f2e',   // Tertiary background
   },
 
   // Text Colors
@@ -48,6 +49,8 @@ export const colors = {
     alert: '#f59e0b',      // Amber
     success: '#10b981',
     info: '#3b82f6',
+    danger: '#ef4444',     // Red
+    warning: '#f59e0b',    // Amber
   },
 
   // Semantic Feature Colors
@@ -155,6 +158,9 @@ export const colors = {
     critical: '#dc2626',   // Dark red (>= 6.0)
   },
 };
+
+// Add online as alias for status.online
+export const online = colors.status.online;
 
 // Export individual color groups for convenience
 export const { background, text, accent, emergency, status, mesh, offline, earthquake, border, brand, gradients, glass } = colors;

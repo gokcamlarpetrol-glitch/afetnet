@@ -76,7 +76,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
       icon: 'people' as const,
       title: 'Yakın Sohbet',
       description: 'Offline mesajlaşma',
-      color: colors.online,
+      color: colors.status.online,
       screen: 'NearbyChat',
     },
   ];
