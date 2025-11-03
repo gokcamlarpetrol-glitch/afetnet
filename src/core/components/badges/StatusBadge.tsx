@@ -16,15 +16,15 @@ function getStatusConfig(status: string) {
   switch (status) {
     case 'online':
       return {
-        color: colors.online,
+        color: colors.status.online,
         text: 'CANLI',
-        backgroundColor: colors.online + '20',
+        backgroundColor: colors.status.online + '20',
       };
     case 'offline':
       return {
-        color: colors.offline,
+        color: colors.status.offline,
         text: 'OFFLINE',
-        backgroundColor: colors.offline + '20',
+        backgroundColor: colors.status.offline + '20',
       };
     case 'active':
       return {

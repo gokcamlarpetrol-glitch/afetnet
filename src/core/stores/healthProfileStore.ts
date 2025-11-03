@@ -19,7 +19,9 @@ export interface HealthProfile {
   bloodType: string; // A+, A-, B+, B-, AB+, AB-, O+, O-
   allergies: string[]; // e.g., ['Penisilin', 'Fıstık']
   chronicConditions: string[]; // e.g., ['Diyabet', 'Hipertansiyon']
+  chronicDiseases?: string[]; // Alias for chronicConditions
   medications: string[]; // e.g., ['İnsülin', 'Aspirin']
+  emergencyMedications?: string[]; // Alias for medications
   emergencyContacts: EmergencyContact[];
   notes: string; // Additional medical notes
   lastUpdated: number;
@@ -41,6 +43,7 @@ interface HealthProfileState {
   removeEmergencyContact: (contactId: string) => void;
   updateEmergencyContact: (contactId: string, updates: Partial<EmergencyContact>) => void;
   setNotes: (notes: string) => void;
+  updateProfile: (updates: Partial<HealthProfile>) => void;
   loadProfile: () => Promise<void>;
   saveProfile: () => Promise<void>;
   clearProfile: () => Promise<void>;
@@ -179,6 +182,17 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
       profile: {
         ...state.profile,
         notes,
+        lastUpdated: Date.now(),
+      },
+    }));
+    get().saveProfile();
+  },
+
+  updateProfile: (updates) => {
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        ...updates,
         lastUpdated: Date.now(),
       },
     }));

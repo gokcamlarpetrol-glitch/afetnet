@@ -105,3 +105,4 @@ Xcode Device Logs'u kontrol edin:
 
 
 
+

@@ -48,6 +48,8 @@ interface MeshActions {
   addMessage: (message: MeshMessage) => void;
   markMessageDelivered: (messageId: string) => void;
   clearOldMessages: (olderThan: number) => void;
+  sendMessage: (content: string, type?: MeshMessage['type'], to?: string) => Promise<void>;
+  broadcastMessage: (content: string, type?: MeshMessage['type']) => Promise<void>;
   
   setScanning: (isScanning: boolean) => void;
   setAdvertising: (isAdvertising: boolean) => void;
@@ -125,6 +127,34 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
     set({
       messages: messages.filter(m => m.timestamp > olderThan)
     });
+  },
+  
+  sendMessage: async (content, type = 'text', to) => {
+    const { myDeviceId } = get();
+    if (!myDeviceId) {
+      throw new Error('Device ID not set');
+    }
+    
+    // This will be handled by BLEMeshService
+    // Store method just creates the message structure
+    const message: MeshMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      from: myDeviceId,
+      to,
+      content,
+      type,
+      timestamp: Date.now(),
+      ttl: 60, // 60 seconds
+      hops: 0,
+      delivered: false,
+    };
+    
+    get().addMessage(message);
+    get().incrementStat('messagesSent');
+  },
+  
+  broadcastMessage: async (content, type = 'text') => {
+    await get().sendMessage(content, type);
   },
   
   setScanning: (isScanning) => set({ isScanning }),

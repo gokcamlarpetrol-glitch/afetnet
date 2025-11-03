@@ -37,7 +37,7 @@ export default function MeshStatusCard({
           <Ionicons 
             name="git-network-outline" 
             size={24} 
-            color={status === 'online' ? colors.online : colors.offline} 
+            color={status === 'online' ? colors.status.online : colors.status.offline} 
           />
           <Text style={styles.title}>Mesh Ağı & Sistem</Text>
         </View>

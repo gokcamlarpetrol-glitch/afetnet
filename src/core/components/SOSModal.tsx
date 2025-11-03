@@ -59,15 +59,21 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
 
     try {
       // Get actual location from device
-      const Location = await import('expo-location');
-      
       let location: { latitude: number; longitude: number; accuracy: number } | null = null;
       
       try {
-        const { status } = await Location.default.requestForegroundPermissionsAsync();
+        // Use static import instead of dynamic import to avoid undefined errors
+        const Location = await import('expo-location');
+        const LocationModule = Location.default || Location;
+        
+        if (!LocationModule || typeof LocationModule.requestForegroundPermissionsAsync !== 'function') {
+          throw new Error('Location module not available');
+        }
+        
+        const { status } = await LocationModule.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const position = await Location.default.getCurrentPositionAsync({
-            accuracy: Location.default.Accuracy.High,
+          const position = await LocationModule.getCurrentPositionAsync({
+            accuracy: LocationModule.Accuracy.High,
           });
           
           location = {

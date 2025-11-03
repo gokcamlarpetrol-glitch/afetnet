@@ -11,4 +11,12 @@ import CoreApp from './src/core/App';
 
 // Use Expo's registerRootComponent for compatibility
 import { registerRootComponent } from 'expo';
-registerRootComponent(CoreApp);
+
+try {
+  registerRootComponent(CoreApp);
+} catch (error) {
+  console.error('[AfetNet] Failed to register root component:', error);
+  // Fallback for React Native
+  const { AppRegistry } = require('react-native');
+  AppRegistry.registerComponent('main', () => CoreApp);
+}

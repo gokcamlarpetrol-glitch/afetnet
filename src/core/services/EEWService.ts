@@ -36,6 +36,7 @@ class EEWService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private maxAttemptsReachedLogged = false; // Track if we've already logged max attempts
 
   // WebSocket URLs
   private wsUrls = {
@@ -45,42 +46,42 @@ class EEWService {
     PROXY: 'wss://afetnet-backend.onrender.com/eew',
   };
 
-  // Poll URLs
-  private pollUrls = [
-    'https://deprem.afad.gov.tr/EventService/GetEventsByFilter',
-    'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=time&limit=10',
-  ];
+  // Get AFAD poll URL (dynamically generated for last 24 hours)
+  private getAfadPollUrl(): string {
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    const startDate = oneDayAgo.toISOString().split('T')[0];
+    const endDate = new Date().toISOString().split('T')[0];
+    return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+  }
 
   async start() {
     if (__DEV__) {
-      logger.info('Starting...');
+      logger.info('Starting EEWService (polling mode - WebSocket disabled)...');
     }
 
     // Check network
     const netState = await NetInfo.fetch();
     if (!netState.isConnected) {
       if (__DEV__) {
-        logger.warn('No network connection');
+        logger.warn('No network connection - EEWService will start when network is available');
       }
+      useEEWStore.getState().setStatus('disconnected', 'Network not available');
       return;
     }
 
-    // Detect region
-    const region = await this.detectRegion();
-    if (__DEV__) {
-      logger.info(`Detected region: ${region}`);
-    }
+    // WebSocket endpoints are not real/available, use polling mode directly
+    // This prevents WebSocket connection errors and reconnect spam
+    useEEWStore.getState().setStatus('connected', 'Using polling mode');
 
-    // Set status to connecting
-    useEEWStore.getState().setStatus('connecting');
-
-    // Start WebSocket
-    await this.startWebSocket(region);
-
-    // Start polling as fallback
+    // Start polling as primary method (WebSocket disabled)
     if (!this.polling) {
       this.polling = true;
       this.pollLoop();
+    }
+
+    if (__DEV__) {
+      logger.info('EEWService started in polling-only mode');
     }
   }
 
@@ -261,15 +262,26 @@ class EEWService {
       }
     }
     
-    // If all URLs fail
-    const finalError = `All WebSocket connection attempts failed for region ${region}.`;
-    logger.error(finalError);
-    useEEWStore.getState().setStatus('error', finalError);
+    // If all URLs fail, just log (don't set error status) - polling will handle data
+    if (__DEV__) {
+      logger.warn(`All WebSocket connection attempts failed for region ${region}. Continuing with polling mode.`);
+    }
+    // Don't set error status - polling mode will continue to work
   }
 
   private handleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error('Max reconnect attempts reached');
+      // Only log once to prevent spam
+      if (!this.maxAttemptsReachedLogged) {
+        if (__DEV__) {
+          logger.warn(`Max reconnect attempts (${this.maxReconnectAttempts}) reached. Switching to polling-only mode.`);
+        }
+        this.maxAttemptsReachedLogged = true;
+        
+        // Switch to polling-only mode - don't try WebSocket anymore
+        useEEWStore.getState().setStatus('connected', 'Using polling mode (WebSocket unavailable)');
+      }
+      // Don't try to reconnect anymore - rely on polling only
       return;
     }
 
@@ -281,20 +293,26 @@ class EEWService {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * this.reconnectAttempts;
 
+    // Only log in dev mode to reduce spam
     if (__DEV__) {
-      logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+      logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     }
 
-    useEEWStore.getState().setStatus('connecting', `Reconnecting... (Attempt ${this.reconnectAttempts})`);
+    // Don't update user-facing status for every reconnect attempt - only on first few
+    if (this.reconnectAttempts <= 2) {
+      useEEWStore.getState().setStatus('connecting', `Reconnecting... (Attempt ${this.reconnectAttempts})`);
+    }
 
     this.reconnectTimeout = setTimeout(() => {
       if (this.polling) {
         this.detectRegion().then((region) => {
           this.startWebSocket(region);
         }).catch((error) => {
-          logger.error('Reconnect failed:', error);
-          const errorMessage = error instanceof Error ? error.message : 'Unknown reconnect error';
-          useEEWStore.getState().setStatus('error', `Reconnect failed: ${errorMessage}`);
+          // Only log errors in dev mode, don't spam user
+          if (__DEV__) {
+            logger.error('Reconnect failed:', error);
+          }
+          // Don't set error status - just continue with polling
         });
       }
       this.reconnectTimeout = null;
@@ -306,44 +324,73 @@ class EEWService {
       const netState = await NetInfo.fetch();
       
       if (netState.isConnected) {
-        for (const url of this.pollUrls) {
-          try {
-            const response = await fetch(url, {
-              headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'AfetNet/1.0',
-              },
-            });
+        try {
+          // Use AFAD API (only real data source for Turkey)
+          const url = this.getAfadPollUrl();
+          
+          // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+          
+          const response = await fetch(url, {
+            headers: {
+              'Accept': 'application/json',
+              'User-Agent': 'AfetNet/1.0',
+            },
+            signal: controller.signal,
+          });
+          
+          clearTimeout(timeoutId);
 
-            // Check if response is JSON
-            const contentType = response.headers.get('content-type');
-            if (!contentType?.includes('application/json')) {
-              if (__DEV__) {
-                logger.warn(`Non-JSON response from ${url}: ${contentType}`);
-              }
-              continue;
+          if (!response.ok) {
+            if (__DEV__) {
+              logger.warn(`AFAD API response not OK: ${response.status}`);
             }
+            // Continue to next poll cycle
+            await new Promise((resolve) => setTimeout(resolve, 60000));
+            continue;
+          }
 
-            const text = await response.text();
-            
-            // Validate JSON before parsing
-            if (!text.trim().startsWith('{') && !text.trim().startsWith('[')) {
-              if (__DEV__) {
-                logger.warn(`Invalid JSON response from ${url}: ${text.substring(0, 100)}`);
-              }
-              continue;
+          // Check if response is JSON
+          const contentType = response.headers.get('content-type');
+          if (!contentType?.includes('application/json')) {
+            if (__DEV__) {
+              logger.warn(`Non-JSON response from AFAD: ${contentType}`);
             }
+            await new Promise((resolve) => setTimeout(resolve, 60000));
+            continue;
+          }
 
-            const data = JSON.parse(text);
-            const events = this.normalizeEvents(data);
-
-            for (const event of events) {
-              if (!this.seenEvents.has(event.id)) {
-                this.seenEvents.add(event.id);
-                this.notifyCallbacks(event);
-              }
+          const text = await response.text();
+          
+          // Validate JSON before parsing
+          if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
+            if (__DEV__) {
+              logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
             }
-          } catch (error) {
+            await new Promise((resolve) => setTimeout(resolve, 60000));
+            continue;
+          }
+
+          const data = JSON.parse(text);
+          
+          // AFAD returns array of events
+          const eventsArray = Array.isArray(data) ? data : (data.events || []);
+          
+          for (const eventData of eventsArray) {
+            const event = this.normalizeEvent(eventData);
+            if (event && !this.seenEvents.has(event.id)) {
+              this.seenEvents.add(event.id);
+              this.notifyCallbacks(event);
+            }
+          }
+
+          if (__DEV__ && eventsArray.length > 0) {
+            logger.info(`Polled ${eventsArray.length} events from AFAD`);
+          }
+        } catch (error) {
+          // Only log errors in dev mode
+          if (__DEV__) {
             logger.error('Poll error:', error);
           }
         }
@@ -356,29 +403,56 @@ class EEWService {
 
   private normalizeEvent(data: any): EEWEvent | null {
     try {
-      const id = data.id || data.eventId || data.code || String(Date.now());
-      const latitude = parseFloat(data.lat ?? data.latitude);
-      const longitude = parseFloat(data.lng ?? data.longitude);
-      const magnitude = parseFloat(data.mag ?? data.magnitude ?? 0);
-      const depth = parseFloat(data.depth ?? data.depth_km ?? 10);
-      const issuedAt = data.ts || data.time || Date.now();
-      const source = (data.src || data.source || 'AFAD').toUpperCase();
+      // AFAD API format support
+      const eventDate = data.eventDate || data.date || data.originTime || data.time;
+      const eventId = data.eventID || data.eventId || data.id || String(Date.now());
+      
+      // Location parsing - AFAD uses geojson.coordinates or lat/lng
+      const latitude = parseFloat(
+        data.geojson?.coordinates?.[1] || 
+        data.latitude || 
+        data.lat || 
+        '0'
+      );
+      const longitude = parseFloat(
+        data.geojson?.coordinates?.[0] || 
+        data.longitude || 
+        data.lng || 
+        '0'
+      );
+      
+      const magnitude = parseFloat(data.mag || data.magnitude || data.ml || '0');
+      const depth = parseFloat(data.depth || data.derinlik || '10');
+      
+      // Location string
+      const locationParts = [
+        data.location,
+        data.ilce,
+        data.sehir,
+        data.title,
+        data.place
+      ].filter(Boolean);
+      const region = locationParts.length > 0 
+        ? locationParts.join(', ') 
+        : 'Türkiye';
 
-      if (isNaN(latitude) || isNaN(longitude)) {
+      if (isNaN(latitude) || isNaN(longitude) || latitude === 0 || longitude === 0) {
         return null;
       }
 
+      const issuedAt = eventDate ? new Date(eventDate).getTime() : Date.now();
+
       return {
-        id: String(id),
+        id: `afad-${eventId}`,
         latitude,
         longitude,
         magnitude,
         depth,
-        region: data.region || data.place || 'Unknown',
-        source,
+        region,
+        source: 'AFAD',
         issuedAt,
         etaSec: data.etaSec,
-        certainty: data.certainty,
+        certainty: magnitude >= 5.0 ? 'high' : magnitude >= 4.0 ? 'medium' : 'low',
       };
     } catch (error) {
       logger.error('Event normalization error:', error);

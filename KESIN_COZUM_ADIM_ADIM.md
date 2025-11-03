@@ -177,3 +177,4 @@ Bu seçenek işaretli değilse → `bluetooth-central` ve `bluetooth-peripheral`
 
 
 
+

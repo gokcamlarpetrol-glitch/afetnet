@@ -22,6 +22,8 @@ import { createLogger } from '../../utils/logger';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { FamilyMarker } from '../../components/map/FamilyMarker';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
+import { useCompass } from '../../../hooks/useCompass';
+import { useUserStatusStore } from '../../stores/userStatusStore';
 
 const logger = createLogger('MapScreen');
 const { width, height } = Dimensions.get('window');
@@ -66,8 +68,16 @@ export default function MapScreen({ navigation }: any) {
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [offlineLocations, setOfflineLocations] = useState<MapLocation[]>([]);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [selectedItem, setSelectedItem] = useState<Earthquake | FamilyMember | null>(null);
+  const [selectedItem, setSelectedItem] = useState<Earthquake | FamilyMember | MapLocation | null>(null);
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
+  const [showCompass, setShowCompass] = useState(true);
+
+  // Compass hook
+  const { heading, isAvailable: compassAvailable } = useCompass();
+  
+  // User status (for debris tracking)
+  const userStatus = useUserStatusStore((state) => state.status);
+  const userStatusLocation = useUserStatusStore((state) => state.location);
 
   const snapPoints = useMemo(() => ['25%', '50%', '85%'], []);
 
@@ -98,9 +108,32 @@ export default function MapScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
-    // Load offline locations
-    const locations = offlineMapService.getAllLocations();
-    setOfflineLocations(locations);
+    // Load offline locations (with retry in case service not initialized yet)
+    const loadOfflineLocations = async () => {
+      let locations = offlineMapService.getAllLocations();
+      
+      // If no locations, wait a bit and try again (service might still be initializing)
+      if (locations.length === 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        locations = offlineMapService.getAllLocations();
+      }
+      
+      setOfflineLocations(locations);
+      
+      if (__DEV__ && locations.length > 0) {
+        logger.info(`MapScreen: Loaded ${locations.length} offline locations`);
+      }
+    };
+    
+    loadOfflineLocations();
+    
+    // Refresh locations periodically (every 30 seconds)
+    const interval = setInterval(() => {
+      const freshLocations = offlineMapService.getAllLocations();
+      setOfflineLocations(freshLocations);
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -155,7 +188,7 @@ export default function MapScreen({ navigation }: any) {
     }
   };
 
-  const handleMarkerPress = (item: Earthquake | FamilyMember) => {
+  const handleMarkerPress = (item: Earthquake | FamilyMember | MapLocation) => {
     haptics.impactLight();
     setSelectedItem(item);
     bottomSheetRef.current?.expand();
@@ -206,17 +239,30 @@ export default function MapScreen({ navigation }: any) {
     }
 
     const isEarthquake = 'magnitude' in selectedItem;
+    const isMapLocation = 'type' in selectedItem && !isEarthquake && !('status' in selectedItem);
 
     return (
       <View style={styles.bottomSheetContent}>
         <View style={styles.bottomSheetHeader}>
           <Ionicons 
-            name={isEarthquake ? 'pulse' : 'person'} 
+            name={
+              isEarthquake ? 'pulse' : 
+              isMapLocation ? getLocationIcon((selectedItem as MapLocation).type) :
+              'person'
+            } 
             size={24} 
-            color={isEarthquake ? getMagnitudeColor((selectedItem as Earthquake).magnitude) : colors.brand.primary} 
+            color={
+              isEarthquake ? getMagnitudeColor((selectedItem as Earthquake).magnitude) : 
+              isMapLocation ? getLocationColor((selectedItem as MapLocation).type) :
+              colors.brand.primary
+            } 
             style={styles.bottomSheetIcon}
           />
-          <Text style={styles.bottomSheetTitle}>{isEarthquake ? (selectedItem as Earthquake).location : (selectedItem as FamilyMember).name}</Text>
+          <Text style={styles.bottomSheetTitle}>
+            {isEarthquake ? (selectedItem as Earthquake).location : 
+             isMapLocation ? (selectedItem as MapLocation).name :
+             (selectedItem as FamilyMember).name}
+          </Text>
         </View>
         
         {isEarthquake ? (
@@ -224,6 +270,25 @@ export default function MapScreen({ navigation }: any) {
             <DetailRow icon="speedometer" label="Büyüklük" value={`${(selectedItem as Earthquake).magnitude.toFixed(1)} ML`} />
             <DetailRow icon="arrow-down" label="Derinlik" value={`${(selectedItem as Earthquake).depth.toFixed(1)} km`} />
             <DetailRow icon="time" label="Zaman" value={new Date((selectedItem as Earthquake).time).toLocaleString('tr-TR')} />
+          </View>
+        ) : isMapLocation ? (
+          <View style={styles.detailContainer}>
+            <DetailRow icon="location" label="Adres" value={(selectedItem as MapLocation).address || 'Adres bilgisi yok'} />
+            <DetailRow icon="navigate" label="Uzaklık" value={userLocation ? formatDistance(calculateDistance(userLocation.latitude, userLocation.longitude, (selectedItem as MapLocation).latitude, (selectedItem as MapLocation).longitude)) : 'Hesaplanıyor...'} />
+            {(selectedItem as MapLocation).capacity && (
+              <DetailRow icon="people" label="Kapasite" value={`${(selectedItem as MapLocation).capacity} kişi`} />
+            )}
+            {(selectedItem as MapLocation).phone && (
+              <DetailRow icon="call" label="Telefon" value={(selectedItem as MapLocation).phone || ''} />
+            )}
+            <DetailRow icon="information-circle" label="Tip" value={
+              (selectedItem as MapLocation).type === 'assembly' ? 'Toplanma Alanı' :
+              (selectedItem as MapLocation).type === 'hospital' ? 'Hastane' :
+              (selectedItem as MapLocation).type === 'water' ? 'Su Dağıtım Noktası' :
+              (selectedItem as MapLocation).type === 'shelter' ? 'Barınma Merkezi' :
+              (selectedItem as MapLocation).type === 'police' ? 'Polis Merkezi' :
+              (selectedItem as MapLocation).type === 'fire' ? 'İtfaiye' : 'Diğer'
+            } />
           </View>
         ) : (
           <View style={styles.detailContainer}>
@@ -302,9 +367,10 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
               longitude: location.longitude,
             }}
             title={location.name}
-            description={location.address}
+            description={location.address || location.type}
+            onPress={() => handleMarkerPress(location)}
           >
-            <View style={styles.offlineMarker}>
+            <View style={[styles.offlineMarker, { borderColor: getLocationColor(location.type) }]}>
               <Ionicons 
                 name={getLocationIcon(location.type)} 
                 size={24} 
@@ -313,6 +379,23 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
             </View>
           </Marker>
         ))}
+
+        {/* Debris/Trapped Status Marker */}
+        {userStatusLocation && (userStatus === 'trapped' || userStatus === 'needs_help') && (
+          <Marker
+            coordinate={userStatusLocation}
+            title={userStatus === 'trapped' ? 'Enkaz Altında' : 'Yardım Gerekiyor'}
+            description="Cihaz algılama durumu"
+          >
+            <View style={[styles.debrisMarker, { backgroundColor: userStatus === 'trapped' ? '#DC2626' : '#F59E0B' }]}>
+              <Ionicons 
+                name={userStatus === 'trapped' ? 'alert-circle' : 'warning'} 
+                size={28} 
+                color="#fff" 
+              />
+            </View>
+          </Marker>
+        )}
       </MapView>
 
       {/* Floating UI Elements */}
@@ -320,7 +403,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         <BlurView intensity={50} tint="dark" style={styles.floatingHeaderBlur}>
           <Text style={styles.headerTitle}>Harita</Text>
           <Text style={styles.headerSubtitle}>
-            {earthquakes.length} deprem • {familyMembers.length} aile üyesi
+            {earthquakes.length} deprem • {familyMembers.length} aile üyesi • {offlineLocations.length} nokta
           </Text>
         </BlurView>
       </View>
@@ -352,6 +435,43 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
       >
         {renderBottomSheetContent()}
       </BottomSheet>
+
+      {/* Compass Widget */}
+      {showCompass && compassAvailable && (
+        <View style={[styles.compassWidget, { bottom: insets.bottom + 100, left: 16 }]}>
+          <BlurView intensity={50} tint="dark" style={styles.compassWidgetBlur}>
+            <View style={[styles.compassCircle, { transform: [{ rotate: `${-heading}deg` }] }]}>
+              <View style={styles.compassNeedle}>
+                <View style={styles.compassNeedleNorth} />
+                <View style={styles.compassNeedleSouth} />
+              </View>
+              <View style={styles.compassLabels}>
+                <Text style={styles.compassLabelN}>N</Text>
+                <Text style={styles.compassLabelS}>S</Text>
+                <Text style={styles.compassLabelE}>E</Text>
+                <Text style={styles.compassLabelW}>W</Text>
+              </View>
+            </View>
+            <Text style={styles.compassHeading}>{Math.round(heading)}°</Text>
+          </BlurView>
+        </View>
+      )}
+
+      {/* Debris Status Indicator */}
+      {(userStatus === 'trapped' || userStatus === 'needs_help') && (
+        <View style={[styles.debrisStatusIndicator, { top: insets.top + 70, left: 16 }]}>
+          <BlurView intensity={50} tint="dark" style={styles.debrisStatusBlur}>
+            <Ionicons 
+              name={userStatus === 'trapped' ? 'alert-circle' : 'warning'} 
+              size={20} 
+              color={userStatus === 'trapped' ? '#DC2626' : '#F59E0B'} 
+            />
+            <Text style={styles.debrisStatusText}>
+              {userStatus === 'trapped' ? 'Enkaz Algılandı' : 'Yardım Gerekli'}
+            </Text>
+          </BlurView>
+        </View>
+      )}
       
       {!isPremium && <PremiumGate featureName="Harita" />}
     </View>
@@ -471,5 +591,141 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+  },
+  compassWidget: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+  },
+  compassWidgetBlur: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  compassCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: colors.brand.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  compassNeedle: {
+    width: 2,
+    height: 24,
+    position: 'absolute',
+  },
+  compassNeedleNorth: {
+    position: 'absolute',
+    top: 2,
+    left: -4,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderTopWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#DC2626',
+  },
+  compassNeedleSouth: {
+    position: 'absolute',
+    bottom: 2,
+    left: -4,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderBottomWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#6B7280',
+  },
+  compassLabels: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+  },
+  compassLabelN: {
+    position: 'absolute',
+    top: 4,
+    left: '50%',
+    marginLeft: -6,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  compassLabelS: {
+    position: 'absolute',
+    bottom: 4,
+    left: '50%',
+    marginLeft: -6,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6B7280',
+  },
+  compassLabelE: {
+    position: 'absolute',
+    right: 4,
+    top: '50%',
+    marginTop: -7,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.text.secondary,
+  },
+  compassLabelW: {
+    position: 'absolute',
+    left: 4,
+    top: '50%',
+    marginTop: -7,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.text.secondary,
+  },
+  compassHeading: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  debrisMarker: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  debrisStatusIndicator: {
+    position: 'absolute',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  debrisStatusBlur: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  debrisStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
 });

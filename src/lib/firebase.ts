@@ -1,29 +1,51 @@
 import { initializeApp } from 'firebase/app';
 import { logger } from '../utils/productionLogger';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { FIREBASE_CONFIG } from '../core/config/firebase';
+import { Platform } from 'react-native';
 
-// Firebase configuration with fallbacks
-const firebaseConfig = {
-  apiKey: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_API_KEY || 'demo-api-key',
-  authDomain: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'afetnet-app.firebaseapp.com',
-  projectId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'afetnet-app',
-  storageBucket: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'afetnet-app.appspot.com',
-  messagingSenderId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '123456789',
-  appId: (globalThis as any).process?.env?.EXPO_PUBLIC_FIREBASE_APP_ID || '1:123456789:ios:abcdef123456',
-};
+// Firebase configuration - use real config from firebase.ts
+const firebaseConfig = (() => {
+  const config = Platform.OS === 'ios' ? FIREBASE_CONFIG.ios : FIREBASE_CONFIG.android;
+  return {
+    apiKey: config.apiKey,
+    authDomain: `${config.projectId}.firebaseapp.com`,
+    projectId: config.projectId,
+    storageBucket: config.storageBucket,
+    messagingSenderId: config.messagingSenderId,
+    appId: config.appId,
+  };
+})();
 
 // Initialize Firebase with error handling
 let app: any = null;
 let messaging: any = null;
 
-try {
-  app = initializeApp(firebaseConfig);
-  messaging = getMessaging(app);
-  logger.info('Firebase initialized successfully');
-} catch (error) {
-  logger.warn('Firebase initialization failed, using fallback mode:', error);
-  // Graceful degradation - Firebase will be disabled
+function initializeFirebase() {
+  if (app) return app; // Already initialized
+  
+  try {
+    app = initializeApp(firebaseConfig);
+    logger.info('Firebase app initialized successfully', { projectId: firebaseConfig.projectId });
+    
+    // Try to initialize messaging (may fail in non-device environments)
+    try {
+      messaging = getMessaging(app);
+      logger.info('Firebase messaging initialized');
+    } catch (msgError) {
+      logger.warn('Firebase messaging initialization failed (this is OK in simulator):', msgError);
+    }
+    
+    return app;
+  } catch (error) {
+    logger.warn('Firebase initialization failed, using fallback mode:', error);
+    // Return null if initialization fails
+    return null;
+  }
 }
+
+// Initialize immediately
+app = initializeFirebase();
 
 // Get FCM token
 export const getFCMToken = async (): Promise<string | null> => {

@@ -184,8 +184,8 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         >
           <LinearGradient
             colors={isPressed 
-              ? ['#dc2626', '#991b1b'] // Daha koyu kırmızı (basılı)
-              : ['#ef4444', '#dc2626'] // Orta ton kırmızı (normal)
+              ? ['#cc0000', '#990000'] // Daha koyu ve dramatik (basılı)
+              : ['#ff3333', '#cc0000'] // Daha canlı ve parlak kırmızı (normal)
             }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -290,11 +290,11 @@ const styles = StyleSheet.create({
   },
   mainButtonWrapper: {
     borderRadius: 28,
-    shadowColor: '#ef4444',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.5, // Daha belirgin shadow
-    shadowRadius: 24,
-    elevation: 16,
+    shadowColor: '#ff3333',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.7, // Çok daha belirgin shadow (güçlendirildi)
+    shadowRadius: 32,
+    elevation: 20,
   },
   mainButton: {
     minHeight: 200, // Daha büyük
@@ -311,16 +311,24 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(239, 68, 68, 0.2)', // Biraz daha belirgin
+    backgroundColor: 'rgba(255, 51, 51, 0.3)', // Daha belirgin glow efekti
+    borderRadius: 28,
   },
   iconContainer: {
     marginBottom: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)', // Arka plan eklendi
+    backgroundColor: 'rgba(255, 255, 255, 0.25)', // Daha belirgin arka plan (artırıldı)
     borderRadius: 50,
     width: 100,
     height: 100,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.4)', // Icon container'a border eklendi
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   mainTitle: {
     fontSize: 28, // Daha büyük

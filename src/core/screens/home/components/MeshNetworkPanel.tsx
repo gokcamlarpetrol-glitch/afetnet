@@ -3,7 +3,7 @@
  * Shows real mesh network stats with progress bars and detailed info
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,12 +11,29 @@ import { useMesh } from '../../../hooks/useMesh';
 import { colors, typography, shadows } from '../../../theme';
 
 export default function MeshNetworkPanel() {
-  const { peers, isConnected } = useMesh();
+  const { peers, isConnected, messages } = useMesh();
   const peerCount = Object.keys(peers).length;
 
-  // Mock data for messages and signal (will be real later)
-  const messageCount = 0;
-  const signalStrength = peerCount > 0 ? 98 : 0;
+  // Real data from mesh store
+  const messageCount = messages ? messages.length : 0;
+  
+  // Calculate real signal strength from peer RSSI values
+  const signalStrength = useMemo(() => {
+    if (peerCount === 0) return 0;
+    
+    const peerArray = Object.values(peers);
+    const rssiValues = peerArray
+      .map((peer: any) => peer.rssi)
+      .filter((rssi: number) => rssi != null && rssi !== 0);
+    
+    if (rssiValues.length === 0) return 50; // Default if no RSSI data
+    
+    // Average RSSI to signal strength (RSSI ranges from -100 to 0)
+    const avgRssi = rssiValues.reduce((a: number, b: number) => a + b, 0) / rssiValues.length;
+    // Convert RSSI to percentage: -50 = 100%, -100 = 0%
+    const strength = Math.max(0, Math.min(100, ((avgRssi + 100) / 50) * 100));
+    return Math.round(strength);
+  }, [peers, peerCount]);
   
   // Progress bar animation
   const signalProgress = useRef(new Animated.Value(0)).current;

@@ -23,6 +23,7 @@ import { whistleService } from './services/WhistleService';
 import { flashlightService } from './services/FlashlightService';
 import { voiceCommandService } from './services/VoiceCommandService';
 import { offlineMapService } from './services/OfflineMapService';
+import { firebaseDataService } from './services/FirebaseDataService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
 import { createLogger } from './utils/logger';
 
@@ -48,9 +49,15 @@ export async function initializeApp() {
       logger.error('Notification services failed:', error);
     }
 
-    // Step 2: Firebase Service
+    // Step 2: Firebase Services (initialize Firebase app first, then data service)
     try {
+      // Initialize Firebase messaging service
       await firebaseService.initialize();
+      
+      // Initialize Firebase Data Service (Firestore) - must be after Firebase app init
+      await firebaseDataService.initialize();
+      
+      logger.info('Firebase services initialized');
     } catch (error) {
       logger.error('Firebase failed:', error);
     }
@@ -84,17 +91,15 @@ export async function initializeApp() {
     }
 
     // Step 7: EEW Service
-    // DISABLED - WebSocket endpoints are not real, causing 491 errors
-    // Will be re-enabled when we have real EEW WebSocket endpoints
-    // try {
-    //   if (__DEV__) {
-    //     logger.info('Step 7/15: Starting EEW service...');
-    //   }
-    //   await eewService.start();
-    // } catch (error) {
-    //   logger.error('EEW service failed to start:', error);
-    //   // Continue without EEW
-    // }
+    // Polling-only mode (WebSocket endpoints not available)
+    // Uses AFAD API polling for earthquake data
+    try {
+      logger.info('Step 7: Starting EEW service (polling-only mode)...');
+      await eewService.start();
+    } catch (error) {
+      logger.error('EEW service failed to start:', error);
+      // Continue without EEW - EarthquakeService handles AFAD data
+    }
 
     // Step 8: Cell Broadcast Service
     try {
@@ -147,7 +152,15 @@ export async function initializeApp() {
     }
 
     // Step 15: Seismic Sensor Service
-    // DISABLED - Too many false positives, will be re-enabled after optimization
+    // DISABLED TEMPORARILY - Too many false positives causing spam
+    // Will be re-enabled after further optimization and testing
+    // The service is still available for enkaz detection via EnkazDetectionService
+    // try {
+    //   logger.info('Step 15: Starting seismic sensor service...');
+    //   await seismicSensorService.start();
+    // } catch (error) {
+    //   logger.error('Seismic sensor failed:', error);
+    // }
 
     // Step 16: Life-Saving Services
     try {
@@ -171,9 +184,9 @@ export async function initializeApp() {
 export function shutdownApp() {
   earthquakeService.stop();
   bleMeshService.stop();
-  // eewService.stop(); // Disabled
+  eewService.stop();
   cellBroadcastService.stop();
-  // seismicSensorService.stop(); // Disabled
+  seismicSensorService.stop();
   enkazDetectionService.stop();
   
   isInitialized = false;

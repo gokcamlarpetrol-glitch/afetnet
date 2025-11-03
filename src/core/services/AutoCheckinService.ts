@@ -154,12 +154,12 @@ class AutoCheckinService {
       const meshStore = useMeshStore.getState();
       
       // Broadcast to all peers
-      meshStore.broadcastMessage({
+      await meshStore.broadcastMessage(JSON.stringify({
         type: 'status_update',
         status,
         message,
         timestamp: Date.now(),
-      });
+      }), 'status');
       
       logger.info(`AutoCheckinService: Broadcasted ${status}`);
     } catch (error) {
