@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, FlatList, Platform, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { startAudioBeacon, createAudioDetector } from '../nearby/audioBeacon';
-import { ensureBlePermissions, scan, NearbyEntry } from '../nearby/ble';
+import { ensureBlePermissions, scan, NearbyEntry, startAdvertisingStub } from '../nearby/ble';
 
 export default function NearbyScreen(){
   const [beaconOn, setBeaconOn] = useState(false);
@@ -63,6 +63,7 @@ export default function NearbyScreen(){
       const stop = scan((entry)=>{
         setDevices(prev => ({ ...prev, [entry.id]: entry }));
       });
+      // keep in ref to stop when toggling off
       // @ts-ignore
       (startBleScan as any)._stop = stop;
       setBleOn(true);
@@ -76,6 +77,11 @@ export default function NearbyScreen(){
     if (st) {st();}
     setBleOn(false);
     setDevices({});
+  }
+
+  async function tryAdvertise(){
+    try{ await startAdvertisingStub(); }
+    catch(e:any){ Alert.alert('Bluetooth', e?.message || 'Bu platformda yayın desteklenmiyor.'); }
   }
 
   const data = Object.values(devices).sort((a,b)=> (b.rssi ?? -999) - (a.rssi ?? -999));
@@ -115,6 +121,9 @@ export default function NearbyScreen(){
         <View style={{ flexDirection:'row', gap:8 }}>
           <Pressable onPress={bleOn ? stopBleScan : startBleScan} style={{ flex:1, backgroundColor: bleOn ? '#b91c1c' : '#22c55e', padding:12, borderRadius:10 }}>
             <Text style={{ color:'white', fontWeight:'800', textAlign:'center' }}>{bleOn ? 'TARAMAYI DURDUR' : 'YAKINLARI TARA'}</Text>
+          </Pressable>
+          <Pressable onPress={tryAdvertise} style={{ flex:1, backgroundColor:'#1f2937', padding:12, borderRadius:10 }}>
+            <Text style={{ color:'white', fontWeight:'800', textAlign:'center' }}>GÖRÜNÜR OL (beta)</Text>
           </Pressable>
         </View>
         <FlatList

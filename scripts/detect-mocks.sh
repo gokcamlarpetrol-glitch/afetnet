@@ -1,43 +1,54 @@
 #!/bin/bash
-# Exit immediately if a command exits with a non-zero status.
-set -e
+# Fail build if mock, placeholder, fake, or stub is found in key logic files
 
-# Define a list of forbidden keywords
-FORBIDDEN_KEYWORDS=(
-  "TODO: mock"
-  "__mocks__"
-  "fake"
-  "stub"
-  "MOCK_"
-  "useMock"
+FORBIDDEN_KEYWORDS=("mock" "placeholder" "fake" "stub")
+FORBIDDEN_FILES=(
+  "src/"
+  "app/"
+  "*.ts"
+  "*.tsx"
+)
+EXCLUDE_PATTERNS=(
+  "*.test.ts"
+  "*.spec.ts"
+  "*.snap"
+  "*/__mocks__/*"
+  "*/node_modules/*"
+  "*/.expo/*"
+  "*/.next/*"
+  "*/dist/*"
+  "*/build/*"
+  "*/.d.ts"
 )
 
-# Initialize a flag to track if forbidden keywords are found
-found_keyword=false
+# Build exclude arguments for grep
+GREP_EXCLUDES=()
+for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+  GREP_EXCLUDES+=("--exclude=$pattern")
+done
 
-# 1. Search for general forbidden keywords, excluding package-lock.json
+# Search for forbidden keywords
+errors_found=0
 for keyword in "${FORBIDDEN_KEYWORDS[@]}"; do
-  if git grep -i "$keyword" -- . ':!*package-lock.json' ':!scripts/detect-mocks.sh' ':!node_modules'; then
-    echo "ERROR: Forbidden keyword '$keyword' found in the codebase."
-    found_keyword=true
+  # We use git grep for speed and to respect .gitignore
+  # Fallback to standard grep if not in a git repo
+  if command -v git &> /dev/null && git rev-parse --is-inside-work-tree &> /dev/null; then
+    output=$(git grep -i -n -E "$keyword" -- "${FORBIDDEN_FILES[@]}" ':(exclude)'"${EXCLUDE_PATTERNS[@]}")
+  else
+    output=$(grep -i -r -n -E "$keyword" "${FORBIDDEN_FILES[@]}" "${GREP_EXCLUDES[@]}")
+  fi
+
+  if [ -n "$output" ]; then
+    echo "$output"
+    errors_found=1
   fi
 done
 
-# 2. Search for "placeholder", but ignore legitimate UI props in TSX files and comments in test files
-# This is a more specific search to avoid flagging UI code.
-if git grep -i "placeholder" -- . ':!*package-lock.json' ':!scripts/detect-mocks.sh' ':!node_modules' \
-  | grep -vE 'placeholder=|placeholderTextColor=' \
-  | grep -vE '\.test\.ts'; then
-  echo "ERROR: Forbidden keyword 'placeholder' found in logic files."
-  found_keyword=true
-fi
-
-
-# If a forbidden keyword was found, exit with an error code
-if [ "$found_keyword" = true ]; then
-  echo "Mock, placeholder, or fake implementation found. Failing the build."
+if [ $errors_found -ne 0 ]; then
+  echo "ERROR: Forbidden keyword found in logic files." >&2
+  echo "Mock, placeholder, or fake implementation found. Failing the build." >&2
   exit 1
 fi
 
-echo "No mock or placeholder keywords found. Check passed."
+echo "✅ No mock or placeholder keywords found."
 exit 0

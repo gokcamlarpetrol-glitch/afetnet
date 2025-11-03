@@ -30,16 +30,15 @@ jobs:
         run: npm run lint
         continue-on-error: false
 
-      - name: Run mock detector
-        run: ./scripts/detect-mocks.sh
-        continue-on-error: false
-
       - name: Run TypeScript check
         run: npx tsc --noEmit
 
       - name: Run tests
         run: npm test
         continue-on-error: false
+
+      - name: Check for mocks and placeholders
+        run: ./scripts/detect-mocks.sh
 
   # Build Checks
   build:
@@ -181,6 +180,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Note: Actual deployment would require Apple Developer account
+      # and proper certificates. This is a placeholder for future implementation.
       - name: Prepare for deployment
         run: |
           echo "🚀 Preparing for App Store deployment..."
@@ -188,3 +189,13 @@ jobs:
           echo "✅ Build verification passed"
           echo "✅ Release readiness confirmed"
           echo "📝 Ready for App Store Connect submission"
+
+      # Future: Add EAS build and submit steps
+      # - name: Build with EAS
+      #   run: eas build --platform all --profile production
+      #
+      # - name: Submit to TestFlight
+      #   run: eas submit --platform ios
+      #
+      # - name: Submit to Play Store (Internal Testing)
+      #   run: eas submit --platform android
