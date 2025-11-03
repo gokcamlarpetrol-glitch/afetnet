@@ -1,40 +1,16 @@
 // Safe SQLite wrapper to prevent crashes when native modules are not available
 import { logger } from '../utils/productionLogger';
-let SQLite: any = null;
-
-try {
-  SQLite = (globalThis as any).require('react-native-sqlite-storage');
-  if (SQLite) {
-    SQLite.enablePromise(true);
-  }
-} catch {
-  logger.warn('react-native-sqlite-storage not available');
-}
+import { open } from 'react-native-quick-sqlite';
 
 export const SafeSQLite = {
-  isAvailable: () => SQLite !== null,
+  isAvailable: () => true, // react-native-quick-sqlite will throw an error if it's not available
   
-  openDatabase: async (options: Record<string, unknown>) => {
-    if (!SQLite) {
-      logger.warn('SQLite not available, returning mock database');
-      return {
-        executeSql: async () => [{ rows: { length: 0 } }],
-        transaction: async (fn: any) => fn({ executeSql: async () => [{ rows: { length: 0 } }] }),
-        close: async () => {},
-      };
-    }
+  openDatabase: (options: { name: string, location?: string }) => {
     try {
-      return await SQLite.openDatabase(options);
-    } catch {
-      logger.warn('Failed to open SQLite database');
-      return {
-        executeSql: async () => [{ rows: { length: 0 } }],
-        transaction: async (fn: any) => fn({ executeSql: async () => [{ rows: { length: 0 } }] }),
-        close: async () => {},
-      };
+      return open(options);
+    } catch (error) {
+      logger.error('Failed to open SQLite database:', error);
+      throw new Error('SQLite not available');
     }
   },
 };
-
-
-

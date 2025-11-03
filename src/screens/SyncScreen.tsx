@@ -3,7 +3,6 @@ import { View, Text, Pressable, Modal, Alert } from 'react-native';
 import SvgQRCode from 'react-native-qrcode-svg';
 import { SafeBarcodeScanner } from '../ui/SafeBarcodeScanner';
 import { useApp } from '../store/app';
-import { makeEnvelope } from '../mesh/envelope'; // if exists; else inline a simple envelope
 import { getQueueSnapshot, importEnvelopes } from '../store/app';
 import { createPack, sharePack, pickAndReadPack } from '../mesh/pack';
 
@@ -23,9 +22,8 @@ export default function SyncScreen(){
   async function buildQR(){
     const envs = await getQueueSnapshot(3);
     if (!envs.length) {
-      // fallback demo envelope
-      const fake = await makeEnvelope({ type:'help', note:'qr', people:1, priority:'med', lat:null, lon:null });
-      envs.push(fake);
+      Alert.alert('QR Oluştur', 'Paylaşılacak veri bulunmuyor.');
+      return;
     }
     const batch = { v:1, c: envs.length, items: envs };
     const s = JSON.stringify(batch);

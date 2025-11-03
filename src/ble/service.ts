@@ -6,15 +6,7 @@ import { Platform } from 'react-native';
 
 export type NearbyHit = { id: string; name?: string | null; rssi?: number | null };
 
-const isSimulator = Platform.OS === 'ios' && !(globalThis as any).process?.env?.EXPO_DEVICE_OWNER;
-
- 
 export async function scanNearby(onHit: (d: NearbyHit) => void) {
-  if (isSimulator) {
-    // Mock: emit a fake device
-    onHit({ id: 'MOCK-DEVICE', name: 'Simulator', rssi: -55 });
-    return new Promise<void>((res) => (globalThis as any).setTimeout(res, SCAN_SECONDS * 1000));
-  }
   return new Promise<void>((resolve) => {
     const sub = ble.onStateChange((state) => {
       if (state === 'PoweredOn') {
@@ -38,10 +30,6 @@ export async function scanNearby(onHit: (d: NearbyHit) => void) {
 }
 
 export async function sendTinyMessage(deviceId: string, payload: object) {
-  if (isSimulator) {
-    logger.debug('MOCK sendTinyMessage →', deviceId, payload);
-    return true;
-  }
   const json = JSON.stringify(payload);
   const base64 = Buffer.from(json, 'utf8').toString('base64');
   const device = await ble.connectToDevice(deviceId, { timeout: CONNECT_TIMEOUT_MS });
