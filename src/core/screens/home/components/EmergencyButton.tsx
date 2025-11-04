@@ -69,6 +69,8 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const handlePressIn = () => {
     setIsPressed(true);
     haptics.impactMedium();
+    
+    console.log('🆘 SOS butonu basıldı - 3 saniye bekleniyor...');
 
     // Scale animation
     Animated.spring(scaleAnim, {
@@ -85,21 +87,24 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
     // Set timer for 3 seconds
     pressTimer.current = setTimeout(() => {
+      console.log('✅ SOS butonu 3 saniye tutuldu - SOS gönderiliyor!');
       haptics.impactHeavy();
-      onPress();
+      haptics.notificationSuccess();
+      onPress(); // Trigger SOS modal
       setIsPressed(false);
       progressAnim.setValue(0);
     }, 3000);
   };
 
   const handlePressOut = () => {
-    setIsPressed(false);
-
-    // Cancel timer
+    // Cancel timer if released before 3 seconds
     if (pressTimer.current) {
+      console.log('⚠️ SOS butonu erken bırakıldı');
       clearTimeout(pressTimer.current);
       pressTimer.current = null;
     }
+    
+    setIsPressed(false);
 
     // Reset animations
     Animated.parallel([

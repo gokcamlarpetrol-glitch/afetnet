@@ -1,5 +1,4 @@
 import { initializeApp } from 'firebase/app';
-import { logger } from '../utils/productionLogger';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { FIREBASE_CONFIG } from '../core/config/firebase';
 import { Platform } from 'react-native';
@@ -20,37 +19,65 @@ const firebaseConfig = (() => {
 // Initialize Firebase with error handling
 let app: any = null;
 let messaging: any = null;
+let initializationAttempted = false;
 
 function initializeFirebase() {
   if (app) return app; // Already initialized
+  if (initializationAttempted) return app; // Prevent re-initialization attempts
+  
+  initializationAttempted = true;
   
   try {
     app = initializeApp(firebaseConfig);
-    logger.info('Firebase app initialized successfully', { projectId: firebaseConfig.projectId });
+    // Use console.log instead of logger to avoid circular dependency
+    if (__DEV__) {
+      console.log('[Firebase] App initialized successfully', { projectId: firebaseConfig.projectId });
+    }
     
     // Try to initialize messaging (may fail in non-device environments)
     try {
       messaging = getMessaging(app);
-      logger.info('Firebase messaging initialized');
+      if (__DEV__) {
+        console.log('[Firebase] Messaging initialized');
+      }
     } catch (msgError) {
-      logger.warn('Firebase messaging initialization failed (this is OK in simulator):', msgError);
+      if (__DEV__) {
+        console.warn('[Firebase] Messaging initialization failed (this is OK in simulator):', msgError);
+      }
     }
     
     return app;
   } catch (error) {
-    logger.warn('Firebase initialization failed, using fallback mode:', error);
+    if (__DEV__) {
+      console.warn('[Firebase] Initialization failed, using fallback mode:', error);
+    }
     // Return null if initialization fails
     return null;
   }
 }
 
-// Initialize immediately
-app = initializeFirebase();
+// Lazy initialization - don't initialize at module load time
+// Initialize on first access instead
+
+// Initialize Firebase on first access
+export function getFirebaseApp() {
+  if (!app) {
+    initializeFirebase();
+  }
+  return app;
+}
 
 // Get FCM token
 export const getFCMToken = async (): Promise<string | null> => {
+  // Ensure Firebase is initialized
+  if (!app) {
+    initializeFirebase();
+  }
+  
   if (!messaging) {
-    logger.warn('Firebase messaging not available, returning null token');
+    if (__DEV__) {
+      console.warn('[Firebase] Messaging not available, returning null token');
+    }
     return null;
   }
   
@@ -60,24 +87,36 @@ export const getFCMToken = async (): Promise<string | null> => {
     });
     return token;
   } catch (error) {
-    logger.error('Error getting FCM token:', error);
+    if (__DEV__) {
+      console.error('[Firebase] Error getting FCM token:', error);
+    }
     return null;
   }
 };
 
 // Handle foreground messages
 export const onForegroundMessage = (callback: (payload: any) => void) => {
+  // Ensure Firebase is initialized
+  if (!app) {
+    initializeFirebase();
+  }
+  
   if (!messaging) {
-    logger.warn('Firebase messaging not available, cannot handle foreground messages');
+    if (__DEV__) {
+      console.warn('[Firebase] Messaging not available, cannot handle foreground messages');
+    }
     return () => {}; // Return empty unsubscribe function
   }
   
   try {
     return onMessage(messaging, callback);
   } catch (error) {
-    logger.error('Error setting up foreground message handler:', error);
+    if (__DEV__) {
+      console.error('[Firebase] Error setting up foreground message handler:', error);
+    }
     return () => {};
   }
 };
 
-export default app;
+// Export lazy getter - don't initialize at module load
+export default getFirebaseApp;

@@ -8,6 +8,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { useEarthquakeStore, Earthquake } from '../stores/earthquakeStore';
 import { createLogger } from '../utils/logger';
 import { autoCheckinService } from './AutoCheckinService';
+import { emergencyModeService } from './EmergencyModeService';
 
 const logger = createLogger('EarthquakeService');
 
@@ -83,6 +84,12 @@ class EarthquakeService {
           await AsyncStorage.setItem('last_checked_earthquake', latestEq.id);
           logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
           autoCheckinService.startCheckIn(latestEq.magnitude);
+          
+          // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
+          if (emergencyModeService.shouldTriggerEmergencyMode(latestEq)) {
+            logger.info(`🚨 CRITICAL EARTHQUAKE DETECTED: ${latestEq.magnitude} - Activating emergency mode`);
+            await emergencyModeService.activateEmergencyMode(latestEq);
+          }
         }
         
         store.setItems(uniqueEarthquakes);
@@ -135,18 +142,21 @@ class EarthquakeService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-      // AFAD API v2 - Son 24 saat (GERÇEK ZAMANLI)
-      const oneDayAgo = new Date();
-      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-      const startDate = oneDayAgo.toISOString().split('T')[0];
+      // AFAD API v2 - Son 7 gün (Daha geniş aralık - Apple şartı)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const startDate = sevenDaysAgo.toISOString().split('T')[0];
       const endDate = new Date().toISOString().split('T')[0];
       
       const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
       
+      // Alternative fallback URL (last 500 events)
+      const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
+      
       console.log('📡 AFAD API çağrılıyor:', url);
       console.log('📅 Tarih aralığı:', startDate, 'dan', endDate, 'a kadar');
 
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -157,8 +167,29 @@ class EarthquakeService {
 
       clearTimeout(timeoutId);
 
+      // If primary endpoint fails, try fallback
       if (!response.ok) {
-        return [];
+        console.warn('⚠️ Primary AFAD endpoint failed, trying fallback...');
+        const fallbackController = new AbortController();
+        const fallbackTimeout = setTimeout(() => fallbackController.abort(), 15000);
+        
+        response = await fetch(fallbackUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'AfetNet/1.0',
+          },
+          signal: fallbackController.signal,
+        });
+        
+        clearTimeout(fallbackTimeout);
+        
+        if (!response.ok) {
+          console.error('❌ Both AFAD endpoints failed');
+          return [];
+        }
+        
+        console.log('✅ Fallback endpoint successful');
       }
 
       const data = await response.json();

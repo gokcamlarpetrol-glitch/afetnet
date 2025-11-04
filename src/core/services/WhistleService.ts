@@ -48,12 +48,12 @@ class WhistleService {
     this.isPlaying = true;
 
     try {
-      // TODO: Load 4000Hz whistle sound when audio file is available
-      // For now, use haptic feedback only
-      logger.info('WhistleService: Using haptic feedback (audio file not available)');
-      await this.playSystemBeep(mode);
+      // Try to load whistle audio if available
+      // If not available, fallback to haptic feedback
+      await this.playWhistleAudio(mode);
     } catch (error) {
-      logger.error('WhistleService play failed:', error);
+      logger.error('WhistleService play failed, using haptic fallback:', error);
+      await this.playSystemBeep(mode);
     }
   }
 
@@ -159,6 +159,28 @@ class WhistleService {
     return new Promise((resolve) => {
       this.intervalId = setTimeout(resolve, ms);
     });
+  }
+
+  /**
+   * Play whistle audio using Audio API
+   * If audio file doesn't exist, throws error and falls back to haptic
+   */
+  private async playWhistleAudio(mode: WhistleMode) {
+    try {
+      // Try to load 4000Hz whistle sound
+      // TODO: Add whistle.mp3 to assets/sounds/ directory
+      // const { sound } = await Audio.Sound.createAsync(
+      //   require('../../../assets/sounds/whistle.mp3')
+      // );
+      // this.sound = sound;
+      // await sound.playAsync();
+      
+      // For now, throw to use haptic fallback
+      throw new Error('Whistle audio file not available yet');
+    } catch (error) {
+      // Rethrow to trigger haptic fallback
+      throw error;
+    }
   }
 
   /**
