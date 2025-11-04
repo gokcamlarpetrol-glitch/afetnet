@@ -26,7 +26,6 @@ import { i18nService } from '../../services/I18nService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SettingItem } from '../../components/settings/SettingItem';
 import * as haptics from '../../utils/haptics';
-import { voiceCommandService } from '../../services/VoiceCommandService';
 import { batterySaverService } from '../../services/BatterySaverService';
 
 interface SettingItem {
@@ -54,7 +53,6 @@ export default function SettingsScreen({ navigation }: any) {
   const seismicSensorEnabled = useSettingsStore((state) => state.seismicSensorEnabled);
   const alarmSoundEnabled = useSettingsStore((state) => state.alarmSoundEnabled);
   const vibrationEnabled = useSettingsStore((state) => state.vibrationEnabled);
-  const voiceCommandEnabled = useSettingsStore((state) => state.voiceCommandEnabled);
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
   
@@ -65,7 +63,6 @@ export default function SettingsScreen({ navigation }: any) {
   const setSeismicSensorEnabled = useSettingsStore((state) => state.setSeismicSensor);
   const setAlarmSoundEnabled = useSettingsStore((state) => state.setAlarmSound);
   const setVibrationEnabled = useSettingsStore((state) => state.setVibration);
-  const setVoiceCommandEnabled = useSettingsStore((state) => state.setVoiceCommand);
   const setBatterySaverEnabled = useSettingsStore((state) => state.setBatterySaver);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
 
@@ -224,22 +221,7 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: () => navigation.navigate('Family'),
     },
-    {
-      icon: 'mic',
-      title: 'Sesli Komutlar',
-      subtitle: 'Eller serbest kontrol (Yardım, Konum, Düdük, SOS)',
-      type: 'switch',
-      value: voiceCommandEnabled,
-      onPress: async () => {
-        const newValue = !voiceCommandEnabled;
-        setVoiceCommandEnabled(newValue);
-        if (newValue) {
-          await voiceCommandService.startListening();
-        } else {
-          await voiceCommandService.stopListening();
-        }
-      },
-    },
+    // Sesli Komutlar kaldırıldı - Apple review compliance
     {
       icon: 'battery-charging',
       title: 'Pil Tasarrufu',
