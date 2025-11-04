@@ -28,6 +28,7 @@ import { useHealthProfileStore } from './stores/healthProfileStore';
 import { useTrialStore } from './stores/trialStore';
 import { createLogger } from './utils/logger';
 import { runAllHealthChecks } from './utils/serviceHealthCheck';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const logger = createLogger('Init');
 
@@ -143,7 +144,21 @@ export async function initializeApp() {
     await initWithTimeout(() => offlineMapService.initialize(), 'OfflineMapService');
     await initWithTimeout(() => useHealthProfileStore.getState().loadProfile(), 'HealthProfile');
 
-    // Step 17: Run service health checks (non-blocking)
+    // Step 17: Auto-save device ID to Firestore
+    await initWithTimeout(async () => {
+      try {
+        const { getDeviceId } = await import('../lib/device');
+        const deviceId = await getDeviceId();
+        if (deviceId && firebaseDataService.isInitialized) {
+          await firebaseDataService.saveDeviceId(deviceId);
+          logger.info(`Device ID auto-saved: ${deviceId}`);
+        }
+      } catch (error) {
+        logger.error('Failed to auto-save device ID:', error);
+      }
+    }, 'DeviceIDAutoSave');
+
+    // Step 18: Run service health checks (non-blocking)
     await initWithTimeout(async () => {
       const healthResults = await runAllHealthChecks();
       const downServices = healthResults.filter(r => r.status === 'down');
@@ -151,6 +166,38 @@ export async function initializeApp() {
         logger.warn(`⚠️ ${downServices.length} service(s) down: ${downServices.map(s => s.name).join(', ')}`);
       }
     }, 'ServiceHealthCheck', 10000); // 10s timeout for health checks
+
+    // Step 19: AI Services (optional, feature flag ile kontrol edilir)
+    await initWithTimeout(async () => {
+      const { aiFeatureToggle } = await import('./ai/services/AIFeatureToggle');
+      await aiFeatureToggle.initialize();
+      
+      // Ilk kullanim: AI ozelliklerini otomatik aktif et
+      const isFirstLaunch = await AsyncStorage.getItem('afetnet_first_launch');
+      if (!isFirstLaunch) {
+        await aiFeatureToggle.enable();
+        await AsyncStorage.setItem('afetnet_first_launch', 'false');
+        logger.info('AI features enabled by default (first launch)');
+      }
+      
+      // AI ozellikleri aktifse servisleri baslat
+      if (aiFeatureToggle.isFeatureEnabled()) {
+        const { riskScoringService } = await import('./ai/services/RiskScoringService');
+        const { preparednessPlanService } = await import('./ai/services/PreparednessPlanService');
+        const { panicAssistantService } = await import('./ai/services/PanicAssistantService');
+        const { newsAggregatorService } = await import('./ai/services/NewsAggregatorService');
+        const { openAIService } = await import('./ai/services/OpenAIService');
+        
+        await riskScoringService.initialize();
+        await preparednessPlanService.initialize();
+        await panicAssistantService.initialize();
+        await newsAggregatorService.initialize();
+        await openAIService.initialize();
+        logger.info('AI services initialized');
+      } else {
+        logger.info('AI services disabled by feature flag');
+      }
+    }, 'AIServices', 5000);
 
     isInitialized = true;
     isInitializing = false;
