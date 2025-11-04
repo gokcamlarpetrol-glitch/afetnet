@@ -3,14 +3,17 @@
  * Shows real mesh network stats with progress bars and detailed info
  */
 
-import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../../hooks/useMesh';
-import { colors, typography, shadows } from '../../../theme';
+import { colors, typography, shadows, spacing } from '../../../theme';
+import * as haptics from '../../../utils/haptics';
 
 export default function MeshNetworkPanel() {
+  const [expanded, setExpanded] = useState(false);
+  const heightAnim = useRef(new Animated.Value(0)).current;
   const { peers, isConnected, messages } = useMesh();
   const peerCount = Object.keys(peers).length;
 
@@ -56,117 +59,169 @@ export default function MeshNetworkPanel() {
 
   const networkStatus = getNetworkStatus();
 
+  const toggleExpanded = () => {
+    haptics.impactLight();
+    setExpanded(!expanded);
+    
+    Animated.spring(heightAnim, {
+      toValue: expanded ? 0 : 1,
+      useNativeDriver: false,
+      tension: 65,
+      friction: 11,
+    }).start();
+  };
+
+  useEffect(() => {
+    // İlk render'da animasyon değerini ayarla
+    if (expanded) {
+      heightAnim.setValue(1);
+    } else {
+      heightAnim.setValue(0);
+    }
+  }, []);
+
   return (
     <View style={styles.container}>
       <LinearGradient
         colors={[colors.background.secondary, colors.background.elevated]}
         style={styles.gradient}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Ionicons name="git-network" size={20} color={colors.mesh.primary} />
-            <Text style={styles.title}>Mesh Ağı</Text>
-          </View>
-          <View style={[styles.statusBadge, { 
-            backgroundColor: isConnected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.15)',
-            borderColor: isConnected ? colors.mesh.primary : colors.status.offline,
-          }]}>
-            <View style={[styles.statusDot, { 
-              backgroundColor: isConnected ? colors.mesh.primary : colors.status.offline,
-            }]} />
-            <Text style={[styles.statusText, { 
-              color: isConnected ? colors.mesh.primary : colors.status.offline,
-            }]}>
-              {isConnected ? 'CANLI' : 'KAPALI'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-              <Ionicons name="people" size={18} color={colors.mesh.primary} />
+        {/* Header - Tıklanabilir Accordion */}
+        <TouchableOpacity 
+          onPress={toggleExpanded} 
+          activeOpacity={0.7}
+          style={styles.headerButton}
+        >
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Ionicons name="git-network" size={20} color={colors.mesh.primary} />
+              <Text style={styles.title}>Mesh Ağı</Text>
             </View>
-            <Text style={styles.statValue}>{peerCount}</Text>
-            <Text style={styles.statLabel}>Cihaz</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="chatbubbles" size={18} color={colors.status.online} />
-            </View>
-            <Text style={styles.statValue}>{messageCount}</Text>
-            <Text style={styles.statLabel}>Mesaj</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="pulse" size={18} color={colors.status.alert} />
-            </View>
-            <Text style={styles.statValue}>{signalStrength}%</Text>
-            <Text style={styles.statLabel}>Sinyal</Text>
-          </View>
-        </View>
-
-        {/* Signal Strength Progress Bar */}
-        {isConnected && (
-          <View style={styles.progressSection}>
-            <View style={styles.progressHeader}>
-              <Text style={styles.progressLabel}>Ağ Durumu</Text>
-              <Text style={[styles.progressStatus, { color: networkStatus.color }]}>
-                {networkStatus.text}
-              </Text>
-            </View>
-            <View style={styles.progressBarContainer}>
-              <Animated.View
-                style={[
-                  styles.progressBarFill,
-                  {
-                    width: signalProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0%', '100%'],
-                    }),
-                    backgroundColor: networkStatus.color,
-                  },
-                ]}
+            <View style={styles.headerRight}>
+              <View style={[styles.statusBadge, { 
+                backgroundColor: isConnected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+                borderColor: isConnected ? colors.mesh.primary : colors.status.offline,
+              }]}>
+                <View style={[styles.statusDot, { 
+                  backgroundColor: isConnected ? colors.mesh.primary : colors.status.offline,
+                }]} />
+                <Text style={[styles.statusText, { 
+                  color: isConnected ? colors.mesh.primary : colors.status.offline,
+                }]}>
+                  {isConnected ? 'CANLI' : 'KAPALI'}
+                </Text>
+              </View>
+              <Ionicons 
+                name={expanded ? 'chevron-up' : 'chevron-down'} 
+                size={20} 
+                color={colors.text.secondary}
+                style={styles.chevron}
               />
             </View>
           </View>
-        )}
+        </TouchableOpacity>
 
-        {/* Connected Devices List */}
-        {isConnected && peerCount > 0 && (
-          <View style={styles.devicesSection}>
-            <Text style={styles.devicesTitle}>Bağlı Cihazlar</Text>
-            <View style={styles.devicesList}>
-              {Object.values(peers).slice(0, 3).map((peer: any, index) => (
-                <View key={index} style={styles.deviceItem}>
-                  <View style={styles.deviceDot} />
-                  <Text style={styles.deviceName}>
-                    Cihaz {index + 1}
+        {/* Collapsible Content */}
+        {expanded && (
+          <Animated.View
+            style={[
+              styles.collapsibleContent,
+              {
+                opacity: heightAnim,
+                maxHeight: heightAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 1000],
+                }),
+                overflow: 'hidden',
+              },
+            ]}
+          >
+            {/* Stats Grid */}
+            <View style={styles.statsGrid}>
+              <View style={styles.statCard}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                  <Ionicons name="people" size={18} color={colors.mesh.primary} />
+                </View>
+                <Text style={styles.statValue}>{peerCount}</Text>
+                <Text style={styles.statLabel}>Cihaz</Text>
+              </View>
+
+              <View style={styles.statCard}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                  <Ionicons name="chatbubbles" size={18} color={colors.status.online} />
+                </View>
+                <Text style={styles.statValue}>{messageCount}</Text>
+                <Text style={styles.statLabel}>Mesaj</Text>
+              </View>
+
+              <View style={styles.statCard}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                  <Ionicons name="pulse" size={18} color={colors.status.alert} />
+                </View>
+                <Text style={styles.statValue}>{signalStrength}%</Text>
+                <Text style={styles.statLabel}>Sinyal</Text>
+              </View>
+            </View>
+
+            {/* Signal Strength Progress Bar */}
+            {isConnected && (
+              <View style={styles.progressSection}>
+                <View style={styles.progressHeader}>
+                  <Text style={styles.progressLabel}>Ağ Durumu</Text>
+                  <Text style={[styles.progressStatus, { color: networkStatus.color }]}>
+                    {networkStatus.text}
                   </Text>
                 </View>
-              ))}
-              {peerCount > 3 && (
-                <Text style={styles.moreDevices}>+{peerCount - 3} daha</Text>
-              )}
-            </View>
-          </View>
-        )}
+                <View style={styles.progressBarContainer}>
+                  <Animated.View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: signalProgress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0%', '100%'],
+                        }),
+                        backgroundColor: networkStatus.color,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            )}
 
-        {/* Last Activity */}
-        <View style={styles.footer}>
-          <Ionicons name="time-outline" size={14} color={colors.text.tertiary} />
-          <Text style={styles.footerText}>
-            {isConnected
-              ? peerCount > 0
-                ? 'Son Aktivite: Az önce'
-                : 'Bağlantı kuruldu, cihaz bekleniyor'
-              : 'Mesh ağı kapalı'}
-          </Text>
-        </View>
+            {/* Connected Devices List */}
+            {isConnected && peerCount > 0 && (
+              <View style={styles.devicesSection}>
+                <Text style={styles.devicesTitle}>Bağlı Cihazlar</Text>
+                <View style={styles.devicesList}>
+                  {Object.values(peers).slice(0, 3).map((peer: any, index) => (
+                    <View key={index} style={styles.deviceItem}>
+                      <View style={styles.deviceDot} />
+                      <Text style={styles.deviceName}>
+                        Cihaz {index + 1}
+                      </Text>
+                    </View>
+                  ))}
+                  {peerCount > 3 && (
+                    <Text style={styles.moreDevices}>+{peerCount - 3} daha</Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* Last Activity */}
+            <View style={styles.footer}>
+              <Ionicons name="time-outline" size={14} color={colors.text.tertiary} />
+              <Text style={styles.footerText}>
+                {isConnected
+                  ? peerCount > 0
+                    ? 'Son Aktivite: Az önce'
+                    : 'Bağlantı kuruldu, cihaz bekleniyor'
+                  : 'Mesh ağı kapalı'}
+              </Text>
+            </View>
+          </Animated.View>
+        )}
       </LinearGradient>
     </View>
   );
@@ -180,18 +235,34 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   gradient: {
-    padding: 20,
+    padding: spacing[6],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[4],
+    minHeight: 60, // Kapalıyken minimum yükseklik
+  },
+  headerButton: {
+    // TouchableOpacity için
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  chevron: {
+    // Animasyon Animated.View ile yapılıyor
+  },
+  collapsibleContent: {
+    // Animated.View için
   },
   title: {
     ...typography.h3,

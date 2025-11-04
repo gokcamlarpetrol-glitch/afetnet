@@ -9,7 +9,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
 import HomeHeader from './components/HomeHeader';
-import StatusCard from './components/StatusCard';
 import MeshNetworkPanel from './components/MeshNetworkPanel';
 import EarthquakeMonitorCard from './components/EarthquakeMonitorCard';
 import EmergencyButton from './components/EmergencyButton';
@@ -176,19 +175,19 @@ export default function HomeScreen({ navigation }: any) {
           }
         >
           <HomeHeader />
-          <StatusCard />
+          
+          {/* AI Features - En üstte, feature flag ile kontrol edilir */}
+          {aiFeaturesEnabled && (
+            <>
+              <NewsCard />
+              <AIAssistantCard navigation={navigation} />
+            </>
+          )}
+          
           <MeshNetworkPanel />
           <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
           <EmergencyButton onPress={handleSOSPress} />
           <FeatureGrid navigation={navigation} />
-          
-          {/* AI Features - Feature flag ile kontrol edilir */}
-          {aiFeaturesEnabled && (
-            <>
-              <AIAssistantCard navigation={navigation} />
-              <NewsCard />
-            </>
-          )}
         </ScrollView>
       </Animated.View>
 
