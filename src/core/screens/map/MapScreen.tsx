@@ -9,27 +9,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
-// Conditional import for maps - use react-native-maps (expo-maps causes RNMapsAirModule error)
-let MapView: any = null;
-let Marker: any = null;
-
-try {
-  // Use react-native-maps (expo-maps has native module issues)
-  const rnMaps = require('react-native-maps');
-  MapView = rnMaps.default || rnMaps;
-  Marker = rnMaps.Marker;
-} catch (e) {
-  // Maps not available - will show fallback UI
-  if (__DEV__) {
-    console.warn('[MapScreen] Maps module not available:', e);
-  }
-}
+// Import react-native-maps - must be available for Expo
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useEarthquakeStore, Earthquake } from '../../stores/earthquakeStore';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { usePremiumStore } from '../../stores/premiumStore';
-import PremiumGate from '../../components/PremiumGate';
 import { calculateDistance, formatDistance, getMagnitudeColor } from '../../utils/mapUtils';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
@@ -77,7 +62,6 @@ export default function MapScreen({ navigation }: any) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
 
-  const [isPremium, setIsPremium] = useState(false);
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [offlineLocations, setOfflineLocations] = useState<MapLocation[]>([]);
@@ -105,19 +89,13 @@ export default function MapScreen({ navigation }: any) {
       setFamilyMembers(state.members);
     });
 
-    const unsubscribePremium = usePremiumStore.subscribe((state) => {
-      setIsPremium(state.isPremium);
-    });
-
     // Initial load
     setEarthquakes(useEarthquakeStore.getState().items);
     setFamilyMembers(useFamilyStore.getState().members);
-    setIsPremium(usePremiumStore.getState().isPremium);
 
     return () => {
       unsubscribe();
       unsubscribeFamily();
-      unsubscribePremium();
     };
   }, []);
 
@@ -323,19 +301,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
   </View>
 );
 
-  // If MapView is not available, show fallback
-  if (!MapView) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' }]}>
-          <Ionicons name="map-outline" size={64} color={colors.text.secondary} />
-          <Text style={[styles.headerTitle, { marginTop: 16 }]}>Harita Yükleniyor...</Text>
-          <Text style={styles.headerSubtitle}>Lütfen bekleyin</Text>
-        </View>
-      </View>
-    );
-  }
+  // MapView is always available - no fallback needed
 
   return (
     <View style={styles.container}>
@@ -343,6 +309,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
       
       <MapView
         ref={mapRef}
+        provider={PROVIDER_GOOGLE}
         style={StyleSheet.absoluteFill}
         customMapStyle={mapStyle}
         mapType={mapType}
@@ -355,6 +322,9 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
           longitude: 28.9784,
           latitudeDelta: 8,
           longitudeDelta: 8,
+        }}
+        onMapReady={() => {
+          logger.info('MapView ready');
         }}
       >
         {/* User Location Marker */}
@@ -375,8 +345,8 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
           </Marker>
         ))}
         
-        {/* Family Member Markers (Premium Feature) */}
-        {isPremium && familyMembers.map(member => (
+        {/* Family Member Markers - Tüm kullanıcılar erişebilir */}
+        {familyMembers.map(member => (
           <Marker
             key={`fm-${member.id}`}
             coordinate={{ latitude: member.latitude, longitude: member.longitude }}
@@ -501,7 +471,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         </View>
       )}
       
-      {!isPremium && <PremiumGate featureName="Harita" />}
+      {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
     </View>
   );
 }
