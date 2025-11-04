@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { usePremiumStore } from '../../stores/premiumStore';
 import { useMeshStore } from '../../stores/meshStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { premiumService } from '../../services/PremiumService';
 import { i18nService } from '../../services/I18nService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
@@ -44,22 +45,34 @@ export default function SettingsScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [isPremium, setIsPremium] = useState(false);
   const [meshStats, setMeshStats] = useState({ messagesSent: 0, messagesReceived: 0, peersDiscovered: 0 });
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [locationEnabled, setLocationEnabled] = useState(true);
-  const [bleMeshEnabled, setBleMeshEnabled] = useState(true);
-  const [eewEnabled, setEewEnabled] = useState(true);
-  const [seismicSensorEnabled, setSeismicSensorEnabled] = useState(true);
-  const [alarmSoundEnabled, setAlarmSoundEnabled] = useState(true);
-  const [vibrationEnabled, setVibrationEnabled] = useState(true);
-  const [voiceCommandEnabled, setVoiceCommandEnabled] = useState(false);
-  const [batterySaverEnabled, setBatterySaverEnabled] = useState(false);
-  const [currentLanguage, setCurrentLanguage] = useState('tr');
+  
+  // Use settings store for persistent settings
+  const notificationsEnabled = useSettingsStore((state) => state.notificationsEnabled);
+  const locationEnabled = useSettingsStore((state) => state.locationEnabled);
+  const bleMeshEnabled = useSettingsStore((state) => state.bleMeshEnabled);
+  const eewEnabled = useSettingsStore((state) => state.eewEnabled);
+  const seismicSensorEnabled = useSettingsStore((state) => state.seismicSensorEnabled);
+  const alarmSoundEnabled = useSettingsStore((state) => state.alarmSoundEnabled);
+  const vibrationEnabled = useSettingsStore((state) => state.vibrationEnabled);
+  const voiceCommandEnabled = useSettingsStore((state) => state.voiceCommandEnabled);
+  const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
+  const currentLanguage = useSettingsStore((state) => state.language);
+  
+  const setNotificationsEnabled = useSettingsStore((state) => state.setNotifications);
+  const setLocationEnabled = useSettingsStore((state) => state.setLocation);
+  const setBleMeshEnabled = useSettingsStore((state) => state.setBleMesh);
+  const setEewEnabled = useSettingsStore((state) => state.setEew);
+  const setSeismicSensorEnabled = useSettingsStore((state) => state.setSeismicSensor);
+  const setAlarmSoundEnabled = useSettingsStore((state) => state.setAlarmSound);
+  const setVibrationEnabled = useSettingsStore((state) => state.setVibration);
+  const setVoiceCommandEnabled = useSettingsStore((state) => state.setVoiceCommand);
+  const setBatterySaverEnabled = useSettingsStore((state) => state.setBatterySaver);
+  const setLanguage = useSettingsStore((state) => state.setLanguage);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setIsPremium(usePremiumStore.getState().isPremium);
       setMeshStats(useMeshStore.getState().stats);
-      setCurrentLanguage(i18nService.getLocale());
     }, 500);
 
     return () => clearInterval(interval);
@@ -82,9 +95,9 @@ export default function SettingsScreen({ navigation }: any) {
       'Dil Seç',
       'Kullanmak istediğiniz dili seçin',
       [
-        { text: 'Türkçe', onPress: () => { i18nService.setLocale('tr'); setCurrentLanguage('tr'); } },
-        { text: 'Kurdî', onPress: () => { i18nService.setLocale('ku'); setCurrentLanguage('ku'); } },
-        { text: 'العربية', onPress: () => { i18nService.setLocale('ar'); setCurrentLanguage('ar'); } },
+        { text: 'Türkçe', onPress: () => { i18nService.setLocale('tr'); setLanguage('tr'); } },
+        { text: 'Kurdî', onPress: () => { i18nService.setLocale('ku'); setLanguage('ku'); } },
+        { text: 'العربية', onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
         { text: 'İptal', style: 'cancel' },
       ]
     );

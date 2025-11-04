@@ -11,14 +11,20 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FirebaseDataService');
 
-// Import Firebase app
-import firebaseApp from '../../lib/firebase';
+// Import Firebase app getter function
+import getFirebaseApp from '../../lib/firebase';
 
 let firestore: any = null;
 
 function getFirestoreInstance() {
-  if (!firestore && firebaseApp) {
+  if (!firestore) {
     try {
+      // Call getFirebaseApp() to get the app instance
+      const firebaseApp = getFirebaseApp();
+      if (!firebaseApp) {
+        logger.warn('Firebase app not initialized');
+        return null;
+      }
       firestore = getFirestore(firebaseApp);
       logger.info('Firestore instance created');
     } catch (error) {
@@ -40,6 +46,7 @@ class FirebaseDataService {
 
     try {
       // Ensure Firebase app is initialized
+      const firebaseApp = getFirebaseApp();
       if (!firebaseApp) {
         logger.warn('Firebase app not initialized - Firestore disabled');
         return;

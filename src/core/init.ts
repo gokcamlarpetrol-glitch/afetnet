@@ -51,6 +51,14 @@ export async function initializeApp() {
 
     // Step 2: Firebase Services (initialize Firebase app first, then data service)
     try {
+      // Initialize Firebase app first (lazy initialization)
+      // This ensures Firebase is initialized before Firestore tries to use it
+      const getFirebaseApp = (await import('../lib/firebase')).default;
+      const firebaseApp = getFirebaseApp();
+      if (!firebaseApp) {
+        logger.warn('Firebase app initialization failed');
+      }
+      
       // Initialize Firebase messaging service
       await firebaseService.initialize();
       

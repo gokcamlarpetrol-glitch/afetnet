@@ -9,7 +9,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
-import MapView, { Marker } from 'react-native-maps';
+// Conditional import for maps - use react-native-maps (expo-maps causes RNMapsAirModule error)
+let MapView: any = null;
+let Marker: any = null;
+
+try {
+  // Use react-native-maps (expo-maps has native module issues)
+  const rnMaps = require('react-native-maps');
+  MapView = rnMaps.default || rnMaps;
+  Marker = rnMaps.Marker;
+} catch (e) {
+  // Maps not available - will show fallback UI
+  if (__DEV__) {
+    console.warn('[MapScreen] Maps module not available:', e);
+  }
+}
 import BottomSheet from '@gorhom/bottom-sheet';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useEarthquakeStore, Earthquake } from '../../stores/earthquakeStore';
@@ -308,6 +322,20 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
     <Text style={styles.detailValue}>{value}</Text>
   </View>
 );
+
+  // If MapView is not available, show fallback
+  if (!MapView) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' }]}>
+          <Ionicons name="map-outline" size={64} color={colors.text.secondary} />
+          <Text style={[styles.headerTitle, { marginTop: 16 }]}>Harita Yükleniyor...</Text>
+          <Text style={styles.headerSubtitle}>Lütfen bekleyin</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

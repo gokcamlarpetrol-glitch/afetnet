@@ -10,6 +10,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { initializeApp, shutdownApp } from './init';
 import ErrorBoundary from './components/ErrorBoundary';
+import PermissionGuard from './components/PermissionGuard';
+import OfflineIndicator from './components/OfflineIndicator';
 
 // Screens
 import HomeScreen from './screens/home';
@@ -52,9 +54,11 @@ export default function CoreApp() {
 
   return (
     <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <NavigationContainer>
+      <PermissionGuard>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+            <OfflineIndicator />
+            <NavigationContainer>
             <Stack.Navigator
               screenOptions={{
                 headerShown: false,
@@ -136,6 +140,7 @@ export default function CoreApp() {
           </NavigationContainer>
         </SafeAreaProvider>
       </GestureHandlerRootView>
+      </PermissionGuard>
     </ErrorBoundary>
   );
 }
