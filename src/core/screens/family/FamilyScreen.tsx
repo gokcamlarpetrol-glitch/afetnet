@@ -909,9 +909,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    gap: 10,
+    paddingVertical: 16, // StatusButton ile aynı (14 -> 16)
+    paddingHorizontal: 20, // StatusButton ile aynı
+    gap: 12, // StatusButton ile aynı (10 -> 12)
   },
   locationShareButtonActive: {
     shadowColor: '#3b82f6',
@@ -920,8 +920,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   locationShareButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18, // StatusButton ile aynı (16 -> 18)
+    fontWeight: '700', // StatusButton ile aynı ('600' -> '700')
     color: '#fff',
   },
   membersSection: {
