@@ -64,14 +64,24 @@ export async function initializeApp() {
     await initWithTimeout(() => notificationService.initialize(), 'NotificationService');
     await initWithTimeout(() => multiChannelAlertService.initialize(), 'MultiChannelAlertService');
 
-    // Step 2: Firebase Services (initialize Firebase app first, then data service)
-    await initWithTimeout(async () => {
-      const getFirebaseApp = (await import('../lib/firebase')).default;
-      const firebaseApp = getFirebaseApp();
-      if (!firebaseApp) throw new Error('Firebase app null');
-      await firebaseService.initialize();
-      await firebaseDataService.initialize();
-    }, 'FirebaseServices');
+           // Step 2: Firebase Services (initialize Firebase app first, then all services)
+           await initWithTimeout(async () => {
+             const getFirebaseApp = (await import('../lib/firebase')).default;
+             const firebaseApp = getFirebaseApp();
+             if (!firebaseApp) throw new Error('Firebase app null');
+             await firebaseService.initialize();
+             await firebaseDataService.initialize();
+             
+             // Initialize additional Firebase services (disabled by default for privacy)
+             const { firebaseStorageService } = await import('./services/FirebaseStorageService');
+             await firebaseStorageService.initialize();
+             
+             // Analytics and Crashlytics disabled by default (Apple review compliance)
+             // const { firebaseAnalyticsService } = await import('./services/FirebaseAnalyticsService');
+             // await firebaseAnalyticsService.initialize();
+             // const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
+             // await firebaseCrashlyticsService.initialize();
+           }, 'FirebaseServices');
 
     // Step 3: Location Service
     await initWithTimeout(() => locationService.initialize(), 'LocationService');

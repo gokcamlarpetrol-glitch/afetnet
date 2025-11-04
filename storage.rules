@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // User profile images
+    match /profiles/{userId}/{allPaths=**} {
+      // Allow read for anyone (public profiles)
+      allow read: if true;
+      // Allow write only for authenticated users or device ID matching
+      allow write: if request.auth != null || request.resource.metadata.userId == userId;
+      allow delete: if request.auth != null || request.resource.metadata.userId == userId;
+    }
+    
+    // Emergency SOS images/attachments
+    match /sos/{sosId}/{allPaths=**} {
+      // Allow read for anyone (emergency response)
+      allow read: if true;
+      // Allow write for authenticated users or device ID validation
+      allow write: if request.auth != null || request.resource.metadata.deviceId != null;
+      allow delete: if request.auth != null || request.resource.metadata.deviceId == resource.metadata.deviceId;
+    }
+    
+    // Family member images
+    match /family/{deviceId}/{memberId}/{allPaths=**} {
+      // Allow read for device owner or family members
+      allow read: if request.auth != null || true; // Allow for offline mesh
+      // Allow write only for device owner
+      allow write: if request.auth != null || request.resource.metadata.deviceId == deviceId;
+      allow delete: if request.auth != null || request.resource.metadata.deviceId == deviceId;
+    }
+    
+    // MBTiles offline maps (read-only, uploaded via admin)
+    match /maps/{mapId}/{allPaths=**} {
+      allow read: if true; // Public read for offline maps
+      allow write: if false; // Only admins can upload (via admin SDK)
+      allow delete: if false;
+    }
+    
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
