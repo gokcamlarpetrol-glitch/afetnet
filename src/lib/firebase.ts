@@ -34,16 +34,24 @@ function initializeFirebase() {
       console.log('[Firebase] App initialized successfully', { projectId: firebaseConfig.projectId });
     }
     
-    // Try to initialize messaging (may fail in non-device environments)
-    try {
-      messaging = getMessaging(app);
-      if (__DEV__) {
-        console.log('[Firebase] Messaging initialized');
+    // Firebase messaging is web-only - skip for React Native
+    // React Native uses expo-notifications instead
+    if (Platform.OS === 'web') {
+      try {
+        messaging = getMessaging(app);
+        if (__DEV__) {
+          console.log('[Firebase] Messaging initialized (web only)');
+        }
+      } catch (msgError) {
+        if (__DEV__) {
+          console.warn('[Firebase] Messaging initialization failed:', msgError);
+        }
       }
-    } catch (msgError) {
+    } else {
       if (__DEV__) {
-        console.warn('[Firebase] Messaging initialization failed (this is OK in simulator):', msgError);
+        console.log('[Firebase] Skipping messaging (React Native - using expo-notifications)');
       }
+      messaging = null;
     }
     
     return app;

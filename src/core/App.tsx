@@ -59,11 +59,11 @@ export default function CoreApp() {
           <SafeAreaProvider>
             <OfflineIndicator />
             <NavigationContainer>
-            <Stack.Navigator
-              screenOptions={{
-                headerShown: false,
-              }}
-            >
+              <Stack.Navigator
+                screenOptions={{
+                  headerShown: false,
+                }}
+              >
               <Stack.Screen name="MainTabs" component={MainTabs} />
               <Stack.Screen 
                 name="Paywall" 
@@ -136,10 +136,10 @@ export default function CoreApp() {
                 name="Conversation" 
                 component={ConversationScreen}
               />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
+              </Stack.Navigator>
+            </NavigationContainer>
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
       </PermissionGuard>
     </ErrorBoundary>
   );

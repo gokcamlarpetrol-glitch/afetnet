@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
 import { usePremiumStore } from '../../stores/premiumStore';
+import { useTrialStore } from '../../stores/trialStore';
 import { useMeshStore } from '../../stores/meshStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
@@ -47,6 +48,7 @@ export default function FamilyScreen({ navigation }: any) {
   
   // Use Zustand hooks - they handle referential equality automatically
   const isPremium = usePremiumStore((state) => state.isPremium);
+  const isTrialActive = useTrialStore((state) => state.isTrialActive);
   const members = useFamilyStore((state) => state.members);
   
   const [isSharingLocation, setIsSharingLocation] = useState(false);
@@ -724,8 +726,13 @@ export default function FamilyScreen({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* Premium Gate */}
-      {!isPremium && <PremiumGate featureName="Aile Güvenlik Zinciri" />}
+      {/* Premium Gate - Sadece trial bittiğinde göster */}
+      {!isPremium && !isTrialActive && (
+        <PremiumGate 
+          featureName="Aile Güvenlik Zinciri" 
+          onUpgradePress={() => navigation.navigate('Paywall')}
+        />
+      )}
 
       {/* ID Share Modal */}
       <Modal

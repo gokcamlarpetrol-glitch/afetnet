@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useMessageStore, Conversation } from '../../stores/messageStore';
 import { usePremiumStore } from '../../stores/premiumStore';
+import { useTrialStore } from '../../stores/trialStore';
 import PremiumGate from '../../components/PremiumGate';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
@@ -30,12 +31,14 @@ import MessageTemplates from './MessageTemplates';
 export default function MessagesScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [isPremium, setIsPremium] = useState(false);
+  const [isTrialActive, setIsTrialActive] = useState(true); // Default true for trial
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const interval = setInterval(() => {
       setIsPremium(usePremiumStore.getState().isPremium);
+      setIsTrialActive(useTrialStore.getState().isTrialActive);
       setConversations(useMessageStore.getState().conversations);
     }, 500);
 
@@ -176,8 +179,13 @@ export default function MessagesScreen({ navigation }: any) {
         </LinearGradient>
       </Pressable>
 
-      {/* Premium Gate */}
-      {!isPremium && <PremiumGate featureName="Mesajlaşma" />}
+      {/* Premium Gate - Sadece trial bittiğinde göster */}
+      {!isPremium && !isTrialActive && (
+        <PremiumGate 
+          featureName="Mesajlaşma" 
+          onUpgradePress={() => navigation.navigate('Paywall')}
+        />
+      )}
     </View>
   );
 }

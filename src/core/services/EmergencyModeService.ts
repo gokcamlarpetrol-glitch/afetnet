@@ -73,14 +73,14 @@ class EmergencyModeService {
       // STEP 2: Update user status to "NEEDS_HELP" if not already set
       const currentStatus = useUserStatusStore.getState().status;
       if (currentStatus !== 'safe') {
-        useUserStatusStore.getState().updateStatus('needs_help', null);
+        useUserStatusStore.getState().setStatus('needs_help');
       }
 
       // STEP 3: Start location tracking
       await this.startLocationTracking();
 
       // STEP 4: Activate BLE mesh for offline communication
-      await this.activateBLEMesh();
+      await this.activateBLEMesh(earthquake);
 
       // STEP 5: Notify family members
       await this.notifyFamilyMembers(earthquake);
@@ -118,15 +118,15 @@ class EmergencyModeService {
       logger.info('Starting continuous location tracking');
       
       // Get current location and broadcast
-      const location = await locationService.getCurrentPosition();
+      const location = await locationService.updateLocation();
       if (location) {
         logger.info(`Current location: ${location.latitude}, ${location.longitude}`);
         
         // Update user status with location
-        useUserStatusStore.getState().updateStatus('needs_help', {
+        useUserStatusStore.getState().setStatus('needs_help');
+        useUserStatusStore.getState().setLocation({
           latitude: location.latitude,
           longitude: location.longitude,
-          accuracy: location.accuracy,
         });
       }
     } catch (error) {
@@ -137,22 +137,28 @@ class EmergencyModeService {
   /**
    * Activate BLE mesh for offline communication
    */
-  private async activateBLEMesh() {
+  private async activateBLEMesh(earthquake: Earthquake) {
     try {
       logger.info('Activating BLE mesh for offline communication');
       
       // BLE mesh should already be running from init.ts
       // This ensures it's broadcasting emergency status
-      if (!bleMeshService.isRunning()) {
+      // Start BLE mesh if not already running
+      try {
         await bleMeshService.start();
+        
+        // Broadcast emergency SOS via BLE mesh (broadcast - no 'to' parameter)
+        const emergencyMessage = JSON.stringify({
+          type: 'EARTHQUAKE_EMERGENCY',
+          magnitude: earthquake.magnitude,
+          location: earthquake.location || 'Bilinmeyen',
+          timestamp: Date.now(),
+        });
+        
+        await bleMeshService.sendMessage(emergencyMessage);
+      } catch (error) {
+        logger.error('BLE mesh broadcast error:', error);
       }
-      
-      // Broadcast emergency SOS via BLE
-      await bleMeshService.broadcastEmergency({
-        type: 'EARTHQUAKE_EMERGENCY',
-        magnitude: 0, // Will be set by caller
-        timestamp: Date.now(),
-      });
     } catch (error) {
       logger.error('BLE mesh activation error:', error);
     }
@@ -175,11 +181,18 @@ class EmergencyModeService {
       // Send status update to all family members
       // This will use BLE mesh + Firebase
       for (const member of familyMembers) {
+        if (!member || !member.id) {
+          logger.warn('Invalid family member skipped');
+          continue;
+        }
+        
         try {
           // Family status broadcasting handled by BLE mesh service
-          logger.info(`Notified family member: ${member.name}`);
+          const memberName = member.name || 'Bilinmeyen';
+          logger.info(`Notified family member: ${memberName}`);
         } catch (error) {
-          logger.error(`Failed to notify ${member.name}:`, error);
+          const memberName = member?.name || 'Bilinmeyen';
+          logger.error(`Failed to notify ${memberName}:`, error);
         }
       }
     } catch (error) {
@@ -205,14 +218,14 @@ class EmergencyModeService {
         {
           text: 'Güvendeyim',
           onPress: () => {
-            useUserStatusStore.getState().updateStatus('safe', null);
+            useUserStatusStore.getState().setStatus('safe');
             this.deactivateEmergencyMode();
           },
         },
         {
           text: 'Yardım Gerekiyor',
           onPress: () => {
-            useUserStatusStore.getState().updateStatus('needs_help', null);
+            useUserStatusStore.getState().setStatus('needs_help');
             // Keep emergency mode active
           },
           style: 'destructive',
@@ -220,7 +233,7 @@ class EmergencyModeService {
         {
           text: 'Enkaz Altındayım',
           onPress: () => {
-            useUserStatusStore.getState().updateStatus('trapped', null);
+            useUserStatusStore.getState().setStatus('trapped');
             // Keep emergency mode active
             // Activate whistle/flashlight
           },

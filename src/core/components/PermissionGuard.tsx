@@ -41,7 +41,34 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
   const [isRequesting, setIsRequesting] = useState(false);
 
   useEffect(() => {
-    requestAllPermissions();
+    let isMounted = true;
+    const timeoutId = setTimeout(() => {
+      if (isMounted && !permissionsChecked) {
+        logger.warn('Permission timeout - skipping');
+        setPermissionsChecked(true);
+        setIsRequesting(false);
+      }
+    }, 5000); // 5 second timeout
+
+    const init = async () => {
+      try {
+        await requestAllPermissions();
+      } catch (error) {
+        logger.error('Permission request failed:', error);
+        if (isMounted) {
+          setPermissionsChecked(true);
+          setIsRequesting(false);
+        }
+      }
+    };
+
+    init();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const requestAllPermissions = async () => {
@@ -68,12 +95,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
         logger.info(`Location permission: ${backgroundStatus === 'granted' ? 'FULL' : 'FOREGROUND ONLY'}`);
       } else {
         statuses.location = false;
-        logger.warn('Location permission DENIED');
-        Alert.alert(
-          'Konum İzni Gerekli',
-          'AfetNet acil durumlarda konumunuzu paylaşarak hayatınızı kurtarabilir. Lütfen konum iznini verin.',
-          [{ text: 'Tamam' }]
-        );
+        logger.warn('Location permission DENIED - continuing anyway');
       }
     } catch (error) {
       logger.error('Location permission error:', error);
@@ -88,12 +110,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       if (status === 'granted') {
         logger.info('Notification permission: GRANTED');
       } else {
-        logger.warn('Notification permission DENIED');
-        Alert.alert(
-          'Bildirim İzni Gerekli',
-          'Deprem uyarıları ve acil durum bildirimleri için bildirim iznini vermeniz hayati önem taşıyor.',
-          [{ text: 'Tamam' }]
-        );
+        logger.warn('Notification permission DENIED - continuing anyway');
       }
     } catch (error) {
       logger.error('Notification permission error:', error);
@@ -129,29 +146,24 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       }
     } catch (error) {
       logger.error('Microphone permission error:', error);
+      // Continue even if microphone permission fails
     }
 
+    // Always set checked to true, even if some permissions failed
     setPermissionStatus(statuses);
     setPermissionsChecked(true);
     setIsRequesting(false);
 
-    // Log summary
+    // Log summary - always proceed
     const criticalGranted = statuses.location && statuses.notifications;
     if (criticalGranted) {
       logger.info('✅ All CRITICAL permissions granted');
-      onPermissionsGranted?.();
     } else {
-      logger.warn('⚠️ Some CRITICAL permissions denied');
-      
-      // Show final warning for critical permissions
-      if (!statuses.location || !statuses.notifications) {
-        Alert.alert(
-          'Kritik İzinler Eksik',
-          'Konum ve Bildirim izinleri AfetNet\'in hayat kurtarıcı özelliklerini kullanmanız için zorunludur. Lütfen Ayarlar\'dan bu izinleri verin.',
-          [{ text: 'Anladım' }]
-        );
-      }
+      logger.warn('⚠️ Some CRITICAL permissions denied - app will continue');
     }
+    
+    // Always call callback
+    onPermissionsGranted?.();
   };
 
   // Show loading while checking permissions
@@ -215,12 +227,12 @@ interface PermissionItemProps {
 function PermissionItem({ icon, label, status, loading }: PermissionItemProps) {
   return (
     <View style={styles.permissionItem}>
-      <Ionicons name={icon} size={24} color={status ? colors.status.safe : colors.text.secondary} />
+      <Ionicons name={icon} size={24} color={status ? colors.status.success : colors.text.secondary} />
       <Text style={styles.permissionLabel}>{label}</Text>
       {loading ? (
         <ActivityIndicator size="small" color={colors.text.secondary} />
       ) : status ? (
-        <Ionicons name="checkmark-circle" size={20} color={colors.status.safe} />
+        <Ionicons name="checkmark-circle" size={20} color={colors.status.success} />
       ) : (
         <Ionicons name="close-circle" size={20} color={colors.text.muted} />
       )}

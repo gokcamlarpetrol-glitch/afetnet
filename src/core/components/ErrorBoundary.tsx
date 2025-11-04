@@ -37,6 +37,10 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Always log to console first (DEV mode shows it immediately)
+    console.error('❌ ERROR BOUNDARY CAUGHT:', error);
+    console.error('Component Stack:', errorInfo.componentStack);
+    
     logger.error('Caught error:', error, errorInfo);
     
     // In production, send to crash reporting service

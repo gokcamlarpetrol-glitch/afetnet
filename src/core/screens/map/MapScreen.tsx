@@ -73,7 +73,7 @@ const mapStyle = [
 
 
 export default function MapScreen({ navigation }: any) {
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
 

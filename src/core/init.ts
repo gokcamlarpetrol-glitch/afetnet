@@ -25,12 +25,30 @@ import { voiceCommandService } from './services/VoiceCommandService';
 import { offlineMapService } from './services/OfflineMapService';
 import { firebaseDataService } from './services/FirebaseDataService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
+import { useTrialStore } from './stores/trialStore';
 import { createLogger } from './utils/logger';
 
 const logger = createLogger('Init');
 
 let isInitialized = false;
 let isInitializing = false;
+
+/**
+ * Initialize service with timeout protection
+ */
+const initWithTimeout = async (fn: () => Promise<void>, name: string, timeout = 5000) => {
+  try {
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`${name} timeout`)), timeout)
+      )
+    ]);
+    logger.info(`✅ ${name} initialized`);
+  } catch (error) {
+    logger.error(`❌ ${name} failed:`, error);
+  }
+};
 
 export async function initializeApp() {
   // Prevent double initialization
@@ -42,86 +60,39 @@ export async function initializeApp() {
 
   try {
     // Step 1: Notification Service & Multi-Channel Alert Service
-    try {
-      await notificationService.initialize();
-      await multiChannelAlertService.initialize();
-    } catch (error) {
-      logger.error('Notification services failed:', error);
-    }
+    await initWithTimeout(() => notificationService.initialize(), 'NotificationService');
+    await initWithTimeout(() => multiChannelAlertService.initialize(), 'MultiChannelAlertService');
 
     // Step 2: Firebase Services (initialize Firebase app first, then data service)
-    try {
-      // Initialize Firebase app first (lazy initialization)
-      // This ensures Firebase is initialized before Firestore tries to use it
+    await initWithTimeout(async () => {
       const getFirebaseApp = (await import('../lib/firebase')).default;
       const firebaseApp = getFirebaseApp();
-      if (!firebaseApp) {
-        logger.warn('Firebase app initialization failed');
-      }
-      
-      // Initialize Firebase messaging service
+      if (!firebaseApp) throw new Error('Firebase app null');
       await firebaseService.initialize();
-      
-      // Initialize Firebase Data Service (Firestore) - must be after Firebase app init
       await firebaseDataService.initialize();
-      
-      logger.info('Firebase services initialized');
-    } catch (error) {
-      logger.error('Firebase failed:', error);
-    }
+    }, 'FirebaseServices');
 
     // Step 3: Location Service
-    try {
-      await locationService.initialize();
-    } catch (error) {
-      logger.error('Location service failed:', error);
-    }
+    await initWithTimeout(() => locationService.initialize(), 'LocationService');
 
-    // Step 4: Premium Service
-    try {
-      await premiumService.initialize();
-    } catch (error) {
-      logger.error('Premium service failed:', error);
-    }
+    // Step 4: Premium Service + Trial Store (3 gün deneme)
+    await initWithTimeout(() => premiumService.initialize(), 'PremiumService');
+    await initWithTimeout(() => useTrialStore.getState().initializeTrial(), 'TrialStore');
 
     // Step 5: Earthquake Service (CRITICAL)
-    try {
-      await earthquakeService.start();
-    } catch (error) {
-      logger.error('⚠️ CRITICAL: Earthquake service failed:', error);
-    }
+    await initWithTimeout(() => earthquakeService.start(), 'EarthquakeService', 10000);
 
     // Step 6: BLE Mesh Service
-    try {
-      await bleMeshService.start();
-    } catch (error) {
-      logger.error('BLE Mesh failed:', error);
-    }
+    await initWithTimeout(() => bleMeshService.start(), 'BLEMeshService');
 
     // Step 7: EEW Service
-    // Polling-only mode (WebSocket endpoints not available)
-    // Uses AFAD API polling for earthquake data
-    try {
-      logger.info('Step 7: Starting EEW service (polling-only mode)...');
-      await eewService.start();
-    } catch (error) {
-      logger.error('EEW service failed to start:', error);
-      // Continue without EEW - EarthquakeService handles AFAD data
-    }
+    await initWithTimeout(() => eewService.start(), 'EEWService');
 
     // Step 8: Cell Broadcast Service
-    try {
-      await cellBroadcastService.initialize();
-    } catch (error) {
-      logger.error('Cell broadcast failed:', error);
-    }
+    await initWithTimeout(() => cellBroadcastService.initialize(), 'CellBroadcastService');
 
     // Step 9: Accessibility Service
-    try {
-      await accessibilityService.initialize();
-    } catch (error) {
-      logger.error('Accessibility failed:', error);
-    }
+    await initWithTimeout(() => accessibilityService.initialize(), 'AccessibilityService');
 
     // Step 10: Institutional Integration Service
     // DISABLED - All API calls disabled, EarthquakeService handles AFAD
@@ -132,32 +103,16 @@ export async function initializeApp() {
     // }
 
     // Step 11: Public API Service
-    try {
-      await publicAPIService.initialize();
-    } catch (error) {
-      logger.error('Public API failed:', error);
-    }
+    await initWithTimeout(() => publicAPIService.initialize(), 'PublicAPIService');
 
     // Step 12: Regional Risk Service
-    try {
-      await regionalRiskService.initialize();
-    } catch (error) {
-      logger.error('Regional risk failed:', error);
-    }
+    await initWithTimeout(() => regionalRiskService.initialize(), 'RegionalRiskService');
 
     // Step 13: Impact Prediction Service
-    try {
-      await impactPredictionService.initialize();
-    } catch (error) {
-      logger.error('Impact prediction failed:', error);
-    }
+    await initWithTimeout(() => impactPredictionService.initialize(), 'ImpactPredictionService');
 
     // Step 14: Enkaz Detection Service (Emergency)
-    try {
-      await enkazDetectionService.start();
-    } catch (error) {
-      logger.error('Enkaz detection failed:', error);
-    }
+    await initWithTimeout(() => enkazDetectionService.start(), 'EnkazDetectionService');
 
     // Step 15: Seismic Sensor Service
     // DISABLED TEMPORARILY - Too many false positives causing spam
@@ -171,15 +126,11 @@ export async function initializeApp() {
     // }
 
     // Step 16: Life-Saving Services
-    try {
-      await whistleService.initialize();
-      await flashlightService.initialize();
-      await voiceCommandService.initialize();
-      await offlineMapService.initialize();
-      await useHealthProfileStore.getState().loadProfile();
-    } catch (error) {
-      logger.error('Life-saving services failed:', error);
-    }
+    await initWithTimeout(() => whistleService.initialize(), 'WhistleService');
+    await initWithTimeout(() => flashlightService.initialize(), 'FlashlightService');
+    await initWithTimeout(() => voiceCommandService.initialize(), 'VoiceCommandService');
+    await initWithTimeout(() => offlineMapService.initialize(), 'OfflineMapService');
+    await initWithTimeout(() => useHealthProfileStore.getState().loadProfile(), 'HealthProfile');
 
     isInitialized = true;
     isInitializing = false;
