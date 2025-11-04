@@ -28,6 +28,7 @@ export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, refresh } = useEarthquakes();
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
+  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true); // Default: true
 
   // Entrance animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -36,6 +37,20 @@ export default function HomeScreen({ navigation }: any) {
   useEffect(() => {
     // Initial load
     refresh();
+    
+    // AI feature flag kontrolü
+    const checkAIFeatures = async () => {
+      try {
+        // Feature toggle'ın initialize olduğundan emin ol
+        await aiFeatureToggle.initialize();
+        setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
+      } catch (error) {
+        console.error('AI feature check error:', error);
+        // Hata durumunda da aktif göster
+        setAiFeaturesEnabled(true);
+      }
+    };
+    checkAIFeatures();
     
     // Entrance animation
     Animated.parallel([
@@ -168,7 +183,7 @@ export default function HomeScreen({ navigation }: any) {
           <FeatureGrid navigation={navigation} />
           
           {/* AI Features - Feature flag ile kontrol edilir */}
-          {aiFeatureToggle.isFeatureEnabled() && (
+          {aiFeaturesEnabled && (
             <>
               <AIAssistantCard navigation={navigation} />
               <NewsCard />

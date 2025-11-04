@@ -12,16 +12,24 @@ const logger = createLogger('AIFeatureToggle');
 const FEATURE_FLAG_KEY = 'afetnet_ai_features_enabled';
 
 class AIFeatureToggle {
-  private isEnabled = false;
+  private isEnabled = true; // Default: enabled (ilk kullanımda aktif)
 
   async initialize(): Promise<void> {
     try {
       const stored = await AsyncStorage.getItem(FEATURE_FLAG_KEY);
-      this.isEnabled = stored === 'true';
+      // Eğer daha önce ayarlanmışsa onu kullan, yoksa default true
+      if (stored !== null) {
+        this.isEnabled = stored === 'true';
+      } else {
+        // İlk kullanım: otomatik aktif et
+        this.isEnabled = true;
+        await AsyncStorage.setItem(FEATURE_FLAG_KEY, 'true');
+      }
       logger.info(`AI features ${this.isEnabled ? 'enabled' : 'disabled'}`);
     } catch (error) {
       logger.error('Failed to load AI feature flag:', error);
-      this.isEnabled = false;
+      // Hata durumunda da aktif olsun
+      this.isEnabled = true;
     }
   }
 
