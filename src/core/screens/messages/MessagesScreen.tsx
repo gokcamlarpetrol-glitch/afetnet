@@ -74,26 +74,9 @@ export default function MessagesScreen({ navigation }: any) {
     />
   );
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Mesajlar</Text>
-          <Text style={styles.headerSubtitle}>
-            {conversations.length} konuşma • Offline
-          </Text>
-        </View>
-        <Pressable 
-          style={styles.headerButton}
-          onPress={handleNewMessage}
-        >
-          <Ionicons name="add-circle" size={28} color={colors.brand.primary} />
-        </Pressable>
-      </View>
-
+  // Combine header elements for FlatList
+  const ListHeaderComponent = () => (
+    <>
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <LinearGradient
@@ -126,14 +109,38 @@ export default function MessagesScreen({ navigation }: any) {
         <Text style={styles.conversationsTitle}>Konuşmalar</Text>
         <Text style={styles.conversationsCount}>{filteredConversations.length}</Text>
       </View>
+    </>
+  );
 
-      {/* Conversation List */}
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
+      {/* Header - Fixed */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Mesajlar</Text>
+          <Text style={styles.headerSubtitle}>
+            {conversations.length} konuşma • Offline
+          </Text>
+        </View>
+        <Pressable 
+          style={styles.headerButton}
+          onPress={handleNewMessage}
+        >
+          <Ionicons name="add-circle" size={28} color={colors.brand.primary} />
+        </Pressable>
+      </View>
+
+      {/* Scrollable Content - FlatList with header */}
       <FlatList
         data={filteredConversations}
         renderItem={renderConversation}
         keyExtractor={(item) => item.userId}
+        ListHeaderComponent={ListHeaderComponent}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        showsVerticalScrollIndicator={true}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <LinearGradient
@@ -163,14 +170,7 @@ export default function MessagesScreen({ navigation }: any) {
         }
       />
 
-      <Pressable style={styles.fab} onPress={handleNewMessage}>
-        <LinearGradient
-          colors={[colors.brand.primary, colors.brand.secondary]}
-          style={styles.fabGradient}
-        >
-          <Ionicons name="add" size={32} color="#fff" />
-        </LinearGradient>
-      </Pressable>
+      {/* FAB KALDIRILDI - Header'daki + butonu kullanılıyor */}
 
       {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
     </View>
@@ -384,23 +384,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
-  fab: {
-    position: 'absolute',
-    bottom: 16 + 50, // Adjust for tab bar
-    right: 16,
-    borderRadius: 30,
-    width: 60,
-    height: 60,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 8,
-  },
-  fabGradient: {
-    flex: 1,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  // FAB styles removed - using header button instead
 });
