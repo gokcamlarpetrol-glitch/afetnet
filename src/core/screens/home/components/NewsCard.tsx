@@ -135,11 +135,11 @@ export default function NewsCard() {
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing[6],
   },
   gradient: {
     borderRadius: 20,
-    padding: spacing.lg,
+    padding: spacing[6],
     borderWidth: 1,
     borderColor: colors.border.light,
   },
@@ -147,12 +147,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing[4],
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing[3],
   },
   iconContainer: {
     width: 36,
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   loadingContainer: {
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing[6],
     alignItems: 'center',
   },
   loadingText: {
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   emptyContainer: {
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing[6],
     alignItems: 'center',
   },
   emptyText: {
@@ -184,18 +184,18 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   newsScroll: {
-    gap: spacing.md,
+    gap: spacing[4],
   },
   newsItem: {
     width: 280,
     backgroundColor: colors.background.elevated,
     borderRadius: 12,
-    padding: spacing.md,
+    padding: spacing[4],
     borderWidth: 1,
     borderColor: colors.border.light,
   },
   newsContent: {
-    gap: spacing.sm,
+    gap: spacing[3],
   },
   magnitudeBadge: {
     alignSelf: 'flex-start',

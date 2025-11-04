@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
   },
   content: {
-    padding: spacing.lg,
+    padding: spacing[6],
   },
   loadingContainer: {
     flex: 1,
@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
   },
   loadingText: {
-    marginTop: spacing.md,
+    marginTop: spacing[4],
     fontSize: 14,
     color: colors.text.secondary,
   },
@@ -166,17 +166,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background.primary,
-    padding: spacing.xl,
+    padding: spacing[8],
   },
   emptyText: {
     fontSize: 16,
     color: colors.text.secondary,
-    marginTop: spacing.md,
-    marginBottom: spacing.lg,
+    marginTop: spacing[4],
+    marginBottom: spacing[6],
   },
   retryButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing[6],
+    paddingVertical: spacing[4],
     backgroundColor: colors.accent.primary,
     borderRadius: 12,
   },
@@ -187,8 +187,8 @@ const styles = StyleSheet.create({
   },
   header: {
     borderRadius: 20,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
+    padding: spacing[6],
+    marginBottom: spacing[6],
     borderWidth: 1,
     borderColor: colors.border.light,
   },
@@ -196,10 +196,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: colors.text.primary,
-    marginBottom: spacing.md,
+    marginBottom: spacing[4],
   },
   progressContainer: {
-    gap: spacing.xs,
+    gap: spacing[2],
   },
   progressBar: {
     height: 8,
@@ -216,13 +216,13 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   section: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing[6],
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing[4],
   },
   sectionTitle: {
     fontSize: 16,
@@ -242,11 +242,11 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing[3],
     backgroundColor: colors.background.card,
     borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    padding: spacing[4],
+    marginBottom: spacing[3],
     borderWidth: 1,
     borderColor: colors.border.light,
   },
@@ -263,8 +263,8 @@ const styles = StyleSheet.create({
   disclaimer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: spacing.sm,
-    padding: spacing.md,
+    gap: spacing[3],
+    padding: spacing[4],
     backgroundColor: 'rgba(59, 130, 246, 0.1)',
     borderRadius: 12,
     borderWidth: 1,

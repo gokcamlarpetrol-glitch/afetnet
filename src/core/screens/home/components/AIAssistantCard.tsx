@@ -120,11 +120,11 @@ export default function AIAssistantCard({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing[6],
   },
   gradient: {
     borderRadius: 20,
-    padding: spacing.lg,
+    padding: spacing[6],
     borderWidth: 1,
     borderColor: colors.border.light,
   },
@@ -132,12 +132,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing[4],
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing[3],
   },
   iconContainer: {
     width: 36,
@@ -165,8 +165,8 @@ const styles = StyleSheet.create({
   },
   buttonsContainer: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
+    gap: spacing[3],
+    marginBottom: spacing[4],
   },
   button: {
     flex: 1,
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 6,
-    paddingTop: spacing.sm,
+    paddingTop: spacing[3],
     borderTopWidth: 1,
     borderTopColor: colors.border.light,
   },
