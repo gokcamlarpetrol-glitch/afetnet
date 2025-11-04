@@ -9,6 +9,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMeshStore } from '../../stores/meshStore';
+import { bleMeshService } from '../../services/BLEMeshService';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 
@@ -63,7 +64,7 @@ export default function MessageTemplates() {
     try {
       haptics.impactMedium();
       
-      // Broadcast via mesh
+      // Create message content
       const messageContent = JSON.stringify({
         type: 'template',
         templateId: template.id,
@@ -72,6 +73,10 @@ export default function MessageTemplates() {
         timestamp: Date.now(),
       });
       
+      // Send via BLE mesh service (actual broadcast)
+      await bleMeshService.sendMessage(messageContent);
+      
+      // Also add to store for UI
       await meshStore.broadcastMessage(messageContent, 'text');
       
       Alert.alert(
@@ -82,6 +87,7 @@ export default function MessageTemplates() {
       
       haptics.notificationSuccess();
     } catch (error) {
+      console.error('Template send error:', error);
       Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
       haptics.notificationError();
     }
