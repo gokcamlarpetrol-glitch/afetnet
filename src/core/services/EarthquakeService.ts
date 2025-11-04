@@ -194,58 +194,124 @@ class EarthquakeService {
 
       const data = await response.json();
       
-      // AFAD apiv2 returns array directly
-      const events = Array.isArray(data) ? data : [];
+      // AFAD apiv2 returns array directly OR object with data property
+      let events: any[] = [];
+      if (Array.isArray(data)) {
+        events = data;
+      } else if (data && Array.isArray(data.data)) {
+        events = data.data;
+      } else if (data && Array.isArray(data.events)) {
+        events = data.events;
+      } else if (data && Array.isArray(data.results)) {
+        events = data.results;
+      }
       
       console.log(`✅ AFAD'dan ${events.length} deprem verisi alındı`);
       
       if (events.length === 0) {
-        console.warn('⚠️ AFAD API boş veri döndü!');
+        console.warn('⚠️ AFAD API boş veri döndü! Response:', JSON.stringify(data).substring(0, 200));
         return [];
       }
       
-      // İlk 3 depremi logla
-      console.log('📊 İlk 3 deprem:');
-      events.slice(0, 3).forEach((eq: any, i: number) => {
-        console.log(`  ${i + 1}. ${eq.location} - Büyüklük: ${eq.mag} - Tarih: ${eq.eventDate}`);
-      });
+      // İlk 3 depremi logla (debug için)
+      if (__DEV__) {
+        console.log('📊 İlk 3 deprem (debug):');
+        events.slice(0, 3).forEach((eq: any, i: number) => {
+          console.log(`  ${i + 1}. Location: ${eq.location || eq.title || eq.place || 'N/A'}, Magnitude: ${eq.mag || eq.magnitude || eq.ml || 'N/A'}, Date: ${eq.eventDate || eq.date || eq.originTime || 'N/A'}`);
+        });
+      }
       
-      const earthquakes = events.map((item: any) => {
-        // AFAD apiv2 format
-        const eventDate = item.eventDate || item.date || item.originTime;
-        const magnitude = parseFloat(item.mag || item.magnitude || item.ml || '0');
-        
-        // Location parsing
-        const locationParts = [
-          item.location,
-          item.ilce,
-          item.sehir,
-          item.title,
-          item.place
-        ].filter(Boolean);
-        
-        const location = locationParts.length > 0 
-          ? locationParts.join(', ') 
-          : 'Türkiye';
-        
-        return {
-          id: `afad-${item.eventID || item.eventId || item.id || Date.now()}-${Math.random()}`,
-          magnitude,
-          location,
-          depth: parseFloat(item.depth || item.derinlik || '10'),
-          time: eventDate ? new Date(eventDate).getTime() : Date.now(),
-          latitude: parseFloat(item.geojson?.coordinates?.[1] || item.latitude || item.lat || '0'),
-          longitude: parseFloat(item.geojson?.coordinates?.[0] || item.longitude || item.lng || '0'),
-          source: 'AFAD' as const,
-        };
-      })
-      .filter((eq: Earthquake) => 
-        eq.latitude !== 0 && 
-        eq.longitude !== 0 &&
-        eq.magnitude >= 1.0 // Minimum 1.0 magnitude
-      )
-      .sort((a, b) => b.time - a.time) // Newest first
-      .slice(0, 100); // Max 100
+      const earthquakes = events
+        .map((item: any) => {
+          // AFAD apiv2 format - Try multiple field names
+          const eventDate = item.eventDate || item.date || item.originTime || item.tarih || item.time;
+          const magnitude = parseFloat(item.mag || item.magnitude || item.ml || item.richter || '0');
+          
+          // Location parsing - Try multiple field combinations
+          const locationParts = [
+            item.location,
+            item.yer || item.placeName,
+            item.ilce,
+            item.sehir || item.city,
+            item.title,
+            item.place,
+            item.epicenter,
+          ].filter(Boolean);
+          
+          const location = locationParts.length > 0 
+            ? locationParts.join(', ') 
+            : 'Türkiye';
+          
+          // Coordinate parsing - Try multiple formats
+          let latitude = 0;
+          let longitude = 0;
+          
+          // GeoJSON format
+          if (item.geojson?.coordinates && Array.isArray(item.geojson.coordinates)) {
+            longitude = parseFloat(item.geojson.coordinates[0]) || 0;
+            latitude = parseFloat(item.geojson.coordinates[1]) || 0;
+          }
+          // Direct lat/lng fields
+          else if (item.latitude && item.longitude) {
+            latitude = parseFloat(item.latitude) || 0;
+            longitude = parseFloat(item.longitude) || 0;
+          }
+          // Alternative field names
+          else if (item.lat && item.lng) {
+            latitude = parseFloat(item.lat) || 0;
+            longitude = parseFloat(item.lng) || 0;
+          }
+          // Enlem/Boylam (Turkish)
+          else if (item.enlem && item.boylam) {
+            latitude = parseFloat(item.enlem) || 0;
+            longitude = parseFloat(item.boylam) || 0;
+          }
+          
+          // Depth parsing
+          const depth = parseFloat(item.depth || item.derinlik || item.derinlikKm || '10') || 10;
+          
+          // Time parsing - Handle multiple formats
+          let time = Date.now();
+          if (eventDate) {
+            const parsedDate = new Date(eventDate);
+            if (!isNaN(parsedDate.getTime())) {
+              time = parsedDate.getTime();
+            }
+          }
+          
+          return {
+            id: `afad-${item.eventID || item.eventId || item.id || item.earthquakeId || Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            magnitude,
+            location,
+            depth,
+            time,
+            latitude,
+            longitude,
+            source: 'AFAD' as const,
+          };
+        })
+        .filter((eq: Earthquake) => {
+          // Validate earthquake data
+          const isValid = 
+            eq.latitude !== 0 && 
+            eq.longitude !== 0 &&
+            !isNaN(eq.latitude) &&
+            !isNaN(eq.longitude) &&
+            eq.latitude >= -90 && eq.latitude <= 90 &&
+            eq.longitude >= -180 && eq.longitude <= 180 &&
+            eq.magnitude >= 1.0 && // Minimum 1.0 magnitude
+            eq.magnitude <= 10.0 && // Maximum 10.0 (sanity check)
+            !isNaN(eq.time) &&
+            eq.time > 0;
+          
+          if (!isValid && __DEV__) {
+            console.warn('⚠️ Invalid earthquake data filtered out:', eq);
+          }
+          
+          return isValid;
+        })
+        .sort((a, b) => b.time - a.time) // Newest first
+        .slice(0, 100); // Max 100
 
       return earthquakes;
       

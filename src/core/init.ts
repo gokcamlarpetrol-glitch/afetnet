@@ -27,6 +27,7 @@ import { firebaseDataService } from './services/FirebaseDataService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
 import { useTrialStore } from './stores/trialStore';
 import { createLogger } from './utils/logger';
+import { runAllHealthChecks } from './utils/serviceHealthCheck';
 
 const logger = createLogger('Init');
 
@@ -131,6 +132,15 @@ export async function initializeApp() {
     await initWithTimeout(() => voiceCommandService.initialize(), 'VoiceCommandService');
     await initWithTimeout(() => offlineMapService.initialize(), 'OfflineMapService');
     await initWithTimeout(() => useHealthProfileStore.getState().loadProfile(), 'HealthProfile');
+
+    // Step 17: Run service health checks (non-blocking)
+    await initWithTimeout(async () => {
+      const healthResults = await runAllHealthChecks();
+      const downServices = healthResults.filter(r => r.status === 'down');
+      if (downServices.length > 0) {
+        logger.warn(`⚠️ ${downServices.length} service(s) down: ${downServices.map(s => s.name).join(', ')}`);
+      }
+    }, 'ServiceHealthCheck', 10000); // 10s timeout for health checks
 
     isInitialized = true;
     isInitializing = false;

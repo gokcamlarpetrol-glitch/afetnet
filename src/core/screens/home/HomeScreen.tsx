@@ -14,6 +14,7 @@ import MeshNetworkPanel from './components/MeshNetworkPanel';
 import EarthquakeMonitorCard from './components/EarthquakeMonitorCard';
 import EmergencyButton from './components/EmergencyButton';
 import FeatureGrid from './components/FeatureGrid';
+import VoiceCommandPanel from '../../components/home/VoiceCommandPanel';
 import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
 import { colors, spacing } from '../../theme';
@@ -164,6 +165,7 @@ export default function HomeScreen({ navigation }: any) {
           <MeshNetworkPanel />
           <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
           <EmergencyButton onPress={handleSOSPress} />
+          <VoiceCommandPanel onCommandExecuted={(cmd) => console.log(`✅ Komut çalıştırıldı: ${cmd}`)} />
           <FeatureGrid navigation={navigation} />
         </ScrollView>
       </Animated.View>
