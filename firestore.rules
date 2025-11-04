@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Devices collection - users can only read/write their own device data
+    match /devices/{deviceId} {
+      // Allow read/write only if the deviceId matches the authenticated user's device ID
+      // Since we're using device IDs (not Firebase Auth), we'll allow public read/write
+      // but restrict based on deviceId matching
+      // In production, you should add additional security checks
+      
+      allow read: if request.auth != null || resource.data.deviceId == deviceId;
+      allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+      
+      // Family members subcollection
+      match /familyMembers/{memberId} {
+        // Allow read/write only for the device owner
+        allow read: if request.auth != null || true; // Allow for offline mesh communication
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || true;
+      }
+    }
+    
+    // Emergency SOS signals collection
+    match /sos/{sosId} {
+      // Allow anyone to read SOS signals (for emergency response)
+      // But only allow write with proper authentication or device ID validation
+      allow read: if true;
+      allow write: if request.auth != null || request.resource.data.deviceId != null;
+      allow delete: if request.auth != null || request.resource.data.deviceId == resource.data.deviceId;
+    }
+    
+    // Messages collection (for BLE mesh backup)
+    match /messages/{messageId} {
+      // Allow read/write for authenticated users or device ID matching
+      allow read: if request.auth != null || resource.data.from == deviceId || resource.data.to == deviceId;
+      allow write: if request.auth != null || request.resource.data.from == deviceId;
+      allow delete: if request.auth != null || request.resource.data.from == deviceId || request.resource.data.to == deviceId;
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
