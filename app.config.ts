@@ -30,7 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-font",
     "expo-localization",
-    // "expo-maps", // Disabled - using react-native-maps instead (expo-maps causes RNMapsAirModule error)
+    // "expo-maps", // Disabled - react-native-maps kullanılıyor (development build gerekli)
     [
       "expo-build-properties",
       {

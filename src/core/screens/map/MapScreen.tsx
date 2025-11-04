@@ -9,8 +9,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
-// Import react-native-maps - must be available for Expo
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+// Use react-native-maps with error handling
+// NOTE: Requires development build (not Expo Go)
+let MapView: any = null;
+let Marker: any = null;
+
+try {
+  const rnMaps = require('react-native-maps');
+  MapView = rnMaps.default || rnMaps;
+  Marker = rnMaps.Marker;
+} catch (e) {
+  logger.warn('react-native-maps not available:', e);
+  // Will show fallback UI
+}
 import BottomSheet from '@gorhom/bottom-sheet';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useEarthquakeStore, Earthquake } from '../../stores/earthquakeStore';
@@ -301,7 +312,36 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
   </View>
 );
 
-  // MapView is always available - no fallback needed
+  // If MapView is not available, show informative fallback
+  if (!MapView || !Marker) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a', padding: 24 }]}>
+          <Ionicons name="map-outline" size={64} color={colors.text.secondary} />
+          <Text style={[styles.headerTitle, { marginTop: 16, textAlign: 'center' }]}>Harita Modülü Yüklenemedi</Text>
+          <Text style={[styles.headerSubtitle, { textAlign: 'center', marginTop: 8 }]}>
+            Development build gereklidir{'\n'}
+            Expo Go'da harita çalışmaz{'\n'}
+            {'\n'}
+            Çalıştır: npx expo run:ios
+          </Text>
+          <Pressable 
+            style={{ marginTop: 24, padding: 12, backgroundColor: colors.accent.primary, borderRadius: 12 }}
+            onPress={() => {
+              Alert.alert(
+                'Harita Modülü',
+                'Development build oluşturmak için:\n\n1. npx expo run:ios\n2. Veya EAS Build kullanın\n\nExpo Go harita modüllerini desteklemez.',
+                [{ text: 'Tamam' }]
+              );
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Nasıl Çalıştırılır?</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -309,9 +349,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
       
       <MapView
         ref={mapRef}
-        provider={PROVIDER_GOOGLE}
         style={StyleSheet.absoluteFill}
-        customMapStyle={mapStyle}
         mapType={mapType}
         showsUserLocation
         showsMyLocationButton={false}
