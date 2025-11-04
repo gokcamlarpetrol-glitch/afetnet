@@ -9,6 +9,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
+import BottomSheet from '@gorhom/bottom-sheet';
+import { colors, typography, spacing, borderRadius } from '../../theme';
+import { useEarthquakeStore, Earthquake } from '../../stores/earthquakeStore';
+import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
+import { calculateDistance, formatDistance, getMagnitudeColor } from '../../utils/mapUtils';
+import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('MapScreen');
+
 // Use react-native-maps with error handling
 // NOTE: Requires development build (not Expo Go)
 let MapView: any = null;
@@ -22,20 +32,12 @@ try {
   logger.warn('react-native-maps not available:', e);
   // Will show fallback UI
 }
-import BottomSheet from '@gorhom/bottom-sheet';
-import { colors, typography, spacing, borderRadius } from '../../theme';
-import { useEarthquakeStore, Earthquake } from '../../stores/earthquakeStore';
-import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { calculateDistance, formatDistance, getMagnitudeColor } from '../../utils/mapUtils';
-import * as haptics from '../../utils/haptics';
-import { createLogger } from '../../utils/logger';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { FamilyMarker } from '../../components/map/FamilyMarker';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
 import { useCompass } from '../../../hooks/useCompass';
 import { useUserStatusStore } from '../../stores/userStatusStore';
 
-const logger = createLogger('MapScreen');
 const { width, height } = Dimensions.get('window');
 
 const mapStyle = [
