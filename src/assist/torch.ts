@@ -20,33 +20,41 @@ export async function torchOff(){
 }
 export function isTorchOn(){ return on; }
 
-let strobeT:any=null;
+let strobeActive = false;
+let strobeTimeout: any = null;
 export async function startMorseSOS(){
   // SOS pattern (· · · – – – · · ·)
-  if (strobeT) {return;}
+  if (strobeActive) {return;}
+  strobeActive = true;
   const unit = 120; // ms
   const seq = [1,1,1,3,3,3,1,1,1]; // dot=1, dash=3
   let i=0;
-  strobeT = (globalThis as any).setInterval(async ()=>{
+
+  const run = async (): Promise<void> => {
+    if (!strobeActive) {return;}
     try{
-      // on
       await SafeTorch.switchState(true);
       const seqIndex = seq[i % seq.length];
       if (seqIndex !== undefined) {
         await sleep(seqIndex * unit);
       }
-      // off
       await SafeTorch.switchState(false);
       await sleep(unit);
       i++;
     }catch{
       // Ignore morse errors
     }
-  }, 10);
+
+    if (!strobeActive) {return;}
+    strobeTimeout = (globalThis as any).setTimeout(run, 0);
+  };
+
+  run();
 }
 export async function stopMorseSOS(){ 
-  if (strobeT) {(globalThis as any).clearInterval(strobeT);} 
-  strobeT=null; 
+  if (!strobeActive) {return;}
+  strobeActive = false;
+  if (strobeTimeout) {(globalThis as any).clearTimeout(strobeTimeout); strobeTimeout=null;}
   try{ 
     await SafeTorch.switchState(false); 
   }catch{
