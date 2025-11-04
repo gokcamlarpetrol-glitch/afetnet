@@ -22,12 +22,14 @@ import { getSOSService } from '../../services/SOSService';
 import * as Location from 'expo-location';
 import { Alert } from 'react-native';
 import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, refresh } = useEarthquakes();
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
   const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true); // Default: true
+  const newsEnabled = useSettingsStore((state) => state.newsEnabled);
 
   // Entrance animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -177,12 +179,8 @@ export default function HomeScreen({ navigation }: any) {
           <HomeHeader />
           
           {/* AI Features - En üstte, feature flag ile kontrol edilir */}
-          {aiFeaturesEnabled && (
-            <>
-              <NewsCard />
-              <AIAssistantCard navigation={navigation} />
-            </>
-          )}
+          {newsEnabled && <NewsCard />}
+          {aiFeaturesEnabled && <AIAssistantCard navigation={navigation} />}
           
           <MeshNetworkPanel />
           <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />

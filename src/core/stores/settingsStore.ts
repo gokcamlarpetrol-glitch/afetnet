@@ -28,6 +28,8 @@ interface SettingsState {
   batterySaverEnabled: boolean;
   // Language
   language: 'tr' | 'ku' | 'ar' | 'en';
+  // News
+  newsEnabled: boolean;
 }
 
 interface SettingsActions {
@@ -41,6 +43,7 @@ interface SettingsActions {
   setVoiceCommand: (enabled: boolean) => void;
   setBatterySaver: (enabled: boolean) => void;
   setLanguage: (lang: 'tr' | 'ku' | 'ar' | 'en') => void;
+  setNews: (enabled: boolean) => void;
   resetToDefaults: () => void;
 }
 
@@ -55,6 +58,7 @@ const defaultSettings: SettingsState = {
   voiceCommandEnabled: false,
   batterySaverEnabled: false,
   language: 'tr',
+  newsEnabled: true,
 };
 
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
@@ -72,6 +76,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setVoiceCommand: (enabled) => set({ voiceCommandEnabled: enabled }),
       setBatterySaver: (enabled) => set({ batterySaverEnabled: enabled }),
       setLanguage: (lang) => set({ language: lang }),
+      setNews: (enabled) => set({ newsEnabled: enabled }),
       
       resetToDefaults: () => set(defaultSettings),
     }),

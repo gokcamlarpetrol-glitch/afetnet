@@ -27,6 +27,7 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SettingItem } from '../../components/settings/SettingItem';
 import * as haptics from '../../utils/haptics';
 import { batterySaverService } from '../../services/BatterySaverService';
+import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 
 interface SettingItem {
   icon: string;
@@ -56,6 +57,10 @@ export default function SettingsScreen({ navigation }: any) {
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
   
+  // AI Features State
+  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
+  const newsEnabled = useSettingsStore((state) => state.newsEnabled);
+  
   const setNotificationsEnabled = useSettingsStore((state) => state.setNotifications);
   const setLocationEnabled = useSettingsStore((state) => state.setLocation);
   const setBleMeshEnabled = useSettingsStore((state) => state.setBleMesh);
@@ -65,12 +70,24 @@ export default function SettingsScreen({ navigation }: any) {
   const setVibrationEnabled = useSettingsStore((state) => state.setVibration);
   const setBatterySaverEnabled = useSettingsStore((state) => state.setBatterySaver);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
+  const setNewsEnabled = useSettingsStore((state) => state.setNews);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setIsPremium(usePremiumStore.getState().isPremium);
       setMeshStats(useMeshStore.getState().stats);
     }, 500);
+
+    // AI features durumunu yükle
+    const loadAIFeatures = async () => {
+      try {
+        await aiFeatureToggle.initialize();
+        setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
+      } catch (error) {
+        console.error('Failed to load AI features state:', error);
+      }
+    };
+    loadAIFeatures();
 
     return () => clearInterval(interval);
   }, []);
@@ -202,6 +219,106 @@ export default function SettingsScreen({ navigation }: any) {
     },
   ];
 
+  const aiSettings: SettingItem[] = [
+    {
+      icon: 'sparkles',
+      title: 'AI Asistan',
+      subtitle: 'Risk skoru, hazırlık planı ve afet anı rehberi',
+      type: 'switch',
+      value: aiFeaturesEnabled,
+      onPress: async () => {
+        haptics.impactLight();
+        const newValue = !aiFeaturesEnabled;
+        setAiFeaturesEnabled(newValue);
+        if (newValue) {
+          await aiFeatureToggle.enable();
+        } else {
+          await aiFeatureToggle.disable();
+        }
+        Alert.alert(
+          'AI Asistan',
+          newValue 
+            ? 'AI Asistan özellikleri aktif edildi. Ana ekranda AI kartları görünecek.'
+            : 'AI Asistan özellikleri kapatıldı.',
+          [{ text: 'Tamam' }]
+        );
+      },
+    },
+    {
+      icon: 'newspaper',
+      title: 'Son Dakika Haberler',
+      subtitle: 'Deprem ve afet haberleri',
+      type: 'switch',
+      value: newsEnabled,
+      onPress: () => {
+        haptics.impactLight();
+        const newValue = !newsEnabled;
+        setNewsEnabled(newValue);
+        Alert.alert(
+          'Haber Sistemi',
+          newValue 
+            ? 'Haber sistemi aktif edildi. Ana ekranda haber kartları görünecek.'
+            : 'Haber sistemi kapatıldı.',
+          [{ text: 'Tamam' }]
+        );
+      },
+    },
+    {
+      icon: 'analytics',
+      title: 'Risk Skorum',
+      subtitle: 'Kişisel risk analizi',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        if (!aiFeaturesEnabled) {
+          Alert.alert(
+            'AI Asistan Gerekli',
+            'Risk skoru özelliğini kullanmak için AI Asistan aktif olmalı.',
+            [{ text: 'Tamam' }]
+          );
+          return;
+        }
+        navigation.navigate('RiskScore');
+      },
+    },
+    {
+      icon: 'list',
+      title: 'Hazırlık Planı',
+      subtitle: 'Kişiselleştirilmiş hazırlık planı',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        if (!aiFeaturesEnabled) {
+          Alert.alert(
+            'AI Asistan Gerekli',
+            'Hazırlık planı özelliğini kullanmak için AI Asistan aktif olmalı.',
+            [{ text: 'Tamam' }]
+          );
+          return;
+        }
+        navigation.navigate('PreparednessPlan');
+      },
+    },
+    {
+      icon: 'shield-checkmark',
+      title: 'Afet Anı Rehberi',
+      subtitle: 'Acil durum aksiyonları',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        if (!aiFeaturesEnabled) {
+          Alert.alert(
+            'AI Asistan Gerekli',
+            'Afet anı rehberi özelliğini kullanmak için AI Asistan aktif olmalı.',
+            [{ text: 'Tamam' }]
+          );
+          return;
+        }
+        navigation.navigate('PanicAssistant');
+      },
+    },
+  ];
+
   const meshSettings: SettingItem[] = [
     {
       icon: 'bluetooth',
@@ -209,7 +326,10 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Bluetooth mesh iletişimi',
       type: 'switch',
       value: bleMeshEnabled,
-      onPress: () => setBleMeshEnabled(!bleMeshEnabled),
+      onPress: () => {
+        haptics.impactLight();
+        setBleMeshEnabled(!bleMeshEnabled);
+      },
     },
     {
       icon: 'chatbubbles',
@@ -251,7 +371,14 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'AFAD ve Kandilli verileri',
       type: 'switch',
       value: true,
-      onPress: () => {},
+      onPress: () => {
+        haptics.impactLight();
+        Alert.alert(
+          'Deprem İzleme',
+          'Deprem izleme sistemi her zaman aktif durumda. AFAD ve Kandilli verileri otomatik olarak çekiliyor.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'warning',
@@ -429,12 +556,13 @@ export default function SettingsScreen({ navigation }: any) {
           </View>
         </View>
 
-        {renderSection('Bildirimler ve Uyarılar', notificationSettings, 1)}
-        {renderSection('Konum ve Harita', locationSettings, 2)}
-        {renderSection('Mesh Ağı ve İletişim', meshSettings, 3)}
-        {renderSection('Deprem İzleme', earthquakeSettings, 4)}
-        {renderSection('Genel', generalSettings, 5)}
-        {renderSection('Hakkında', aboutSettings, 6)}
+        {renderSection('AI Özellikleri', aiSettings, 1)}
+        {renderSection('Bildirimler ve Uyarılar', notificationSettings, 2)}
+        {renderSection('Konum ve Harita', locationSettings, 3)}
+        {renderSection('Mesh Ağı ve İletişim', meshSettings, 4)}
+        {renderSection('Deprem İzleme', earthquakeSettings, 5)}
+        {renderSection('Genel', generalSettings, 6)}
+        {renderSection('Hakkında', aboutSettings, 7)}
         
         {/* App Version */}
         <View style={styles.versionContainer}>
