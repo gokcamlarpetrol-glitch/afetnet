@@ -21,8 +21,8 @@ interface UserStatusState {
 }
 
 interface UserStatusActions {
-  setStatus: (status: UserStatus) => void;
-  setLocation: (location: Location) => void;
+  setStatus: (status: UserStatus) => Promise<void>;
+  setLocation: (location: Location) => Promise<void>;
   setSosTriggered: (triggered: boolean) => void;
   setBatteryLevel: (level: number) => void;
   reset: () => void;
@@ -36,12 +36,54 @@ const initialState: UserStatusState = {
   batteryLevel: 100,
 };
 
-export const useUserStatusStore = create<UserStatusState & UserStatusActions>((set) => ({
+export const useUserStatusStore = create<UserStatusState & UserStatusActions>((set, get) => ({
   ...initialState,
 
-  setStatus: (status) => set({ status, lastUpdate: Date.now() }),
+  setStatus: async (status) => {
+    set({ status, lastUpdate: Date.now() });
+    
+    // Save to Firebase
+    try {
+      const { getDeviceId } = await import('../../lib/device');
+      const deviceId = await getDeviceId();
+      if (deviceId) {
+        const { firebaseDataService } = await import('../services/FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          const { location } = get();
+          await firebaseDataService.saveStatusUpdate(deviceId, {
+            status,
+            location: location || null,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save status to Firebase:', error);
+    }
+  },
   
-  setLocation: (location) => set({ location, lastUpdate: Date.now() }),
+  setLocation: async (location) => {
+    set({ location, lastUpdate: Date.now() });
+    
+    // Save to Firebase
+    try {
+      const { getDeviceId } = await import('../../lib/device');
+      const deviceId = await getDeviceId();
+      if (deviceId) {
+        const { firebaseDataService } = await import('../services/FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          await firebaseDataService.saveLocationUpdate(deviceId, {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            accuracy: null,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save location to Firebase:', error);
+    }
+  },
   
   setSosTriggered: (triggered) => set({ sosTriggered: triggered }),
   

@@ -168,7 +168,9 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'LED ışık uyarıları',
       type: 'switch',
       value: false,
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert('LED Uyarısı', 'Bu özellik yakında eklenecektir.');
+      },
     },
     {
       icon: 'notifications-outline',
@@ -176,7 +178,9 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Tam ekran acil durum uyarıları',
       type: 'switch',
       value: true,
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert('Tam Ekran Uyarı', 'Bu özellik her zaman aktif durumda.');
+      },
     },
   ];
 
@@ -194,7 +198,7 @@ export default function SettingsScreen({ navigation }: any) {
       title: 'Harita Ayarları',
       subtitle: 'Harita görünümü ve filtreler',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => navigation.navigate('Map'),
     },
   ];
 
@@ -270,7 +274,13 @@ export default function SettingsScreen({ navigation }: any) {
       title: 'Büyüklük Filtresi',
       subtitle: 'Minimum deprem büyüklüğü',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Büyüklük Filtresi',
+          'Şu anda tüm depremler gösteriliyor. Filtreleme özelliği yakında eklenecektir.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
   ];
 
@@ -287,7 +297,13 @@ export default function SettingsScreen({ navigation }: any) {
       title: 'Yazı Boyutu',
       subtitle: 'Erişilebilirlik ayarları',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Yazı Boyutu',
+          'Erişilebilirlik ayarları yakında eklenecektir.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'contrast',
@@ -295,7 +311,13 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Görünürlüğü artır',
       type: 'switch',
       value: false,
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Yüksek Kontrast',
+          'Bu özellik yakında eklenecektir.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'moon',
@@ -303,7 +325,13 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Tema ayarları',
       type: 'switch',
       value: true,
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Karanlık Mod',
+          'Uygulama şu anda karanlık modda çalışıyor.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
   ];
 
@@ -313,28 +341,52 @@ export default function SettingsScreen({ navigation }: any) {
       title: 'Hakkında',
       subtitle: 'AfetNet v1.0.0',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'AfetNet',
+          'AfetNet v1.0.0\n\nAfet durumlarında offline iletişim için tasarlanmış acil durum uygulaması.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'document-text',
       title: 'Gizlilik Politikası',
       subtitle: 'Kullanım koşulları',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Gizlilik Politikası',
+          'Gizlilik politikası yakında eklenecektir.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'shield-checkmark',
       title: 'Güvenlik',
       subtitle: 'Güvenlik ve şifreleme',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Güvenlik',
+          'Tüm verileriniz şifrelenmiş olarak saklanmaktadır. E2E encryption aktif.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'help-circle',
       title: 'Yardım ve Destek',
       subtitle: 'SSS ve destek',
       type: 'arrow',
-      onPress: () => {},
+      onPress: () => {
+        Alert.alert(
+          'Yardım ve Destek',
+          'Destek için: support@afetnet.app',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
   ];
 

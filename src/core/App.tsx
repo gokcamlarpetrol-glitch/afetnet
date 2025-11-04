@@ -36,8 +36,14 @@ import HealthProfileScreen from './screens/health/HealthProfileScreen';
 import NewMessageScreen from './screens/messages/NewMessageScreen';
 import ConversationScreen from './screens/messages/ConversationScreen';
 
+// AI Screens
+import RiskScoreScreen from './screens/ai/RiskScoreScreen';
+import PreparednessPlanScreen from './screens/ai/PreparednessPlanScreen';
+import PanicAssistantScreen from './screens/ai/PanicAssistantScreen';
+
 // Navigation
 import MainTabs from './navigation/MainTabs';
+import { colors } from './theme';
 
 const Stack = createStackNavigator();
 
@@ -135,6 +141,36 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="Conversation" 
                 component={ConversationScreen}
+              />
+              <Stack.Screen 
+                name="RiskScore" 
+                component={RiskScoreScreen}
+                options={{ 
+                  headerShown: true,
+                  headerTitle: 'Risk Skorum',
+                  headerStyle: { backgroundColor: colors.background.primary },
+                  headerTintColor: colors.text.primary,
+                }}
+              />
+              <Stack.Screen 
+                name="PreparednessPlan" 
+                component={PreparednessPlanScreen}
+                options={{ 
+                  headerShown: true,
+                  headerTitle: 'Hazirlik Plani',
+                  headerStyle: { backgroundColor: colors.background.primary },
+                  headerTintColor: colors.text.primary,
+                }}
+              />
+              <Stack.Screen 
+                name="PanicAssistant" 
+                component={PanicAssistantScreen}
+                options={{ 
+                  headerShown: true,
+                  headerTitle: 'Afet Ani Rehberi',
+                  headerStyle: { backgroundColor: colors.background.primary },
+                  headerTintColor: colors.text.primary,
+                }}
               />
               </Stack.Navigator>
             </NavigationContainer>

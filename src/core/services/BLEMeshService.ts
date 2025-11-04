@@ -205,6 +205,24 @@ class BLEMeshService {
     useMeshStore.getState().addMessage(message);
     useMeshStore.getState().incrementStat('messagesSent');
 
+    // Save to Firestore (backup)
+    try {
+      const { firebaseDataService } = await import('./FirebaseDataService');
+      if (firebaseDataService.isInitialized) {
+        await firebaseDataService.saveMessage({
+          id: message.id,
+          from: message.from,
+          to: message.to,
+          content: message.content,
+          type: message.type,
+          timestamp: message.timestamp,
+          priority: message.type === 'sos' ? 'critical' : 'normal',
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to save message to Firestore:', error);
+    }
+
     if (__DEV__) logger.info('Message queued:', message.id);
   }
 

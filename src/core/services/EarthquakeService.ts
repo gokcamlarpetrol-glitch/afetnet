@@ -85,6 +85,37 @@ class EarthquakeService {
           logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
           autoCheckinService.startCheckIn(latestEq.magnitude);
           
+          // Save to Firebase (for critical earthquakes >= 4.0)
+          try {
+            const { firebaseDataService } = await import('./FirebaseDataService');
+            if (firebaseDataService.isInitialized) {
+              await firebaseDataService.saveEarthquake({
+                id: latestEq.id,
+                location: latestEq.location,
+                magnitude: latestEq.magnitude,
+                depth: latestEq.depth,
+                time: latestEq.time,
+                latitude: latestEq.latitude,
+                longitude: latestEq.longitude,
+              });
+              
+              // Save alert for current user
+              const { getDeviceId } = await import('../../lib/device');
+              const deviceId = await getDeviceId();
+              if (deviceId) {
+                await firebaseDataService.saveEarthquakeAlert(deviceId, latestEq.id, {
+                  earthquakeId: latestEq.id,
+                  magnitude: latestEq.magnitude,
+                  location: latestEq.location,
+                  timestamp: latestEq.time,
+                  notified: true,
+                });
+              }
+            }
+          } catch (error) {
+            logger.error('Failed to save earthquake to Firebase:', error);
+          }
+          
           // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
           if (emergencyModeService.shouldTriggerEmergencyMode(latestEq)) {
             logger.info(`🚨 CRITICAL EARTHQUAKE DETECTED: ${latestEq.magnitude} - Activating emergency mode`);

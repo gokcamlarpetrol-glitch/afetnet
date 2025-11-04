@@ -14,12 +14,15 @@ import MeshNetworkPanel from './components/MeshNetworkPanel';
 import EarthquakeMonitorCard from './components/EarthquakeMonitorCard';
 import EmergencyButton from './components/EmergencyButton';
 import FeatureGrid from './components/FeatureGrid';
+import AIAssistantCard from './components/AIAssistantCard';
+import NewsCard from './components/NewsCard';
 import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
 import { colors, spacing } from '../../theme';
 import { getSOSService } from '../../services/SOSService';
 import * as Location from 'expo-location';
 import { Alert } from 'react-native';
+import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 
 export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, refresh } = useEarthquakes();
@@ -163,6 +166,14 @@ export default function HomeScreen({ navigation }: any) {
           <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
           <EmergencyButton onPress={handleSOSPress} />
           <FeatureGrid navigation={navigation} />
+          
+          {/* AI Features - Feature flag ile kontrol edilir */}
+          {aiFeatureToggle.isFeatureEnabled() && (
+            <>
+              <AIAssistantCard navigation={navigation} />
+              <NewsCard />
+            </>
+          )}
         </ScrollView>
       </Animated.View>
 

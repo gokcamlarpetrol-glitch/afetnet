@@ -31,6 +31,33 @@ export async function startHistory(){
           await d.executeSql('INSERT INTO loc_points(ts,lat,lon,acc,enu_x,enu_y) VALUES(?,?,?,?,?,?)',
             [ts, loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy ?? null, enu?.x ?? null, enu?.y ?? null]);
         });
+        
+        // Save critical location updates to Firebase (significant movement or every 5 minutes)
+        const isCritical = !last || 
+          (ts - last.ts) >= 300000 || // 5 minutes
+          haversine(last.lat, last.lon, loc.coords.latitude, loc.coords.longitude) >= 100; // 100 meters
+        
+        if (isCritical) {
+          try {
+            const { getDeviceId } = await import('../lib/device');
+            const deviceId = await getDeviceId();
+            if (deviceId) {
+              const { firebaseDataService } = await import('../core/services/FirebaseDataService');
+              if (firebaseDataService.isInitialized) {
+                await firebaseDataService.saveLocationUpdate(deviceId, {
+                  latitude: loc.coords.latitude,
+                  longitude: loc.coords.longitude,
+                  accuracy: loc.coords.accuracy || null,
+                  timestamp: ts,
+                });
+              }
+            }
+          } catch (error) {
+            // Silent fail - don't break location collection
+            console.warn('Failed to save location history to Firebase:', error);
+          }
+        }
+        
         last = { lat: loc.coords.latitude, lon: loc.coords.longitude, ts };
         await prune();
       }catch{

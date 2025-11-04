@@ -1,142 +1,125 @@
-# Firebase Durum Raporu
+# Firebase Veri Saklama Durum Raporu
 
 **Tarih:** 4 Kasım 2025  
-**Durum:** Firebase Entegrasyonu Kontrol Edildi
+**Durum:** Firebase hazır, bazı eksikler var
 
 ---
 
-## ✅ MEVCUT FİREBASE ÖZELLİKLERİ
+## ✅ HAZIR OLANLAR
 
-### 1. Firebase App Initialization ✅
-**Dosya:** `src/lib/firebase.ts`
-- Firebase app initialization var
-- Lazy initialization (circular dependency önleme)
-- Error handling var
-- Platform-specific (iOS/Android) config desteği
+### 1. **Firestore Collections (Rules ile Korunuyor)**
+- ✅ `devices/{deviceId}` - Cihaz ID'leri
+- ✅ `devices/{deviceId}/familyMembers/{memberId}` - Aile üyeleri
+- ✅ `sos/{sosId}` - SOS sinyalleri
+- ✅ `messages/{messageId}` - Mesajlar (BLE mesh backup)
 
-### 2. Firebase Configuration ✅
-**Dosya:** `src/core/config/firebase.ts`
-- iOS config: ✅ Tam
-- Android config: ⚠️ Android appId placeholder ("YOUR_ANDROID_APP_ID")
-- Project ID: `afetnet-4a6b6`
-- API Key, Storage Bucket, Messaging Sender ID: ✅ Tam
+### 2. **Firebase Storage (Rules ile Korunuyor)**
+- ✅ `profiles/{userId}/` - Profil resimleri
+- ✅ `sos/{sosId}/` - SOS ekleri (fotoğraf, video)
+- ✅ `family/{deviceId}/{memberId}/` - Aile üyesi resimleri
+- ✅ `maps/{mapId}/` - MBTiles offline haritalar
 
-### 3. Firebase Services ✅
+### 3. **Firebase Services Implementation**
+- ✅ `FirebaseDataService` - Device ID ve Family Members için hazır
+- ✅ `FirebaseStorageService` - Dosya upload/download hazır
+- ✅ Index'ler - Tüm collections için tanımlı
 
-#### a. FirebaseService (Push Notifications)
-**Dosya:** `src/core/services/FirebaseService.ts`
-- Expo push notifications entegrasyonu
-- Notification channels (Android)
-- Push token alma
-- Test notification gönderme
-
-#### b. FirebaseDataService (Firestore)
-**Dosya:** `src/core/services/FirebaseDataService.ts`
-- Firestore initialization
-- Device ID saklama
-- Family member CRUD operations
-- Real-time sync (onSnapshot)
-- Offline fallback (AsyncStorage)
-
-### 4. Firebase Config Files ✅
-- `google-services.json` - Android config dosyası var
-- `GoogleService-Info.plist` - iOS config dosyası var
-- Script: `scripts/firebase_setup.py` - Otomatik setup scripti var
+### 4. **Kod Entegrasyonu**
+- ✅ Device ID kaydediliyor (`familyStore.ts`)
+- ✅ Family Members kaydediliyor (`familyStore.ts`)
+- ✅ Real-time sync (`subscribeToFamilyMembers`)
 
 ---
 
-## ⚠️ EKSİK/İYİLEŞTİRME GEREKENLER
+## ❌ EKSİKLER
 
-### 1. Android App ID ⚠️
-**Dosya:** `src/core/config/firebase.ts`
-**Durum:** Android appId placeholder ("YOUR_ANDROID_APP_ID")
-**Çözüm:** Gerçek Android app ID ile değiştirilmeli
+### 1. **Mesajlar Firestore'a Kaydedilmiyor**
+- ❌ `BLEMeshService.sendMessage()` - Mesaj gönderiliyor ama Firestore'a kaydedilmiyor
+- ❌ `FirebaseDataService.saveMessage()` metodu yok
+- ❌ Mesajlar sadece local state'te (meshStore)
 
-### 2. Firestore Security Rules ✅ YENİ EKLENDİ
-**Dosya:** `firestore.rules`
-**Durum:** ✅ Yeni oluşturuldu
-**Özellikler:**
-- Devices collection: Device ID bazlı erişim kontrolü
-- Family members: Device owner bazlı erişim
-- SOS signals: Public read (emergency response için)
-- Messages: Device ID bazlı erişim
-- Default deny: Diğer tüm erişimler reddediliyor
+### 2. **SOS Sinyalleri Firestore'a Kaydedilmiyor**
+- ❌ `SOSService.sendSOSSignal()` - SOS gönderiliyor ama Firestore'a kaydedilmiyor
+- ❌ `FirebaseDataService.saveSOS()` metodu yok
+- ❌ SOS sadece BLE mesh ile broadcast ediliyor
 
-### 3. Firebase Analytics ❌
-**Durum:** Yok
-**Not:** Opsiyonel - Apple privacy compliance için şimdilik eklenmedi
-
-### 4. Firebase Crashlytics ❌
-**Durum:** Yok (sadece TODO comment var)
-**Not:** ErrorBoundary mevcut - production için yeterli olabilir
-
-### 5. Firebase Remote Config ❌
-**Durum:** Yok
-**Not:** Opsiyonel - şimdilik config dosyaları yeterli
-
-### 6. Firebase Performance Monitoring ❌
-**Durum:** Yok
-**Not:** Opsiyonel - şimdilik gerekli değil
+### 3. **Device ID Otomatik Kayıt**
+- ⚠️ Device ID `familyStore.ts` içinde kaydediliyor ama app başlangıcında otomatik kayıt yok
+- ⚠️ İlk açılışta device ID Firestore'a kaydedilmeli
 
 ---
 
-## 📋 YAPILMASI GEREKENLER
+## 📋 YAPILACAKLAR
 
-### Kritik (Şimdi Yapılmalı):
-1. ✅ Firestore Security Rules oluşturuldu
-2. ⚠️ Android App ID güncellenmeli (Firebase Console'dan alınmalı)
-
-### Opsiyonel (Gelecek):
-1. Firebase Analytics eklenebilir (privacy compliance sonrası)
-2. Firebase Crashlytics eklenebilir (production monitoring için)
-3. Firebase Remote Config eklenebilir (feature flags için)
+1. ✅ `FirebaseDataService.saveMessage()` metodu ekle
+2. ✅ `FirebaseDataService.saveSOS()` metodu ekle
+3. ✅ `BLEMeshService.sendMessage()` içinde Firestore'a kaydet
+4. ✅ `SOSService.sendSOSSignal()` içinde Firestore'a kaydet
+5. ✅ App başlangıcında device ID'yi otomatik kaydet
 
 ---
 
-## 🔧 FIREBASE SETUP ADIMLARI
+## 🔒 GÜVENLİK
 
-### 1. Firestore Security Rules Deploy
-```bash
-# Firebase CLI ile deploy et
-firebase deploy --only firestore:rules
+- ✅ Firestore Rules: Device ID-based access control aktif
+- ✅ Storage Rules: User-based access control aktif
+- ⚠️ Production'da ek güvenlik kontrolleri eklenebilir (Firebase Auth)
+
+---
+
+## 📊 VERİ YAPISI
+
+### Devices Collection
+```typescript
+/devices/{deviceId}
+{
+  deviceId: string,
+  createdAt: string,
+  updatedAt: string
+}
 ```
 
-### 2. Android App ID Güncelleme
-1. Firebase Console'a git
-2. Project Settings > General
-3. Android app'in gerçek App ID'sini kopyala
-4. `src/core/config/firebase.ts` dosyasında `YOUR_ANDROID_APP_ID` yerine gerçek ID'yi yapıştır
+### Family Members Subcollection
+```typescript
+/devices/{deviceId}/familyMembers/{memberId}
+{
+  id: string,
+  name: string,
+  deviceId: string,
+  lastSeen: number,
+  location?: { lat, lng },
+  status?: string,
+  updatedAt: string
+}
+```
 
-### 3. Firebase Console Kontrolleri
-- [ ] Firestore Database oluşturulmuş mu?
-- [ ] Security rules deploy edilmiş mi?
-- [ ] iOS app Firebase'e eklenmiş mi?
-- [ ] Android app Firebase'e eklenmiş mi?
-- [ ] Push notifications (Cloud Messaging) aktif mi?
+### SOS Signals Collection
+```typescript
+/sos/{sosId}
+{
+  id: string,
+  deviceId: string,
+  timestamp: number,
+  location: { latitude, longitude, accuracy },
+  message: string,
+  status: 'active' | 'resolved'
+}
+```
+
+### Messages Collection
+```typescript
+/messages/{messageId}
+{
+  id: string,
+  from: string, // deviceId
+  to?: string, // deviceId (optional for broadcast)
+  content: string,
+  type: 'text' | 'sos' | 'status',
+  timestamp: number,
+  priority: 'low' | 'normal' | 'high' | 'critical'
+}
+```
 
 ---
 
-## 📊 SONUÇ
-
-**Mevcut Durum:**
-- ✅ Firebase App: Çalışıyor
-- ✅ Firestore: Çalışıyor
-- ✅ Push Notifications: Çalışıyor
-- ✅ Security Rules: ✅ Yeni eklendi
-- ⚠️ Android App ID: Güncellenmeli
-
-**Kritik Eksikler:**
-- ⚠️ Android App ID güncellenmeli
-
-**Opsiyonel Özellikler:**
-- Analytics (opsiyonel)
-- Crashlytics (opsiyonel)
-- Remote Config (opsiyonel)
-
-**Genel Durum:** Firebase entegrasyonu %90 tamam. Sadece Android App ID güncellenmeli.
-
----
-
-**Commit:** `94ce745` - Sesli komutlar kaldırıldı  
-**Sonraki Adım:** Android App ID'yi Firebase Console'dan alıp güncelle
-
+**Not:** Tüm eksiklerin tamamlanması gerekiyor.

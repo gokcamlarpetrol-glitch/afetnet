@@ -51,6 +51,23 @@ class SOSService {
       // Notify nearby devices
       await this.notifyNearbyDevices(signal);
 
+      // Save to Firestore (backup)
+      try {
+        const { firebaseDataService } = await import('./FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          await firebaseDataService.saveSOS({
+            id: signal.id,
+            deviceId: userId,
+            timestamp: signal.timestamp,
+            location: signal.location,
+            message: signal.message,
+            status: 'active',
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to save SOS to Firestore:', error);
+      }
+
       // Start continuous beacon
       this.startContinuousBeacon();
 

@@ -201,13 +201,34 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
 
   loadProfile: async () => {
     try {
+      // First load from AsyncStorage (fast)
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
         const profile = JSON.parse(stored);
         set({ profile, isLoaded: true });
-        logger.info('HealthProfile loaded');
+        logger.info('HealthProfile loaded from local storage');
       } else {
         set({ isLoaded: true });
+      }
+
+      // Then try to sync from Firebase
+      try {
+        const { getDeviceId } = await import('../../lib/device');
+        const deviceId = await getDeviceId();
+        if (deviceId) {
+          const { firebaseDataService } = await import('../services/FirebaseDataService');
+          if (firebaseDataService.isInitialized) {
+            const cloudProfile = await firebaseDataService.loadHealthProfile(deviceId);
+            if (cloudProfile) {
+              // Merge: Firebase takes precedence
+              set({ profile: cloudProfile, isLoaded: true });
+              await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cloudProfile));
+              logger.info('HealthProfile loaded from Firebase');
+            }
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to load health profile from Firebase:', error);
       }
     } catch (error) {
       logger.error('HealthProfile load failed:', error);
@@ -219,6 +240,21 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
     try {
       const { profile } = get();
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      
+      // Save to Firebase
+      try {
+        const { getDeviceId } = await import('../../lib/device');
+        const deviceId = await getDeviceId();
+        if (deviceId) {
+          const { firebaseDataService } = await import('../services/FirebaseDataService');
+          if (firebaseDataService.isInitialized) {
+            await firebaseDataService.saveHealthProfile(deviceId, profile);
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to save health profile to Firebase:', error);
+      }
+      
       logger.info('HealthProfile saved');
     } catch (error) {
       logger.error('HealthProfile save failed:', error);

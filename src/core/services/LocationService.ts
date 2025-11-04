@@ -73,6 +73,25 @@ class LocationService {
         timestamp: location.timestamp,
       };
 
+      // Save to Firebase (for critical location updates)
+      try {
+        const { getDeviceId } = await import('../../lib/device');
+        const deviceId = await getDeviceId();
+        if (deviceId) {
+          const { firebaseDataService } = await import('./FirebaseDataService');
+          if (firebaseDataService.isInitialized) {
+            await firebaseDataService.saveLocationUpdate(deviceId, {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              accuracy: location.coords.accuracy,
+              timestamp: location.timestamp,
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to save location to Firebase:', error);
+      }
+
       if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;
 

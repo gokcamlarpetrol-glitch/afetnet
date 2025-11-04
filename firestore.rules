@@ -19,6 +19,41 @@ service cloud.firestore {
         allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
         allow delete: if request.auth != null || true;
       }
+      
+      // Health profile subcollection
+      match /healthProfile/{profileId} {
+        allow read: if request.auth != null || true; // Allow for emergency access
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+      }
+      
+      // ICE (In Case of Emergency) subcollection
+      match /ice/{iceId} {
+        allow read: if request.auth != null || true; // Allow for emergency access
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+      }
+      
+      // Location updates subcollection
+      match /locationUpdates/{locationId} {
+        allow read: if request.auth != null || true; // Allow for family member tracking
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+      }
+      
+      // Status updates subcollection
+      match /statusUpdates/{statusId} {
+        allow read: if request.auth != null || true; // Allow for family member tracking
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+      }
+      
+      // Earthquake alerts subcollection
+      match /earthquakeAlerts/{alertId} {
+        allow read: if request.auth != null || resource.data.deviceId == deviceId;
+        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+      }
     }
     
     // Emergency SOS signals collection
@@ -36,6 +71,13 @@ service cloud.firestore {
       allow read: if request.auth != null || resource.data.from == deviceId || resource.data.to == deviceId;
       allow write: if request.auth != null || request.resource.data.from == deviceId;
       allow delete: if request.auth != null || request.resource.data.from == deviceId || request.resource.data.to == deviceId;
+    }
+    
+    // Earthquakes collection (public read for emergency awareness)
+    match /earthquakes/{earthquakeId} {
+      allow read: if true; // Public read for emergency awareness
+      allow write: if request.auth != null || request.resource.data.magnitude >= 4.0; // Only allow critical earthquakes
+      allow delete: if request.auth != null; // Only authenticated users can delete
     }
     
     // Deny all other access

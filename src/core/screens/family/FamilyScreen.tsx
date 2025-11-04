@@ -272,6 +272,31 @@ export default function FamilyScreen({ navigation }: any) {
             // Broadcast location update
             await useMeshStore.getState().broadcastMessage(locationMessage, 'location');
 
+            // Save to Firebase for cloud sync
+            try {
+              const { firebaseDataService } = await import('../../services/FirebaseDataService');
+              if (firebaseDataService.isInitialized) {
+                await firebaseDataService.saveLocationUpdate(myDeviceId, {
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  accuracy: location.coords.accuracy || null,
+                  timestamp: Date.now(),
+                });
+                
+                // Also save status update
+                await firebaseDataService.saveStatusUpdate(myDeviceId, {
+                  status: currentStatus,
+                  location: {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                  },
+                  timestamp: Date.now(),
+                });
+              }
+            } catch (error) {
+              logger.error('Failed to save location to Firebase:', error);
+            }
+
             // FIXED: Find member by deviceId and use member.id (not deviceId) for updateMemberLocation
             const familyMembers = useFamilyStore.getState().members;
             const myMember = familyMembers.find(m => m.deviceId === myDeviceId);
@@ -365,6 +390,33 @@ export default function FamilyScreen({ navigation }: any) {
 
       // Broadcast to all nearby devices (family members will filter by deviceId)
       await useMeshStore.getState().broadcastMessage(statusMessage, 'status');
+
+      // Save to Firebase for cloud sync
+      try {
+        const { firebaseDataService } = await import('../../services/FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          await firebaseDataService.saveStatusUpdate(myDeviceId, {
+            status,
+            location: location ? {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+            } : null,
+            timestamp: Date.now(),
+          });
+          
+          // Also save location if available
+          if (location) {
+            await firebaseDataService.saveLocationUpdate(myDeviceId, {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              accuracy: location.coords.accuracy || null,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to save status to Firebase:', error);
+      }
 
       // Also try to send directly to each family member if their deviceId is known
       // This ensures message delivery even if they're not in broadcast range
