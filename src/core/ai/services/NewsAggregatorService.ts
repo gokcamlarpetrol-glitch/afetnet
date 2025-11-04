@@ -27,33 +27,103 @@ class NewsAggregatorService {
    */
   async fetchLatestNews(): Promise<NewsArticle[]> {
     try {
-      // Simdilik mock data, Phase 4'te gercek API entegre edilecek
-      const mockNews: NewsArticle[] = [
-        {
-          id: 'news_1',
-          title: 'AFAD: Son 24 saatte 15 deprem kaydedildi',
-          summary: 'AFAD verilerine gore son 24 saatte Turkiye genelinde 15 deprem meydana geldi.',
-          url: 'https://www.afad.gov.tr',
-          source: 'AFAD',
-          publishedAt: Date.now() - 3600000, // 1 saat once
-          category: 'earthquake',
+      // Google News RSS'ten haber cek
+      const response = await fetch(GOOGLE_NEWS_RSS_URL, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'AfetNet/1.0',
         },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const xmlText = await response.text();
+      const articles = this.parseRSSFeed(xmlText);
+      
+      logger.info(`Fetched ${articles.length} news articles from Google News RSS`);
+      return articles;
+    } catch (error) {
+      logger.error('Failed to fetch news from Google News RSS:', error);
+      
+      // Fallback: Mock data
+      return [
         {
-          id: 'news_2',
-          title: 'Uzmanlar uyardi: Deprem cantasi hazir olsun',
-          summary: 'Deprem uzmanlari, her ailenin deprem cantasi hazirlamasi gerektigini vurguladi.',
-          url: 'https://example.com',
-          source: 'Haberler',
-          publishedAt: Date.now() - 7200000, // 2 saat once
-          category: 'preparedness',
+          id: 'news_fallback_1',
+          title: 'Deprem haberleri yukleniyor...',
+          summary: 'Haber servisi gecici olarak kullanilamiyor.',
+          url: '#',
+          source: 'AfetNet',
+          publishedAt: Date.now(),
+          category: 'general',
         },
       ];
-
-      return mockNews;
-    } catch (error) {
-      logger.error('Failed to fetch news:', error);
-      return [];
     }
+  }
+
+  /**
+   * RSS feed'i parse et ve NewsArticle formatina donustur
+   */
+  private parseRSSFeed(xmlText: string): NewsArticle[] {
+    const articles: NewsArticle[] = [];
+    
+    try {
+      // <item> tag'lerini bul
+      const itemRegex = /<item>(.*?)<\/item>/gs;
+      const matches = xmlText.matchAll(itemRegex);
+      
+      for (const match of matches) {
+        const itemXml = match[1];
+        
+        // Title, link, pubDate extract et
+        const title = this.extractTag(itemXml, 'title');
+        const link = this.extractTag(itemXml, 'link');
+        const pubDate = this.extractTag(itemXml, 'pubDate');
+        const description = this.extractTag(itemXml, 'description');
+        const source = this.extractTag(itemXml, 'source') || 'Google News';
+        
+        if (title && link) {
+          articles.push({
+            id: `news_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: this.cleanHTML(title),
+            summary: this.cleanHTML(description || title),
+            url: link,
+            source: this.cleanHTML(source),
+            publishedAt: pubDate ? new Date(pubDate).getTime() : Date.now(),
+            category: 'earthquake',
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to parse RSS feed:', error);
+    }
+    
+    return articles;
+  }
+
+  /**
+   * XML tag'inden icerik cikar
+   */
+  private extractTag(xml: string, tag: string): string {
+    const regex = new RegExp(`<${tag}[^>]*>(.*?)<\/${tag}>`, 's');
+    const match = xml.match(regex);
+    return match ? match[1].trim() : '';
+  }
+
+  /**
+   * HTML tag'lerini ve CDATA'yi temizle
+   */
+  private cleanHTML(text: string): string {
+    return text
+      .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .trim();
   }
 
   /**
