@@ -221,6 +221,29 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
                   <Text style={styles.loadingText}>Haber yükleniyor...</Text>
                 </View>
               )}
+              // GÜVENLIK: WebView güvenlik ayarları
+              javaScriptEnabled={true}
+              domStorageEnabled={false}
+              thirdPartyCookiesEnabled={false}
+              sharedCookiesEnabled={false}
+              allowsInlineMediaPlayback={false}
+              mediaPlaybackRequiresUserAction={true}
+              allowsBackForwardNavigationGestures={false}
+              // GÜVENLIK: Sadece HTTPS'e izin ver
+              onShouldStartLoadWithRequest={(request) => {
+                const url = request.url;
+                // Sadece HTTPS ve orijinal domain'e izin ver
+                if (!url.startsWith('https://')) {
+                  logger.warn('Blocked non-HTTPS URL:', url);
+                  return false;
+                }
+                return true;
+              }}
+              // GÜVENLIK: Hata durumunda bilgi verme
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                logger.error('WebView error:', nativeEvent);
+              }}
             />
           ) : (
             <View style={styles.noUrlContainer}>

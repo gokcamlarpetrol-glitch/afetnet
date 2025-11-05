@@ -1,24 +1,29 @@
 /**
  * FIREBASE CONFIGURATION
  * Firebase config for push notifications and analytics
+ * 
+ * GÜVENLIK: API key'ler .env dosyasından okunur
+ * ASLA hardcoded key kullanma!
  */
+
+import { ENV } from './env';
 
 export const FIREBASE_CONFIG = {
   ios: {
-    apiKey: 'REDACTED_FIREBASE_KEY',
-    projectId: 'afetnet-4a6b6',
+    apiKey: ENV.FIREBASE_API_KEY,
+    projectId: ENV.FIREBASE_PROJECT_ID,
     messagingSenderId: '702394557087',
     appId: '1:702394557087:ios:c73ce04083a4e97a0578aa',
-    storageBucket: 'afetnet-4a6b6.firebasestorage.app',
+    storageBucket: `${ENV.FIREBASE_PROJECT_ID}.firebasestorage.app`,
   },
   android: {
-    apiKey: 'REDACTED_FIREBASE_KEY',
-    projectId: 'afetnet-4a6b6',
+    apiKey: ENV.FIREBASE_API_KEY,
+    projectId: ENV.FIREBASE_PROJECT_ID,
     messagingSenderId: '702394557087',
     appId: '1:702394557087:android:YOUR_ANDROID_APP_ID',
-    storageBucket: 'afetnet-4a6b6.firebasestorage.app',
+    storageBucket: `${ENV.FIREBASE_PROJECT_ID}.firebasestorage.app`,
   },
 };
 
-export const BUNDLE_ID = 'com.gokhancamci.afetnetapp';
+export const BUNDLE_ID = ENV.BUNDLE_ID;
 

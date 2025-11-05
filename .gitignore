@@ -48,7 +48,34 @@ yarn-error.log
 .env.production.local
 .env.*.local
 
+# Firebase Config Files (SENSITIVE - Never commit!)
+google-services.json
+GoogleService-Info.plist
+firebase-config.json
+
+# Security & Secrets (SENSITIVE - Never commit!)
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.jks
+*.keystore
+.secret
+secrets.json
+credentials.json
+
 # Temporary files
 *.log
 *.tmp
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+Thumbs.db
 

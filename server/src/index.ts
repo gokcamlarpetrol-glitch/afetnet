@@ -20,6 +20,14 @@ import {
   pushRegistrationRateLimiter,
   eewRateLimiter,
 } from './middleware/rateLimiter';
+import {
+  securityHeadersMiddleware,
+  corsOptions,
+  bodyLimitMiddleware,
+  ipFilterMiddleware,
+  requestIdMiddleware,
+  suspiciousActivityMiddleware,
+} from './middleware/securityHeaders';
 
 // Load environment variables
 dotenv.config();
@@ -39,13 +47,17 @@ monitoringService.initialize({
 // Setup Sentry Express middleware (must be before other middleware)
 monitoringService.setupExpressMiddleware(app);
 
+// Security middleware (MUST be first!)
+app.use(requestIdMiddleware);
+app.use(securityHeadersMiddleware);
+app.use(ipFilterMiddleware);
+app.use(suspiciousActivityMiddleware);
+
 // Middleware
-app.use(cors({
-  origin: [/^https?:\/\/(localhost:|127\.0\.0\.1:)/, /render\.com$/, /afetnet/],
-  credentials: true,
-}));
+app.use(cors(corsOptions));
 app.set('trust proxy', 1);
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(bodyLimitMiddleware);
 
 // Performance monitoring middleware
 app.use(performanceMonitoringMiddleware);

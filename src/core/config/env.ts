@@ -23,13 +23,13 @@ export const ENV = {
   // OpenAI (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
   OPENAI_API_KEY: getEnvVar('EXPO_PUBLIC_OPENAI_API_KEY', ''),
   
-  // RevenueCat
-  RC_IOS_KEY: getEnvVar('RC_IOS_KEY', 'REDACTED_REVENUECAT_KEY'),
-  RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', 'REDACTED_REVENUECAT_KEY'),
+  // RevenueCat (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
+  RC_IOS_KEY: getEnvVar('RC_IOS_KEY', ''),
+  RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', ''),
   
-  // Firebase (Public key - client-side kullanım için güvenli)
-  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', 'REDACTED_FIREBASE_KEY'),
-  FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', 'afetnet-4a6b6'),
+  // Firebase (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
+  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', ''),
+  FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', ''),
   
   // EAS
   EAS_PROJECT_ID: getEnvVar('EAS_PROJECT_ID', '072f1217-172a-40ce-af23-3fc0ad3f7f09'),
