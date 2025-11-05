@@ -1,12 +1,14 @@
 /**
  * PREMIUM GATE - Overlay for Premium Features
- * Shows screen but prevents interaction + Trial info
+ * APPLE REVIEW CRITICAL: Trial aktifken içeriği göster, paywall gösterme!
+ * Trial bittikten sonra paywall göster.
  */
 
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTrialStore } from '../stores/trialStore';
+import { usePremiumStore } from '../stores/premiumStore';
 import { createLogger } from '../utils/logger';
 import * as haptics from '../utils/haptics';
 
@@ -15,12 +17,23 @@ const logger = createLogger('PremiumGate');
 interface PremiumGateProps {
   featureName: string;
   onUpgradePress?: () => void;
+  children?: React.ReactNode;
 }
 
-export default function PremiumGate({ featureName, onUpgradePress }: PremiumGateProps) {
+export default function PremiumGate({ featureName, onUpgradePress, children }: PremiumGateProps) {
   const daysRemaining = useTrialStore((state) => state.getRemainingDays());
   const hoursRemaining = useTrialStore((state) => state.getRemainingHours());
   const isTrialActive = useTrialStore((state) => state.isTrialActive);
+  const isPremium = usePremiumStore((state) => state.isPremium);
+
+  // APPLE REVIEW CRITICAL: Trial aktifse VEYA premium ise içeriği göster
+  if (isTrialActive || isPremium) {
+    logger.info(`Access granted to ${featureName} (trial: ${isTrialActive}, premium: ${isPremium})`);
+    return <>{children}</>;
+  }
+
+  // Trial bittiyse VE premium değilse paywall göster
+  logger.info(`Access denied to ${featureName} - showing paywall`);
 
   const handleUpgrade = () => {
     haptics.impactMedium();

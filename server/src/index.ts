@@ -11,12 +11,33 @@ import eewRoutes from './routes/eew';
 import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
+import { monitoringService, errorLoggingMiddleware, performanceMonitoringMiddleware } from './monitoring';
+import {
+  globalRateLimiter,
+  strictRateLimiter,
+  apiRateLimiter,
+  publicRateLimiter,
+  pushRegistrationRateLimiter,
+  eewRateLimiter,
+} from './middleware/rateLimiter';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Initialize Sentry monitoring (must be first)
+monitoringService.initialize({
+  dsn: process.env.SENTRY_DSN || '',
+  environment: process.env.NODE_ENV || 'production',
+  tracesSampleRate: 0.1, // 10% of transactions
+  profilesSampleRate: 0.1, // 10% of transactions
+  enabled: process.env.SENTRY_ENABLED === 'true',
+});
+
+// Setup Sentry Express middleware (must be before other middleware)
+monitoringService.setupExpressMiddleware(app);
 
 // Middleware
 app.use(cors({
@@ -26,19 +47,28 @@ app.use(cors({
 app.set('trust proxy', 1);
 app.use(express.json());
 
-// Routes
-app.use('/api', iapRoutes);
-app.use('/push', pushRoutes);
-app.use('/api', eewRoutes);
+// Performance monitoring middleware
+app.use(performanceMonitoringMiddleware);
 
-// Health check with database status
-app.get('/health', async (req, res) => {
+// Global rate limiting (applies to all routes)
+app.use(globalRateLimiter);
+
+// Routes with specific rate limiters
+app.use('/api/iap', strictRateLimiter, iapRoutes); // Strict for IAP
+app.use('/push/register', pushRegistrationRateLimiter); // Very strict for registration
+app.use('/push', apiRateLimiter, pushRoutes); // Moderate for other push endpoints
+app.use('/api/eew', eewRateLimiter, eewRoutes); // Lenient for critical EEW service
+app.use('/api', apiRateLimiter); // Moderate for other API endpoints
+
+// Health check with database status (public endpoint, lenient rate limit)
+app.get('/health', publicRateLimiter, async (req, res) => {
   try {
     const dbConnected = await pingDb();
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
       database: dbConnected ? 'connected' : 'disconnected',
+      monitoring: monitoringService ? 'active' : 'disabled',
     });
   } catch (error) {
     res.status(500).json({
@@ -50,7 +80,13 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Error handling
+// Sentry error handler (must be before other error handlers)
+monitoringService.setupErrorHandler(app);
+
+// Custom error logging middleware
+app.use(errorLoggingMiddleware);
+
+// Final error handling
 app.use((error: any, req: any, res: any, _next: any) => {
   console.error('❌ Server error:', error);
   res.status(500).json({
@@ -62,12 +98,14 @@ app.use((error: any, req: any, res: any, _next: any) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('🛑 Shutting down server...');
+  await monitoringService.flush(2000); // Flush Sentry events
   await pool.end();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('🛑 Shutting down server...');
+  await monitoringService.flush(2000); // Flush Sentry events
   await pool.end();
   process.exit(0);
 });
@@ -75,23 +113,26 @@ process.on('SIGTERM', async () => {
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 AfetNet Server running on port ${PORT}`);
+  console.log(`📊 Monitoring: ${process.env.SENTRY_ENABLED === 'true' ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`🛡️ Rate Limiting: ENABLED`);
   console.log(`📱 Endpoints:`);
-  console.log(`   GET  /api/iap/products`);
-  console.log(`   POST /api/iap/verify`);
+  console.log(`   GET  /api/iap/products (strict rate limit)`);
+  console.log(`   POST /api/iap/verify (strict rate limit)`);
   console.log(`   GET  /api/user/entitlements`);
   console.log(`   POST /api/iap/apple-notifications`);
-  console.log(`   GET  /health`);
-  console.log(`   POST /push/register`);
+  console.log(`   GET  /health (public rate limit)`);
+  console.log(`   POST /push/register (very strict rate limit)`);
   console.log(`   POST /push/unregister`);
   console.log(`   GET  /push/health`);
   console.log(`   GET  /push/tick`);
-  console.log(`   GET  /api/eew/health`);
-  console.log(`   POST /api/eew/test`);
+  console.log(`   GET  /api/eew/health (lenient rate limit)`);
+  console.log(`   POST /api/eew/test (lenient rate limit)`);
   
   // Test database connection
   const dbConnected = await pingDb();
   if (!dbConnected) {
     console.error('❌ Database connection failed - server may not work properly');
+    monitoringService.captureMessage('Database connection failed on startup', 'error');
   }
   
   // Start earthquake detection and warning services
@@ -107,7 +148,10 @@ app.listen(PORT, async () => {
       // Intentionally left as no-op to avoid altering existing push system
     });
     console.log('✅ EEW service initialized (MODE=%s)', process.env.EEW_PROVIDER_MODE||'poll');
-  }catch(err){ console.warn('⚠️ EEW init skipped:', err); }
+  }catch(err){ 
+    console.warn('⚠️ EEW init skipped:', err);
+    monitoringService.captureException(err as Error, { context: 'EEW initialization' });
+  }
 });
 
 export default app;

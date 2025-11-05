@@ -3,7 +3,7 @@
  * Displays personalized disaster preparedness plan
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,23 +11,55 @@ import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import { preparednessPlanService } from '../../ai/services/PreparednessPlanService';
 import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('PreparednessPlanScreen');
+const LOAD_TIMEOUT = 5000; // 5 seconds
 
 export default function PreparednessPlanScreen() {
   const { preparednessPlan, preparednessPlanLoading } = useAIAssistantStore();
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadPlan();
+    
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   const loadPlan = async () => {
     try {
       useAIAssistantStore.getState().setPreparednessPlanLoading(true);
+      
+      // Timeout ekle - 5 saniye sonra fallback'e geç
+      timeoutRef.current = setTimeout(() => {
+        logger.warn('Preparedness plan loading timeout, using fallback');
+        useAIAssistantStore.getState().setPreparednessPlanLoading(false);
+      }, LOAD_TIMEOUT);
+      
       const plan = await preparednessPlanService.generatePlan({});
+      
+      // Timeout'u iptal et
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      
       useAIAssistantStore.getState().setPreparednessPlan(plan);
       haptics.impactLight();
     } catch (error) {
-      console.error('Failed to load plan:', error);
+      logger.error('Failed to load plan:', error);
       useAIAssistantStore.getState().setPreparednessPlanError('Plan yuklenemedi');
+    } finally {
+      // Her durumda loading'i kapat
+      useAIAssistantStore.getState().setPreparednessPlanLoading(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     }
   };
 

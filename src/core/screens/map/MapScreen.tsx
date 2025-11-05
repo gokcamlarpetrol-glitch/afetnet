@@ -34,9 +34,13 @@ try {
 }
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { FamilyMarker } from '../../components/map/FamilyMarker';
+import TrappedUserMarker from '../../components/rescue/TrappedUserMarker';
+import ClusterMarker from '../../components/map/ClusterMarker';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
 import { useCompass } from '../../../hooks/useCompass';
 import { useUserStatusStore } from '../../stores/userStatusStore';
+import { useRescueStore, TrappedUser } from '../../stores/rescueStore';
+import { clusterMarkers, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
 
 const { width, height } = Dimensions.get('window');
 
@@ -78,10 +82,12 @@ export default function MapScreen({ navigation }: any) {
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [offlineLocations, setOfflineLocations] = useState<MapLocation[]>([]);
+  const [trappedUsers, setTrappedUsers] = useState<TrappedUser[]>([]);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedItem, setSelectedItem] = useState<Earthquake | FamilyMember | MapLocation | null>(null);
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
   const [showCompass, setShowCompass] = useState(true);
+  const [currentZoom, setCurrentZoom] = useState(10);
 
   // Compass hook
   const { heading, isAvailable: compassAvailable } = useCompass();
@@ -102,13 +108,19 @@ export default function MapScreen({ navigation }: any) {
       setFamilyMembers(state.members);
     });
 
+    const unsubscribeRescue = useRescueStore.subscribe((state) => {
+      setTrappedUsers(state.trappedUsers);
+    });
+
     // Initial load
     setEarthquakes(useEarthquakeStore.getState().items);
     setFamilyMembers(useFamilyStore.getState().members);
+    setTrappedUsers(useRescueStore.getState().trappedUsers);
 
     return () => {
       unsubscribe();
       unsubscribeFamily();
+      unsubscribeRescue();
     };
   }, []);
 
@@ -434,6 +446,25 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
             </View>
           </Marker>
         )}
+
+        {/* Trapped Users (Rescue Team Mode) */}
+        {trappedUsers.map((user) => (
+          <TrappedUserMarker
+            key={`tu-${user.id}`}
+            user={user}
+            onPress={(user) => {
+              // Zoom to user location
+              if (user.location && mapRef.current) {
+                mapRef.current.animateToRegion({
+                  latitude: user.location.latitude,
+                  longitude: user.location.longitude,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                }, 1000);
+              }
+            }}
+          />
+        ))}
       </MapView>
 
       {/* Floating UI Elements */}
@@ -441,7 +472,8 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         <BlurView intensity={50} tint="dark" style={styles.floatingHeaderBlur}>
           <Text style={styles.headerTitle}>Harita</Text>
           <Text style={styles.headerSubtitle}>
-            {earthquakes.length} deprem • {familyMembers.length} aile üyesi • {offlineLocations.length} nokta
+            {earthquakes.length} deprem • {familyMembers.length} aile • {offlineLocations.length} nokta
+            {trappedUsers.length > 0 && ` • ${trappedUsers.length} enkaz`}
           </Text>
         </BlurView>
       </View>

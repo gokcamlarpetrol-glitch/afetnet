@@ -4,9 +4,10 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/core';
 import { colors, spacing } from '../../../theme';
 import * as haptics from '../../../utils/haptics';
 import { useNewsStore } from '../../../ai/stores/newsStore';
@@ -14,6 +15,7 @@ import { newsAggregatorService } from '../../../ai/services/NewsAggregatorServic
 import { NewsArticle } from '../../../ai/types/news.types';
 
 export default function NewsCard() {
+  const navigation = useNavigation();
   const { articles, loading } = useNewsStore();
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -39,7 +41,10 @@ export default function NewsCard() {
 
       useNewsStore.getState().setArticles(allNews.slice(0, 5)); // En son 5 haber
     } catch (error) {
-      console.error('Failed to load news:', error);
+      if (__DEV__) {
+        const logger = await import('../../../utils/logger').then(m => m.createLogger('NewsCard'));
+        logger.error('Failed to load news:', error);
+      }
       useNewsStore.getState().setError('Haberler yuklenemedi');
     } finally {
       useNewsStore.getState().setLoading(false);
@@ -48,9 +53,8 @@ export default function NewsCard() {
 
   const handleArticlePress = (article: NewsArticle) => {
     haptics.impactLight();
-    if (article.url && article.url !== '#') {
-      Linking.openURL(article.url);
-    }
+    // Navigate to NewsDetailScreen instead of opening external link
+    (navigation as any).navigate('NewsDetail', { article });
   };
 
   const getTimeAgo = (timestamp: number): string => {

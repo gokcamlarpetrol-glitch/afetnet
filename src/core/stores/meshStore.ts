@@ -17,7 +17,7 @@ export interface MeshMessage {
   from: string;
   to?: string; // undefined = broadcast
   content: string;
-  type: 'text' | 'sos' | 'location' | 'status';
+  type: 'text' | 'sos' | 'location' | 'status' | 'broadcast' | 'SOS_BEACON' | 'family_group';
   timestamp: number;
   ttl: number;
   hops: number;

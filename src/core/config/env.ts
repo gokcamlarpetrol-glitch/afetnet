@@ -20,11 +20,14 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
 }
 
 export const ENV = {
+  // OpenAI (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
+  OPENAI_API_KEY: getEnvVar('EXPO_PUBLIC_OPENAI_API_KEY', ''),
+  
   // RevenueCat
   RC_IOS_KEY: getEnvVar('RC_IOS_KEY', 'REDACTED_REVENUECAT_KEY'),
   RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', 'REDACTED_REVENUECAT_KEY'),
   
-  // Firebase
+  // Firebase (Public key - client-side kullanım için güvenli)
   FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', 'REDACTED_FIREBASE_KEY'),
   FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', 'afetnet-4a6b6'),
   

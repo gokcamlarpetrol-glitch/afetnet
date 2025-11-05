@@ -6,6 +6,7 @@
 
 import { NewsArticle, NewsCategory } from '../types/news.types';
 import { createLogger } from '../../utils/logger';
+import { openAIService } from './OpenAIService';
 
 const logger = createLogger('NewsAggregatorService');
 
@@ -14,6 +15,8 @@ const GOOGLE_NEWS_RSS_URL = 'https://news.google.com/rss/search?q=deprem+türkiy
 
 class NewsAggregatorService {
   private isInitialized = false;
+  private summaryCache = new Map<string, { summary: string; timestamp: number }>();
+  private readonly CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -153,6 +156,59 @@ class NewsAggregatorService {
     } catch (error) {
       logger.error('Failed to convert earthquakes to news:', error);
       return [];
+    }
+  }
+
+  /**
+   * Haber icerigi AI ile ozetle
+   * OpenAI GPT-4 kullanarak Turkce, anlasilir ozet olustur
+   */
+  async summarizeArticle(article: NewsArticle): Promise<string> {
+    try {
+      // Cache kontrolu
+      const cacheKey = article.id;
+      const cached = this.summaryCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+        logger.info('Returning cached summary for:', article.title);
+        return cached.summary;
+      }
+
+      // OpenAI ile ozet olustur
+      if (!openAIService.isConfigured()) {
+        logger.warn('OpenAI not configured, returning article summary');
+        return article.summary || article.title;
+      }
+
+      const prompt = `Aşağıdaki haber içeriğini Türkçe olarak özetle. Özet 3-5 paragraf olmalı, anlaşılır ve bilgilendirici olmalı. Deprem ve afet güvenliği açısından önemli detayları vurgula.
+
+Haber Başlığı: ${article.title}
+
+Haber İçeriği:
+${article.summary}
+
+Kaynak: ${article.source}
+${article.magnitude ? `Deprem Büyüklüğü: ${article.magnitude}` : ''}
+${article.location ? `Konum: ${article.location}` : ''}
+
+Lütfen sadece özet metnini döndür, başlık veya ek açıklama ekleme.`;
+
+      const systemPrompt = `Sen bir haber özeti uzmanısın. Deprem ve afet haberleri konusunda bilgilisin. Özetlerin Türkçe, anlaşılır, bilgilendirici ve objektif olmalı. Paniğe yol açmadan, gerçekleri net bir şekilde aktarmalısın.`;
+
+      const summary = await openAIService.generateText(prompt, {
+        systemPrompt,
+        maxTokens: 500,
+        temperature: 0.7,
+      });
+
+      // Cache'e kaydet
+      this.summaryCache.set(cacheKey, { summary, timestamp: Date.now() });
+
+      logger.info('Generated AI summary for:', article.title);
+      return summary;
+    } catch (error) {
+      logger.error('Failed to summarize article:', error);
+      // Fallback: Orijinal ozet
+      return article.summary || article.title;
     }
   }
 }

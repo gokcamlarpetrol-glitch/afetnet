@@ -3,7 +3,7 @@
  * Provides emergency actions during disasters
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,18 +11,43 @@ import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import { panicAssistantService } from '../../ai/services/PanicAssistantService';
 import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('PanicAssistantScreen');
+const LOAD_TIMEOUT = 5000; // 5 seconds
 
 export default function PanicAssistantScreen() {
   const { panicAssistant, panicAssistantLoading } = useAIAssistantStore();
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadActions();
+    
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   const loadActions = async () => {
     try {
       useAIAssistantStore.getState().setPanicAssistantLoading(true);
+      
+      // Timeout ekle - 5 saniye sonra fallback'e geç
+      timeoutRef.current = setTimeout(() => {
+        logger.warn('Panic assistant loading timeout, using fallback');
+        useAIAssistantStore.getState().setPanicAssistantLoading(false);
+      }, LOAD_TIMEOUT);
+      
       const actions = await panicAssistantService.getEmergencyActions('earthquake');
+      
+      // Timeout'u iptal et
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      
       useAIAssistantStore.getState().setPanicAssistant({
         isActive: true,
         currentScenario: 'earthquake',
@@ -31,8 +56,15 @@ export default function PanicAssistantScreen() {
       });
       haptics.impactHeavy();
     } catch (error) {
-      console.error('Failed to load actions:', error);
+      logger.error('Failed to load actions:', error);
       useAIAssistantStore.getState().setPanicAssistantError('Aksiyonlar yuklenemedi');
+    } finally {
+      // Her durumda loading'i kapat
+      useAIAssistantStore.getState().setPanicAssistantLoading(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     }
   };
 

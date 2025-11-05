@@ -3,7 +3,7 @@
  * Displays user's earthquake risk score and recommendations
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,23 +12,55 @@ import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import { riskScoringService } from '../../ai/services/RiskScoringService';
 import { RiskLevel } from '../../ai/types/ai.types';
 import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('RiskScoreScreen');
+const LOAD_TIMEOUT = 5000; // 5 seconds
 
 export default function RiskScoreScreen() {
   const { riskScore, riskScoreLoading } = useAIAssistantStore();
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadRiskScore();
+    
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   const loadRiskScore = async () => {
     try {
       useAIAssistantStore.getState().setRiskScoreLoading(true);
+      
+      // Timeout ekle - 5 saniye sonra fallback'e geç
+      timeoutRef.current = setTimeout(() => {
+        logger.warn('Risk score loading timeout, using fallback');
+        useAIAssistantStore.getState().setRiskScoreLoading(false);
+      }, LOAD_TIMEOUT);
+      
       const score = await riskScoringService.calculateRiskScore({});
+      
+      // Timeout'u iptal et
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      
       useAIAssistantStore.getState().setRiskScore(score);
       haptics.impactLight();
     } catch (error) {
-      console.error('Failed to load risk score:', error);
+      logger.error('Failed to load risk score:', error);
       useAIAssistantStore.getState().setRiskScoreError('Risk skoru yuklenemedi');
+    } finally {
+      // Her durumda loading'i kapat
+      useAIAssistantStore.getState().setRiskScoreLoading(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     }
   };
 

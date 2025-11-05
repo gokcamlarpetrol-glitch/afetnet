@@ -85,6 +85,67 @@ class EarthquakeService {
           logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
           autoCheckinService.startCheckIn(latestEq.magnitude);
           
+          // 🤖 AI ANALIZI: Deprem analizi ve doğrulama
+          try {
+            const { earthquakeAnalysisService } = await import('../ai/services/EarthquakeAnalysisService');
+            
+            // Kullanıcı konumunu al
+            let userLocation: { latitude: number; longitude: number } | undefined;
+            try {
+              const Location = await import('expo-location');
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status === 'granted') {
+                const position = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.Balanced,
+                });
+                userLocation = {
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude,
+                };
+              }
+            } catch (locError) {
+              logger.warn('Could not get user location for analysis:', locError);
+            }
+
+            // AI analizi yap
+            const analysis = await earthquakeAnalysisService.analyzeEarthquake(
+              latestEq,
+              userLocation
+            );
+
+            if (analysis) {
+              logger.info(`✅ AI Analizi tamamlandı: Risk=${analysis.riskLevel}, Doğrulandı=${analysis.verified}, Güven=${analysis.confidence}%`);
+              
+              // AI analizi ile bildirim gönder
+              const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+              await multiChannelAlertService.sendAlert({
+                title: `${latestEq.magnitude} Deprem${analysis.verified ? ' ✓ Doğrulandı' : ''}`,
+                body: analysis.userMessage,
+                priority: latestEq.magnitude >= 5.0 ? 'critical' : 'high',
+                channels: {
+                  pushNotification: true,
+                  fullScreenAlert: latestEq.magnitude >= 5.0,
+                  alarmSound: latestEq.magnitude >= 5.0,
+                  vibration: true,
+                  tts: latestEq.magnitude >= 5.0,
+                  led: false,
+                  bluetooth: false,
+                },
+                data: {
+                  earthquake: latestEq,
+                  analysis,
+                  verified: analysis.verified,
+                  sources: analysis.sources,
+                },
+              });
+            } else {
+              logger.warn('⚠️ AI analizi yapılamadı veya deprem doğrulanamadı');
+            }
+          } catch (aiError) {
+            logger.error('AI analysis failed:', aiError);
+            // AI hatası durumunda normal akışa devam et
+          }
+          
           // Save to Firebase (for critical earthquakes >= 4.0)
           try {
             const { firebaseDataService } = await import('./FirebaseDataService');

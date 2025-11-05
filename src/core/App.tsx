@@ -41,6 +41,9 @@ import RiskScoreScreen from './screens/ai/RiskScoreScreen';
 import PreparednessPlanScreen from './screens/ai/PreparednessPlanScreen';
 import PanicAssistantScreen from './screens/ai/PanicAssistantScreen';
 
+// News Screens
+import NewsDetailScreen from './screens/news/NewsDetailScreen';
+
 // Navigation
 import MainTabs from './navigation/MainTabs';
 import { colors } from './theme';
@@ -171,6 +174,10 @@ export default function CoreApp() {
                   headerStyle: { backgroundColor: colors.background.primary },
                   headerTintColor: colors.text.primary,
                 }}
+              />
+              <Stack.Screen 
+                name="NewsDetail" 
+                component={NewsDetailScreen}
               />
               </Stack.Navigator>
             </NavigationContainer>

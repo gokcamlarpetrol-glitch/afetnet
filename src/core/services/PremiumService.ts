@@ -35,7 +35,7 @@ class PremiumService {
       const apiKey = Platform.OS === 'ios' ? REVENUECAT_API_KEY_IOS : REVENUECAT_API_KEY_ANDROID;
       
       if (!apiKey) {
-        if (__DEV__) logger.warn('RevenueCat API key not found. Using trial only.');
+        logger.info('RevenueCat API key not found. Using trial only.');
         // Check trial status
         const isTrialActive = useTrialStore.getState().checkTrialStatus();
         usePremiumStore.getState().setPremium(isTrialActive);
@@ -50,7 +50,7 @@ class PremiumService {
       await this.checkPremiumStatus();
 
       this.isInitialized = true;
-      if (__DEV__) logger.info('Initialized successfully');
+      logger.info('Initialized successfully');
 
     } catch (error) {
       logger.error('Initialization error:', error);

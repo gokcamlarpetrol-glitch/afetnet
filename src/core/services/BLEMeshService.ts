@@ -209,15 +209,15 @@ class BLEMeshService {
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
       if (firebaseDataService.isInitialized) {
-        await firebaseDataService.saveMessage({
-          id: message.id,
-          from: message.from,
-          to: message.to,
-          content: message.content,
-          type: message.type,
-          timestamp: message.timestamp,
-          priority: message.type === 'sos' ? 'critical' : 'normal',
-        });
+      await firebaseDataService.saveMessage({
+        id: message.id,
+        from: message.from,
+        to: message.to,
+        content: message.content,
+        type: (message.type === 'sos' || message.type === 'status' || message.type === 'location' || message.type === 'text') ? message.type : 'text',
+        timestamp: message.timestamp,
+        priority: message.type === 'sos' ? 'critical' : 'normal',
+      });
       }
     } catch (error) {
       logger.error('Failed to save message to Firestore:', error);
@@ -245,6 +245,49 @@ class BLEMeshService {
     useMeshStore.getState().incrementStat('messagesSent');
 
     if (__DEV__) logger.info('SOS sent:', message.id);
+  }
+
+  /**
+   * Broadcast a message to all nearby devices (for beacon)
+   */
+  async broadcastMessage(message: Partial<MeshMessage> | string) {
+    if (!this.myDeviceId) return;
+
+    // Handle string payload (for beacon)
+    if (typeof message === 'string') {
+      const fullMessage: MeshMessage = {
+        id: await Crypto.randomUUID(),
+        from: this.myDeviceId,
+        content: message,
+        type: 'broadcast',
+        timestamp: Date.now(),
+        ttl: 5,
+        hops: 0,
+        delivered: false,
+      };
+      this.messageQueue.push(fullMessage);
+      useMeshStore.getState().incrementStat('messagesSent');
+      if (__DEV__) logger.info('Broadcast message queued (string)');
+      return;
+    }
+
+    // Handle object payload
+    const fullMessage: MeshMessage = {
+      id: await Crypto.randomUUID(),
+      from: this.myDeviceId,
+      content: message.content || '',
+      type: message.type || 'broadcast',
+      timestamp: message.timestamp || Date.now(),
+      ttl: 5, // Lower TTL for broadcasts
+      hops: 0,
+      delivered: false,
+      ...message,
+    };
+
+    this.messageQueue.push(fullMessage);
+    useMeshStore.getState().incrementStat('messagesSent');
+
+    if (__DEV__) logger.info('Broadcast message queued:', fullMessage.type);
   }
 
   private async requestPermissions() {
@@ -279,6 +322,22 @@ class BLEMeshService {
       const fallbackId = `afn-${uuid.slice(0, 8)}`;
       if (__DEV__) logger.warn('Using fallback device ID:', fallbackId);
       return fallbackId;
+    }
+  }
+
+  /**
+   * Handle received beacon message
+   */
+  private async handleBeaconMessage(message: MeshMessage, rssi?: number | null) {
+    try {
+      // Parse beacon payload
+      const payload = JSON.parse(message.content);
+      
+      // Forward to rescue beacon service
+      const { rescueBeaconService } = await import('./RescueBeaconService');
+      await rescueBeaconService.handleReceivedBeacon(payload, rssi || undefined);
+    } catch (error) {
+      logger.error('Failed to handle beacon message:', error);
     }
   }
 
@@ -420,6 +479,11 @@ class BLEMeshService {
             if (value && value.value) {
               const payload = Buffer.from(value.value, 'base64').toString('utf-8');
               const incomingMessage = JSON.parse(payload) as MeshMessage;
+              
+              // Handle beacon messages
+              if (incomingMessage.type === 'SOS_BEACON') {
+                await this.handleBeaconMessage(incomingMessage, device.rssi);
+              }
               
               // Add to store if not duplicate
               useMeshStore.getState().addMessage(incomingMessage);

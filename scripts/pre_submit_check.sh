@@ -14,13 +14,13 @@ if [ -n "$FORBIDDEN" ]; then
 fi
 
 # 2) Verify Paywall route exists
-if ! grep -q "name=\"Paywall\"" src/navigation/AppNavigator.tsx; then
+if ! grep -q "name=\"Paywall\"" src/core/App.tsx; then
   echo "❌ Paywall route missing in navigation"
   exit 1
 fi
 
 # 3) Verify Settings has a Premium button (navigate to Paywall)
-if ! grep -q "navigate('Paywall')" src/screens/Settings/components/PremiumSection.tsx; then
+if ! grep -q "navigate('Paywall')" src/core/screens/settings/SettingsScreen.tsx; then
   echo "❌ Settings Premium button not wired to Paywall"
   exit 1
 fi

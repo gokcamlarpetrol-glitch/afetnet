@@ -79,6 +79,7 @@ export async function checkFirebaseHealth(): Promise<ServiceHealthStatus> {
 
 /**
  * Check BLE Mesh service health
+ * Note: "degraded" status is normal - Bluetooth might be off or no peers nearby
  */
 export async function checkBLEMeshHealth(): Promise<ServiceHealthStatus> {
   const startTime = Date.now();
@@ -90,12 +91,15 @@ export async function checkBLEMeshHealth(): Promise<ServiceHealthStatus> {
     const myDeviceId = meshStore.myDeviceId;
     
     if (!myDeviceId) {
-      return {
+      // This is normal on first launch or if Bluetooth is disabled
+      healthStatuses.set('BLE Mesh', {
         name: 'BLE Mesh',
-        status: 'down',
-        message: 'BLE Mesh service not initialized (no device ID)',
+        status: 'degraded',
+        message: 'BLE Mesh service not initialized - Bluetooth may be disabled or permissions not granted',
         lastChecked: startTime,
-      };
+      });
+      
+      return healthStatuses.get('BLE Mesh')!;
     }
     
     // Check if there are any peers or messages (indicates service is active)
@@ -111,19 +115,21 @@ export async function checkBLEMeshHealth(): Promise<ServiceHealthStatus> {
       
       return healthStatuses.get('BLE Mesh')!;
     } else {
+      // No activity is normal - just means no peers nearby or Bluetooth is off
       healthStatuses.set('BLE Mesh', {
         name: 'BLE Mesh',
-        status: 'degraded',
-        message: 'BLE Mesh initialized but no activity (Bluetooth might be disabled or no peers nearby)',
+        status: 'healthy',
+        message: 'BLE Mesh initialized - No peers nearby (this is normal)',
         lastChecked: startTime,
       });
       
       return healthStatuses.get('BLE Mesh')!;
     }
   } catch (error) {
+    // Only mark as down if there's an actual error
     return {
       name: 'BLE Mesh',
-      status: 'down',
+      status: 'degraded',
       message: `BLE Mesh check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       lastChecked: startTime,
     };

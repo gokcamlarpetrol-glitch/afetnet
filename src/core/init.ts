@@ -24,6 +24,7 @@ import { flashlightService } from './services/FlashlightService';
 import { voiceCommandService } from './services/VoiceCommandService';
 import { offlineMapService } from './services/OfflineMapService';
 import { firebaseDataService } from './services/FirebaseDataService';
+import { storageManagementService } from './services/StorageManagementService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
 import { useTrialStore } from './stores/trialStore';
 import { createLogger } from './utils/logger';
@@ -144,6 +145,18 @@ export async function initializeApp() {
     await initWithTimeout(() => offlineMapService.initialize(), 'OfflineMapService');
     await initWithTimeout(() => useHealthProfileStore.getState().loadProfile(), 'HealthProfile');
 
+    // Step 16.5: Storage Management Service (Critical)
+    await initWithTimeout(async () => {
+      await storageManagementService.initialize();
+      storageManagementService.startMonitoring(60000); // Check every minute
+    }, 'StorageManagementService');
+
+    // Step 16.6: Rescue Beacon Service (Emergency)
+    await initWithTimeout(async () => {
+      const { rescueBeaconService } = await import('./services/RescueBeaconService');
+      await rescueBeaconService.initialize();
+    }, 'RescueBeaconService');
+
     // Step 17: Auto-save device ID to Firestore
     await initWithTimeout(async () => {
       try {
@@ -187,13 +200,15 @@ export async function initializeApp() {
         const { panicAssistantService } = await import('./ai/services/PanicAssistantService');
         const { newsAggregatorService } = await import('./ai/services/NewsAggregatorService');
         const { openAIService } = await import('./ai/services/OpenAIService');
+        const { earthquakeAnalysisService } = await import('./ai/services/EarthquakeAnalysisService');
         
+        await openAIService.initialize();
         await riskScoringService.initialize();
         await preparednessPlanService.initialize();
         await panicAssistantService.initialize();
         await newsAggregatorService.initialize();
-        await openAIService.initialize();
-        logger.info('AI services initialized');
+        await earthquakeAnalysisService.initialize();
+        logger.info('AI services initialized (OpenAI-powered)');
       } else {
         logger.info('AI services disabled by feature flag');
       }
@@ -207,13 +222,22 @@ export async function initializeApp() {
   }
 }
 
-export function shutdownApp() {
+export async function shutdownApp() {
   earthquakeService.stop();
   bleMeshService.stop();
   eewService.stop();
   cellBroadcastService.stop();
   seismicSensorService.stop();
   enkazDetectionService.stop();
+  storageManagementService.stopMonitoring();
+  
+  // Stop rescue beacon if active
+  try {
+    const { rescueBeaconService } = await import('./services/RescueBeaconService');
+    rescueBeaconService.stopBeacon();
+  } catch (error) {
+    logger.error('Failed to stop rescue beacon:', error);
+  }
   
   isInitialized = false;
 }

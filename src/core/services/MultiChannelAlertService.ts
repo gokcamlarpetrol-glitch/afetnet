@@ -146,30 +146,32 @@ class MultiChannelAlertService {
       await this.cancelAlert();
     }
 
-    this.currentAlert = options;
+    // AI mesaj optimizasyonu
+    const optimizedOptions = this.optimizeAlertForChannels(options);
+    this.currentAlert = optimizedOptions;
     this.isAlerting = true;
 
-    const channels = { ...DEFAULT_CHANNELS, ...options.channels };
+    const channels = { ...DEFAULT_CHANNELS, ...optimizedOptions.channels };
 
     try {
       // 1. Push Notification (always on)
       if (channels.pushNotification) {
-        await this.sendPushNotification(options);
+        await this.sendPushNotification(optimizedOptions);
       }
 
       // 2. Full Screen Alert (critical priority)
-      if (channels.fullScreenAlert && (options.priority === 'critical' || options.priority === 'high')) {
-        await this.showFullScreenAlert(options);
+      if (channels.fullScreenAlert && (optimizedOptions.priority === 'critical' || optimizedOptions.priority === 'high')) {
+        await this.showFullScreenAlert(optimizedOptions);
       }
 
       // 3. Alarm Sound
       if (channels.alarmSound) {
-        await this.playAlarmSound(options.sound);
+        await this.playAlarmSound(optimizedOptions.sound);
       }
 
       // 4. Vibration
       if (channels.vibration) {
-        await this.startVibration(options.vibrationPattern);
+        await this.startVibration(optimizedOptions.vibrationPattern);
       }
 
       // 5. LED Flash
@@ -177,21 +179,21 @@ class MultiChannelAlertService {
         await this.startLEDFlash();
       }
 
-      // 6. Text-to-Speech
+      // 6. Text-to-Speech (AI-optimized)
       if (channels.tts) {
-        await this.speakText(options.ttsText || options.body);
+        await this.speakText(optimizedOptions.ttsText || optimizedOptions.body);
       }
 
       // 7. Bluetooth Broadcast (if enabled)
       if (channels.bluetooth) {
-        await this.broadcastViaBluetooth(options);
+        await this.broadcastViaBluetooth(optimizedOptions);
       }
 
       // Auto-dismiss after duration (if set) - STORE TIMEOUT TO PREVENT MEMORY LEAK
-      if (options.duration && options.duration > 0) {
+      if (optimizedOptions.duration && optimizedOptions.duration > 0) {
         this.dismissTimeout = setTimeout(() => {
           this.cancelAlert();
-        }, options.duration * 1000);
+        }, optimizedOptions.duration * 1000);
       }
 
     } catch (error) {
@@ -199,6 +201,66 @@ class MultiChannelAlertService {
       this.isAlerting = false;
       this.currentAlert = null;
     }
+  }
+
+  /**
+   * AI mesajlarını kanallar için optimize et
+   */
+  private optimizeAlertForChannels(options: AlertOptions): AlertOptions {
+    const optimized = { ...options };
+
+    // TTS için özel metin oluştur (daha kısa ve net)
+    if (!options.ttsText) {
+      optimized.ttsText = this.generateTTSText(options);
+    }
+
+    // 5.0+ depremler için tüm kanalları aktifleştir
+    if (options.data?.earthquake?.magnitude >= 5.0) {
+      optimized.priority = 'critical';
+      optimized.channels = {
+        ...optimized.channels,
+        fullScreenAlert: true,
+        alarmSound: true,
+        vibration: true,
+        tts: true,
+      };
+      
+      logger.info('🚨 Büyük deprem (5.0+) - Tüm kanallar aktif');
+    }
+
+    // Doğrulanmış depremler için özel işaretleme
+    if (options.data?.verified) {
+      logger.info('✅ Doğrulanmış deprem bilgisi');
+    }
+
+    return optimized;
+  }
+
+  /**
+   * TTS için optimize edilmiş metin oluştur
+   */
+  private generateTTSText(options: AlertOptions): string {
+    // AI mesajından TTS için uygun metin çıkar
+    let ttsText = options.body;
+
+    // Çok uzunsa kısalt (TTS için ideal: 100-150 karakter)
+    if (ttsText.length > 150) {
+      // İlk cümleyi al
+      const firstSentence = ttsText.split('.')[0];
+      if (firstSentence.length > 0 && firstSentence.length <= 150) {
+        ttsText = firstSentence + '.';
+      } else {
+        ttsText = ttsText.substring(0, 147) + '...';
+      }
+    }
+
+    // Özel karakterleri temizle
+    ttsText = ttsText
+      .replace(/[✓✅⚠️🚨]/g, '') // Emoji'leri kaldır
+      .replace(/\s+/g, ' ') // Çoklu boşlukları tek boşluğa indir
+      .trim();
+
+    return ttsText;
   }
 
   async cancelAlert() {

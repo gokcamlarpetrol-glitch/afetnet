@@ -169,7 +169,6 @@ interface FeatureGridProps {
 export default function FeatureGrid({ navigation }: FeatureGridProps) {
   const handlePress = (feature: Feature) => {
     haptics.impactMedium();
-    console.log(`Hızlı erişim butonu tıklandı: ${feature.title} (${feature.screen})`);
     
     try {
       // Direct navigation - works for both tab screens and stack screens
@@ -178,16 +177,16 @@ export default function FeatureGrid({ navigation }: FeatureGridProps) {
       if (['Map', 'Family', 'Messages'].includes(feature.screen)) {
         // Tab screens - navigate within MainTabs
         navigation.navigate(feature.screen);
-        console.log(`Tab navigasyon başarılı: ${feature.screen}`);
       } else {
         // Stack screens - navigate to parent Stack Navigator
         // Get parent navigator if available
         const parentNavigator = navigation.getParent?.() || navigation;
         parentNavigator.navigate(feature.screen);
-        console.log(`Stack navigasyon başarılı: ${feature.screen}`);
       }
     } catch (error) {
-      console.error(`Navigasyon hatası (${feature.screen}):`, error);
+      if (__DEV__) {
+        console.error(`Navigasyon hatası (${feature.screen}):`, error);
+      }
     }
   };
 

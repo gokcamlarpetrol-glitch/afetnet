@@ -1,0 +1,375 @@
+/**
+ * FAMILY GROUP CHAT SCREEN
+ * Group messaging for family members via BLE Mesh
+ */
+
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useFamilyStore } from '../../stores/familyStore';
+import { bleMeshService } from '../../services/BLEMeshService';
+import { colors } from '../../theme';
+import * as haptics from '../../utils/haptics';
+import { getDeviceId } from '../../../lib/device';
+
+interface GroupMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: number;
+  status: 'sending' | 'sent' | 'delivered' | 'read';
+  readBy: string[];
+}
+
+export default function FamilyGroupChatScreen({ navigation }: any) {
+  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [myDeviceId, setMyDeviceId] = useState('');
+  const flatListRef = useRef<FlatList>(null);
+  const { members } = useFamilyStore();
+
+  useEffect(() => {
+    loadDeviceId();
+    loadMessages();
+
+    // Listen for new messages
+    const unsubscribe = bleMeshService.onMessage((message) => {
+      if (message.type === 'family_group') {
+        const groupMsg: GroupMessage = JSON.parse(message.content);
+        setMessages((prev) => [...prev, groupMsg]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const loadDeviceId = async () => {
+    const id = await getDeviceId();
+    setMyDeviceId(id);
+  };
+
+  const loadMessages = () => {
+    // Load from storage (simplified)
+    setMessages([]);
+  };
+
+  const handleSend = async () => {
+    if (!inputText.trim()) return;
+
+    haptics.impactLight();
+
+    const newMessage: GroupMessage = {
+      id: Date.now().toString(),
+      senderId: myDeviceId,
+      senderName: 'Ben',
+      content: inputText.trim(),
+      timestamp: Date.now(),
+      status: 'sending',
+      readBy: [myDeviceId],
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+    setInputText('');
+
+    // Send via BLE Mesh
+    await bleMeshService.broadcastMessage({
+      type: 'family_group',
+      content: JSON.stringify(newMessage),
+      timestamp: Date.now(),
+    });
+
+    // Update status
+    setTimeout(() => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === newMessage.id ? { ...msg, status: 'sent' } : msg
+        )
+      );
+    }, 1000);
+
+    // Scroll to bottom
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  const renderMessage = ({ item }: { item: GroupMessage }) => {
+    const isMyMessage = item.senderId === myDeviceId;
+
+    return (
+      <View
+        style={[
+          styles.messageContainer,
+          isMyMessage ? styles.myMessage : styles.theirMessage,
+        ]}
+      >
+        {!isMyMessage && (
+          <Text style={styles.senderName}>{item.senderName}</Text>
+        )}
+        <View
+          style={[
+            styles.messageBubble,
+            isMyMessage ? styles.myBubble : styles.theirBubble,
+          ]}
+        >
+          <Text
+            style={[
+              styles.messageText,
+              isMyMessage && styles.myMessageText,
+            ]}
+          >
+            {item.content}
+          </Text>
+          <View style={styles.messageFooter}>
+            <Text
+              style={[
+                styles.messageTime,
+                isMyMessage && styles.myMessageTime,
+              ]}
+            >
+              {new Date(item.timestamp).toLocaleTimeString('tr-TR', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </Text>
+            {isMyMessage && (
+              <Ionicons
+                name={
+                  item.status === 'read'
+                    ? 'checkmark-done'
+                    : item.status === 'delivered'
+                    ? 'checkmark-done'
+                    : item.status === 'sent'
+                    ? 'checkmark'
+                    : 'time'
+                }
+                size={14}
+                color={
+                  item.status === 'read'
+                    ? '#3b82f6'
+                    : 'rgba(255, 255, 255, 0.7)'
+                }
+              />
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
+        </Pressable>
+        <View style={styles.headerInfo}>
+          <Text style={styles.title}>Aile Grubu</Text>
+          <Text style={styles.subtitle}>{members.length} üye</Text>
+        </View>
+        <Pressable style={styles.infoButton}>
+          <Ionicons name="information-circle-outline" size={24} color={colors.text.primary} />
+        </Pressable>
+      </View>
+
+      {/* Messages List */}
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.messagesList}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons name="chatbubbles-outline" size={64} color={colors.text.tertiary} />
+            <Text style={styles.emptyText}>Henüz mesaj yok</Text>
+            <Text style={styles.emptySubtext}>
+              Ailenizle BLE Mesh üzerinden mesajlaşın
+            </Text>
+          </View>
+        }
+      />
+
+      {/* Input */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.input}
+            placeholder="Mesaj yazın..."
+            placeholderTextColor={colors.text.tertiary}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={500}
+          />
+          <Pressable
+            style={[
+              styles.sendButton,
+              !inputText.trim() && styles.sendButtonDisabled,
+            ]}
+            onPress={handleSend}
+            disabled={!inputText.trim()}
+          >
+            <Ionicons
+              name="send"
+              size={20}
+              color={inputText.trim() ? '#ffffff' : colors.text.tertiary}
+            />
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.light,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerInfo: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  infoButton: {
+    padding: 8,
+  },
+  messagesList: {
+    padding: 16,
+  },
+  messageContainer: {
+    marginBottom: 16,
+    maxWidth: '80%',
+  },
+  myMessage: {
+    alignSelf: 'flex-end',
+  },
+  theirMessage: {
+    alignSelf: 'flex-start',
+  },
+  senderName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginBottom: 4,
+    marginLeft: 12,
+  },
+  messageBubble: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  myBubble: {
+    backgroundColor: colors.brand.primary,
+    borderBottomRightRadius: 4,
+  },
+  theirBubble: {
+    backgroundColor: colors.background.card,
+    borderBottomLeftRadius: 4,
+  },
+  messageText: {
+    fontSize: 15,
+    color: colors.text.primary,
+    lineHeight: 20,
+  },
+  myMessageText: {
+    color: '#ffffff',
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  messageTime: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  myMessageTime: {
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.text.tertiary,
+    marginTop: 8,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.light,
+    backgroundColor: colors.background.primary,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: colors.background.card,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text.primary,
+    maxHeight: 100,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.brand.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  sendButtonDisabled: {
+    backgroundColor: colors.background.tertiary,
+  },
+});
+
+
