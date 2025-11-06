@@ -156,7 +156,12 @@ export default function UserReportsScreen({ navigation }: any) {
   };
 
   if (!isPremium) {
-    return <PremiumGate featureName="Kullanıcı Raporları" />;
+    return (
+      <PremiumGate
+        featureName="Kullanıcı Raporları"
+        onUpgradePress={() => navigation?.navigate?.('Paywall')}
+      />
+    );
   }
 
   return (

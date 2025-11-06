@@ -3,7 +3,7 @@
  * QR scan, ID input, or BLE discovery
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Alert,
   ScrollView,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,6 +26,7 @@ import { getDeviceId as getDeviceIdFromLib, isValidDeviceId } from '../../../lib
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import * as Clipboard from 'expo-clipboard';
 
 const logger = createLogger('NewMessageScreen');
 
@@ -36,36 +38,175 @@ export default function NewMessageScreen({ navigation }: any) {
   const [isScanning, setIsScanning] = useState(false);
   const [scannedDevices, setScannedDevices] = useState<Array<{ deviceId: string; name?: string; rssi?: number }>>([]);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const isScanningRef = useRef(isScanning);
+  const scanCountdownStateRef = useRef(0);
+  const discoveryUnsubscribeRef = useRef<(() => void) | null>(null);
+  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scanCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const scannedDevicesRef = useRef(0);
+  const initRequestedRef = useRef(false);
+  const [scanCountdown, setScanCountdown] = useState(0);
 
+  const meshStoreDeviceId = useMeshStore((state) => state.myDeviceId);
+
+  const tabOptions = useMemo<
+    ReadonlyArray<{ key: 'qr' | 'id' | 'scan'; label: string; icon: keyof typeof Ionicons.glyphMap }>
+  >(
+    () => [
+      { key: 'qr', label: 'QR Kod', icon: 'qr-code' },
+      { key: 'id', label: 'ID ile Ekle', icon: 'key-outline' },
+      { key: 'scan', label: 'Tarama', icon: 'bluetooth' },
+    ],
+    []
+  );
+
+  const displayDeviceId = myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...';
+
+  const handleHelp = useCallback(() => {
+    Alert.alert(
+      'Mesh Mesajlaşma',
+      'AfetNet cihazları Bluetooth mesh ağı üzerinden haberleşir. Bluetooth ve konum izinleri kapalıysa mesajlar iletilmez. Erişim sorununda her iki izni de kontrol edin.'
+    );
+  }, []);
+
+  const handleShowMyQrInfo = useCallback(() => {
+    const id = myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
+    if (!id) {
+      Alert.alert(
+        'Cihaz ID hazır değil',
+        'Önce Bluetooth ve konum izinlerini açarak mesh ağını başlatın.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Benim AfetNet ID’m',
+      `${id}
+
+Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sağlayabilirsiniz.`
+    );
+  }, []);
+
+  const getSignalLabel = (rssi?: number) => {
+    if (typeof rssi !== 'number') return undefined;
+    if (rssi > -70) return 'Sinyal: Güçlü';
+    if (rssi > -90) return 'Sinyal: Orta';
+    return 'Sinyal: Zayıf';
+  };
+
+  const isMeshConnected = useMeshStore((state) => state.isConnected);
+  const myDeviceIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const getMyId = async () => {
+    myDeviceIdRef.current = myDeviceId;
+  }, [myDeviceId]);
+
+  const ensureMeshReady = useCallback(async (): Promise<string | null> => {
+    const meshStore = useMeshStore.getState();
+    let id = bleMeshService.getMyDeviceId() || meshStore.myDeviceId || myDeviceIdRef.current;
+
+    if (!id) {
       try {
-        const id = bleMeshService.getMyDeviceId() || await getDeviceIdFromLib();
-        setMyDeviceId(id);
+        await bleMeshService.start();
       } catch (error) {
-        logger.error('Failed to get device ID:', error);
+        logger.warn('Mesh start attempt failed:', error);
       }
-    };
-    getMyId();
+      const refreshedStore = useMeshStore.getState();
+      id = bleMeshService.getMyDeviceId() || refreshedStore.myDeviceId || myDeviceIdRef.current;
+    }
+
+    if (!id) {
+      try {
+        const fallback = await getDeviceIdFromLib();
+        if (fallback) {
+          id = fallback;
+          useMeshStore.getState().setMyDeviceId(fallback);
+          setMyDeviceId(fallback);
+          myDeviceIdRef.current = fallback;
+        }
+      } catch (error) {
+        logger.error('Device ID retrieval failed:', error);
+      }
+    }
+
+    if (!id) {
+      Alert.alert(
+        'Mesh Ağı Aktif Değil',
+        'Bluetooth açık değil veya gerekli izinler verilmedi. Lütfen Bluetoothu etkinleştirip tekrar deneyin.'
+      );
+      return null;
+    }
+
+    if (!myDeviceIdRef.current && id) {
+      setMyDeviceId(id);
+      myDeviceIdRef.current = id;
+    }
+
+    const latestStore = useMeshStore.getState();
+    if (latestStore.myDeviceId !== id) {
+      latestStore.setMyDeviceId(id);
+    }
+    if (!latestStore.isConnected) {
+      latestStore.setConnected(true);
+    }
+
+    return id;
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'scan') {
-      startBLEScan();
-    } else {
-      stopBLEScan();
-    }
-    return () => {
-      stopBLEScan();
-    };
-  }, [activeTab]);
+    isScanningRef.current = isScanning;
+  }, [isScanning]);
 
-  const startBLEScan = () => {
+  useEffect(() => {
+    scanCountdownStateRef.current = scanCountdown;
+  }, [scanCountdown]);
+
+  const stopBLEScan = useCallback(() => {
+    if (
+      !isScanningRef.current &&
+      scanCountdownStateRef.current === 0 &&
+      !scanTimeoutRef.current &&
+      !scanCountdownRef.current
+    ) {
+      return;
+    }
+
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = null;
+    }
+    if (scanCountdownRef.current) {
+      clearInterval(scanCountdownRef.current);
+      scanCountdownRef.current = null;
+    }
+    if (discoveryUnsubscribeRef.current) {
+      discoveryUnsubscribeRef.current();
+      discoveryUnsubscribeRef.current = null;
+    }
+    setIsScanning((prev) => (prev ? false : prev));
+    setScanCountdown((prev) => (prev !== 0 ? 0 : prev));
+    scannedDevicesRef.current = 0;
+  }, []);
+
+  const startBLEScan = useCallback(async () => {
+    const id = await ensureMeshReady();
+    if (!id) {
+      return;
+    }
+
+    setScanError(null);
     setIsScanning(true);
     setScannedDevices([]);
-    
-    // Listen for discovered devices
-    const unsubscribe = bleMeshService.onMessage((message) => {
+    scannedDevicesRef.current = 0;
+    setScanCountdown(10);
+
+    if (discoveryUnsubscribeRef.current) {
+      discoveryUnsubscribeRef.current();
+      discoveryUnsubscribeRef.current = null;
+    }
+
+    discoveryUnsubscribeRef.current = bleMeshService.onMessage((message) => {
       try {
         // Check content for discovery info (mesh message content is string)
         const content = message.content;
@@ -73,17 +214,23 @@ export default function NewMessageScreen({ navigation }: any) {
           try {
             const data = JSON.parse(content);
             if (data.type === 'discovery' || data.type === 'beacon' || data.type === 'discovery_request') {
-              const deviceId = data.deviceId || data.senderId || message.from;
-              if (deviceId && deviceId !== myDeviceId) {
+              const discoveredId = data.deviceId || data.senderId || message.from;
+              if (discoveredId && discoveredId !== id) {
                 setScannedDevices(prev => {
-                  const exists = prev.find(d => d.deviceId === deviceId);
+                  const exists = prev.find(d => d.deviceId === discoveredId);
                   if (!exists) {
-                    return [...prev, { 
-                      deviceId, 
-                      name: data.name,
-                      rssi: data.rssi 
-                    }];
+                    const updated = [
+                      ...prev,
+                      {
+                        deviceId: discoveredId,
+                        name: data.name,
+                        rssi: data.rssi,
+                      },
+                    ];
+                    scannedDevicesRef.current = updated.length;
+                    return updated;
                   }
+                  scannedDevicesRef.current = prev.length;
                   return prev;
                 });
               }
@@ -98,22 +245,63 @@ export default function NewMessageScreen({ navigation }: any) {
     });
 
     // Broadcast discovery request via mesh store
-    if (myDeviceId) {
+    if (id) {
       useMeshStore.getState().broadcastMessage(JSON.stringify({
         type: 'discovery_request',
-        deviceId: myDeviceId,
+        deviceId: id,
       }), 'text');
     }
 
     // Auto-stop after 10 seconds
-    setTimeout(() => {
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+    }
+    scanTimeoutRef.current = setTimeout(() => {
       stopBLEScan();
-    }, 10000);
-  };
+      if (scannedDevicesRef.current === 0) {
+        setScanError('Yakında cihaz bulunamadı. Bluetooth açık ve diğer cihazlar yakın olmalı.');
+      }
+    }, 12000);
 
-  const stopBLEScan = () => {
-    setIsScanning(false);
-  };
+    if (scanCountdownRef.current) {
+      clearInterval(scanCountdownRef.current);
+    }
+    scanCountdownRef.current = setInterval(() => {
+      setScanCountdown((prev) => {
+        if (prev <= 1) {
+          if (scanCountdownRef.current) {
+            clearInterval(scanCountdownRef.current);
+            scanCountdownRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [ensureMeshReady, stopBLEScan]);
+
+  useEffect(() => {
+    if (!initRequestedRef.current) {
+      initRequestedRef.current = true;
+      void ensureMeshReady();
+    }
+
+    return () => {
+      stopBLEScan();
+    };
+  }, [ensureMeshReady, stopBLEScan]);
+
+  useEffect(() => {
+    if (activeTab === 'scan') {
+      startBLEScan();
+    } else if (isScanningRef.current || scanCountdownStateRef.current > 0) {
+      stopBLEScan();
+    }
+
+    return () => {
+      stopBLEScan();
+    };
+  }, [activeTab, startBLEScan, stopBLEScan]);
 
   const handleQRScan = ({ data }: { data: string }) => {
     try {
@@ -166,6 +354,33 @@ export default function NewMessageScreen({ navigation }: any) {
     startConversation(selectedDeviceId);
   };
 
+  const handleCopyId = useCallback(async () => {
+    const idToCopy = myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
+    if (!idToCopy) return;
+    await Clipboard.setStringAsync(idToCopy);
+    haptics.notificationSuccess();
+    Alert.alert('Kopyalandı', 'Cihaz ID panoya kaydedildi.');
+  }, []);
+
+  const statusItems = useMemo(() => [
+    {
+      label: 'Cihaz ID',
+      value: myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...',
+      icon: 'finger-print' as const,
+      action: myDeviceId ? handleCopyId : undefined,
+    },
+    {
+      label: 'Mesh Durumu',
+      value: isMeshConnected ? 'Aktif' : 'Pasif',
+      icon: isMeshConnected ? ('radio' as const) : ('radio-outline' as const),
+    },
+    {
+      label: 'Taranan Cihaz',
+      value: `${scannedDevices.length}`,
+      icon: 'people-outline' as const,
+    },
+  ], [handleCopyId, isMeshConnected, meshStoreDeviceId, myDeviceId, scannedDevices.length]);
+
   const startConversation = (targetDeviceId: string) => {
     try {
       // Check if conversation already exists
@@ -194,6 +409,148 @@ export default function NewMessageScreen({ navigation }: any) {
       Alert.alert('Hata', 'Konuşma başlatılamadı. Lütfen tekrar deneyin.');
     }
   };
+
+  const renderQRCard = () => (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.cardHeaderCopy}>
+          <Text style={styles.cardTitle}>QR Kod ile eşleş</Text>
+          <Text style={styles.cardSubtitle}>
+            Karşı tarafın QR kodunu tarayarak saniyeler içinde güvenli sohbet başlatabilirsiniz.
+          </Text>
+        </View>
+        <Pressable style={styles.cardHeaderIcon} onPress={handleShowMyQrInfo}>
+          <Ionicons name="qr-code-outline" size={22} color={colors.brand.primary} />
+        </Pressable>
+      </View>
+      <View style={styles.cameraWrapper}>
+        <CameraView
+          style={styles.cameraView}
+          facing="back"
+          onBarcodeScanned={handleQRScan}
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        />
+        <View style={styles.cameraOverlay}>
+          <View style={styles.cameraFrame} />
+        </View>
+      </View>
+      <Text style={styles.cardHint}>İpucu: Profil › Paylaş menüsünden kendi QR kodunuzu gösterebilirsiniz.</Text>
+    </View>
+  );
+
+  const renderIDCard = () => (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.cardHeaderCopy}>
+          <Text style={styles.cardTitle}>Cihaz ID ile ekle</Text>
+          <Text style={styles.cardSubtitle}>Bilinen AfetNet ID&apos;lerini girerek kişileri manuel olarak ekleyin.</Text>
+        </View>
+        <View style={styles.cardHeaderIcon}>
+          <Ionicons name="key-outline" size={22} color={colors.brand.primary} />
+        </View>
+      </View>
+      <TextInput
+        style={styles.input}
+        placeholder="Örn: afn-k1lou0h5"
+        placeholderTextColor={colors.text.tertiary}
+        value={deviceId}
+        onChangeText={setDeviceId}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <Pressable
+        style={[styles.primaryButton, !deviceId.trim() && styles.primaryButtonDisabled]}
+        onPress={handleManualAdd}
+        disabled={!deviceId.trim()}
+      >
+        <Ionicons name="send" size={16} color="#0f172a" />
+        <Text style={styles.primaryButtonText}>Ekle ve Mesaj Gönder</Text>
+      </Pressable>
+      <Text style={styles.cardHint}>ID “afn-” ile başlar ve en az 8 karakter içerir.</Text>
+    </View>
+  );
+
+  const renderScanCard = () => (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.cardHeaderCopy}>
+          <Text style={styles.cardTitle}>Yakındaki cihazlar</Text>
+          <Text style={styles.cardSubtitle}>
+            Bluetooth açıkken çevrenizdeki AfetNet cihazlarını keşfederek mesh ağı oluşturun.
+          </Text>
+        </View>
+        <View style={styles.cardHeaderIcon}>
+          <Ionicons name="scan-outline" size={22} color={colors.brand.primary} />
+        </View>
+      </View>
+
+      <View style={styles.scanStatusRow}>
+        <View style={[styles.scanStatusBadge, isScanning ? styles.scanStatusBadgeActive : styles.scanStatusBadgeInactive]}>
+          <Ionicons name={isScanning ? 'pulse' : 'bluetooth'} size={16} color={isScanning ? '#0f172a' : '#0ea5e9'} />
+          <Text style={[styles.scanStatusText, isScanning && styles.scanStatusTextActive]}>
+            {isScanning ? `Tarama sürüyor (${Math.max(scanCountdown, 0)}s)` : 'Tarama hazır'}
+          </Text>
+        </View>
+        <Pressable style={styles.secondaryButton} onPress={startBLEScan}>
+          <Ionicons name="refresh" size={16} color={colors.brand.primary} />
+          <Text style={styles.secondaryButtonText}>Yeniden Tara</Text>
+        </Pressable>
+      </View>
+
+      {isScanning && (
+        <View style={styles.scanLoading}>
+          <ActivityIndicator color={colors.brand.primary} />
+          <Text style={styles.scanLoadingText}>Cihazlar aranıyor...</Text>
+        </View>
+      )}
+
+      {scannedDevices.length > 0 ? (
+        scannedDevices.map((device) => (
+          <Pressable
+            key={device.deviceId}
+            style={styles.deviceRow}
+            onPress={() => handleDeviceSelect(device.deviceId)}
+          >
+            <View style={styles.deviceAvatar}>
+              <Ionicons name="phone-portrait" size={18} color={colors.brand.primary} />
+            </View>
+            <View style={styles.deviceInfo}>
+              <Text style={styles.deviceName} numberOfLines={1}>
+                {device.name || `Cihaz ${device.deviceId.slice(0, 8)}...`}
+              </Text>
+              <Text style={styles.deviceIdText} numberOfLines={1}>
+                {device.deviceId}
+              </Text>
+              {getSignalLabel(device.rssi) && (
+                <Text style={styles.deviceSignal}>{getSignalLabel(device.rssi)}</Text>
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#64748b" />
+          </Pressable>
+        ))
+      ) : (
+        !isScanning && (
+          <View style={styles.emptyState}>
+            <Ionicons name="compass-outline" size={28} color="#94a3b8" />
+            <Text style={styles.emptyTitle}>Henüz cihaz bulunamadı</Text>
+            <Text style={styles.emptySubtitle}>
+              Bluetooth ve konum servislerinin açık olduğundan emin olun. Cihazları yakın konumda tutun.
+            </Text>
+            <Pressable style={styles.secondaryButtonGhost} onPress={startBLEScan}>
+              <Text style={styles.secondaryButtonGhostText}>Tarama Başlat</Text>
+            </Pressable>
+          </View>
+        )
+      )}
+
+      {scanError && (
+        <View style={styles.warningBox}>
+          <Ionicons name="alert" size={16} color="#f97316" />
+          <Text style={styles.warningText}>{scanError}</Text>
+        </View>
+      )}
+    </View>
+  );
 
   if (activeTab === 'qr' && !permission) {
     return (
@@ -224,388 +581,586 @@ export default function NewMessageScreen({ navigation }: any) {
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      
-      {/* Header */}
-      <LinearGradient
-        colors={['#1e293b', '#0f172a']}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
+    <View style={styles.screen}>
+      <StatusBar barStyle="light-content" backgroundColor="#060b1b" />
+
+      <LinearGradient colors={['#060b1b', '#0b1228']} style={styles.gradientOverlay} />
+
+      <View
+        style={[
+          styles.container,
+          {
+            paddingTop: Math.max(insets.top - 22, 0),
+            paddingBottom: Math.max(insets.bottom, 24),
+          },
+        ]}
       >
-        <Pressable 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </Pressable>
-        <Text style={styles.headerTitle}>Yeni Mesaj</Text>
-        <View style={{ width: 40 }} />
-      </LinearGradient>
+        <View style={styles.headerRow}>
+          <Pressable style={styles.navButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={22} color="#fff" />
+          </Pressable>
+          <View style={styles.headerTextContainer}>
+            <Text style={styles.headerTitle}>Yeni Mesaj</Text>
+            <Text style={styles.headerSubtitle}>Çevrimdışı mesh ağında güvenli bağlantı kur</Text>
+          </View>
+          <Pressable style={styles.infoButton} onPress={handleHelp}>
+            <Ionicons name="information-circle-outline" size={20} color="#cbd5f5" />
+          </Pressable>
+        </View>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, activeTab === 'qr' && styles.tabActive]}
-          onPress={() => setActiveTab('qr')}
+        <ScrollView
+          style={styles.scroll}
+          contentInsetAdjustmentBehavior="never"
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <Ionicons 
-            name="qr-code" 
-            size={20} 
-            color={activeTab === 'qr' ? colors.brand.primary : colors.text.secondary} 
-          />
-          <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>
-            QR Kod
-          </Text>
-        </Pressable>
-        
-        <Pressable
-          style={[styles.tab, activeTab === 'id' && styles.tabActive]}
-          onPress={() => setActiveTab('id')}
-        >
-          <Ionicons 
-            name="key" 
-            size={20} 
-            color={activeTab === 'id' ? colors.brand.primary : colors.text.secondary} 
-          />
-          <Text style={[styles.tabText, activeTab === 'id' && styles.tabTextActive]}>
-            ID ile Ekle
-          </Text>
-        </Pressable>
-        
-        <Pressable
-          style={[styles.tab, activeTab === 'scan' && styles.tabActive]}
-          onPress={() => setActiveTab('scan')}
-        >
-          <Ionicons 
-            name="bluetooth" 
-            size={20} 
-            color={activeTab === 'scan' ? colors.brand.primary : colors.text.secondary} 
-          />
-          <Text style={[styles.tabText, activeTab === 'scan' && styles.tabTextActive]}>
-            Tarama
-          </Text>
-        </Pressable>
-      </View>
+            <View style={styles.connectionCard}>
+              <View style={styles.connectionHeader}>
+                <View>
+                  <Text style={styles.connectionTitle}>Bağlantı Özeti</Text>
+                  <Text style={styles.connectionSubtitle}>
+                    {isMeshConnected
+                      ? 'Mesh ağı hazır. Bluetooth açık.'
+                      : 'Mesh ağı kapalı. Bluetooth ve konumu etkinleştirin.'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.connectionAction,
+                    (!myDeviceId && !meshStoreDeviceId) && styles.connectionActionDisabled,
+                    pressed && styles.connectionActionPressed,
+                  ]}
+                  onPress={handleCopyId}
+                  disabled={!myDeviceId && !meshStoreDeviceId}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#0ea5e9" />
+                  <Text style={styles.connectionActionText}>Kimliği Kopyala</Text>
+                </Pressable>
+              </View>
 
-      {/* Content */}
-      <ScrollView style={styles.content}>
-        {activeTab === 'qr' && (
-          <View style={styles.qrContainer}>
-            <View style={styles.cameraContainer}>
-              <CameraView
-                style={styles.camera}
-                facing="back"
-                onBarcodeScanned={handleQRScan}
-                barcodeScannerSettings={{
-                  barcodeTypes: ['qr'],
-                }}
-              />
-              <View style={styles.overlay}>
-                <View style={styles.scanFrame} />
-                <Text style={styles.scanHint}>
-                  QR kodu çerçeveye hizalayın
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <View style={[styles.statIcon, { backgroundColor: 'rgba(14,165,233,0.18)' }]}> 
+                    <Ionicons name="finger-print" size={16} color="#38bdf8" />
+                  </View>
+                  <Text style={styles.statLabel}>Cihaz ID</Text>
+                  <Text style={styles.statValue} numberOfLines={1}>{displayDeviceId}</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <View style={[styles.statIcon, { backgroundColor: isMeshConnected ? 'rgba(74,222,128,0.18)' : 'rgba(248,113,113,0.18)' }]}> 
+                    <Ionicons name={isMeshConnected ? 'radio' : 'radio-outline'} size={16} color={isMeshConnected ? '#4ade80' : '#f87171'} />
+                  </View>
+                  <Text style={styles.statLabel}>Mesh Durumu</Text>
+                  <Text style={styles.statValue}>{isMeshConnected ? 'Aktif' : 'Pasif'}</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <View style={[styles.statIcon, { backgroundColor: 'rgba(139,92,246,0.18)' }]}> 
+                    <Ionicons name="people-outline" size={16} color="#8b5cf6" />
+                  </View>
+                  <Text style={styles.statLabel}>Taranan Cihaz</Text>
+                  <Text style={styles.statValue}>{scannedDevices.length}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.tipBanner}>
+              <Ionicons name="shield-checkmark" size={20} color="#4ade80" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Çevrimdışı güvenli bağlantı</Text>
+                <Text style={styles.tipSubtitle}>
+                  Bluetooth ve konum açık olduğunda mesajlar ağdaki tüm cihazlara ulaştırılır.
                 </Text>
               </View>
             </View>
-          </View>
-        )}
 
-        {activeTab === 'id' && (
-          <View style={styles.idContainer}>
-            <Text style={styles.sectionTitle}>Cihaz ID Girin</Text>
-            <Text style={styles.sectionSubtitle}>
-              Kişinin cihaz ID'sini manuel olarak girin
-            </Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Cihaz ID..."
-              placeholderTextColor={colors.text.tertiary}
-              value={deviceId}
-              onChangeText={setDeviceId}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Pressable style={styles.addButton} onPress={handleManualAdd}>
-              <LinearGradient
-                colors={[colors.brand.primary, colors.brand.secondary]}
-                style={styles.addButtonGradient}
-              >
-                <Ionicons name="checkmark" size={20} color="#fff" />
-                <Text style={styles.addButtonText}>Ekle ve Mesaj Gönder</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
-        )}
-
-        {activeTab === 'scan' && (
-          <View style={styles.scanContainer}>
-            <Text style={styles.sectionTitle}>Yakındaki Cihazlar</Text>
-            <Text style={styles.sectionSubtitle}>
-              {isScanning 
-                ? 'Cihazlar taranıyor...' 
-                : 'Tarama tamamlandı. Yeniden başlatmak için tekrar tıklayın.'}
-            </Text>
-
-            {scannedDevices.length === 0 && !isScanning && (
-              <Pressable style={styles.scanButton} onPress={startBLEScan}>
-                <Ionicons name="refresh" size={20} color={colors.brand.primary} />
-                <Text style={styles.scanButtonText}>Yeniden Tara</Text>
-              </Pressable>
-            )}
-
-            {scannedDevices.map((device) => (
-              <Pressable
-                key={device.deviceId}
-                style={styles.deviceCard}
-                onPress={() => handleDeviceSelect(device.deviceId)}
-              >
-                <View style={styles.deviceIcon}>
-                  <Ionicons name="phone-portrait" size={24} color={colors.brand.primary} />
-                </View>
-                <View style={styles.deviceInfo}>
-                  <Text style={styles.deviceName}>
-                    {device.name || `Cihaz ${device.deviceId.slice(0, 8)}...`}
+            <View style={styles.segmentContainer}>
+              {tabOptions.map((option) => (
+                <Pressable
+                  key={option.key}
+                  style={[styles.segmentButton, activeTab === option.key && styles.segmentButtonActive]}
+                  onPress={() => setActiveTab(option.key)}
+                >
+                  <Ionicons
+                    name={option.icon}
+                    size={16}
+                    color={activeTab === option.key ? '#0ea5e9' : '#94a3b8'}
+                  />
+                  <Text
+                    style={[styles.segmentLabel, activeTab === option.key && styles.segmentLabelActive]}
+                  >
+                    {option.label}
                   </Text>
-                  <Text style={styles.deviceId}>{device.deviceId}</Text>
-                  {device.rssi && (
-                    <Text style={styles.deviceRssi}>
-                      Sinyal: {device.rssi > -70 ? 'Güçlü' : device.rssi > -90 ? 'Orta' : 'Zayıf'}
-                    </Text>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={colors.text.tertiary} />
-              </Pressable>
-            ))}
+                </Pressable>
+              ))}
+            </View>
 
-            {scannedDevices.length === 0 && isScanning && (
-              <View style={styles.scanningIndicator}>
-                <Ionicons name="bluetooth" size={48} color={colors.brand.primary} />
-                <Text style={styles.scanningText}>Cihazlar aranıyor...</Text>
-              </View>
-            )}
-          </View>
-        )}
-      </ScrollView>
+            {activeTab === 'qr' && renderQRCard()}
+            {activeTab === 'id' && renderIDCard()}
+            {activeTab === 'scan' && renderScanCard()}
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#060b1b',
+  },
+  gradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: 'transparent',
   },
-  header: {
+  headerRow: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
+  navButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(148,163,184,0.18)',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginLeft: 12,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    color: '#fff',
+  },
+  headerSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: 'rgba(226,232,240,0.65)',
+  },
+  infoButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(148,163,184,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  connectionCard: {
+    borderRadius: 22,
+    padding: 20,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.15)',
+    marginBottom: 18,
+  },
+  connectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  connectionTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#fff',
   },
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+  connectionSubtitle: {
+    fontSize: 13,
+    color: '#94a3b8',
+    marginTop: 6,
   },
-  tab: {
+  connectionAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(14,165,233,0.45)',
+    backgroundColor: 'rgba(14,165,233,0.12)',
+  },
+  connectionActionDisabled: {
+    opacity: 0.35,
+  },
+  connectionActionPressed: {
+    opacity: 0.8,
+  },
+  connectionActionText: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0ea5e9',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    marginHorizontal: -6,
+  },
+  statItem: {
+    flex: 1,
+    marginHorizontal: 6,
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: 'rgba(30,41,59,0.72)',
+  },
+  statIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginBottom: 4,
+    letterSpacing: 0.3,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#e2e8f0',
+  },
+  tipBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    marginBottom: 20,
+  },
+  tipContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  tipTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#bef264',
+    marginBottom: 2,
+  },
+  tipSubtitle: {
+    fontSize: 12,
+    color: '#a3e635',
+    lineHeight: 18,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,23,42,0.85)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.18)',
+    padding: 6,
+    marginBottom: 22,
+  },
+  segmentButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#1e293b',
   },
-  tabActive: {
-    backgroundColor: colors.brand.primary + '20',
-    borderWidth: 1,
-    borderColor: colors.brand.primary,
+  segmentButtonActive: {
+    backgroundColor: 'rgba(14,165,233,0.18)',
   },
-  tabText: {
-    fontSize: 14,
+  segmentLabel: {
+    marginLeft: 8,
+    fontSize: 13,
     fontWeight: '600',
-    color: colors.text.secondary,
+    color: '#94a3b8',
   },
-  tabTextActive: {
-    color: colors.brand.primary,
+  segmentLabelActive: {
+    color: '#0ea5e9',
   },
-  content: {
+  card: {
+    borderRadius: 24,
+    padding: 22,
+    backgroundColor: 'rgba(15,23,42,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.14)',
+    marginBottom: 26,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  cardHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  cardHeaderIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(14,165,233,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 6,
+  },
+  cardSubtitle: {
+    fontSize: 13,
+    color: '#9aa6c2',
+    lineHeight: 20,
+  },
+  cardHint: {
+    marginTop: 16,
+    fontSize: 12,
+    color: '#94a3b8',
+    lineHeight: 18,
+  },
+  cameraWrapper: {
+    height: 260,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.35)',
+  },
+  cameraView: {
     flex: 1,
   },
-  qrContainer: {
-    flex: 1,
-  },
-  cameraContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  camera: {
-    flex: 1,
-  },
-  overlay: {
+  cameraOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(8,15,35,0.35)',
   },
-  scanFrame: {
-    width: 250,
-    height: 250,
+  cameraFrame: {
+    width: 220,
+    height: 220,
+    borderRadius: 28,
     borderWidth: 3,
-    borderColor: colors.brand.primary,
-    borderRadius: 20,
-  },
-  scanHint: {
-    marginTop: 32,
-    fontSize: 16,
-    color: '#fff',
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  idContainer: {
-    padding: 20,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    marginBottom: 24,
+    borderColor: 'rgba(59,130,246,0.8)',
   },
   input: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#fff',
+    width: '100%',
+    backgroundColor: 'rgba(10,17,33,0.9)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#334155',
-    marginBottom: 20,
+    borderColor: 'rgba(59,130,246,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#fff',
+    fontSize: 15,
+    marginTop: 6,
   },
-  addButton: {
-    borderRadius: 12,
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
     overflow: 'hidden',
+    marginTop: 16,
   },
-  addButtonGradient: {
+  primaryButtonDisabled: {
+    opacity: 0.55,
+  },
+  primaryButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     paddingVertical: 16,
+    borderRadius: 18,
   },
-  addButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  scanContainer: {
-    padding: 20,
-  },
-  scanButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    marginTop: 12,
-  },
-  scanButtonText: {
+  primaryButtonText: {
+    marginLeft: 10,
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.brand.primary,
+    fontWeight: '700',
+    color: '#0f172a',
   },
-  deviceCard: {
+  helperText: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  scanStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
+    justifyContent: 'space-between',
+    marginBottom: 18,
   },
-  deviceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.brand.primary + '20',
-    justifyContent: 'center',
+  scanStatusBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(14,165,233,0.12)',
+  },
+  scanStatusBadgeActive: {
+    backgroundColor: 'rgba(74,222,128,0.18)',
+  },
+  scanStatusBadgeInactive: {
+    backgroundColor: 'rgba(148,163,184,0.12)',
+  },
+  scanStatusText: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#38bdf8',
+  },
+  scanStatusTextActive: {
+    color: '#0f172a',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(14,165,233,0.35)',
+    backgroundColor: 'rgba(14,165,233,0.12)',
+  },
+  secondaryButtonText: {
+    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0ea5e9',
+  },
+  secondaryButtonGhost: {
+    marginTop: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
+    backgroundColor: 'rgba(148,163,184,0.08)',
+  },
+  secondaryButtonGhostText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#e2e8f0',
+    textAlign: 'center',
+  },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148,163,184,0.12)',
+  },
+  deviceAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(14,165,233,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
   deviceInfo: {
     flex: 1,
   },
   deviceName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 4,
   },
-  deviceId: {
+  deviceIdText: {
     fontSize: 12,
-    color: colors.text.secondary,
-    marginBottom: 2,
+    color: '#94a3b8',
+    marginTop: 2,
   },
-  deviceRssi: {
-    fontSize: 11,
-    color: colors.text.tertiary,
+  deviceSignal: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#38bdf8',
   },
-  scanningIndicator: {
+  scanLoading: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 14,
   },
-  scanningText: {
-    marginTop: 16,
+  scanLoadingText: {
+    marginLeft: 12,
+    fontSize: 13,
+    color: '#cbd5f5',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyTitle: {
+    marginTop: 12,
     fontSize: 14,
-    color: colors.text.secondary,
+    fontWeight: '600',
+    color: '#e2e8f0',
+  },
+  emptySubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 16,
+  },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(249,115,22,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.35)',
+  },
+  warningText: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: '#f97316',
+    flex: 1,
   },
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    padding: 32,
   },
   permissionText: {
-    fontSize: 16,
-    color: colors.text.secondary,
+    fontSize: 15,
+    color: '#cbd5f5',
     textAlign: 'center',
+    lineHeight: 22,
     marginBottom: 24,
   },
   permissionButton: {
-    backgroundColor: colors.brand.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: 16,
+    backgroundColor: colors.brand.primary,
   },
   permissionButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#fff',
+    color: '#0f172a',
   },
 });
 

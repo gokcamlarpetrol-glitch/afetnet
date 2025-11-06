@@ -15,6 +15,7 @@ import EmergencyButton from './components/EmergencyButton';
 import FeatureGrid from './components/FeatureGrid';
 import AIAssistantCard from './components/AIAssistantCard';
 import NewsCard from './components/NewsCard';
+import AboutAfetNetCard from './components/AboutAfetNetCard';
 import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
 import { colors, spacing } from '../../theme';
@@ -186,6 +187,7 @@ export default function HomeScreen({ navigation }: any) {
           <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
           <EmergencyButton onPress={handleSOSPress} />
           <FeatureGrid navigation={navigation} />
+          <AboutAfetNetCard />
         </ScrollView>
       </Animated.View>
 

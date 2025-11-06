@@ -5,16 +5,16 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
-import { FamilyMember } from '../../stores/familyStore';
 
 // --- StatusButton Component ---
 interface StatusButtonProps {
-  status: 'safe' | 'need-help' | 'critical';
-  onPress: (status: 'safe' | 'need-help' | 'critical') => void;
+  status: 'safe' | 'need-help' | 'critical' | 'location';
+  onPress: (status: StatusButtonProps['status']) => void;
+  active?: boolean;
 }
 
-export function StatusButton({ status, onPress }: StatusButtonProps) {
-  const { icon, text, gradientColors } = getStatusInfo(status);
+export function StatusButton({ status, onPress, active = false }: StatusButtonProps) {
+  const { icon, text, gradientColors } = getStatusInfo(status, active);
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -41,7 +41,7 @@ export function StatusButton({ status, onPress }: StatusButtonProps) {
   );
 }
 
-function getStatusInfo(status: StatusButtonProps['status']) {
+function getStatusInfo(status: StatusButtonProps['status'], active: boolean) {
   switch (status) {
     case 'safe':
       return { icon: 'shield-checkmark', text: 'Güvendeyim', gradientColors: ['#10b981', '#059669'] };
@@ -49,6 +49,10 @@ function getStatusInfo(status: StatusButtonProps['status']) {
       return { icon: 'help-buoy', text: 'Yardıma İhtiyacım Var', gradientColors: ['#f59e0b', '#d97706'] };
     case 'critical':
       return { icon: 'alert-circle', text: 'Acil Durum (SOS)', gradientColors: ['#ef4444', '#dc2626'] };
+    case 'location':
+      return active
+        ? { icon: 'location', text: 'Konum Paylaşılıyor', gradientColors: ['#3b82f6', '#2563eb'] }
+        : { icon: 'location-outline', text: 'Konumumu Paylaş', gradientColors: ['#1e3a8a', '#1e40af'] };
   }
 }
 

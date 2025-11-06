@@ -5,15 +5,22 @@
 
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import { usePremiumStore } from './premiumStore';
 
 const TRIAL_START_KEY = 'afetnet_trial_start';
 const TRIAL_DURATION_DAYS = 3;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const TRIAL_DURATION_MS = TRIAL_DURATION_DAYS * MS_PER_DAY;
+const TRIAL_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+let trialMonitor: NodeJS.Timeout | null = null;
+let trialExpiryTimeout: NodeJS.Timeout | null = null;
 
 interface TrialState {
   trialStartTime: number | null;
   isTrialActive: boolean;
   daysRemaining: number;
+  hoursRemaining: number;
   isLoading: boolean;
 }
 
@@ -29,7 +36,55 @@ const initialState: TrialState = {
   trialStartTime: null,
   isTrialActive: false,
   daysRemaining: 0,
+  hoursRemaining: 0,
   isLoading: true,
+};
+
+const computeTrialStatus = (startTime: number) => {
+  const now = Date.now();
+  const elapsed = now - startTime;
+  const remainingMs = TRIAL_DURATION_MS - elapsed;
+  const isActive = remainingMs > 0;
+  const daysRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / MS_PER_DAY)) : 0;
+  const hoursRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))) : 0;
+
+  return {
+    isActive,
+    daysRemaining,
+    hoursRemaining,
+    remainingMs: Math.max(0, remainingMs),
+  };
+};
+
+const syncPremiumAccess = (isTrialActive: boolean) => {
+  const premiumState = usePremiumStore.getState();
+  const hasPaidSubscription = premiumState.subscriptionType !== null;
+
+  if (!hasPaidSubscription) {
+    premiumState.setPremium(isTrialActive);
+  }
+};
+
+const startTrialMonitor = (recompute: () => void) => {
+  if (trialMonitor) {
+    return;
+  }
+
+  trialMonitor = setInterval(() => {
+    recompute();
+  }, TRIAL_REFRESH_INTERVAL);
+};
+
+const stopTrialMonitor = () => {
+  if (trialMonitor) {
+    clearInterval(trialMonitor);
+    trialMonitor = null;
+  }
+
+  if (trialExpiryTimeout) {
+    clearTimeout(trialExpiryTimeout);
+    trialExpiryTimeout = null;
+  }
 };
 
 export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
@@ -42,42 +97,56 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       // Check if trial already started
       const storedStart = await SecureStore.getItemAsync(TRIAL_START_KEY);
 
-      if (storedStart) {
-        // Trial already started
-        const startTime = parseInt(storedStart, 10);
-        const now = Date.now();
-        const elapsed = now - startTime;
-        const daysElapsed = elapsed / MS_PER_DAY;
+      const startTime = storedStart ? parseInt(storedStart, 10) : Date.now();
 
-        if (daysElapsed < TRIAL_DURATION_DAYS) {
-          // Trial still active
-          const daysRemaining = Math.ceil(TRIAL_DURATION_DAYS - daysElapsed);
-          set({
-            trialStartTime: startTime,
-            isTrialActive: true,
-            daysRemaining,
-            isLoading: false,
-          });
-        } else {
-          // Trial expired
-          set({
-            trialStartTime: startTime,
-            isTrialActive: false,
-            daysRemaining: 0,
-            isLoading: false,
-          });
-        }
-      } else {
-        // First time - start trial
-        const now = Date.now();
-        await SecureStore.setItemAsync(TRIAL_START_KEY, String(now));
+      if (!storedStart) {
+        await SecureStore.setItemAsync(TRIAL_START_KEY, String(startTime));
+      }
+
+      const applyState = () => {
+        const { isActive, daysRemaining, hoursRemaining, remainingMs } = computeTrialStatus(startTime);
 
         set({
-          trialStartTime: now,
-          isTrialActive: true,
-          daysRemaining: TRIAL_DURATION_DAYS,
+          trialStartTime: startTime,
+          isTrialActive: isActive,
+          daysRemaining,
+          hoursRemaining,
           isLoading: false,
         });
+
+        syncPremiumAccess(isActive);
+
+        if (!isActive) {
+          stopTrialMonitor();
+        } else {
+          // If trial will expire sooner than refresh interval, schedule immediate check
+          if (remainingMs < TRIAL_REFRESH_INTERVAL) {
+            if (trialExpiryTimeout) {
+              clearTimeout(trialExpiryTimeout);
+            }
+
+            trialExpiryTimeout = setTimeout(() => {
+              const { isActive: stillActive, daysRemaining: nextDays, hoursRemaining: nextHours } = computeTrialStatus(startTime);
+              set({
+                isTrialActive: stillActive,
+                daysRemaining: nextDays,
+                hoursRemaining: nextHours,
+              });
+              syncPremiumAccess(stillActive);
+              if (!stillActive) {
+                stopTrialMonitor();
+              }
+            }, remainingMs + 1000);
+          }
+        }
+
+        return isActive;
+      };
+
+      const active = applyState();
+
+      if (active) {
+        startTrialMonitor(applyState);
       }
     } catch (error) {
       if (__DEV__) {
@@ -88,7 +157,22 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
         trialStartTime: Date.now(),
         isTrialActive: true,
         daysRemaining: TRIAL_DURATION_DAYS,
+        hoursRemaining: TRIAL_DURATION_DAYS * 24,
         isLoading: false,
+      });
+      syncPremiumAccess(true);
+      startTrialMonitor(() => {
+        const { trialStartTime } = get();
+        if (!trialStartTime) {
+          return false;
+        }
+        const { isActive, daysRemaining, hoursRemaining } = computeTrialStatus(trialStartTime);
+        set({ isTrialActive: isActive, daysRemaining, hoursRemaining });
+        syncPremiumAccess(isActive);
+        if (!isActive) {
+          stopTrialMonitor();
+        }
+        return isActive;
       });
     }
   },
@@ -100,46 +184,28 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       return false;
     }
 
-    const now = Date.now();
-    const elapsed = now - trialStartTime;
-    const daysElapsed = elapsed / MS_PER_DAY;
-
-    if (daysElapsed >= TRIAL_DURATION_DAYS) {
-      set({ isTrialActive: false, daysRemaining: 0 });
-      return false;
+    const { isActive, daysRemaining, hoursRemaining } = computeTrialStatus(trialStartTime);
+    set({
+      isTrialActive: isActive,
+      daysRemaining,
+      hoursRemaining,
+    });
+    syncPremiumAccess(isActive);
+    if (!isActive) {
+      stopTrialMonitor();
     }
 
-    return isTrialActive;
+    return isActive;
   },
 
   getRemainingDays: () => {
-    const { trialStartTime } = get();
-
-    if (!trialStartTime) {
-      return 0;
-    }
-
-    const now = Date.now();
-    const elapsed = now - trialStartTime;
-    const daysElapsed = elapsed / MS_PER_DAY;
-    const remaining = Math.ceil(TRIAL_DURATION_DAYS - daysElapsed);
-
-    return Math.max(0, remaining);
+    const { daysRemaining } = get();
+    return daysRemaining;
   },
 
   getRemainingHours: () => {
-    const { trialStartTime } = get();
-
-    if (!trialStartTime) {
-      return 0;
-    }
-
-    const now = Date.now();
-    const elapsed = now - trialStartTime;
-    const hoursElapsed = elapsed / (60 * 60 * 1000);
-    const remaining = Math.ceil((TRIAL_DURATION_DAYS * 24) - hoursElapsed);
-
-    return Math.max(0, remaining);
+    const { hoursRemaining } = get();
+    return hoursRemaining;
   },
 
   endTrial: async () => {
@@ -149,7 +215,10 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
         trialStartTime: null,
         isTrialActive: false,
         daysRemaining: 0,
+        hoursRemaining: 0,
       });
+      syncPremiumAccess(false);
+      stopTrialMonitor();
     } catch (error) {
       if (__DEV__) {
         console.error('[TrialStore] End trial error:', error);

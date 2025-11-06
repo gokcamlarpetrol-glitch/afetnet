@@ -3,7 +3,7 @@
  * All app features and services settings
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Alert,
   Switch,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,12 +25,13 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { premiumService } from '../../services/PremiumService';
 import { i18nService } from '../../services/I18nService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { SettingItem } from '../../components/settings/SettingItem';
+import { SettingItem as SettingItemRow } from '../../components/settings/SettingItem';
 import * as haptics from '../../utils/haptics';
 import { batterySaverService } from '../../services/BatterySaverService';
 import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
+import { ENV } from '../../config/env';
 
-interface SettingItem {
+interface SettingOption {
   icon: string;
   title: string;
   subtitle?: string;
@@ -117,12 +119,12 @@ export default function SettingsScreen({ navigation }: any) {
     );
   };
   
-  const renderSection = (title: string, items: any[], sectionIndex: number) => (
+  const renderSection = (title: string, items: SettingOption[], sectionIndex: number) => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <View style={styles.sectionContent}>
         {items.map((item, itemIndex) => (
-          <SettingItem
+          <SettingItemRow
             key={item.title}
             index={sectionIndex * 10 + itemIndex} // Unique index for animation delay
             icon={item.icon as any}
@@ -137,7 +139,7 @@ export default function SettingsScreen({ navigation }: any) {
     </View>
   );
 
-  const premiumSettings: SettingItem[] = [
+  const premiumSettings: SettingOption[] = [
     {
       icon: 'star',
       title: 'Premium Üyelik',
@@ -154,7 +156,7 @@ export default function SettingsScreen({ navigation }: any) {
     },
   ];
 
-  const notificationSettings: SettingItem[] = [
+  const notificationSettings: SettingOption[] = [
     {
       icon: 'notifications',
       title: 'Bildirimler',
@@ -182,26 +184,17 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'flash',
       title: 'LED Uyarısı',
-      subtitle: 'LED ışık uyarıları',
-      type: 'switch',
-      value: false,
+      subtitle: 'Fener ve düdük araçları',
+      type: 'arrow',
       onPress: () => {
-        Alert.alert('LED Uyarısı', 'Bu özellik yakında eklenecektir.');
-      },
-    },
-    {
-      icon: 'notifications-outline',
-      title: 'Tam Ekran Uyarı',
-      subtitle: 'Tam ekran acil durum uyarıları',
-      type: 'switch',
-      value: true,
-      onPress: () => {
-        Alert.alert('Tam Ekran Uyarı', 'Bu özellik her zaman aktif durumda.');
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('FlashlightWhistle');
       },
     },
   ];
 
-  const locationSettings: SettingItem[] = [
+  const locationSettings: SettingOption[] = [
     {
       icon: 'location',
       title: 'Konum Servisi',
@@ -219,7 +212,7 @@ export default function SettingsScreen({ navigation }: any) {
     },
   ];
 
-  const aiSettings: SettingItem[] = [
+  const aiSettings: SettingOption[] = [
     {
       icon: 'sparkles',
       title: 'AI Asistan',
@@ -319,7 +312,7 @@ export default function SettingsScreen({ navigation }: any) {
     },
   ];
 
-  const meshSettings: SettingItem[] = [
+  const meshSettings: SettingOption[] = [
     {
       icon: 'bluetooth',
       title: 'BLE Mesh Ağı',
@@ -364,7 +357,7 @@ export default function SettingsScreen({ navigation }: any) {
     },
   ];
 
-  const earthquakeSettings: SettingItem[] = [
+  const earthquakeSettings: SettingOption[] = [
     {
       icon: 'pulse',
       title: 'Deprem İzleme',
@@ -399,70 +392,77 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'filter',
       title: 'Büyüklük Filtresi',
-      subtitle: 'Minimum deprem büyüklüğü',
+      subtitle: 'Detaylı filtreleri aç',
       type: 'arrow',
       onPress: () => {
-        Alert.alert(
-          'Büyüklük Filtresi',
-          'Şu anda tüm depremler gösteriliyor. Filtreleme özelliği yakında eklenecektir.',
-          [{ text: 'Tamam' }]
-        );
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('AllEarthquakes');
       },
     },
   ];
 
-  const generalSettings: SettingItem[] = [
-    {
-      icon: 'language',
-      title: 'Dil',
-      subtitle: i18nService.getLocaleDisplayName(currentLanguage),
-      type: 'arrow',
-      onPress: handleLanguageChange,
-    },
-    {
-      icon: 'text',
-      title: 'Yazı Boyutu',
-      subtitle: 'Erişilebilirlik ayarları',
-      type: 'arrow',
-      onPress: () => {
-        Alert.alert(
-          'Yazı Boyutu',
-          'Erişilebilirlik ayarları yakında eklenecektir.',
-          [{ text: 'Tamam' }]
-        );
+  const generalSettings = useMemo<SettingOption[]>(() => {
+    const items: SettingOption[] = [
+      {
+        icon: 'language',
+        title: 'Dil',
+        subtitle: i18nService.getLocaleDisplayName(currentLanguage),
+        type: 'arrow',
+        onPress: handleLanguageChange,
       },
-    },
-    {
-      icon: 'contrast',
-      title: 'Yüksek Kontrast',
-      subtitle: 'Görünürlüğü artır',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        Alert.alert(
-          'Yüksek Kontrast',
-          'Bu özellik yakında eklenecektir.',
-          [{ text: 'Tamam' }]
-        );
+      {
+        icon: 'moon',
+        title: 'Karanlık Mod',
+        subtitle: 'Tema ayarları',
+        type: 'switch',
+        value: true,
+        onPress: () => {
+          Alert.alert(
+            'Karanlık Mod',
+            'Uygulama şu anda karanlık modda çalışıyor.',
+            [{ text: 'Tamam' }]
+          );
+        },
       },
-    },
-    {
-      icon: 'moon',
-      title: 'Karanlık Mod',
-      subtitle: 'Tema ayarları',
-      type: 'switch',
-      value: true,
-      onPress: () => {
-        Alert.alert(
-          'Karanlık Mod',
-          'Uygulama şu anda karanlık modda çalışıyor.',
-          [{ text: 'Tamam' }]
-        );
-      },
-    },
-  ];
+    ];
 
-  const aboutSettings: SettingItem[] = [
+    if (__DEV__) {
+      items.push(
+        {
+          icon: 'text',
+          title: 'Yazı Boyutu',
+          subtitle: 'Erişilebilirlik ayarları (dev)',
+          type: 'arrow',
+          onPress: () => {
+            Alert.alert(
+              'Yazı Boyutu',
+              'Bu özellik geliştirme modunda test ediliyor.',
+              [{ text: 'Tamam' }]
+            );
+          },
+        },
+        {
+          icon: 'contrast',
+          title: 'Yüksek Kontrast',
+          subtitle: 'Görünürlüğü artır (dev)',
+          type: 'switch',
+          value: false,
+          onPress: () => {
+            Alert.alert(
+              'Yüksek Kontrast',
+              'Bu özellik geliştirme modunda test ediliyor.',
+              [{ text: 'Tamam' }]
+            );
+          },
+        }
+      );
+    }
+
+    return items;
+  }, [currentLanguage, navigation]);
+
+  const aboutSettings: SettingOption[] = [
     {
       icon: 'information-circle',
       title: 'Hakkında',
@@ -479,14 +479,28 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'document-text',
       title: 'Gizlilik Politikası',
-      subtitle: 'Kullanım koşulları',
+      subtitle: 'Politikayı görüntüle',
       type: 'arrow',
-      onPress: () => {
-        Alert.alert(
-          'Gizlilik Politikası',
-          'Gizlilik politikası yakında eklenecektir.',
-          [{ text: 'Tamam' }]
-        );
+      onPress: async () => {
+        haptics.impactLight();
+        try {
+          const url = ENV.PRIVACY_POLICY_URL;
+          if (!url) {
+            throw new Error('URL tanımlı değil');
+          }
+          const canOpen = await Linking.canOpenURL(url);
+          if (!canOpen) {
+            throw new Error('URL açılamıyor');
+          }
+          await Linking.openURL(url);
+        } catch (error) {
+          console.error('Gizlilik politikası açma hatası:', error);
+          Alert.alert(
+            'Gizlilik Politikası',
+            'Gizlilik politikası şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html adresini ziyaret edin.',
+            [{ text: 'Tamam' }]
+          );
+        }
       },
     },
     {
@@ -508,11 +522,9 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'SSS ve destek',
       type: 'arrow',
       onPress: () => {
-        Alert.alert(
-          'Yardım ve Destek',
-          'Destek için: support@afetnet.app',
-          [{ text: 'Tamam' }]
-        );
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('PsychologicalSupport');
       },
     },
   ];

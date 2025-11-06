@@ -286,8 +286,6 @@ PODS:
     - ExpoModulesCore
   - ExpoSpeech (14.0.7):
     - ExpoModulesCore
-  - ExpoVideo (3.0.12):
-    - ExpoModulesCore
   - EXTaskManager (14.0.8):
     - ExpoModulesCore
     - UMAppLoader
@@ -1724,6 +1722,28 @@ PODS:
   - react-native-tcp-socket (6.3.0):
     - CocoaAsyncSocket
     - React-Core
+  - react-native-webview (13.15.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - React-NativeModulesApple (0.81.5):
     - hermes-engine
     - React-callinvoker
@@ -2075,7 +2095,7 @@ PODS:
     - ReactNativeDependencies
   - ReactNativeDependencies (0.81.5)
   - RevenueCat (5.45.0)
-  - RNCAsyncStorage (2.2.0):
+  - RNCAsyncStorage (1.24.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2408,7 +2428,6 @@ DEPENDENCIES:
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - ExpoSMS (from `../node_modules/expo-sms/ios`)
   - ExpoSpeech (from `../node_modules/expo-speech/ios`)
-  - ExpoVideo (from `../node_modules/expo-video/ios`)
   - EXTaskManager (from `../node_modules/expo-task-manager/ios`)
   - EXUpdatesInterface (from `../node_modules/expo-updates-interface/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2455,6 +2474,7 @@ DEPENDENCIES:
   - react-native-quick-sqlite (from `../node_modules/react-native-quick-sqlite`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - react-native-tcp-socket (from `../node_modules/react-native-tcp-socket`)
+  - react-native-webview (from `../node_modules/react-native-webview`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-oscompat (from `../node_modules/react-native/ReactCommon/oscompat`)
   - React-perflogger (from `../node_modules/react-native/ReactCommon/reactperflogger`)
@@ -2582,8 +2602,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-sms/ios"
   ExpoSpeech:
     :path: "../node_modules/expo-speech/ios"
-  ExpoVideo:
-    :path: "../node_modules/expo-video/ios"
   EXTaskManager:
     :path: "../node_modules/expo-task-manager/ios"
   EXUpdatesInterface:
@@ -2675,6 +2693,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-safe-area-context"
   react-native-tcp-socket:
     :path: "../node_modules/react-native-tcp-socket"
+  react-native-webview:
+    :path: "../node_modules/react-native-webview"
   React-NativeModulesApple:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-oscompat:
@@ -2798,7 +2818,6 @@ SPEC CHECKSUMS:
   ExpoSharing: 032c01bb034319e2374badf082ae935be866d2e9
   ExpoSMS: 10cd15976285c7e42f91790d6584eea53dc4e026
   ExpoSpeech: 18a7f92a932028e16d3df1891377a8b626ab5cc0
-  ExpoVideo: 6907c4872886dce2720d3af20782eb6ee7734110
   EXTaskManager: cbbb80cbccea6487ccca0631809fbba2ed3e5271
   EXUpdatesInterface: 5adf50cb41e079c861da6d9b4b954c3db9a50734
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
@@ -2846,6 +2865,7 @@ SPEC CHECKSUMS:
   react-native-quick-sqlite: ef5b0117b3882204f404cad7d5789dc7634d8979
   react-native-safe-area-context: 37e680fc4cace3c0030ee46e8987d24f5d3bdab2
   react-native-tcp-socket: 120072c8020262032773f80f0daaf3964aaa08a1
+  react-native-webview: b29007f4723bca10872028067b07abacfa1cb35a
   React-NativeModulesApple: 8969913947d5b576de4ed371a939455a8daf28aa
   React-oscompat: ce47230ed20185e91de62d8c6d139ae61763d09c
   React-perflogger: 02b010e665772c7dcb859d85d44c1bfc5ac7c0e4
@@ -2878,7 +2898,7 @@ SPEC CHECKSUMS:
   ReactCommon: 08810150b1206cc44aecf5f6ae19af32f29151a8
   ReactNativeDependencies: 71ce9c28beb282aa720ea7b46980fff9669f428a
   RevenueCat: 9d0328a098bd0e1b425d91d136e643b72cd70326
-  RNCAsyncStorage: 3a4f5e2777dae1688b781a487923a08569e27fe4
+  RNCAsyncStorage: 7a5a6094f9f6b9158e72f1855cd86e769413d851
   RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
   RNGestureHandler: 2914750df066d89bf9d8f48a10ad5f0051108ac3
   RNPurchases: 14791d01d683a7f334f03d8ffadf92260b3c54a0

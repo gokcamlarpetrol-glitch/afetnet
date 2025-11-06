@@ -5,6 +5,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import { AppState, AppStateStatus, NativeEventSubscription } from 'react-native';
 import { useEarthquakeStore, Earthquake } from '../stores/earthquakeStore';
 import { createLogger } from '../utils/logger';
 import { autoCheckinService } from './AutoCheckinService';
@@ -19,6 +20,9 @@ const POLL_INTERVAL = 30000; // 30 seconds - Real-time AFAD updates
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private isFetching = false;
+  private lastFetchedAt: number | null = null;
+  private appStateListener?: NativeEventSubscription;
 
   async start() {
     if (this.isRunning) return;
@@ -26,11 +30,12 @@ class EarthquakeService {
     this.isRunning = true;
     
     // Initial fetch
-    await this.fetchEarthquakes();
+    await this.fetchEarthquakes({ reason: 'initial-start', force: true });
+    this.setupAppStateListener();
     
     // Start polling
     this.intervalId = setInterval(() => {
-      this.fetchEarthquakes();
+      void this.fetchEarthquakes({ reason: 'interval' });
     }, POLL_INTERVAL);
   }
 
@@ -40,14 +45,49 @@ class EarthquakeService {
       this.intervalId = null;
     }
     this.isRunning = false;
+    this.teardownAppStateListener();
   }
 
-  async fetchEarthquakes() {
+  private setupAppStateListener() {
+    this.teardownAppStateListener();
+    this.appStateListener = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') {
+        void this.fetchEarthquakes({ reason: 'app-foreground', force: true });
+      }
+    });
+  }
+
+  private teardownAppStateListener() {
+    if (this.appStateListener) {
+      this.appStateListener.remove();
+      this.appStateListener = undefined;
+    }
+  }
+
+  async fetchEarthquakes(options: { reason?: string; force?: boolean } = {}) {
+    if (this.isFetching && !options.force) {
+      logger.debug('⏳ Deprem verisi isteği atlandı (önceki istek devam ediyor)', options);
+      return;
+    }
+
+    const now = Date.now();
+    if (!options.force && this.lastFetchedAt && now - this.lastFetchedAt < POLL_INTERVAL / 2) {
+      logger.debug('🔁 Deprem verisi yeterince yeni, sorgu atlandı', {
+        reason: options.reason,
+        lastFetchedAgo: now - this.lastFetchedAt,
+      });
+      return;
+    }
+
+    this.isFetching = true;
     const store = useEarthquakeStore.getState();
     store.setLoading(true);
     store.setError(null); // Clear previous errors
 
     try {
+      logger.info('🌍 Deprem verisi yenileniyor', {
+        reason: options.reason ?? 'manual',
+      });
       let earthquakes: Earthquake[] = [];
 
       // 1. AFAD (Turkey - Primary source)
@@ -72,11 +112,11 @@ class EarthquakeService {
         const latestEq = uniqueEarthquakes[0];
         const lastCheckedEq = await AsyncStorage.getItem('last_checked_earthquake');
         
-        console.log('🔝 EN SON DEPREM:', {
+        logger.info('🔝 En son deprem', {
           location: latestEq.location,
           magnitude: latestEq.magnitude,
           time: new Date(latestEq.time).toLocaleString('tr-TR'),
-          zamanFarki: Math.round((Date.now() - latestEq.time) / 60000) + ' dakika önce'
+          minutesAgo: Math.round((Date.now() - latestEq.time) / 60000),
         });
         
         // Trigger auto check-in for new significant earthquakes (magnitude >= 4.0)
@@ -185,13 +225,17 @@ class EarthquakeService {
         }
         
         store.setItems(uniqueEarthquakes);
-        console.log(`✅ Store güncellendi: ${uniqueEarthquakes.length} deprem`);
+        logger.info(`✅ Store güncellendi`, { count: uniqueEarthquakes.length });
+        this.lastFetchedAt = Date.now();
+        await AsyncStorage.setItem(LAST_FETCH_KEY, String(this.lastFetchedAt));
         await this.saveToCache(uniqueEarthquakes);
       } else {
         // Try cache if no new data
         const cached = await this.loadFromCache();
         if (cached && cached.length > 0) {
           store.setItems(cached);
+          const lastFetchValue = await AsyncStorage.getItem(LAST_FETCH_KEY);
+          this.lastFetchedAt = lastFetchValue ? Number(lastFetchValue) : this.lastFetchedAt;
         } else {
           store.setError('Deprem verisi alınamadı. İnternet bağlantınızı kontrol edin.');
         }
@@ -201,10 +245,13 @@ class EarthquakeService {
       const cached = await this.loadFromCache();
       if (cached && cached.length > 0) {
         store.setItems(cached);
+        const lastFetchValue = await AsyncStorage.getItem(LAST_FETCH_KEY);
+        this.lastFetchedAt = lastFetchValue ? Number(lastFetchValue) : this.lastFetchedAt;
       } else {
         store.setError('Deprem verisi alınamadı. Lütfen tekrar deneyin.');
       }
     } finally {
+      this.isFetching = false;
       store.setLoading(false);
     }
   }
@@ -238,15 +285,19 @@ class EarthquakeService {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       const startDate = sevenDaysAgo.toISOString().split('T')[0];
-      const endDate = new Date().toISOString().split('T')[0];
+
+      // AFAD filter endpoint includes events up to the start of the "end" day.
+      // Add one extra day so we always capture the current day's events.
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const endDate = tomorrow.toISOString().split('T')[0];
       
       const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
       
       // Alternative fallback URL (last 500 events)
       const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
       
-      console.log('📡 AFAD API çağrılıyor:', url);
-      console.log('📅 Tarih aralığı:', startDate, 'dan', endDate, 'a kadar');
+      logger.debug('📡 AFAD API çağrılıyor', { url, startDate, endDate });
 
       let response = await fetch(url, {
         method: 'GET',
@@ -281,7 +332,7 @@ class EarthquakeService {
           return [];
         }
         
-        console.log('✅ Fallback endpoint successful');
+        logger.info('✅ AFAD fallback endpoint successful');
       }
 
       const data = await response.json();
@@ -298,18 +349,21 @@ class EarthquakeService {
         events = data.results;
       }
       
-      console.log(`✅ AFAD'dan ${events.length} deprem verisi alındı`);
+      logger.info('✅ AFAD verisi alındı', { count: events.length });
       
       if (events.length === 0) {
-        console.warn('⚠️ AFAD API boş veri döndü! Response:', JSON.stringify(data).substring(0, 200));
+        logger.warn('⚠️ AFAD API boş veri döndü', { responsePreview: JSON.stringify(data).substring(0, 200) });
         return [];
       }
       
       // İlk 3 depremi logla (debug için)
       if (__DEV__) {
-        console.log('📊 İlk 3 deprem (debug):');
         events.slice(0, 3).forEach((eq: any, i: number) => {
-          console.log(`  ${i + 1}. Location: ${eq.location || eq.title || eq.place || 'N/A'}, Magnitude: ${eq.mag || eq.magnitude || eq.ml || 'N/A'}, Date: ${eq.eventDate || eq.date || eq.originTime || 'N/A'}`);
+          logger.debug(`📊 Deprem ${i + 1}`, {
+            location: eq.location || eq.title || eq.place || 'N/A',
+            magnitude: eq.mag || eq.magnitude || eq.ml || 'N/A',
+            date: eq.eventDate || eq.date || eq.originTime || 'N/A',
+          });
         });
       }
       

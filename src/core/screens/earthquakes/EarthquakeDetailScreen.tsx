@@ -23,16 +23,44 @@ import * as haptics from '../../utils/haptics';
 
 interface Props {
   navigation: any;
-  route: {
-    params: {
-      earthquake: Earthquake;
+  route?: {
+    params?: {
+      earthquake?: Earthquake;
     };
   };
 }
 
 export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { earthquake: initialEarthquake } = route.params;
+  const initialEarthquake = route?.params?.earthquake;
+
+  if (!initialEarthquake) {
+    return (
+      <View style={styles.fallbackContainer}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <LinearGradient
+          colors={['#312e81', '#1e293b']}
+          style={[styles.header, { paddingTop: insets.top + 16 }]}
+        >
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation?.goBack?.()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Deprem Detayı</Text>
+          <View style={styles.refreshButton} />
+        </LinearGradient>
+        <View style={styles.fallbackBody}>
+          <Ionicons name="alert-circle" size={48} color="#ef4444" />
+          <Text style={styles.fallbackTitle}>Deprem verisi bulunamadı</Text>
+          <Text style={styles.fallbackSubtitle}>
+            Lütfen ana ekrandan bir deprem seçerek tekrar deneyin.
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => navigation?.goBack?.()}>
+            <Text style={styles.retryButtonText}>Geri Dön</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
   
   const [earthquake, setEarthquake] = useState<Earthquake>(initialEarthquake);
   const [loading, setLoading] = useState(true);
@@ -48,6 +76,11 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
       setLoading(true);
       setError(null);
       
+      if (!earthquake?.id) {
+        setEarthquake(initialEarthquake);
+        return;
+      }
+
       // Extract eventID from earthquake.id (format: "afad-{eventID}-{random}")
       const eventID = earthquake.id.split('-')[1];
       
@@ -88,15 +121,16 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   };
 
   const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString('tr-TR', {
+    const formatter = new Intl.DateTimeFormat('tr-TR', {
       day: '2-digit',
       month: 'long',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
+      timeZone: 'Europe/Istanbul',
     });
+    return formatter.format(new Date(timestamp));
   };
 
   const getTimeAgo = (timestamp: number) => {
@@ -484,6 +518,41 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#94a3b8',
     marginTop: 4,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#3b82f6',
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  fallbackContainer: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+  },
+  fallbackBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  fallbackTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  fallbackSubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

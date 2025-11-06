@@ -15,6 +15,13 @@ import { whistleService } from '../../../services/WhistleService';
 import { flashlightService } from '../../../services/FlashlightService';
 import { batterySaverService } from '../../../services/BatterySaverService';
 
+const logDebug = (...args: any[]) => {
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+};
+
 interface EmergencyButtonProps {
   onPress: () => void;
 }
@@ -70,7 +77,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     setIsPressed(true);
     haptics.impactMedium();
     
-    console.log('🆘 SOS butonu basıldı - 3 saniye bekleniyor...');
+    logDebug('🆘 SOS butonu basıldı - 3 saniye bekleniyor...');
 
     // Scale animation
     Animated.spring(scaleAnim, {
@@ -87,7 +94,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
     // Set timer for 3 seconds
     pressTimer.current = setTimeout(() => {
-      console.log('✅ SOS butonu 3 saniye tutuldu - SOS gönderiliyor!');
+      logDebug('✅ SOS butonu 3 saniye tutuldu - SOS gönderiliyor!');
       haptics.impactHeavy();
       haptics.notificationSuccess();
       onPress(); // Trigger SOS modal
@@ -99,7 +106,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const handlePressOut = () => {
     // Cancel timer if released before 3 seconds
     if (pressTimer.current) {
-      console.log('⚠️ SOS butonu erken bırakıldı');
+      logDebug('⚠️ SOS butonu erken bırakıldı');
       clearTimeout(pressTimer.current);
       pressTimer.current = null;
     }
@@ -124,42 +131,42 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   const handleWhistle = async () => {
     haptics.impactMedium();
-    console.log('Düdük butonu tıklandı, mevcut durum:', whistleActive);
+    logDebug('Düdük butonu tıklandı, mevcut durum:', whistleActive);
     
     if (whistleActive) {
       await whistleService.stop();
       setWhistleActive(false);
-      console.log('Düdük durduruldu');
+      logDebug('Düdük durduruldu');
     } else {
       await whistleService.playSOSWhistle('morse');
       setWhistleActive(true);
-      console.log('Düdük başlatıldı');
+      logDebug('Düdük başlatıldı');
     }
   };
 
   const handleFlashlight = async () => {
     haptics.impactMedium();
-    console.log('Fener butonu tıklandı, mevcut durum:', flashActive);
+    logDebug('Fener butonu tıklandı, mevcut durum:', flashActive);
     
     if (flashActive) {
       await flashlightService.stop();
       setFlashActive(false);
-      console.log('Fener kapatıldı');
+      logDebug('Fener kapatıldı');
     } else {
       await flashlightService.flashSOSMorse();
       setFlashActive(true);
-      console.log('Fener açıldı (SOS Morse)');
+      logDebug('Fener açıldı (SOS Morse)');
     }
   };
 
   const handle112Call = async () => {
     haptics.impactHeavy();
-    console.log('112 arama butonu tıklandı');
+    logDebug('112 arama butonu tıklandı');
     
     // Direct call - no confirmation needed in emergency
     try {
       await Linking.openURL('tel:112');
-      console.log('112 arama başlatıldı');
+      logDebug('112 arama başlatıldı');
     } catch (error) {
       console.error('112 arama hatası:', error);
       Alert.alert('Hata', '112 aranırken bir hata oluştu. Lütfen manuel olarak arayın.');

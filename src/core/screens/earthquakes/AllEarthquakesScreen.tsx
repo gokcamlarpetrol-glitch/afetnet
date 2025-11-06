@@ -3,7 +3,7 @@
  * Filtreleme, konum bazlı, FlatList optimizations
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +27,12 @@ export default function AllEarthquakesScreen({ navigation }: any) {
   const [locationFilter, setLocationFilter] = useState<LocationFilter>(999999); // Show all Turkey by default
   const [magnitudeFilter, setMagnitudeFilter] = useState<MagnitudeFilter>(0); // Show all magnitudes by default
   const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    // Ekran açıldığında en güncel veriyi çek
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter earthquakes
   const filteredEarthquakes = useMemo(() => {
@@ -62,23 +68,37 @@ export default function AllEarthquakesScreen({ navigation }: any) {
     return filtered.sort((a, b) => b.time - a.time);
   }, [earthquakes, timeFilter, locationFilter, magnitudeFilter]);
 
+  const lastUpdatedText = useMemo(() => {
+    const reference = filteredEarthquakes[0] ?? earthquakes[0];
+    return reference ? formatTimestamp(reference.time) : '---';
+  }, [filteredEarthquakes, earthquakes]);
+
   const getMagnitudeColor = (mag: number) => {
     if (mag >= 5.0) return colors.earthquake.major;
     if (mag >= 4.0) return colors.earthquake.moderate;
     return colors.earthquake.minor;
   };
 
-  const getTimeAgo = (timestamp: number): string => {
-    const now = Date.now();
-    const diffMs = now - timestamp;
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const formatTimestamp = (timestamp: number): string => {
+    const diffMs = Date.now() - timestamp;
+    const formatterShort = new Intl.DateTimeFormat('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Istanbul',
+    });
 
-    if (diffMins < 1) return 'Az önce';
-    if (diffMins < 60) return `${diffMins} dakika önce`;
-    if (diffHours < 24) return `${diffHours} saat önce`;
-    return `${diffDays} gün önce`;
+    if (diffMs > 48 * 60 * 60 * 1000) {
+      const formatterLong = new Intl.DateTimeFormat('tr-TR', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Istanbul',
+      });
+      return formatterLong.format(new Date(timestamp));
+    }
+
+    return formatterShort.format(new Date(timestamp));
   };
 
   const renderItem = ({ item }: { item: Earthquake }) => {
@@ -114,7 +134,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
           <View style={styles.itemMeta}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={13} color={colors.text.secondary} />
-              <Text style={styles.metaText}>{getTimeAgo(item.time)}</Text>
+              <Text style={styles.metaText}>{formatTimestamp(item.time)}</Text>
             </View>
             <View style={styles.metaDot} />
             <View style={styles.metaItem}>
@@ -241,7 +261,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
           {filteredEarthquakes.length} deprem bulundu (Türkiye - AFAD)
         </Text>
         <Text style={styles.resultSubtext}>
-          Son 100 deprem gösteriliyor
+          Son güncelleme: {lastUpdatedText} • Son 100 deprem gösteriliyor
         </Text>
       </View>
 

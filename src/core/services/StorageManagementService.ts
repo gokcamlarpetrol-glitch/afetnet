@@ -5,7 +5,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { createLogger } from '../utils/logger';
 import { Alert } from 'react-native';
 
@@ -59,15 +59,19 @@ class StorageManagementService {
       
       // Check initial storage
       const stats = await this.getStorageStats();
-      logger.info('Initial storage stats:', {
-        freeSpaceMB: (stats.freeSpace / 1024 / 1024).toFixed(2),
-        usedPercentage: stats.usedPercentage.toFixed(2),
-      });
+      if (!stats) {
+        logger.warn('Storage stats unavailable during initialization; skipping warning checks.');
+      } else {
+        logger.info('Initial storage stats:', {
+          freeSpaceMB: (stats.freeSpace / 1024 / 1024).toFixed(2),
+          usedPercentage: stats.usedPercentage.toFixed(2),
+        });
 
-      // Check for warnings
-      const warning = this.checkStorageWarning(stats);
-      if (warning && warning.level === 'critical') {
-        await this.handleCriticalStorage(stats);
+        // Check for warnings
+        const warning = this.checkStorageWarning(stats);
+        if (warning && warning.level === 'critical') {
+          await this.handleCriticalStorage(stats);
+        }
       }
 
       logger.info('Storage management initialized');
@@ -86,6 +90,11 @@ class StorageManagementService {
     this.monitoringInterval = setInterval(async () => {
       try {
         const stats = await this.getStorageStats();
+        if (!stats) {
+          logger.debug('Storage stats unavailable; skipping monitoring iteration.');
+          return;
+        }
+
         const warning = this.checkStorageWarning(stats);
 
         if (warning) {
@@ -114,11 +123,17 @@ class StorageManagementService {
   /**
    * Get current storage statistics
    */
-  async getStorageStats(): Promise<StorageStats> {
+  async getStorageStats(): Promise<StorageStats | null> {
     try {
       // Get file system info
       const fsInfo = await FileSystem.getFreeDiskStorageAsync();
       const totalSpace = await FileSystem.getTotalDiskCapacityAsync();
+
+      if (!totalSpace || totalSpace <= 0 || fsInfo == null) {
+        logger.warn('Received invalid storage stats from FileSystem API.', { totalSpace, fsInfo });
+        return null;
+      }
+
       const freeSpace = fsInfo;
       const usedSpace = totalSpace - freeSpace;
       const usedPercentage = (usedSpace / totalSpace) * 100;
@@ -136,15 +151,7 @@ class StorageManagementService {
       };
     } catch (error) {
       logger.error('Failed to get storage stats:', error);
-      // Return safe defaults
-      return {
-        totalSpace: 0,
-        freeSpace: 0,
-        usedSpace: 0,
-        usedPercentage: 0,
-        asyncStorageSize: 0,
-        fileSystemSize: 0,
-      };
+      return null;
     }
   }
 
@@ -381,6 +388,17 @@ class StorageManagementService {
     status: 'ok' | 'warning' | 'critical';
   }> {
     const stats = await this.getStorageStats();
+    if (!stats) {
+      return {
+        totalMB: 0,
+        usedMB: 0,
+        freeMB: 0,
+        usedPercentage: 0,
+        asyncStorageMB: 0,
+        status: 'ok',
+      };
+    }
+
     const warning = this.checkStorageWarning(stats);
 
     return {

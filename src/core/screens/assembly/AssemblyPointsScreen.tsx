@@ -199,7 +199,12 @@ export default function AssemblyPointsScreen({ navigation }: any) {
   };
 
   if (!isPremium) {
-    return <PremiumGate featureName="Toplanma Noktaları Haritası" />;
+    return (
+      <PremiumGate
+        featureName="Toplanma Noktaları Haritası"
+        onUpgradePress={() => navigation?.navigate?.('Paywall')}
+      />
+    );
   }
 
   return (

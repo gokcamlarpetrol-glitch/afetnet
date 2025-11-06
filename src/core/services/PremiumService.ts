@@ -3,7 +3,7 @@
  */
 
 import Purchases, { PurchasesOffering } from 'react-native-purchases';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { usePremiumStore } from '../stores/premiumStore';
 import { useTrialStore } from '../stores/trialStore';
 import { APP_CONFIG } from '../config/app';
@@ -22,6 +22,8 @@ const ENTITLEMENT_ID = APP_CONFIG.iap.entitlementId;
 
 class PremiumService {
   private isInitialized = false;
+  private hasRevenueCat = false;
+  private revenueCatDisabledReason: string | null = null;
 
   async initialize() {
     if (this.isInitialized) return;
@@ -36,6 +38,7 @@ class PremiumService {
       
       if (!apiKey) {
         logger.info('RevenueCat API key not found. Using trial only.');
+        this.hasRevenueCat = false;
         // Check trial status
         const isTrialActive = useTrialStore.getState().checkTrialStatus();
         usePremiumStore.getState().setPremium(isTrialActive);
@@ -45,6 +48,7 @@ class PremiumService {
 
       // Configure RevenueCat
       Purchases.configure({ apiKey });
+      this.hasRevenueCat = true;
 
       // Check current status (includes trial check)
       await this.checkPremiumStatus();
@@ -54,15 +58,43 @@ class PremiumService {
 
     } catch (error) {
       logger.error('Initialization error:', error);
-      // Check trial as fallback
+      this.disableRevenueCat('initialize', error);
       const isTrialActive = useTrialStore.getState().checkTrialStatus();
       usePremiumStore.getState().setPremium(isTrialActive);
     }
   }
 
+  private disableRevenueCat(context: string, error?: unknown) {
+    if (!this.hasRevenueCat) {
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const isInvalidKey = message.toLowerCase().includes('invalid api key');
+
+    if (!isInvalidKey) {
+      // For transient issues keep RevenueCat enabled
+      logger.error(`${context} error:`, error);
+      return;
+    }
+
+    this.hasRevenueCat = false;
+    this.revenueCatDisabledReason = message;
+    logger.warn(`RevenueCat disabled (${context}) - falling back to trial only.`, { message });
+
+    const isTrialActive = useTrialStore.getState().checkTrialStatus();
+    usePremiumStore.getState().setPremium(isTrialActive);
+  }
+
   async checkPremiumStatus(): Promise<boolean> {
     try {
       usePremiumStore.getState().setLoading(true);
+
+      if (!this.hasRevenueCat) {
+        const isTrialActive = useTrialStore.getState().checkTrialStatus();
+        usePremiumStore.getState().setPremium(isTrialActive);
+        return isTrialActive;
+      }
 
       // First check if user has paid subscription
       const customerInfo = await Purchases.getCustomerInfo();
@@ -85,9 +117,8 @@ class PremiumService {
       return isTrialActive;
 
     } catch (error) {
-      logger.error('Status check error:', error);
-      
-      // On error, check trial as fallback
+      this.disableRevenueCat('checkPremiumStatus', error);
+
       const isTrialActive = useTrialStore.getState().checkTrialStatus();
       usePremiumStore.getState().setPremium(isTrialActive);
       
@@ -99,10 +130,18 @@ class PremiumService {
 
   async getOfferings(): Promise<PurchasesOffering | null> {
     try {
+      if (!this.hasRevenueCat) {
+        logger.info('RevenueCat not configured; returning null offerings.');
+        return null;
+      }
+
       const offerings = await Purchases.getOfferings();
       return offerings.current;
     } catch (error) {
-      logger.error('Get offerings error:', error);
+      this.disableRevenueCat('getOfferings', error);
+      if (this.revenueCatDisabledReason) {
+        logger.info('Returning null offerings - RevenueCat disabled.');
+      }
       return null;
     }
   }
@@ -110,6 +149,12 @@ class PremiumService {
   async purchasePackage(packageId: string): Promise<boolean> {
     try {
       usePremiumStore.getState().setLoading(true);
+
+      if (!this.hasRevenueCat) {
+        logger.warn('Purchase attempted but RevenueCat is not configured.');
+        Alert.alert('Abonelik Kullanılamıyor', 'Abonelik sistemi şu anda devre dışı. Lütfen destek ile iletişime geçin.');
+        return false;
+      }
 
       const offerings = await this.getOfferings();
       if (!offerings) return false;
@@ -135,7 +180,7 @@ class PremiumService {
       return isPremium;
 
     } catch (error) {
-      logger.error('Purchase error:', error);
+      this.disableRevenueCat('purchasePackage', error);
       return false;
     } finally {
       usePremiumStore.getState().setLoading(false);
@@ -145,6 +190,12 @@ class PremiumService {
   async restorePurchases(): Promise<boolean> {
     try {
       usePremiumStore.getState().setLoading(true);
+
+      if (!this.hasRevenueCat) {
+        logger.warn('Restore attempted but RevenueCat is not configured.');
+        Alert.alert('Abonelik Kullanılamıyor', 'Satın almalar şu anda geri yüklenemiyor. Lütfen destek ile iletişime geçin.');
+        return false;
+      }
 
       const customerInfo = await Purchases.restorePurchases();
       const isPremium = typeof customerInfo.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
@@ -163,7 +214,7 @@ class PremiumService {
       return isPremium;
 
     } catch (error) {
-      logger.error('Restore error:', error);
+      this.disableRevenueCat('restorePurchases', error);
       return false;
     } finally {
       usePremiumStore.getState().setLoading(false);

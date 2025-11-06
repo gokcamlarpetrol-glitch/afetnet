@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Alert, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -160,6 +160,23 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       logger.info('✅ All CRITICAL permissions granted');
     } else {
       logger.warn('⚠️ Some CRITICAL permissions denied - app will continue');
+      Alert.alert(
+        'İzin Gerekli',
+        'Konum ve bildirim izinleri afet uyarıları için zorunludur. Lütfen Ayarlar menüsünden izinleri etkinleştirin.',
+        [
+          {
+            text: 'Ayarlar',
+            onPress: () => {
+              try {
+                Linking.openSettings();
+              } catch (error) {
+                logger.error('Settings open error:', error);
+              }
+            },
+          },
+          { text: 'Tamam', style: 'cancel' },
+        ]
+      );
     }
     
     // Always call callback

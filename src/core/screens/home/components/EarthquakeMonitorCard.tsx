@@ -20,48 +20,56 @@ const ISTANBUL_LAT = 41.0082;
 const ISTANBUL_LON = 28.9784;
 const NEARBY_RADIUS_KM = 500; // 500km radius for "nearby"
 
+const logDebug = (...args: any[]) => {
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+};
+
 export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) {
   const { earthquakes, loading } = useEarthquakes();
 
-  // Filter earthquakes within 500km of Istanbul
-  const nearbyEarthquakes = useMemo(() => {
-    const filtered = earthquakes
-      .filter((eq) => {
-        const distance = calculateDistance(
-          ISTANBUL_LAT,
-          ISTANBUL_LON,
-          eq.latitude,
-          eq.longitude
-        );
-        return distance <= NEARBY_RADIUS_KM;
-      })
-      .sort((a, b) => b.time - a.time); // Newest first
-    
-    console.log('🗺️ Deprem Monitör Kartı:', {
-      toplamDeprem: earthquakes.length,
-      istanbulYakin: filtered.length,
-      enSonDeprem: filtered[0] ? {
-        location: filtered[0].location,
-        magnitude: filtered[0].magnitude,
-        time: new Date(filtered[0].time).toLocaleString('tr-TR')
-      } : null
+  const sortedEarthquakes = useMemo(() => {
+    const sorted = [...earthquakes].sort((a, b) => b.time - a.time);
+    logDebug('🗺️ Deprem Monitör Kartı - Global', {
+      toplam: sorted.length,
+      enSon: sorted[0]
+        ? {
+            location: sorted[0].location,
+            magnitude: sorted[0].magnitude,
+            time: new Date(sorted[0].time).toLocaleString('tr-TR'),
+          }
+        : null,
     });
-    
-    return filtered;
+    return sorted;
   }, [earthquakes]);
 
-  const last24Hours = nearbyEarthquakes.filter((eq) => {
+  // Nearby earthquakes (Istanbul radius) for local context
+  const nearbyEarthquakes = useMemo(() => {
+    return sortedEarthquakes.filter((eq) => {
+      const distance = calculateDistance(
+        ISTANBUL_LAT,
+        ISTANBUL_LON,
+        eq.latitude,
+        eq.longitude
+      );
+      return distance <= NEARBY_RADIUS_KM;
+    });
+  }, [sortedEarthquakes]);
+
+  const last24Hours = sortedEarthquakes.filter((eq) => {
     const now = Date.now();
     return now - eq.time < 24 * 60 * 60 * 1000;
   });
 
-  const maxMagnitude = nearbyEarthquakes.length > 0
-    ? Math.max(...nearbyEarthquakes.map((eq) => eq.magnitude))
+  const maxMagnitude = sortedEarthquakes.length > 0
+    ? Math.max(...sortedEarthquakes.map((eq) => eq.magnitude))
     : 0;
 
   // Son 3 deprem: 1 üstte (featured) + 2 altta (list)
-  const latestEarthquake = nearbyEarthquakes[0]; // En son deprem
-  const nextTwoEarthquakes = nearbyEarthquakes.slice(1, 3); // Sonraki 2 deprem
+  const latestEarthquake = sortedEarthquakes[0]; // Türkiye genelindeki en son deprem
+  const nextTwoEarthquakes = sortedEarthquakes.slice(1, 3);
 
   const getMagnitudeColor = (mag: number) => {
     if (mag >= 5.0) return '#ef4444';
@@ -69,16 +77,26 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
     return '#eab308';
   };
 
-  const getTimeAgo = (timestamp: number): string => {
+  const formatTimestamp = (timestamp: number): string => {
     const diffMs = Date.now() - timestamp;
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    
-    if (diffMinutes < 1) return 'Az önce';
-    if (diffMinutes < 60) return `${diffMinutes} dk önce`;
-    if (diffHours < 24) return `${diffHours} saat önce`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays} gün önce`;
+    const formatterShort = new Intl.DateTimeFormat('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Istanbul',
+    });
+
+    if (diffMs > 48 * 60 * 60 * 1000) {
+      const formatterLong = new Intl.DateTimeFormat('tr-TR', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Istanbul',
+      });
+      return formatterLong.format(new Date(timestamp));
+    }
+
+    return formatterShort.format(new Date(timestamp));
   };
 
   const getDistance = (eq: any): string => {
@@ -106,7 +124,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
             </View>
             <View>
               <Text style={styles.title}>Deprem İzleme Sistemi</Text>
-              <Text style={styles.subtitle}>İstanbul Bölgesi (500km)</Text>
+              <Text style={styles.subtitle}>Türkiye Geneli • AFAD Canlı Verisi</Text>
             </View>
           </View>
           <View style={styles.liveBadge}>
@@ -126,7 +144,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
           </View>
           <View style={styles.stat}>
             <Text style={styles.statTitle}>Toplam</Text>
-            <Text style={styles.statValue}>{nearbyEarthquakes.length}</Text>
+            <Text style={styles.statValue}>{sortedEarthquakes.length}</Text>
           </View>
         </View>
 
@@ -159,7 +177,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                       {latestEarthquake.location}
                     </Text>
                     <Text style={styles.featuredTime}>
-                      {getTimeAgo(latestEarthquake.time)}
+                      {formatTimestamp(latestEarthquake.time)}
                     </Text>
                   </View>
                 </View>
@@ -196,7 +214,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                           {eq.location}
                         </Text>
                         <Text style={styles.smallEqMeta}>
-                          {getTimeAgo(eq.time)} • {getDistance(eq)}
+                          {formatTimestamp(eq.time)} • {getDistance(eq)}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.5)" />
@@ -208,8 +226,22 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
           ) : (
             <View style={styles.noDataContainer}>
               <Text style={styles.noDataText}>
-                {loading ? 'Veriler yükleniyor...' : 'Yakın bölgede deprem kaydı yok'}
+                {loading ? 'Veriler yükleniyor...' : 'Deprem kaydı bulunamadı'}
               </Text>
+            </View>
+          )}
+
+          {nearbyEarthquakes.length > 0 && (
+            <View style={styles.nearbySection}>
+              <Text style={styles.nearbyTitle}>İstanbul çevresinde</Text>
+              {nearbyEarthquakes.slice(0, 2).map((eq) => (
+                <View key={eq.id} style={styles.nearbyItem}>
+                  <Ionicons name="location-outline" size={14} color="rgba(255,255,255,0.7)" />
+                  <Text style={styles.nearbyText} numberOfLines={1}>
+                    {eq.location} • {formatTimestamp(eq.time)}
+                  </Text>
+                </View>
+              ))}
             </View>
           )}
 
@@ -447,6 +479,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     color: 'rgba(255,255,255,0.6)',
+  },
+  nearbySection: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 8,
+  },
+  nearbyTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.75)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  nearbyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  nearbyText: {
+    flex: 1,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
   },
   viewAllBtn: {
     flexDirection: 'row',

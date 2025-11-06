@@ -4,7 +4,7 @@
  * Premium feature with 2 tabs: AI Summary + Original Article (WebView)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
   Share,
   Linking,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
+import type { WebViewProps } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography } from '../../theme';
@@ -42,10 +42,76 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
   const [activeTab, setActiveTab] = useState<TabType>('summary');
   const [aiSummary, setAiSummary] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [articleContent, setArticleContent] = useState<string>('');
+  const [articleContentLoading, setArticleContentLoading] = useState(false);
+  const [articleContentError, setArticleContentError] = useState<string | null>(null);
+
+  const WebViewComponent = useMemo<React.ComponentType<WebViewProps> | null>(() => {
+    try {
+      const { WebView } = require('react-native-webview');
+      return WebView as React.ComponentType<WebViewProps>;
+    } catch (error) {
+      logger.warn('react-native-webview module unavailable; falling back to external browser.', error);
+      return null;
+    }
+  }, []);
+
+  const sanitizeArticleContent = (html: string): string => {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<header[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const loadArticleContent = useCallback(async () => {
+    if (!article.url || article.url === '#') return;
+
+    try {
+      setArticleContentLoading(true);
+      setArticleContentError(null);
+
+      const response = await fetch(article.url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'AfetNet/1.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
+      const rawHtml = await response.text();
+      const sanitized = sanitizeArticleContent(rawHtml);
+
+      if (sanitized.length > 0) {
+        setArticleContent(sanitized);
+      } else {
+        setArticleContentError('Haber içeriği çözümlenemedi.');
+      }
+    } catch (err) {
+      logger.error('Failed to fetch article content:', err);
+      setArticleContentError('Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyin.');
+    } finally {
+      setArticleContentLoading(false);
+    }
+  }, [article.url]);
 
   useEffect(() => {
     loadAISummary();
   }, []);
+
+  useEffect(() => {
+    if (!WebViewComponent && article.url && article.url !== '#') {
+      void loadArticleContent();
+    }
+  }, [WebViewComponent, article.url, loadArticleContent]);
 
   const loadAISummary = async () => {
     try {
@@ -211,40 +277,69 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
       ) : (
         <View style={styles.webViewContainer}>
           {article.url && article.url !== '#' ? (
-            <WebView
-              source={{ uri: article.url }}
-              style={styles.webView}
-              startInLoadingState
-              renderLoading={() => (
-                <View style={styles.webViewLoading}>
-                  <ActivityIndicator size="large" color={colors.accent.primary} />
-                  <Text style={styles.loadingText}>Haber yükleniyor...</Text>
-                </View>
-              )}
-              // GÜVENLIK: WebView güvenlik ayarları
-              javaScriptEnabled={true}
-              domStorageEnabled={false}
-              thirdPartyCookiesEnabled={false}
-              sharedCookiesEnabled={false}
-              allowsInlineMediaPlayback={false}
-              mediaPlaybackRequiresUserAction={true}
-              allowsBackForwardNavigationGestures={false}
-              // GÜVENLIK: Sadece HTTPS'e izin ver
-              onShouldStartLoadWithRequest={(request) => {
-                const url = request.url;
-                // Sadece HTTPS ve orijinal domain'e izin ver
-                if (!url.startsWith('https://')) {
-                  logger.warn('Blocked non-HTTPS URL:', url);
-                  return false;
-                }
-                return true;
-              }}
-              // GÜVENLIK: Hata durumunda bilgi verme
-              onError={(syntheticEvent) => {
-                const { nativeEvent } = syntheticEvent;
-                logger.error('WebView error:', nativeEvent);
-              }}
-            />
+            WebViewComponent ? (
+              <WebViewComponent
+                source={{ uri: article.url }}
+                style={styles.webView}
+                startInLoadingState
+                renderLoading={() => (
+                  <View style={styles.webViewLoading}>
+                    <ActivityIndicator size="large" color={colors.accent.primary} />
+                    <Text style={styles.loadingText}>Haber yükleniyor...</Text>
+                  </View>
+                )}
+                javaScriptEnabled
+                domStorageEnabled={false}
+                thirdPartyCookiesEnabled={false}
+                sharedCookiesEnabled={false}
+                allowsInlineMediaPlayback={false}
+                mediaPlaybackRequiresUserAction
+                allowsBackForwardNavigationGestures={false}
+                onShouldStartLoadWithRequest={(request) => {
+                  const url = request.url;
+                  if (!url.startsWith('https://')) {
+                    logger.warn('Blocked non-HTTPS URL:', url);
+                    return false;
+                  }
+                  return true;
+                }}
+                onError={(event) => {
+                  const { nativeEvent } = event;
+                  logger.error('WebView error:', nativeEvent);
+                }}
+              />
+            ) : (
+              <View style={styles.webViewUnavailableContainer}>
+                <Ionicons name="alert-circle-outline" size={48} color={colors.text.tertiary} />
+                <Text style={styles.webViewUnavailableTitle}>WebView kullanılabilir değil</Text>
+                <Text style={styles.webViewUnavailableText}>
+                  Cihazınızda web içerik bileşeni yüklü değil. Aşağıda haberin sadeleştirilmiş metnini görüntüleyebilir veya tarayıcıda açabilirsiniz.
+                </Text>
+                {articleContentLoading ? (
+                  <View style={styles.articleFallbackLoading}>
+                    <ActivityIndicator size="large" color={colors.accent.primary} />
+                    <Text style={styles.articleFallbackLoadingText}>Haber içeriği yükleniyor...</Text>
+                  </View>
+                ) : articleContent ? (
+                  <ScrollView style={styles.articleFallbackScroll}>
+                    <Text style={styles.articleFallbackText}>{articleContent}</Text>
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.articleFallbackText}>
+                    {articleContentError || 'Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyebilirsiniz.'}
+                  </Text>
+                )}
+                <TouchableOpacity style={styles.originalButton} onPress={handleOpenExternal}>
+                  <LinearGradient
+                    colors={[colors.accent.primary, colors.accent.secondary]}
+                    style={styles.originalButtonGradient}
+                  >
+                    <Ionicons name="open-outline" size={20} color="#fff" />
+                    <Text style={styles.originalButtonText}>Tarayıcıda Aç</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )
           ) : (
             <View style={styles.noUrlContainer}>
               <Ionicons name="alert-circle-outline" size={64} color={colors.text.tertiary} />
@@ -461,6 +556,49 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: 20,
     textAlign: 'center',
+  },
+  webViewUnavailableContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    gap: 16,
+  },
+  webViewUnavailableTitle: {
+    ...typography.h3,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  webViewUnavailableText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  articleFallbackLoading: {
+    alignItems: 'center',
+    marginTop: spacing[4],
+    marginBottom: spacing[3],
+    gap: spacing[2],
+  },
+  articleFallbackLoadingText: {
+    ...typography.small,
+    color: colors.text.secondary,
+  },
+  articleFallbackScroll: {
+    maxHeight: 240,
+    marginTop: spacing[4],
+    marginBottom: spacing[3],
+    padding: spacing[4],
+    backgroundColor: colors.background.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  articleFallbackText: {
+    ...typography.body,
+    color: colors.text.primary,
+    lineHeight: 22,
   },
 });
 

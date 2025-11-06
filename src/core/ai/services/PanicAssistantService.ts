@@ -74,7 +74,11 @@ Aşağıdaki JSON formatında döndür (sadece JSON, başka açıklama yok):
       "id": "1",
       "text": "Kısa, net aksiyon talimatı",
       "priority": 1,
-      "icon": "shield-checkmark"
+      "icon": "shield-checkmark",
+      "phase": "before|during|after",
+      "details": "Detaylı açıklama",
+      "checklist": ["Ek adım", "Ek adım"],
+      "expectedDurationMinutes": 2
     }
   ]
 }
@@ -84,6 +88,9 @@ Aşağıdaki JSON formatında döndür (sadece JSON, başka açıklama yok):
 - Kısa, net, anlaşılır (max 50 karakter)
 - Hayat kurtarıcı, AFAD/UMKE standartlarına uygun
 - Icon: shield-checkmark, warning, exit, medical, call, location, people
+- Phase alanı: before (öncesi), during (sarsıntı anı), after (sonrası)
+- Details alanında 1-2 cümleyle kritik açıklama ver
+- Checklist alanında uygulamayı destekleyen kısa maddeler ver (opsiyonel)
 
 ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kritik aksiyonlar ekle!' : ''}`;
 
@@ -99,7 +106,20 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
     const parsed = this.parseAIResponse(aiResponse);
     
     return parsed.actions.map((action: any) => ({
-      ...action,
+      id: action.id || String(Math.random()),
+      text: action.text || 'Aksiyon',
+      priority: typeof action.priority === 'number' ? action.priority : 1,
+      icon: this.validateIcon(action.icon),
+      phase: ['before', 'during', 'after', 'check'].includes(action.phase)
+        ? action.phase
+        : 'during',
+      details: action.details || undefined,
+      checklist: Array.isArray(action.checklist)
+        ? action.checklist.filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
+        : undefined,
+      expectedDurationMinutes: typeof action.expectedDurationMinutes === 'number'
+        ? action.expectedDurationMinutes
+        : undefined,
       completed: false,
     }));
   }
@@ -128,6 +148,16 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
         text: action.text || 'Aksiyon',
         priority: typeof action.priority === 'number' ? action.priority : idx + 1,
         icon: this.validateIcon(action.icon),
+        phase: ['before', 'during', 'after', 'check'].includes(action.phase)
+          ? action.phase
+          : 'during',
+        details: action.details || undefined,
+        checklist: Array.isArray(action.checklist)
+          ? action.checklist.filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
+          : undefined,
+        expectedDurationMinutes: typeof action.expectedDurationMinutes === 'number'
+          ? action.expectedDurationMinutes
+          : undefined,
       }));
 
       // Priority'ye göre sırala
@@ -168,6 +198,9 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 1,
           completed: false,
           icon: 'shield-checkmark',
+          phase: 'during',
+          details: 'Sarsıntı sırasında kendinizi sağlam bir yapının yanına konumlandırarak başınızı koruyun.',
+          checklist: ['Baş ve boyun koruması sağlayın', 'Pencerelerden uzak durun'],
         },
         {
           id: '2',
@@ -175,6 +208,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 2,
           completed: false,
           icon: 'warning',
+          phase: 'during',
+          details: 'Camların kırılması ciddi yaralanmalara yol açabilir, iç duvarlara doğru yönelin.',
         },
         {
           id: '3',
@@ -182,6 +217,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 3,
           completed: false,
           icon: 'medical',
+          phase: 'during',
+          details: 'Sarsıntı sırasında düşen cisimlere karşı en hayati bölgeleri koruyun.',
         },
         {
           id: '4',
@@ -189,6 +226,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 4,
           completed: false,
           icon: 'alert-circle',
+          phase: 'during',
+          details: 'Ani hareket etmeyin, sarsıntı geçmeden tahliye etmeyin.',
         },
         {
           id: '5',
@@ -196,6 +235,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 5,
           completed: false,
           icon: 'exit',
+          phase: 'after',
+          details: 'Asansör kullanmayın, merdivenleri kontrollü şekilde kullanın.',
         },
         {
           id: '6',
@@ -203,6 +244,9 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 6,
           completed: false,
           icon: 'location',
+          phase: 'after',
+          details: 'Önceden belirlenen toplanma alanına giderek aile bireyleriyle buluşun.',
+          checklist: ['Acil çantanızı yanınıza alın', 'Gaz ve elektrik vanalarını kapatın'],
         },
       ];
 
@@ -214,6 +258,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
           priority: 7,
           completed: false,
           icon: 'call',
+          phase: 'after',
+          details: 'Yaralı veya mahsur kalanlar için 112 Acil Çağrı Merkezi ile iletişime geçin.',
         });
       }
 
@@ -228,6 +274,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
         priority: 1,
         completed: false,
         icon: 'shield-checkmark',
+        phase: 'before',
+        details: 'Derin nefes alın, çevrenizdekilere güven verin.',
       },
       {
         id: '2',
@@ -235,6 +283,7 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
         priority: 2,
         completed: false,
         icon: 'exit',
+        phase: 'during',
       },
       {
         id: '3',
@@ -242,6 +291,8 @@ ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem, kri
         priority: 3,
         completed: false,
         icon: 'call',
+        phase: 'after',
+        details: 'Olay hakkında net bilgi verin, adresinizi paylaşın.',
       },
     ];
   }

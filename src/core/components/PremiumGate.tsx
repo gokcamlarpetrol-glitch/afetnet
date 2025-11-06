@@ -24,10 +24,11 @@ export default function PremiumGate({ featureName, onUpgradePress, children }: P
   const daysRemaining = useTrialStore((state) => state.getRemainingDays());
   const hoursRemaining = useTrialStore((state) => state.getRemainingHours());
   const isTrialActive = useTrialStore((state) => state.isTrialActive);
+  const isTrialLoading = useTrialStore((state) => state.isLoading);
   const isPremium = usePremiumStore((state) => state.isPremium);
 
   // APPLE REVIEW CRITICAL: Trial aktifse VEYA premium ise içeriği göster
-  if (isTrialActive || isPremium) {
+  if (isTrialLoading || isTrialActive || isPremium) {
     logger.info(`Access granted to ${featureName} (trial: ${isTrialActive}, premium: ${isPremium})`);
     return <>{children}</>;
   }

@@ -11,6 +11,13 @@ import { Video, ResizeMode } from 'expo-av';
 import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
 import { colors, typography } from '../../../theme';
 
+const logDebug = (...args: any[]) => {
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+};
+
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
   const { isOnline } = useNetworkStatus();
@@ -80,11 +87,11 @@ export default function HomeHeader() {
               isLooping
               isMuted
               onLoadStart={() => {
-                console.log('📹 Video yüklenmeye başladı');
+                logDebug('📹 Video yüklenmeye başladı');
               }}
               onLoad={() => {
                 setVideoLoaded(true);
-                console.log('✅ Video yüklendi');
+                logDebug('✅ Video yüklendi');
               }}
             />
             {/* Fallback: Video yüklenene kadar gradient göster */}

@@ -358,6 +358,12 @@ class MultiChannelAlertService {
   }
 
   private async sendPushNotification(options: AlertOptions) {
+    const Notifications = getNotifications();
+    if (!Notifications) {
+      logger.warn('Notifications module not available; skipping push notification');
+      return null;
+    }
+
     let channelId = 'normal-priority';
     
     if (options.priority === 'critical') {
@@ -398,6 +404,11 @@ class MultiChannelAlertService {
     
     // Schedule a critical notification that shows on lock screen
     if (Platform.OS === 'ios') {
+      const Notifications = getNotifications();
+      if (!Notifications) {
+        logger.warn('Notifications module not available; cannot show full-screen alert');
+        return;
+      }
       await Notifications.scheduleNotificationAsync({
         content: {
           title: options.title,
@@ -419,9 +430,16 @@ class MultiChannelAlertService {
         await this.soundInstance.unloadAsync();
       }
 
+      const AudioModule = getAudio();
+      const Notifications = getNotifications();
+
       if (soundFile) {
         // Load custom sound
-        const { sound } = await Audio.Sound.createAsync(
+        if (!AudioModule) {
+          logger.warn('Audio module not available; cannot play custom alarm sound');
+          return;
+        }
+        const { sound } = await AudioModule.Sound.createAsync(
           { uri: soundFile },
           { shouldPlay: true, isLooping: true, volume: 1.0 }
         );
@@ -432,12 +450,16 @@ class MultiChannelAlertService {
         
         // For now, use system notification sound
         // Custom audio file would be better but requires asset bundling
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            sound: 'default',
-          },
-          trigger: null,
-        });
+        if (Notifications) {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              sound: 'default',
+            },
+            trigger: null,
+          });
+        } else {
+          logger.warn('Notifications module not available; skipping default alarm sound notification');
+        }
       }
     } catch (error) {
       logger.error('Sound error:', error);
@@ -446,6 +468,12 @@ class MultiChannelAlertService {
 
   private async startVibration(pattern?: number[]) {
     try {
+      const HapticsModule = getHaptics();
+      if (!HapticsModule) {
+        logger.warn('Haptics module not available; skipping vibration');
+        return;
+      }
+
       if (Platform.OS === 'ios') {
         // iOS supports haptic feedback
         const sosPattern = pattern || [0, 200, 100, 200, 100, 200, 100, 500, 100, 500, 100, 500, 100, 200, 100, 200, 100, 200];
@@ -457,7 +485,7 @@ class MultiChannelAlertService {
             const pause = sosPattern[i + 1] || 0;
             
             if (duration > 0) {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
             }
             
             if (pause > 0) {
@@ -476,12 +504,12 @@ class MultiChannelAlertService {
       } else {
         // Android vibration is handled by notification channel
         // But we can also trigger additional vibrations
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
         
         if (pattern) {
           // Custom pattern vibration
           this.vibrationInterval = setInterval(async () => {
-            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
           }, 1000);
         }
       }
@@ -499,6 +527,12 @@ class MultiChannelAlertService {
 
   private async speakText(text: string) {
     try {
+      const SpeechModule = getSpeech();
+      if (!SpeechModule) {
+        logger.warn('Speech module not available; skipping TTS');
+        return;
+      }
+
       const options = {
         language: 'tr-TR', // Turkish
         pitch: 1.2, // Slightly higher pitch for urgency
@@ -506,7 +540,7 @@ class MultiChannelAlertService {
         volume: 1.0,
       };
 
-      await Speech.speak(text, options);
+      await SpeechModule.speak(text, options);
     } catch (error) {
       logger.error('TTS error:', error);
     }

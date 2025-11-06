@@ -47,8 +47,10 @@ class OpenAIService {
     this.apiKey = apiKey || process.env.EXPO_PUBLIC_OPENAI_API_KEY || null;
 
     if (!this.apiKey) {
-      logger.warn('⚠️ OpenAI API key not found - running in MOCK mode');
-      logger.warn('💡 .env dosyasına EXPO_PUBLIC_OPENAI_API_KEY ekleyin');
+      logger.warn('⚠️ OpenAI API key not found - running in fallback mode');
+      if (__DEV__) {
+        logger.warn('💡 .env dosyasına EXPO_PUBLIC_OPENAI_API_KEY ekleyin');
+      }
     } else {
       // Key'in ilk ve son 4 karakterini göster (güvenlik için)
       const maskedKey = this.apiKey.substring(0, 7) + '...' + this.apiKey.substring(this.apiKey.length - 4);
@@ -74,8 +76,8 @@ class OpenAIService {
 
     // Mock mode: API key yoksa
     if (!this.apiKey) {
-      logger.warn('🤖 Mock mode: Returning placeholder response');
-      return this.getMockResponse(prompt);
+      logger.warn('🤖 OpenAI dev fallback aktif');
+      return this.getFallbackResponse(prompt);
     }
 
     try {
@@ -123,9 +125,9 @@ class OpenAIService {
           error: errorText,
         });
         
-        // Hata durumunda mock response döndür
-        logger.warn('⚠️ Falling back to mock response');
-        return this.getMockResponse(prompt);
+        // Hata durumunda fallback döndür
+        logger.warn('⚠️ Falling back to safe response');
+        return this.getFallbackResponse(prompt);
       }
 
       const data: OpenAIResponse = await response.json();
@@ -139,8 +141,8 @@ class OpenAIService {
       return generatedText;
     } catch (error) {
       logger.error('❌ OpenAI API exception:', error);
-      // Hata durumunda mock response döndür
-      return this.getMockResponse(prompt);
+      // Hata durumunda fallback döndür
+      return this.getFallbackResponse(prompt);
     }
   }
 
@@ -157,8 +159,8 @@ class OpenAIService {
     const { maxTokens = 500, temperature = 0.7 } = options;
 
     if (!this.apiKey) {
-      logger.warn('🤖 Mock mode: Returning placeholder response');
-      return 'Bu bir test yanıtıdır. Gerçek AI entegrasyonu için .env dosyasına EXPO_PUBLIC_OPENAI_API_KEY ekleyin.';
+      logger.warn('🤖 OpenAI dev fallback aktif (chat)');
+      return this.getUnavailableMessage();
     }
 
     try {
@@ -191,8 +193,8 @@ class OpenAIService {
   /**
    * Mock response generator (API key olmadığında)
    */
-  private getMockResponse(prompt: string): string {
-    // Prompt'a göre basit mock yanıtlar
+  private getFallbackResponse(prompt: string): string {
+    // Prompt'a göre bilgilendirici fallback yanıtları
     if (prompt.toLowerCase().includes('risk')) {
       return 'Risk analizi: Orta seviye risk. Deprem hazırlığı yapmanız önerilir. Acil durum çantası hazırlayın ve toplanma noktanızı belirleyin.';
     }
@@ -205,7 +207,11 @@ class OpenAIService {
       return 'Deprem anında: ÇÖK-KAPAN-TUTUN. Masanın altına girin, başınızı koruyun. Sarsıntı durduktan sonra sakin bir şekilde binayı terk edin.';
     }
 
-    return 'Bu bir test yanıtıdır. Gerçek AI entegrasyonu için .env dosyasına EXPO_PUBLIC_OPENAI_API_KEY ekleyin.';
+    return this.getUnavailableMessage();
+  }
+
+  private getUnavailableMessage(): string {
+    return 'AI servisi şu anda kullanılamıyor. Lütfen temel afet yönergelerini uygulayın ve daha sonra tekrar deneyin.';
   }
 
   /**

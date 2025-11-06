@@ -9,6 +9,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMeshStore } from '../../stores/meshStore';
+import { useMessageStore } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
@@ -58,11 +59,59 @@ const TEMPLATES: MessageTemplate[] = [
 ];
 
 export default function MessageTemplates() {
-  const meshStore = useMeshStore();
+  const isMeshConnected = useMeshStore((state) => state.isConnected);
+
+  const ensureMeshReady = async (): Promise<boolean> => {
+    const meshStore = useMeshStore.getState();
+    let deviceId = bleMeshService.getMyDeviceId() || meshStore.myDeviceId;
+
+    if (!deviceId) {
+      try {
+        await bleMeshService.start();
+      } catch (error) {
+        console.warn('[MessageTemplates] Mesh start error:', error);
+      }
+      deviceId = bleMeshService.getMyDeviceId() || meshStore.myDeviceId;
+    }
+
+    if (!deviceId) {
+      Alert.alert(
+        'Mesh Ağı Kapalı',
+        'Bluetooth açık değil veya mesh ağı başlatılamadı. Lütfen Bluetoothu etkinleştirip tekrar deneyin.'
+      );
+      haptics.notificationError();
+      return false;
+    }
+
+    // Persist device ID in store so mesajlaşma akışları kullanılabilir
+    if (meshStore.myDeviceId !== deviceId) {
+      meshStore.setMyDeviceId(deviceId);
+    }
+    if (!meshStore.isConnected) {
+      meshStore.setConnected(true);
+    }
+
+    return true;
+  };
 
   const sendTemplate = async (template: MessageTemplate) => {
     try {
       haptics.impactMedium();
+
+      const meshReady = await ensureMeshReady();
+      if (!meshReady) {
+        return;
+      }
+
+      const senderId = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
+      if (!senderId) {
+        Alert.alert(
+          'Bluetooth Kapalı',
+          'Bluetooth ve konum izinleri kapalı olduğu için mesaj gönderilemedi. Lütfen her iki izni de açıp tekrar deneyin.'
+        );
+        haptics.notificationError();
+        return;
+      }
       
       // Create message content
       const messageContent = JSON.stringify({
@@ -75,9 +124,17 @@ export default function MessageTemplates() {
       
       // Send via BLE mesh service (actual broadcast)
       await bleMeshService.sendMessage(messageContent);
-      
-      // Also add to store for UI
-      await meshStore.broadcastMessage(messageContent, 'text');
+
+      const timestamp = Date.now();
+      useMessageStore.getState().addMessage({
+        id: `template_${template.id}_${timestamp}`,
+        from: 'me',
+        to: 'broadcast',
+        content: template.message,
+        timestamp,
+        delivered: true,
+        read: true,
+      });
       
       Alert.alert(
         'Mesaj Gönderildi',
@@ -95,8 +152,18 @@ export default function MessageTemplates() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Hızlı Mesajlar</Text>
-      <Text style={styles.subtitle}>Tek dokunuşla acil durum mesajı gönderin</Text>
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.header}>Hızlı Mesajlar</Text>
+          <Text style={styles.subtitle}>Tek dokunuşla acil durum mesajı gönderin</Text>
+        </View>
+        <View style={[styles.statusPill, { backgroundColor: isMeshConnected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }] }>
+          <View style={[styles.statusDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#ef4444' }]} />
+          <Text style={[styles.statusText, { color: isMeshConnected ? '#22c55e' : '#ef4444' }]}>
+            {isMeshConnected ? 'Mesh aktif' : 'Mesh pasif'}
+          </Text>
+        </View>
+      </View>
 
       <View style={styles.grid}>
         {TEMPLATES.map((template) => (
@@ -142,6 +209,11 @@ const styles = StyleSheet.create({
   container: {
     padding: 20,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   header: {
     ...typography.h3,
     color: colors.text.primary,
@@ -151,6 +223,24 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     marginBottom: 24,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   grid: {
     gap: 16,

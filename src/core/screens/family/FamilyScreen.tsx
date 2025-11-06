@@ -480,6 +480,14 @@ export default function FamilyScreen({ navigation }: any) {
     );
   };
 
+  const handleStatusButtonPress = (status: 'safe' | 'need-help' | 'critical' | 'location') => {
+    if (status === 'location') {
+      void handleShareLocation();
+    } else {
+      void handleStatusUpdate(status);
+    }
+  };
+
   const handleAddMember = () => {
     haptics.impactMedium();
     navigation.navigate('AddFamilyMember');
@@ -712,33 +720,10 @@ export default function FamilyScreen({ navigation }: any) {
         {/* Status Buttons */}
         <View style={styles.statusSection}>
           <Text style={styles.sectionTitle}>Durumunu Bildir</Text>
-          <StatusButton status="safe" onPress={handleStatusUpdate} />
-          <StatusButton status="need-help" onPress={handleStatusUpdate} />
-          <StatusButton status="critical" onPress={handleStatusUpdate} />
-
-          {/* Konum Paylaş Butonu - Mavi */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.locationShareButton,
-              isSharingLocation && styles.locationShareButtonActive,
-              pressed && styles.pressed,
-            ]}
-            onPress={handleShareLocation}
-          >
-            <LinearGradient
-              colors={isSharingLocation ? ['#3b82f6', '#2563eb'] : ['#1e3a8a', '#1e40af']}
-              style={styles.locationShareButtonGradient}
-            >
-              <Ionicons 
-                name={isSharingLocation ? "location" : "location-outline"} 
-                size={20} 
-                color="#fff" 
-              />
-              <Text style={styles.locationShareButtonText}>
-                {isSharingLocation ? 'Konum Paylaşılıyor' : 'Konumumu Paylaş'}
-              </Text>
-            </LinearGradient>
-          </Pressable>
+          <StatusButton status="safe" onPress={handleStatusButtonPress} />
+          <StatusButton status="need-help" onPress={handleStatusButtonPress} />
+          <StatusButton status="critical" onPress={handleStatusButtonPress} />
+          <StatusButton status="location" active={isSharingLocation} onPress={handleStatusButtonPress} />
         </View>
 
         {/* Member List */}
@@ -925,57 +910,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#94a3b8',
   },
-  statusButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  statusButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    padding: 16,
-  },
-  statusButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  locationShareButton: {
-    marginTop: 8,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  locationShareButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16, // StatusButton ile aynı (14 -> 16)
-    paddingHorizontal: 20, // StatusButton ile aynı
-    gap: 12, // StatusButton ile aynı (10 -> 12)
-  },
-  locationShareButtonActive: {
-    shadowColor: '#3b82f6',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  locationShareButtonText: {
-    fontSize: 18, // StatusButton ile aynı (16 -> 18)
-    fontWeight: '700', // StatusButton ile aynı ('600' -> '700')
-    color: '#fff',
-  },
   membersSection: {
     marginTop: 16,
   },
@@ -1099,10 +1033,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
-  },
-  pressed: {
-    opacity: 0.7,
-    transform: [{ scale: 0.98 }],
   },
   modalOverlay: {
     flex: 1,

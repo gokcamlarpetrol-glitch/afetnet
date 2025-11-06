@@ -23,13 +23,14 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
 import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
+import { useMeshStore } from '../../stores/meshStore';
 
 
 export default function MessagesScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-
+  const isMeshConnected = useMeshStore((state) => state.isConnected);
   useEffect(() => {
     const interval = setInterval(() => {
       setConversations(useMessageStore.getState().conversations);
@@ -120,15 +121,16 @@ export default function MessagesScreen({ navigation }: any) {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Mesajlar</Text>
-          <Text style={styles.headerSubtitle}>
-            {conversations.length} konuşma • Offline
-          </Text>
+          <View style={[styles.meshBadge, isMeshConnected ? styles.meshBadgeActive : styles.meshBadgeInactive]}>
+            <View style={[styles.meshDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#f97316' }]} />
+            <Text style={[styles.meshText, { color: isMeshConnected ? '#bbf7d0' : '#fcd34d' }]}>Mesh {isMeshConnected ? 'aktif' : 'pasif'}</Text>
+          </View>
         </View>
         <Pressable 
           style={styles.headerButton}
           onPress={handleNewMessage}
         >
-          <Ionicons name="add-circle" size={28} color={colors.brand.primary} />
+          <Ionicons name="add-circle" size={34} color={colors.brand.primary} />
         </Pressable>
       </View>
 
@@ -205,11 +207,37 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(59,130,246,0.12)',
+  },
+  meshBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  meshBadgeActive: {
+    backgroundColor: 'rgba(34,197,94,0.15)',
+  },
+  meshBadgeInactive: {
+    backgroundColor: 'rgba(249,115,22,0.15)',
+  },
+  meshDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  meshText: {
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   searchContainer: {
     paddingHorizontal: 16,

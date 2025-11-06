@@ -457,7 +457,12 @@ export default function DisasterMapScreen({ navigation }: any) {
       </View>
 
       {/* Premium Gate */}
-      {!isPremium && <PremiumGate featureName="Aktif Afet Haritası" />}
+      {!isPremium && (
+        <PremiumGate
+          featureName="Aktif Afet Haritası"
+          onUpgradePress={() => navigation?.navigate?.('Paywall')}
+        />
+      )}
     </View>
   );
 }
