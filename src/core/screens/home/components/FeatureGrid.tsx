@@ -10,6 +10,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as haptics from '../../../utils/haptics';
 import { colors } from '../../../theme';
+import { createLogger } from '../../../utils/logger';
+
+const logger = createLogger('FeatureGrid');
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 52) / 2; // 2 columns, 20px padding + 12px gap
@@ -170,24 +173,58 @@ export default function FeatureGrid({ navigation }: FeatureGridProps) {
   const handlePress = (feature: Feature) => {
     haptics.impactMedium();
     
-    try {
-      // Direct navigation - works for both tab screens and stack screens
-      // Since HomeScreen is inside MainTabs, we can navigate to tabs directly
-      // For stack screens, we need to go up to parent navigator
-      if (['Map', 'Family', 'Messages'].includes(feature.screen)) {
-        // Tab screens - navigate within MainTabs
-        navigation.navigate(feature.screen);
-      } else {
-        // Stack screens - navigate to parent Stack Navigator
-        // Get parent navigator if available
-        const parentNavigator = navigation.getParent?.() || navigation;
-        parentNavigator.navigate(feature.screen);
+    // CRITICAL: Navigation with comprehensive error handling and retry
+    const attemptNavigation = () => {
+      try {
+        // Direct navigation - works for both tab screens and stack screens
+        // Since HomeScreen is inside MainTabs, we can navigate to tabs directly
+        // For stack screens, we need to go up to parent navigator
+        if (['Map', 'Family', 'Messages'].includes(feature.screen)) {
+          // Tab screens - navigate within MainTabs
+          if (navigation && typeof navigation.navigate === 'function') {
+            navigation.navigate(feature.screen);
+          } else {
+            throw new Error('Tab navigation not available');
+          }
+        } else {
+          // Stack screens - navigate to parent Stack Navigator
+          // Get parent navigator if available
+          const parentNavigator = navigation?.getParent?.() || navigation;
+          if (parentNavigator && typeof parentNavigator.navigate === 'function') {
+            parentNavigator.navigate(feature.screen);
+          } else {
+            throw new Error('Stack navigation not available');
+          }
+        }
+      } catch (error: any) {
+        // CRITICAL: Retry once if navigation fails
+        logger.error(`Navigation error (${feature.screen}):`, error);
+        
+        // Retry after short delay
+        setTimeout(() => {
+          try {
+            if (['Map', 'Family', 'Messages'].includes(feature.screen)) {
+              navigation?.navigate?.(feature.screen);
+            } else {
+              const parentNavigator = navigation?.getParent?.() || navigation;
+              parentNavigator?.navigate?.(feature.screen);
+            }
+          } catch (retryError) {
+            logger.error(`Navigation retry failed (${feature.screen}):`, retryError);
+            // Last resort: Show error to user (non-critical features)
+            if (__DEV__) {
+              const Alert = require('react-native').Alert;
+              Alert.alert(
+                'Navigasyon Hatası',
+                `${feature.title} ekranına geçiş yapılamadı. Lütfen tekrar deneyin.`
+              );
+            }
+          }
+        }, 100);
       }
-    } catch (error) {
-      if (__DEV__) {
-        console.error(`Navigasyon hatası (${feature.screen}):`, error);
-      }
-    }
+    };
+    
+    attemptNavigation();
   };
 
   return (

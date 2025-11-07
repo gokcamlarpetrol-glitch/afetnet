@@ -57,58 +57,135 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
     setIsSending(true);
     haptics.impactHeavy();
 
+    // CRITICAL: This is life-saving - MUST work with retry mechanism
+    let retryCount = 0;
+    const maxRetries = 3;
+    let sosSent = false;
+    let location: { latitude: number; longitude: number; accuracy: number } | null = null;
+    let locationStatus = 'unknown';
+
+    // Step 1: Get location with timeout and fallback
     try {
-      // Get actual location from device
-      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
+      const Location = await import('expo-location');
+      const LocationModule = Location.default || Location;
       
-      try {
-        // Use static import instead of dynamic import to avoid undefined errors
-        const Location = await import('expo-location');
-        const LocationModule = Location.default || Location;
-        
-        if (!LocationModule || typeof LocationModule.requestForegroundPermissionsAsync !== 'function') {
-          throw new Error('Location module not available');
-        }
-        
-        const { status } = await LocationModule.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const position = await LocationModule.getCurrentPositionAsync({
+      if (!LocationModule || typeof LocationModule.requestForegroundPermissionsAsync !== 'function') {
+        throw new Error('Location module not available');
+      }
+      
+      // Request permission with timeout
+      const permissionPromise = LocationModule.requestForegroundPermissionsAsync();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Permission timeout')), 5000)
+      );
+      
+      const { status } = await Promise.race([permissionPromise, timeoutPromise]) as any;
+      
+      if (status === 'granted') {
+        try {
+          // Try high accuracy first
+          const positionPromise = LocationModule.getCurrentPositionAsync({
             accuracy: LocationModule.Accuracy.High,
+            maximumAge: 30000,
           });
+          const positionTimeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Position timeout')), 10000)
+          );
           
+          const position = await Promise.race([positionPromise, positionTimeoutPromise]) as any;
           location = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy || 10,
           };
+          locationStatus = 'success';
+        } catch (highAccError) {
+          // Fallback to balanced accuracy
+          try {
+            const position = await LocationModule.getCurrentPositionAsync({
+              accuracy: LocationModule.Accuracy.Balanced,
+              maximumAge: 60000,
+            });
+            location = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy || 50,
+            };
+            locationStatus = 'low-accuracy';
+          } catch (fallbackError) {
+            locationStatus = 'failed';
+            logger.warn('Could not get location, sending SOS without location:', fallbackError);
+          }
         }
-      } catch (locError) {
-        logger.warn('Could not get location, sending SOS without location:', locError);
-        // Continue without location - still send SOS
+      } else {
+        locationStatus = 'denied';
+        logger.warn('Location permission denied');
       }
-
-      await sosService.sendSOSSignal(location, 'Acil yardım gerekiyor!');
-      
-      setIsSending(false);
-      setIsSent(true);
-      onConfirm();
-
-      // Auto close after 2 seconds
-      setTimeout(() => {
-        onClose();
-      }, 2000);
-    } catch (error) {
-      setIsSending(false);
-      logger.error('SOS send failed:', error);
-      
-      // Show error message to user
-      const Alert = await import('react-native').then(m => m.Alert);
-      Alert.alert(
-        'SOS Gönderilemedi',
-        'Acil yardım sinyali gönderilemedi. Lütfen manuel olarak yardım çağırın.',
-        [{ text: 'Tamam' }]
-      );
+    } catch (locError) {
+      locationStatus = 'error';
+      logger.warn('Location error, sending SOS without location:', locError);
+      // Continue without location - still send SOS
     }
+
+    // Step 2: Send SOS with retry mechanism
+    while (!sosSent && retryCount < maxRetries) {
+      try {
+        await sosService.sendSOSSignal(
+          location,
+          locationStatus === 'success' || locationStatus === 'low-accuracy'
+            ? 'Acil yardım gerekiyor! Konum paylaşıldı.'
+            : 'Acil yardım gerekiyor!'
+        );
+        sosSent = true;
+      } catch (error) {
+        retryCount++;
+        logger.error(`SOS send attempt ${retryCount} failed:`, error);
+        
+        if (retryCount < maxRetries) {
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        } else {
+          // All retries failed
+          setIsSending(false);
+          logger.error('❌ CRITICAL: All SOS retry attempts failed');
+          
+          // Show error with retry option
+          const Alert = await import('react-native').then(m => m.Alert);
+          Alert.alert(
+            '⚠️ SOS Gönderilemedi',
+            'Acil yardım sinyali gönderilemedi. Lütfen manuel olarak yardım çağırın.',
+            [
+              { text: 'Tekrar Dene', onPress: sendSOS },
+              { 
+                text: '112 Ara', 
+                onPress: async () => {
+                  try {
+                    const Linking = await import('react-native').then(m => m.Linking);
+                    await Linking.openURL('tel:112');
+                  } catch (callError) {
+                    logger.error('112 call failed:', callError);
+                  }
+                },
+                style: 'destructive'
+              },
+              { text: 'İptal', style: 'cancel', onPress: onClose }
+            ]
+          );
+          return;
+        }
+      }
+    }
+
+    // Success
+    setIsSending(false);
+    setIsSent(true);
+    onConfirm();
+    haptics.notificationSuccess();
+
+    // Auto close after 3 seconds (longer for user to see success)
+    setTimeout(() => {
+      onClose();
+    }, 3000);
   };
 
   const handleCancel = () => {

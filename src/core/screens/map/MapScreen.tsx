@@ -36,6 +36,7 @@ import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { FamilyMarker } from '../../components/map/FamilyMarker';
 import TrappedUserMarker from '../../components/rescue/TrappedUserMarker';
 import ClusterMarker from '../../components/map/ClusterMarker';
+import MapLayerControl, { MapLayers } from '../../components/map/MapLayerControl';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
 import { useCompass } from '../../../hooks/useCompass';
 import { useUserStatusStore } from '../../stores/userStatusStore';
@@ -74,7 +75,7 @@ const mapStyle = [
   ];
 
 
-export default function MapScreen({ navigation }: any) {
+export default function MapScreen({ navigation, route }: any) {
   const mapRef = useRef<any>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
@@ -88,6 +89,21 @@ export default function MapScreen({ navigation }: any) {
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
   const [showCompass, setShowCompass] = useState(true);
   const [currentZoom, setCurrentZoom] = useState(10);
+  const [currentRegion, setCurrentRegion] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
+  
+  // Elite: Layer control state
+  const [layers, setLayers] = useState<MapLayers>({
+    earthquakes: true,
+    family: true,
+    pois: true,
+    trappedUsers: true,
+    hazardZones: false,
+  });
 
   // Compass hook
   const { heading, isAvailable: compassAvailable } = useCompass();
@@ -156,11 +172,48 @@ export default function MapScreen({ navigation }: any) {
   useEffect(() => {
     getUserLocation();
     
+    // Handle navigation params (focusOnMember, focusOnEarthquake)
+    if (route?.params) {
+      const { focusOnMember, focusOnEarthquake } = route.params;
+      
+      if (focusOnMember) {
+        const member = useFamilyStore.getState().members.find(m => m.id === focusOnMember);
+        if (member && mapRef.current) {
+          setTimeout(() => {
+            mapRef.current?.animateToRegion({
+              latitude: member.latitude,
+              longitude: member.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }, 1000);
+            setSelectedItem(member);
+            bottomSheetRef.current?.expand();
+          }, 500);
+        }
+      }
+      
+      if (focusOnEarthquake) {
+        const eq = useEarthquakeStore.getState().items.find(e => e.id === focusOnEarthquake);
+        if (eq && mapRef.current) {
+          setTimeout(() => {
+            mapRef.current?.animateToRegion({
+              latitude: eq.latitude,
+              longitude: eq.longitude,
+              latitudeDelta: 0.5,
+              longitudeDelta: 0.5,
+            }, 1000);
+            setSelectedItem(eq);
+            bottomSheetRef.current?.expand();
+          }, 500);
+        }
+      }
+    }
+    
     // Cleanup function
     return () => {
       // Location request cleanup if needed
     };
-  }, []);
+  }, [route?.params]);
 
   const getUserLocation = async () => {
     try {
@@ -229,12 +282,14 @@ export default function MapScreen({ navigation }: any) {
         if (camera) {
           camera.zoom += 1;
           mapRef.current?.animateCamera(camera, { duration: 250 });
+          setCurrentZoom(camera.zoom + 1);
         }
         break;
       case 'zoomOut':
         if (camera) {
           camera.zoom -= 1;
           mapRef.current?.animateCamera(camera, { duration: 250 });
+          setCurrentZoom(camera.zoom - 1);
         }
         break;
       case 'locate':
@@ -249,10 +304,61 @@ export default function MapScreen({ navigation }: any) {
         break;
     }
   };
+
+  // Elite: Handle layer toggle
+  const handleLayerToggle = useCallback((layer: keyof MapLayers) => {
+    setLayers(prev => ({ ...prev, [layer]: !prev[layer] }));
+  }, []);
+
+  // Elite: Marker clustering for performance
+  const clusteredMarkers = useMemo(() => {
+    if (!currentRegion) return { earthquakes: [], family: [] };
+    
+    const zoomLevel = getZoomLevel(currentRegion.latitudeDelta);
+    
+    const eqMarkers: ClusterableMarker[] = earthquakes.map(eq => ({
+      id: `eq-${eq.id}`,
+      latitude: eq.latitude,
+      longitude: eq.longitude,
+      ...eq,
+    }));
+    
+    const familyMarkers: ClusterableMarker[] = familyMembers.map(member => ({
+      id: `fm-${member.id}`,
+      latitude: member.latitude,
+      longitude: member.longitude,
+      ...member,
+    }));
+    
+    return {
+      earthquakes: clusterMarkers(eqMarkers, zoomLevel),
+      family: clusterMarkers(familyMarkers, zoomLevel),
+    };
+  }, [earthquakes, familyMembers, currentRegion]);
+  
+  // Elite: Empty state check
+  const hasAnyMarkers = useMemo(() => {
+    return (
+      (layers.earthquakes && earthquakes.length > 0) ||
+      (layers.family && familyMembers.length > 0) ||
+      (layers.pois && offlineLocations.length > 0) ||
+      (layers.trappedUsers && trappedUsers.length > 0)
+    );
+  }, [layers, earthquakes.length, familyMembers.length, offlineLocations.length, trappedUsers.length]);
   
   const renderBottomSheetContent = useCallback(() => {
     if (!selectedItem) {
-      return <View style={styles.bottomSheetEmpty}><Text style={styles.bottomSheetEmptyText}>Detayları görmek için bir nokta seçin</Text></View>;
+      return (
+        <View style={styles.bottomSheetEmpty}>
+          <Ionicons name="location-outline" size={48} color={colors.text.tertiary} />
+          <Text style={styles.bottomSheetEmptyText}>Detayları görmek için bir nokta seçin</Text>
+          {!hasAnyMarkers && (
+            <Text style={styles.bottomSheetEmptySubtext}>
+              Haritada görüntülenecek veri bulunmuyor
+            </Text>
+          )}
+        </View>
+      );
     }
 
     const isEarthquake = 'magnitude' in selectedItem;
@@ -377,7 +483,21 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         }}
         onMapReady={() => {
           logger.info('MapView ready');
+          // Set initial region for clustering
+          setCurrentRegion({
+            latitude: 41.0082,
+            longitude: 28.9784,
+            latitudeDelta: 8,
+            longitudeDelta: 8,
+          });
         }}
+        onRegionChangeComplete={(region) => {
+          setCurrentRegion(region);
+          setCurrentZoom(getZoomLevel(region.latitudeDelta));
+        }}
+        customMapStyle={mapStyle}
+        loadingEnabled
+        loadingIndicatorColor={colors.accent.primary}
       >
         {/* User Location Marker */}
         {userLocation && (
@@ -386,30 +506,75 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
           </Marker>
         )}
         
-        {/* Earthquake Markers */}
-        {earthquakes.map(eq => (
-          <Marker 
-            key={`eq-${eq.id}`} 
-            coordinate={{ latitude: eq.latitude, longitude: eq.longitude }}
-            onPress={() => handleMarkerPress(eq)}
-          >
-            <EarthquakeMarker magnitude={eq.magnitude} selected={selectedItem?.id === eq.id} />
-          </Marker>
-        ))}
+        {/* Elite: Clustered Earthquake Markers */}
+        {layers.earthquakes && clusteredMarkers.earthquakes.map((item) => {
+          if (isCluster(item)) {
+            return (
+              <ClusterMarker
+                key={item.id}
+                cluster={item}
+                onPress={(cluster) => {
+                  // Zoom in on cluster
+                  if (mapRef.current) {
+                    mapRef.current.animateToRegion({
+                      latitude: cluster.latitude,
+                      longitude: cluster.longitude,
+                      latitudeDelta: currentRegion?.latitudeDelta ? currentRegion.latitudeDelta * 0.5 : 2,
+                      longitudeDelta: currentRegion?.longitudeDelta ? currentRegion.longitudeDelta * 0.5 : 2,
+                    }, 500);
+                  }
+                }}
+              />
+            );
+          }
+          const eq = item as Earthquake;
+          return (
+            <Marker 
+              key={`eq-${eq.id}`} 
+              coordinate={{ latitude: eq.latitude, longitude: eq.longitude }}
+              onPress={() => handleMarkerPress(eq)}
+              tracksViewChanges={false}
+            >
+              <EarthquakeMarker magnitude={eq.magnitude} selected={selectedItem?.id === eq.id} />
+            </Marker>
+          );
+        })}
         
-        {/* Family Member Markers - Tüm kullanıcılar erişebilir */}
-        {familyMembers.map(member => (
-          <Marker
-            key={`fm-${member.id}`}
-            coordinate={{ latitude: member.latitude, longitude: member.longitude }}
-            onPress={() => handleMarkerPress(member)}
-          >
-            <FamilyMarker name={member.name} status={member.status} />
-          </Marker>
-        ))}
+        {/* Elite: Clustered Family Member Markers */}
+        {layers.family && clusteredMarkers.family.map((item) => {
+          if (isCluster(item)) {
+            return (
+              <ClusterMarker
+                key={item.id}
+                cluster={item}
+                onPress={(cluster) => {
+                  if (mapRef.current) {
+                    mapRef.current.animateToRegion({
+                      latitude: cluster.latitude,
+                      longitude: cluster.longitude,
+                      latitudeDelta: currentRegion?.latitudeDelta ? currentRegion.latitudeDelta * 0.5 : 2,
+                      longitudeDelta: currentRegion?.longitudeDelta ? currentRegion.longitudeDelta * 0.5 : 2,
+                    }, 500);
+                  }
+                }}
+              />
+            );
+          }
+          const member = item as FamilyMember;
+          return (
+            <Marker
+              key={`fm-${member.id}`}
+              coordinate={{ latitude: member.latitude, longitude: member.longitude }}
+              onPress={() => handleMarkerPress(member)}
+              tracksViewChanges={false}
+            >
+              <FamilyMarker name={member.name} status={member.status} />
+            </Marker>
+          );
+        })}
         
         {/* Offline Location Markers (Assembly Points, Hospitals, etc.) */}
-        {offlineLocations.map((location) => (
+        {layers.pois && offlineLocations.map((location) => (
           <Marker
             key={location.id}
             coordinate={{
@@ -419,6 +584,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
             title={location.name}
             description={location.address || location.type}
             onPress={() => handleMarkerPress(location)}
+            tracksViewChanges={false}
           >
             <View style={[styles.offlineMarker, { borderColor: getLocationColor(location.type) }]}>
               <Ionicons 
@@ -448,7 +614,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         )}
 
         {/* Trapped Users (Rescue Team Mode) */}
-        {trappedUsers.map((user) => (
+        {layers.trappedUsers && trappedUsers.map((user) => (
           <TrappedUserMarker
             key={`tu-${user.id}`}
             user={user}
@@ -461,6 +627,8 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
                   latitudeDelta: 0.01,
                   longitudeDelta: 0.01,
                 }, 1000);
+                setSelectedItem(user as any);
+                bottomSheetRef.current?.expand();
               }
             }}
           />
@@ -470,13 +638,32 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
       {/* Floating UI Elements */}
       <View style={[styles.floatingHeader, { paddingTop: insets.top + 16 }]}>
         <BlurView intensity={50} tint="dark" style={styles.floatingHeaderBlur}>
-          <Text style={styles.headerTitle}>Harita</Text>
-          <Text style={styles.headerSubtitle}>
-            {earthquakes.length} deprem • {familyMembers.length} aile • {offlineLocations.length} nokta
-            {trappedUsers.length > 0 && ` • ${trappedUsers.length} enkaz`}
-          </Text>
+          <View style={styles.headerRow}>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Harita</Text>
+              <Text style={styles.headerSubtitle}>
+                {layers.earthquakes ? earthquakes.length : 0} deprem • {layers.family ? familyMembers.length : 0} aile • {layers.pois ? offlineLocations.length : 0} nokta
+                {layers.trappedUsers && trappedUsers.length > 0 && ` • ${trappedUsers.length} enkaz`}
+              </Text>
+            </View>
+            {/* Elite: Offline Mode Indicator */}
+            <View style={styles.offlineBadge}>
+              <Ionicons name="bluetooth" size={16} color={colors.status.online} />
+              <Text style={styles.offlineBadgeText}>Offline</Text>
+            </View>
+          </View>
         </BlurView>
       </View>
+      
+      {/* Elite: Map Layer Control */}
+      <MapLayerControl
+        layers={layers}
+        onLayerToggle={handleLayerToggle}
+        earthquakeCount={earthquakes.length}
+        familyCount={familyMembers.length}
+        poisCount={offlineLocations.length}
+        trappedUsersCount={trappedUsers.length}
+      />
       <View style={[styles.floatingControls, { top: insets.top + 100 }]}>
         <Pressable style={styles.controlButton} onPress={() => handleMapControlPress('zoomIn')}>
           <Ionicons name="add" size={24} color={colors.text.primary} />
@@ -574,6 +761,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignItems: 'center',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
   headerTitle: {
     ...typography.h3,
     color: colors.text.primary,
@@ -581,6 +777,23 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     ...typography.caption,
     color: colors.text.secondary,
+  },
+  offlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.status.online,
+  },
+  offlineBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.status.online,
   },
   floatingControls: {
     position: 'absolute',
@@ -642,10 +855,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 48,
   },
   bottomSheetEmptyText: {
     ...typography.body,
     color: colors.text.secondary,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  bottomSheetEmptySubtext: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+    marginTop: 8,
+    textAlign: 'center',
   },
   offlineMarker: {
     width: 40,

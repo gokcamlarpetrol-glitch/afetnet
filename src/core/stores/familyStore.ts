@@ -173,12 +173,12 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const { members } = get();
     // OPTIMIZED: Check if update is actually needed (prevents unnecessary re-renders)
     const existingMember = members.find(m => m.id === id);
-    if (existingMember && 
-        existingMember.location?.latitude === latitude && 
-        existingMember.location?.longitude === longitude) {
-      // Location unchanged - no need to update, Zustand will prevent re-render anyway
-      // But we should still update lastSeen for tracking purposes
-      // However, if location is truly the same, skip the update entirely
+    const locationChanged = !existingMember || 
+      existingMember.location?.latitude !== latitude || 
+      existingMember.location?.longitude !== longitude;
+    
+    if (!locationChanged) {
+      // Location unchanged - no need to update
       return;
     }
     
@@ -207,13 +207,28 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         console.error('Failed to update location in Firebase:', error);
       }
     }
+
+    // Elite: Send notification for significant location changes (only if member is in critical status)
+    if (locationChanged && updatedMember && (updatedMember.status === 'critical' || updatedMember.status === 'need-help')) {
+      try {
+        const { notificationService } = await import('../services/NotificationService');
+        await notificationService.showFamilyLocationUpdateNotification(
+          updatedMember.name,
+          latitude,
+          longitude
+        );
+      } catch (error) {
+        console.error('Failed to send location update notification:', error);
+      }
+    }
   },
   
   updateMemberStatus: async (id, status) => {
     const { members } = get();
     // OPTIMIZED: Check if update is actually needed (prevents unnecessary re-renders)
     const existingMember = members.find(m => m.id === id);
-    if (existingMember && existingMember.status === status) {
+    const statusChanged = existingMember && existingMember.status !== status;
+    if (!statusChanged && existingMember && existingMember.status === status) {
       // Status unchanged, skip update - Zustand will prevent re-render anyway, but this is more efficient
       return;
     }
@@ -237,6 +252,34 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         }
       } catch (error) {
         console.error('Failed to update status in Firebase:', error);
+      }
+    }
+
+    // Elite: Send notification for critical status changes
+    if (statusChanged && updatedMember && (status === 'critical' || status === 'need-help')) {
+      try {
+        const { multiChannelAlertService } = await import('../services/MultiChannelAlertService');
+        const statusText = status === 'critical' ? 'KRİTİK DURUM' : 'YARDIM GEREKİYOR';
+        await multiChannelAlertService.sendAlert({
+          title: `⚠️ ${updatedMember.name} - ${statusText}`,
+          body: `${updatedMember.name} durumu "${status}" olarak güncellendi.`,
+          priority: status === 'critical' ? 'critical' : 'high',
+          channels: {
+            pushNotification: true,
+            fullScreenAlert: status === 'critical',
+            alarmSound: status === 'critical',
+            vibration: true,
+            tts: true,
+          },
+          data: {
+            type: 'family_status',
+            memberId: id,
+            memberName: updatedMember.name,
+            status,
+          },
+        });
+      } catch (error) {
+        console.error('Failed to send family status notification:', error);
       }
     }
   },

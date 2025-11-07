@@ -148,18 +148,46 @@ class MultiChannelAlertService {
       await this.cancelAlert();
     }
 
+    // Check settings store for user preferences
+    let alarmSoundEnabled = true;
+    let vibrationEnabled = true;
+    let notificationsEnabled = true;
+    
+    try {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      alarmSoundEnabled = settings.alarmSoundEnabled;
+      vibrationEnabled = settings.vibrationEnabled;
+      notificationsEnabled = settings.notificationsEnabled;
+    } catch (error) {
+      // Settings store not available, use defaults
+      logger.warn('Settings store not available, using defaults');
+    }
+
     // AI mesaj optimizasyonu
     const optimizedOptions = this.optimizeAlertForChannels(options);
     this.currentAlert = optimizedOptions;
     this.isAlerting = true;
 
     const channels = { ...DEFAULT_CHANNELS, ...optimizedOptions.channels };
+    
+    // Apply user settings
+    if (!alarmSoundEnabled) {
+      channels.alarmSound = false;
+    }
+    if (!vibrationEnabled) {
+      channels.vibration = false;
+    }
+    if (!notificationsEnabled) {
+      channels.pushNotification = false;
+    }
+    
     const effectiveDuration = optimizedOptions.duration ?? this.getDefaultDuration(optimizedOptions.priority);
     optimizedOptions.duration = effectiveDuration;
 
     try {
-      // 1. Push Notification (always on)
-      if (channels.pushNotification) {
+      // 1. Push Notification (check settings)
+      if (channels.pushNotification && notificationsEnabled) {
         await this.sendPushNotification(optimizedOptions);
       }
 
@@ -168,13 +196,13 @@ class MultiChannelAlertService {
         await this.showFullScreenAlert(optimizedOptions);
       }
 
-      // 3. Alarm Sound
-      if (channels.alarmSound) {
+      // 3. Alarm Sound (check settings)
+      if (channels.alarmSound && alarmSoundEnabled) {
         await this.playAlarmSound(optimizedOptions.sound);
       }
 
-      // 4. Vibration
-      if (channels.vibration) {
+      // 4. Vibration (check settings)
+      if (channels.vibration && vibrationEnabled) {
         await this.startVibration(optimizedOptions.vibrationPattern, optimizedOptions.duration);
       }
 
@@ -218,18 +246,73 @@ class MultiChannelAlertService {
       optimized.ttsText = this.generateTTSText(options);
     }
 
-    // 5.0+ depremler için tüm kanalları aktifleştir
-    if (options.data?.earthquake?.magnitude >= 5.0) {
+    // Elite: Enhanced magnitude-based optimization
+    const magnitude = options.data?.earthquake?.magnitude || options.data?.magnitude || 0;
+    
+    if (magnitude >= 7.0) {
+      // MEGA EARTHQUAKE - Maximum everything
       optimized.priority = 'critical';
       optimized.channels = {
         ...optimized.channels,
+        pushNotification: true,
+        fullScreenAlert: true,
+        alarmSound: true,
+        vibration: true,
+        tts: true,
+        bluetooth: true,
+      };
+      optimized.duration = 0; // Stay until dismissed
+      logger.info('🚨🚨🚨 MEGA DEPREM (7.0+) - MAXIMUM ALERT');
+    } else if (magnitude >= 6.0) {
+      // MAJOR EARTHQUAKE - Critical alert
+      optimized.priority = 'critical';
+      optimized.channels = {
+        ...optimized.channels,
+        pushNotification: true,
+        fullScreenAlert: true,
+        alarmSound: true,
+        vibration: true,
+        tts: true,
+        bluetooth: true,
+      };
+      optimized.duration = 0;
+      logger.info('🚨 Büyük deprem (6.0+) - Kritik uyarı');
+    } else if (magnitude >= 5.0) {
+      // SIGNIFICANT EARTHQUAKE - High alert
+      optimized.priority = 'critical';
+      optimized.channels = {
+        ...optimized.channels,
+        pushNotification: true,
         fullScreenAlert: true,
         alarmSound: true,
         vibration: true,
         tts: true,
       };
-      
-      logger.info('🚨 Büyük deprem (5.0+) - Tüm kanallar aktif');
+      logger.info('🚨 Önemli deprem (5.0+) - Tüm kanallar aktif');
+    } else if (magnitude >= 4.5) {
+      // MODERATE EARTHQUAKE - High priority
+      optimized.priority = 'high';
+      optimized.channels = {
+        ...optimized.channels,
+        pushNotification: true,
+        fullScreenAlert: false,
+        alarmSound: true,
+        vibration: true,
+        tts: true,
+      };
+      logger.info('⚠️ Orta deprem (4.5+) - Yüksek öncelik');
+    } else if (magnitude >= 4.0) {
+      // NOTABLE EARTHQUAKE - Normal-high priority
+      optimized.priority = 'high';
+      optimized.channels = {
+        ...optimized.channels,
+        pushNotification: true,
+        fullScreenAlert: false,
+        alarmSound: false,
+        vibration: true,
+        tts: true,
+      };
+      logger.info('📢 Fark edilir deprem (4.0+) - Normal yüksek öncelik');
     }
 
     // Doğrulanmış depremler için özel işaretleme

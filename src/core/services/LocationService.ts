@@ -44,8 +44,14 @@ class LocationService {
         }
       }
 
-      // Get initial location
-      await this.updateLocation();
+      // Get initial location (non-blocking - don't wait for GPS if it takes too long)
+      // Elite: Use Promise.race to prevent blocking initialization if GPS is slow
+      Promise.race([
+        this.updateLocation(),
+        new Promise((resolve) => setTimeout(resolve, 10000)), // 10 second timeout for GPS
+      ]).catch((error) => {
+        logger.warn('Initial location update timeout or failed, continuing initialization:', error);
+      });
 
       this.isInitialized = true;
       if (__DEV__) logger.info('Initialized successfully');
@@ -73,24 +79,29 @@ class LocationService {
         timestamp: location.timestamp,
       };
 
-      // Save to Firebase (for critical location updates)
-      try {
-        const { getDeviceId } = await import('../../lib/device');
-        const deviceId = await getDeviceId();
-        if (deviceId) {
-          const { firebaseDataService } = await import('./FirebaseDataService');
-          if (firebaseDataService.isInitialized) {
-            await firebaseDataService.saveLocationUpdate(deviceId, {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              accuracy: location.coords.accuracy,
-              timestamp: location.timestamp,
-            });
+      // Save to Firebase (for critical location updates) - non-blocking
+      // Elite: Don't block location update if Firebase save fails or is slow
+      Promise.resolve().then(async () => {
+        try {
+          const { getDeviceId } = await import('../../lib/device');
+          const deviceId = await getDeviceId();
+          if (deviceId) {
+            const { firebaseDataService } = await import('./FirebaseDataService');
+            if (firebaseDataService.isInitialized) {
+              await firebaseDataService.saveLocationUpdate(deviceId, {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                accuracy: location.coords.accuracy,
+                timestamp: location.timestamp,
+              });
+            }
           }
+        } catch (error) {
+          logger.error('Failed to save location to Firebase:', error);
         }
-      } catch (error) {
-        logger.error('Failed to save location to Firebase:', error);
-      }
+      }).catch((error) => {
+        logger.warn('Firebase location save error (non-critical):', error);
+      });
 
       if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;

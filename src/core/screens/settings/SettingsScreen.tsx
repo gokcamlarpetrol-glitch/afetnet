@@ -319,9 +319,20 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Bluetooth mesh iletişimi',
       type: 'switch',
       value: bleMeshEnabled,
-      onPress: () => {
+      onPress: async () => {
         haptics.impactLight();
-        setBleMeshEnabled(!bleMeshEnabled);
+        const newValue = !bleMeshEnabled;
+        setBleMeshEnabled(newValue);
+        
+        // Start/stop BLE Mesh service based on setting
+        const { bleMeshService } = await import('../../services/BLEMeshService');
+        if (newValue) {
+          await bleMeshService.start();
+          Alert.alert('BLE Mesh', 'Bluetooth mesh ağı başlatıldı.');
+        } else {
+          bleMeshService.stop();
+          Alert.alert('BLE Mesh', 'Bluetooth mesh ağı durduruldu.');
+        }
       },
     },
     {
@@ -379,7 +390,21 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Deprem erken uyarı bildirimleri',
       type: 'switch',
       value: eewEnabled,
-      onPress: () => setEewEnabled(!eewEnabled),
+      onPress: async () => {
+        haptics.impactLight();
+        const newValue = !eewEnabled;
+        setEewEnabled(newValue);
+        
+        // Start/stop EEW service based on setting
+        const { eewService } = await import('../../services/EEWService');
+        if (newValue) {
+          await eewService.start();
+          Alert.alert('Erken Uyarı', 'Erken uyarı sistemi aktif edildi.');
+        } else {
+          eewService.stop();
+          Alert.alert('Erken Uyarı', 'Erken uyarı sistemi kapatıldı.');
+        }
+      },
     },
     {
       icon: 'phone-portrait',
@@ -422,6 +447,52 @@ export default function SettingsScreen({ navigation }: any) {
             'Karanlık Mod',
             'Uygulama şu anda karanlık modda çalışıyor.',
             [{ text: 'Tamam' }]
+          );
+        },
+      },
+      {
+        icon: 'map',
+        title: 'Çevrimdışı Haritalar',
+        subtitle: 'Harita bölgelerini indir ve yönet',
+        type: 'arrow',
+        onPress: () => {
+          haptics.impactLight();
+          const parentNavigator = navigation.getParent?.() || navigation;
+          parentNavigator.navigate('OfflineMapSettings');
+        },
+      },
+      {
+        icon: 'settings',
+        title: 'Gelişmiş Ayarlar',
+        subtitle: 'Geliştirici seçenekleri ve depolama',
+        type: 'arrow',
+        onPress: () => {
+          haptics.impactLight();
+          const parentNavigator = navigation.getParent?.() || navigation;
+          parentNavigator.navigate('AdvancedSettings');
+        },
+      },
+      {
+        icon: 'refresh',
+        title: 'Ayarları Sıfırla',
+        subtitle: 'Tüm ayarları varsayılan değerlere döndür',
+        type: 'arrow',
+        onPress: () => {
+          haptics.impactMedium();
+          Alert.alert(
+            'Ayarları Sıfırla',
+            'Tüm ayarlar varsayılan değerlere döndürülecek. Devam etmek istiyor musunuz?',
+            [
+              { text: 'İptal', style: 'cancel' },
+              {
+                text: 'Sıfırla',
+                style: 'destructive',
+                onPress: () => {
+                  useSettingsStore.getState().resetToDefaults();
+                  Alert.alert('Başarılı', 'Ayarlar varsayılan değerlere döndürüldü.');
+                },
+              },
+            ]
           );
         },
       },

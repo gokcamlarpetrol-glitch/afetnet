@@ -35,6 +35,9 @@ import AddFamilyMemberScreen from './screens/family/AddFamilyMemberScreen';
 import HealthProfileScreen from './screens/health/HealthProfileScreen';
 import NewMessageScreen from './screens/messages/NewMessageScreen';
 import ConversationScreen from './screens/messages/ConversationScreen';
+import FamilyGroupChatScreen from './screens/family/FamilyGroupChatScreen';
+import AdvancedSettingsScreen from './screens/settings/AdvancedSettingsScreen';
+import OfflineMapSettingsScreen from './screens/settings/OfflineMapSettingsScreen';
 
 // AI Screens
 import RiskScoreScreen from './screens/ai/RiskScoreScreen';
@@ -52,8 +55,13 @@ const Stack = createStackNavigator();
 
 export default function CoreApp() {
   useEffect(() => {
-    // Initialize app
-    initializeApp();
+    // CRITICAL: Initialize app with proper error handling
+    // MUST await to catch initialization errors
+    initializeApp().catch((error) => {
+      // CRITICAL: Log initialization failure but don't crash app
+      console.error('❌ CRITICAL: App initialization failed:', error);
+      // Try to continue anyway - some services may still work
+    });
 
     // Cleanup on unmount
     return () => {
@@ -183,6 +191,27 @@ export default function CoreApp() {
                 name="NewsDetail" 
                 component={NewsDetailScreen}
                 options={{ headerShown: false }}
+              />
+              <Stack.Screen 
+                name="FamilyGroupChat" 
+                component={FamilyGroupChatScreen}
+                options={{ 
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen 
+                name="AdvancedSettings" 
+                component={AdvancedSettingsScreen}
+                options={{ 
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen 
+                name="OfflineMapSettings" 
+                component={OfflineMapSettingsScreen}
+                options={{ 
+                  headerShown: false,
+                }}
               />
               </Stack.Navigator>
             </NavigationContainer>

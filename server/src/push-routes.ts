@@ -16,8 +16,13 @@ const router = express.Router();
 // In-memory registry (for production, persist in DB)
 const registry = new Map<string, DeviceToken>();
 
-// Middleware: org secret
+// Middleware: org secret (skip for /register endpoint - public registration)
 router.use((req, res, next) => {
+  // Allow /register without auth (public registration)
+  if (req.path === '/register' || req.path.endsWith('/register')) {
+    return next();
+  }
+  
   const orgSecret = req.header('x-org-secret');
   if (!process.env.ORG_SECRET || orgSecret !== process.env.ORG_SECRET) {
     return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -29,18 +34,50 @@ router.get('/health', (req, res) => {
   res.json({ ok: true, total: registry.size });
 });
 
-router.post('/register', (req, res) => {
-  const { token, type, provinces } = req.body || {};
-  if (!token || !type) {
-    return res.status(400).json({ ok: false, error: 'token and type required' });
+// Elite: Register push token with location for EARLY WARNING system
+router.post('/register', async (req, res) => {
+  const { userId, pushToken, deviceType, latitude, longitude, provinces } = req.body || {};
+  
+  if (!pushToken || !deviceType) {
+    return res.status(400).json({ ok: false, error: 'pushToken and deviceType required' });
   }
+  
+  // Store in memory registry (for backward compatibility)
   const entry: DeviceToken = {
-    token,
-    type: type === 'ios' ? 'ios' : 'fcm',
+    token: pushToken,
+    type: deviceType === 'ios' ? 'ios' : 'fcm',
     provinces: Array.isArray(provinces) ? provinces : [],
     createdAt: Date.now(),
   };
-  registry.set(token, entry);
+  registry.set(pushToken, entry);
+  
+  // Elite: Also save to database for EARLY WARNING system
+  try {
+    const { pool } = await import('./database');
+    if (pool) {
+      await pool.query(`
+        INSERT INTO user_locations (user_id, push_token, last_latitude, last_longitude, device_type, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (user_id) 
+        DO UPDATE SET 
+          push_token = EXCLUDED.push_token,
+          last_latitude = EXCLUDED.last_latitude,
+          last_longitude = EXCLUDED.last_longitude,
+          device_type = EXCLUDED.device_type,
+          updated_at = NOW()
+      `, [
+        userId || pushToken, // Use userId if provided, otherwise use pushToken as userId
+        pushToken,
+        latitude || null,
+        longitude || null,
+        deviceType,
+      ]);
+    }
+  } catch (error) {
+    console.error('Failed to save to database:', error);
+    // Continue even if database save fails
+  }
+  
   res.json({ ok: true });
 });
 
@@ -70,6 +107,33 @@ router.get('/tick', async (req, res) => {
     }
   }
   res.json({ ok: true, sent, total: registry.size });
+});
+
+// Elite: Earthquake warning endpoint
+router.post('/send-warning', async (req, res) => {
+  const { pushToken, deviceType, payload } = req.body || {};
+  
+  if (!pushToken || !deviceType || !payload) {
+    return res.status(400).json({ ok: false, error: 'pushToken, deviceType, and payload required' });
+  }
+  
+  try {
+    const title = `🚨 Deprem Uyarısı - M${payload.event?.magnitude?.toFixed(1) || '?'}`;
+    const body = payload.warning?.secondsRemaining 
+      ? `${payload.warning.secondsRemaining} saniye içinde sarsıntı bekleniyor`
+      : `${payload.event?.region || 'Bilinmeyen bölge'} - ${payload.event?.magnitude?.toFixed(1) || '?'} büyüklüğünde deprem`;
+    
+    if (deviceType === 'ios') {
+      await sendApns(pushToken, title, body);
+    } else {
+      await sendFcm(pushToken, title, body);
+    }
+    
+    res.json({ ok: true, sent: true });
+  } catch (error) {
+    console.error('❌ Failed to send warning:', error);
+    res.status(500).json({ ok: false, error: 'Failed to send warning' });
+  }
 });
 
 // Initialize Firebase Admin once

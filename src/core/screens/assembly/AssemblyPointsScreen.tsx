@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -110,59 +110,172 @@ export default function AssemblyPointsScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
-    if (userLocation) {
-      const pointsWithDistance = ASSEMBLY_POINTS.map(point => ({
-        ...point,
-        distance: calculateDistance(
-          userLocation.latitude,
-          userLocation.longitude,
-          point.latitude,
-          point.longitude
-        ),
-      }));
+    // CRITICAL: Safe distance calculation with error handling
+    try {
+      if (userLocation && userLocation.latitude && userLocation.longitude) {
+        const pointsWithDistance = ASSEMBLY_POINTS.map(point => {
+          try {
+            const distance = calculateDistance(
+              userLocation.latitude,
+              userLocation.longitude,
+              point.latitude,
+              point.longitude
+            );
+            return {
+              ...point,
+              distance: isNaN(distance) || !isFinite(distance) ? undefined : distance,
+            };
+          } catch (error) {
+            logger.error(`Distance calculation error for point ${point.id}:`, error);
+            return { ...point, distance: undefined };
+          }
+        });
 
-      // Sort by distance or capacity
-      const sorted = pointsWithDistance.sort((a, b) => {
-        if (sortBy === 'distance') {
-          return (a.distance || Infinity) - (b.distance || Infinity);
-        } else {
-          return b.capacity - a.capacity;
-        }
-      });
+        // Sort by distance or capacity
+        const sorted = pointsWithDistance.sort((a, b) => {
+          if (sortBy === 'distance') {
+            return (a.distance || Infinity) - (b.distance || Infinity);
+          } else {
+            return b.capacity - a.capacity;
+          }
+        });
 
-      setPoints(sorted);
-    } else {
+        setPoints(sorted);
+      } else {
+        setPoints(ASSEMBLY_POINTS);
+      }
+    } catch (error) {
+      logger.error('Points processing error:', error);
+      // Fallback: Show points without distance
       setPoints(ASSEMBLY_POINTS);
     }
   }, [userLocation, sortBy]);
 
   const getUserLocation = async () => {
+    // CRITICAL: Location fetching with timeout and comprehensive error handling
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      // Request permission with timeout
+      const permissionPromise = Location.requestForegroundPermissionsAsync();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Permission timeout')), 10000)
+      );
+      
+      const { status } = await Promise.race([permissionPromise, timeoutPromise]) as any;
+      
       if (status !== 'granted') {
-        Alert.alert('Konum İzni', 'En yakın toplanma noktalarını görmek için konum izni gereklidir');
+        Alert.alert(
+          'Konum İzni Gerekli',
+          'En yakın toplanma noktalarını görmek için konum izni gereklidir. Lütfen ayarlardan izin verin.',
+          [
+            { text: 'Tamam', style: 'default' },
+            { 
+              text: 'Ayarlara Git', 
+              onPress: () => {
+                Linking.openSettings().catch((err) => {
+                  logger.error('Failed to open settings:', err);
+                });
+              }
+            }
+          ]
+        );
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // Get position with timeout and fallback
+      try {
+        const positionPromise = Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          maximumAge: 60000, // Accept cached location up to 1 minute old
+        });
+        const positionTimeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Position timeout')), 15000)
+        );
+        
+        const location = await Promise.race([positionPromise, positionTimeoutPromise]) as any;
 
-      setUserLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-    } catch (error) {
-      logger.error('Location error:', error);
+        setUserLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+      } catch (posError) {
+        // Try with lower accuracy
+        try {
+          const location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Low,
+            maximumAge: 300000, // Accept cached location up to 5 minutes old
+          });
+          
+          setUserLocation({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          });
+        } catch (fallbackError) {
+          logger.error('Location error (all methods failed):', fallbackError);
+          Alert.alert(
+            'Konum Alınamadı',
+            'Konumunuz alınamadı. Toplanma noktaları mesafeye göre sıralanamayacak ancak tüm noktalar görüntülenecek.',
+            [{ text: 'Tamam' }]
+          );
+        }
+      }
+    } catch (error: any) {
+      logger.error('Location permission error:', error);
+      Alert.alert(
+        'Konum Hatası',
+        'Konum izni alınırken bir hata oluştu. Lütfen tekrar deneyin.',
+        [{ text: 'Tamam' }]
+      );
     }
   };
 
-  const handleGetDirections = (point: AssemblyPoint) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}`;
-    Linking.openURL(url).catch((error) => {
+  const handleGetDirections = async (point: AssemblyPoint) => {
+    // CRITICAL: Directions with comprehensive error handling and fallback
+    try {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}`;
+      
+      // Check if URL can be opened
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        throw new Error('Cannot open maps URL');
+      }
+      
+      await Linking.openURL(url);
+    } catch (error: any) {
       logger.error('Failed to open maps:', error);
-      Alert.alert('Hata', 'Harita uygulaması açılamadı');
-    });
+      
+      // CRITICAL: Try alternative methods
+      try {
+        // Try Apple Maps on iOS
+        if (Platform.OS === 'ios') {
+          const appleMapsUrl = `http://maps.apple.com/?daddr=${point.latitude},${point.longitude}`;
+          const canOpen = await Linking.canOpenURL(appleMapsUrl);
+          if (canOpen) {
+            await Linking.openURL(appleMapsUrl);
+            return;
+          }
+        }
+        
+        // Fallback: Show coordinates
+        Alert.alert(
+          'Yol Tarifi',
+          `Harita uygulaması açılamadı. Koordinatlar:\n${point.latitude}, ${point.longitude}\n\nBu koordinatları harita uygulamanızda arayabilirsiniz.`,
+          [
+            { text: 'Tamam', style: 'default' },
+            { 
+              text: 'Tekrar Dene', 
+              onPress: () => handleGetDirections(point)
+            }
+          ]
+        );
+      } catch (fallbackError) {
+        logger.error('Fallback maps error:', fallbackError);
+        Alert.alert(
+          'Hata',
+          'Harita uygulaması açılamadı. Lütfen manuel olarak harita uygulamanızı kullanın.',
+          [{ text: 'Tamam' }]
+        );
+      }
+    }
   };
 
   const getTypeIcon = (type: string) => {
@@ -211,7 +324,20 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()}>
+        <Pressable 
+          onPress={() => {
+            // CRITICAL: Navigation with error handling
+            try {
+              if (navigation && typeof navigation.goBack === 'function') {
+                navigation.goBack();
+              } else {
+                logger.warn('Navigation goBack not available');
+              }
+            } catch (error) {
+              logger.error('Navigation error:', error);
+            }
+          }}
+        >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <View>

@@ -613,6 +613,108 @@ class FirebaseDataService {
   }
 
   /**
+   * Save earthquake analysis to Firestore (shared across all users)
+   * This ensures analysis is done once and shared with all users
+   */
+  async saveEarthquakeAnalysis(earthquakeId: string, analysis: {
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    userMessage: string;
+    recommendations: string[];
+    verified: boolean;
+    sources: string[];
+    confidence: number;
+    earthquakeId: string;
+    magnitude: number;
+    location: string;
+    timestamp: number;
+  }): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveEarthquakeAnalysis');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      const analysisRef = doc(db, 'earthquake_analyses', earthquakeId);
+      await setDoc(analysisRef, {
+        ...analysis,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info(`Earthquake analysis saved to Firestore: ${earthquakeId}`);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save earthquake analysis:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get earthquake analysis from Firestore (shared analysis)
+   * Returns null if analysis doesn't exist or is expired
+   */
+  async getEarthquakeAnalysis(earthquakeId: string): Promise<{
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    userMessage: string;
+    recommendations: string[];
+    verified: boolean;
+    sources: string[];
+    confidence: number;
+    createdAt: string;
+  } | null> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, cannot get earthquake analysis');
+      return null;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return null;
+      }
+
+      const analysisRef = doc(db, 'earthquake_analyses', earthquakeId);
+      const snapshot = await getDoc(analysisRef);
+      
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        // Analysis is valid for 24 hours
+        const createdAt = new Date(data.createdAt).getTime();
+        const now = Date.now();
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        
+        if (now - createdAt > maxAge) {
+          logger.info(`Earthquake analysis expired for ${earthquakeId}`);
+          return null;
+        }
+        
+        return {
+          riskLevel: data.riskLevel,
+          userMessage: data.userMessage,
+          recommendations: data.recommendations || [],
+          verified: data.verified,
+          sources: data.sources || [],
+          confidence: data.confidence,
+          createdAt: data.createdAt,
+        };
+      }
+      return null;
+    } catch (error) {
+      logger.error('Failed to get earthquake analysis:', error);
+      return null;
+    }
+  }
+
+  /**
    * Save AI generated news summary so it can be reused by other clients
    */
   async saveNewsSummary(articleId: string, payload: {

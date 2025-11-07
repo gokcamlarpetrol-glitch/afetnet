@@ -125,7 +125,12 @@ export default function ConversationScreen({ navigation, route }: any) {
   const sendMessage = async () => {
     if (!inputText.trim() || !myDeviceId) return;
 
-    const messageContent = inputText.trim();
+    // Elite Security: Sanitize user input before sending
+    const { sanitizeText } = require('../../utils/inputSanitizer');
+    const messageContent = sanitizeText(inputText.trim(), 10000); // Max 10KB message
+    if (!messageContent || messageContent.length === 0) {
+      return; // Empty after sanitization
+    }
     setInputText('');
     haptics.impactMedium();
 
@@ -255,6 +260,22 @@ export default function ConversationScreen({ navigation, route }: any) {
         contentContainerStyle={styles.messagesList}
         inverted={false}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <LinearGradient
+              colors={['#1e293b', '#0f172a']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.emptyIcon}
+            >
+              <Ionicons name="chatbubbles-outline" size={64} color={colors.brand.primary} />
+            </LinearGradient>
+            <Text style={styles.emptyText}>Henüz mesaj yok</Text>
+            <Text style={styles.emptySubtext}>
+              Bu konuşmada henüz mesaj bulunmuyor.{'\n'}İlk mesajı göndererek başlayın.
+            </Text>
+          </View>
+        }
       />
 
       {/* Input Bar */}
@@ -404,6 +425,34 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

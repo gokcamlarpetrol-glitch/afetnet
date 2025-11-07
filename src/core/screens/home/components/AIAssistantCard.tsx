@@ -266,22 +266,65 @@ export default function AIAssistantCard({ navigation }: Props) {
     haptics.impactMedium();
     await animatePress();
 
+    // CRITICAL: AI assistant navigation with timeout and error handling
     try {
+      // CRITICAL: Ensure data with timeout (15 seconds per service)
+      const ensurePromises: Promise<unknown>[] = [];
+      
       if (screen === 'RiskScore') {
-        await aiAssistantCoordinator.ensureRiskScore(true);
+        const ensurePromise = aiAssistantCoordinator.ensureRiskScore(true);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('RiskScore timeout')), 15000)
+        );
+        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       } else if (screen === 'PreparednessPlan') {
-        await aiAssistantCoordinator.ensurePreparednessPlan(true);
+        const ensurePromise = aiAssistantCoordinator.ensurePreparednessPlan(true);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('PreparednessPlan timeout')), 15000)
+        );
+        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       } else {
-        await aiAssistantCoordinator.ensurePanicAssistant('earthquake', true);
+        const ensurePromise = aiAssistantCoordinator.ensurePanicAssistant('earthquake', true);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('PanicAssistant timeout')), 15000)
+        );
+        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       }
 
-      navigation.navigate(screen);
-    } catch (error) {
+      // Wait for data preparation (with timeout)
+      await Promise.race([
+        Promise.all(ensurePromises),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Overall timeout')), 20000)
+        )
+      ]);
+
+      // CRITICAL: Navigate with error handling
+      if (navigation && typeof navigation.navigate === 'function') {
+        navigation.navigate(screen);
+      } else {
+        throw new Error('Navigation not available');
+      }
+    } catch (error: any) {
       logger.error('AI assistant action failed:', error);
-      Alert.alert(
-        'AI Asistan servisi',
-        'Veri alınırken bir sorun oluştu. İnternet bağlantınızı kontrol edip tekrar deneyin.'
-      );
+      
+      // CRITICAL: Still try to navigate even if data loading failed
+      // User can see loading state on the detail screen
+      try {
+        if (navigation && typeof navigation.navigate === 'function') {
+          navigation.navigate(screen);
+        } else {
+          Alert.alert(
+            'Navigasyon Hatası',
+            'Ekrana geçiş yapılamadı. Lütfen tekrar deneyin.'
+          );
+        }
+      } catch (navError) {
+        Alert.alert(
+          'AI Asistan servisi',
+          'Veri alınırken bir sorun oluştu. İnternet bağlantınızı kontrol edip tekrar deneyin.'
+        );
+      }
     }
   };
 

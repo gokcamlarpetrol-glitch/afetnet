@@ -127,6 +127,7 @@ app.listen(PORT, async () => {
   console.log(`🚀 AfetNet Server running on port ${PORT}`);
   console.log(`📊 Monitoring: ${process.env.SENTRY_ENABLED === 'true' ? 'ENABLED' : 'DISABLED'}`);
   console.log(`🛡️ Rate Limiting: ENABLED`);
+  console.log(`🌐 Base URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
   console.log(`📱 Endpoints:`);
   console.log(`   GET  /api/iap/products (strict rate limit)`);
   console.log(`   POST /api/iap/verify (strict rate limit)`);
@@ -135,6 +136,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /health (public rate limit)`);
   console.log(`   POST /push/register (very strict rate limit)`);
   console.log(`   POST /push/unregister`);
+  console.log(`   POST /push/send-warning (earthquake warnings)`);
   console.log(`   GET  /push/health`);
   console.log(`   GET  /push/tick`);
   console.log(`   GET  /api/eew/health (lenient rate limit)`);
@@ -144,14 +146,22 @@ app.listen(PORT, async () => {
   const dbConnected = await pingDb();
   if (!dbConnected) {
     console.error('❌ Database connection failed - server may not work properly');
+    console.warn('⚠️ Some features may be limited without database');
     monitoringService.captureMessage('Database connection failed on startup', 'error');
+  } else {
+    console.log('✅ Database connection successful');
   }
   
   // Start earthquake detection and warning services
   console.log('🌍 Starting earthquake services...');
-  earthquakeDetectionService; // Auto-starts monitoring
-  earthquakeWarningService.startMonitoring();
-  console.log('✅ Earthquake services started');
+  try {
+    earthquakeDetectionService; // Auto-starts monitoring
+    earthquakeWarningService.startMonitoring();
+    console.log('✅ Earthquake services started');
+  } catch (error) {
+    console.error('❌ Failed to start earthquake services:', error);
+    monitoringService.captureException(error as Error, { context: 'Earthquake services initialization' });
+  }
 
   // Start EEW providers if enabled
   try{
@@ -164,6 +174,8 @@ app.listen(PORT, async () => {
     console.warn('⚠️ EEW init skipped:', err);
     monitoringService.captureException(err as Error, { context: 'EEW initialization' });
   }
+  
+  console.log('🎉 Server initialization complete!');
 });
 
 export default app;

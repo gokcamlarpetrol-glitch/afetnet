@@ -25,6 +25,8 @@ import { voiceCommandService } from './services/VoiceCommandService';
 import { offlineMapService } from './services/OfflineMapService';
 import { firebaseDataService } from './services/FirebaseDataService';
 import { storageManagementService } from './services/StorageManagementService';
+import { batteryMonitoringService } from './services/BatteryMonitoringService';
+import { networkMonitoringService } from './services/NetworkMonitoringService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
 import { useTrialStore } from './stores/trialStore';
 import { createLogger } from './utils/logger';
@@ -37,19 +39,46 @@ let isInitialized = false;
 let isInitializing = false;
 
 /**
- * Initialize service with timeout protection
+ * Elite: Initialize service with timeout protection and better error handling
  */
 const initWithTimeout = async (fn: () => Promise<void>, name: string, timeout = 5000) => {
   try {
     await Promise.race([
       fn(),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(`${name} timeout`)), timeout)
+        setTimeout(() => reject(new Error(`${name} timeout after ${timeout}ms`)), timeout)
       )
     ]);
     logger.info(`✅ ${name} initialized`);
-  } catch (error) {
-    logger.error(`❌ ${name} failed:`, error);
+  } catch (error: any) {
+    // Elite: Better error handling - extract meaningful error message
+    let errorMessage: string;
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'object' && error !== null) {
+      // Handle error objects (like {jsEngine: "hermes"})
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.toString && error.toString() !== '[object Object]') {
+        errorMessage = error.toString();
+      } else {
+        // Fallback: stringify only if it's a simple object
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch {
+          errorMessage = String(error);
+        }
+      }
+    } else {
+      errorMessage = String(error);
+    }
+    
+    // Elite: Only log if it's not a timeout (timeouts are expected for optional services)
+    if (errorMessage.includes('timeout')) {
+      logger.warn(`⚠️ ${name} initialization timeout (${timeout}ms) - service may be optional`);
+    } else {
+      logger.error(`❌ ${name} failed: ${errorMessage}`);
+    }
   }
 };
 
@@ -67,6 +96,7 @@ export async function initializeApp() {
     await initWithTimeout(() => multiChannelAlertService.initialize(), 'MultiChannelAlertService');
 
            // Step 2: Firebase Services (initialize Firebase app first, then all services)
+           // Elite: Increased timeout to 15 seconds for Firebase initialization (first launch can be slow)
            await initWithTimeout(async () => {
              const getFirebaseApp = (await import('../lib/firebase')).default;
              const firebaseApp = getFirebaseApp();
@@ -83,10 +113,11 @@ export async function initializeApp() {
              // await firebaseAnalyticsService.initialize();
              // const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
              // await firebaseCrashlyticsService.initialize();
-           }, 'FirebaseServices');
+           }, 'FirebaseServices', 15000); // 15 seconds timeout
 
     // Step 3: Location Service
-    await initWithTimeout(() => locationService.initialize(), 'LocationService');
+    // Elite: Increased timeout to 15 seconds for GPS location acquisition (first launch can be slow)
+    await initWithTimeout(() => locationService.initialize(), 'LocationService', 15000);
 
     // Step 4: Premium Service + Trial Store (3 gün deneme)
     await initWithTimeout(() => premiumService.initialize(), 'PremiumService');
@@ -95,11 +126,27 @@ export async function initializeApp() {
     // Step 5: Earthquake Service (CRITICAL)
     await initWithTimeout(() => earthquakeService.start(), 'EarthquakeService', 10000);
 
-    // Step 6: BLE Mesh Service
-    await initWithTimeout(() => bleMeshService.start(), 'BLEMeshService');
+    // Step 6: BLE Mesh Service (check settings)
+    await initWithTimeout(async () => {
+      const { useSettingsStore } = await import('./stores/settingsStore');
+      const bleMeshEnabled = useSettingsStore.getState().bleMeshEnabled;
+      if (bleMeshEnabled) {
+        await bleMeshService.start();
+      } else {
+        logger.info('BLE Mesh disabled in settings');
+      }
+    }, 'BLEMeshService');
 
-    // Step 7: EEW Service
-    await initWithTimeout(() => eewService.start(), 'EEWService');
+    // Step 7: EEW Service (check settings)
+    await initWithTimeout(async () => {
+      const { useSettingsStore } = await import('./stores/settingsStore');
+      const eewEnabled = useSettingsStore.getState().eewEnabled;
+      if (eewEnabled) {
+        await eewService.start();
+      } else {
+        logger.info('EEW Service disabled in settings');
+      }
+    }, 'EEWService');
 
     // Step 8: Cell Broadcast Service
     await initWithTimeout(() => cellBroadcastService.initialize(), 'CellBroadcastService');
@@ -127,16 +174,25 @@ export async function initializeApp() {
     // Step 14: Enkaz Detection Service (Emergency)
     await initWithTimeout(() => enkazDetectionService.start(), 'EnkazDetectionService');
 
-    // Step 15: Seismic Sensor Service
-    // DISABLED TEMPORARILY - Too many false positives causing spam
-    // Will be re-enabled after further optimization and testing
-    // The service is still available for enkaz detection via EnkazDetectionService
-    // try {
-    //   logger.info('Step 15: Starting seismic sensor service...');
-    //   await seismicSensorService.start();
-    // } catch (error) {
-    //   logger.error('Seismic sensor failed:', error);
-    // }
+           // Step 15: Seismic Sensor Service (REAL EARLY WARNING - FIRST-TO-ALERT)
+           // ELITE: Re-enabled for REAL early warning - detects earthquakes AS THEY START
+           // CRITICAL: This is the ONLY way to warn BEFORE earthquake fully happens
+           // We MUST be FIRST - this is life-saving
+           try {
+             const { useSettingsStore } = await import('./stores/settingsStore');
+             const seismicSensorEnabled = useSettingsStore.getState().seismicSensorEnabled;
+             
+             if (seismicSensorEnabled) {
+               logger.info('Step 15: Starting seismic sensor service (FIRST-TO-ALERT - REAL EARLY WARNING)...');
+               await initWithTimeout(() => seismicSensorService.start(), 'SeismicSensorService', 10000);
+               logger.info('✅ SeismicSensorService started - FIRST-TO-ALERT active');
+             } else {
+               logger.info('SeismicSensorService disabled by user settings');
+             }
+           } catch (error) {
+             logger.error('Seismic sensor failed:', error);
+             // Continue without seismic detection - polling will still work
+           }
 
     // Step 16: Life-Saving Services
     await initWithTimeout(() => whistleService.initialize(), 'WhistleService');
@@ -156,6 +212,10 @@ export async function initializeApp() {
       const { rescueBeaconService } = await import('./services/RescueBeaconService');
       await rescueBeaconService.initialize();
     }, 'RescueBeaconService');
+
+    // Step 16.7: Elite Monitoring Services (Battery & Network)
+    await initWithTimeout(() => batteryMonitoringService.start(), 'BatteryMonitoringService');
+    await initWithTimeout(() => networkMonitoringService.start(), 'NetworkMonitoringService');
 
     // Step 17: Auto-save device ID to Firestore
     await initWithTimeout(async () => {
@@ -181,38 +241,65 @@ export async function initializeApp() {
     }, 'ServiceHealthCheck', 10000); // 10s timeout for health checks
 
     // Step 19: AI Services (optional, feature flag ile kontrol edilir)
+    // Elite: Increased timeout to 10 seconds for AI services (may need to load OpenAI SDK)
     await initWithTimeout(async () => {
-      const { aiFeatureToggle } = await import('./ai/services/AIFeatureToggle');
-      await aiFeatureToggle.initialize();
-      
-      // Ilk kullanim: AI ozelliklerini otomatik aktif et
-      const isFirstLaunch = await AsyncStorage.getItem('afetnet_first_launch');
-      if (!isFirstLaunch) {
-        await aiFeatureToggle.enable();
-        await AsyncStorage.setItem('afetnet_first_launch', 'false');
-        logger.info('AI features enabled by default (first launch)');
-      }
-      
-      // AI ozellikleri aktifse servisleri baslat
-      if (aiFeatureToggle.isFeatureEnabled()) {
-        const { riskScoringService } = await import('./ai/services/RiskScoringService');
-        const { preparednessPlanService } = await import('./ai/services/PreparednessPlanService');
-        const { panicAssistantService } = await import('./ai/services/PanicAssistantService');
-        const { newsAggregatorService } = await import('./ai/services/NewsAggregatorService');
-        const { openAIService } = await import('./ai/services/OpenAIService');
-        const { earthquakeAnalysisService } = await import('./ai/services/EarthquakeAnalysisService');
+      try {
+        const { aiFeatureToggle } = await import('./ai/services/AIFeatureToggle');
+        await aiFeatureToggle.initialize();
         
-        await openAIService.initialize();
-        await riskScoringService.initialize();
-        await preparednessPlanService.initialize();
-        await panicAssistantService.initialize();
-        await newsAggregatorService.initialize();
-        await earthquakeAnalysisService.initialize();
-        logger.info('AI services initialized (OpenAI-powered)');
-      } else {
-        logger.info('AI services disabled by feature flag');
+        // Ilk kullanim: AI ozelliklerini otomatik aktif et
+        const isFirstLaunch = await AsyncStorage.getItem('afetnet_first_launch');
+        if (!isFirstLaunch) {
+          await aiFeatureToggle.enable();
+          await AsyncStorage.setItem('afetnet_first_launch', 'false');
+          logger.info('AI features enabled by default (first launch)');
+        }
+        
+        // AI ozellikleri aktifse servisleri baslat
+        if (aiFeatureToggle.isFeatureEnabled()) {
+          // Elite: Initialize services sequentially with individual error handling
+          // CRITICAL: Each service must be initialized independently - failures shouldn't cascade
+          const { openAIService } = await import('./ai/services/OpenAIService');
+          await openAIService.initialize().catch((err: any) => {
+            logger.warn('⚠️ OpenAIService init failed (non-critical):', err?.message || err);
+          });
+          
+          const { riskScoringService } = await import('./ai/services/RiskScoringService');
+          await riskScoringService.initialize().catch((err: any) => {
+            logger.warn('⚠️ RiskScoringService init failed (non-critical):', err?.message || err);
+          });
+          
+          const { preparednessPlanService } = await import('./ai/services/PreparednessPlanService');
+          await preparednessPlanService.initialize().catch((err: any) => {
+            logger.warn('⚠️ PreparednessPlanService init failed (non-critical):', err?.message || err);
+          });
+          
+          const { panicAssistantService } = await import('./ai/services/PanicAssistantService');
+          await panicAssistantService.initialize().catch((err: any) => {
+            logger.warn('⚠️ PanicAssistantService init failed (non-critical):', err?.message || err);
+          });
+          
+          const { newsAggregatorService } = await import('./ai/services/NewsAggregatorService');
+          await newsAggregatorService.initialize().catch((err: any) => {
+            logger.warn('⚠️ NewsAggregatorService init failed (non-critical):', err?.message || err);
+          });
+          
+          const { earthquakeAnalysisService } = await import('./ai/services/EarthquakeAnalysisService');
+          await earthquakeAnalysisService.initialize().catch((err: any) => {
+            logger.warn('⚠️ EarthquakeAnalysisService init failed (non-critical):', err?.message || err);
+          });
+          
+          logger.info('AI services initialized (OpenAI-powered)');
+        } else {
+          logger.info('AI services disabled by feature flag');
+        }
+      } catch (error: any) {
+        // Elite: AI services are optional - don't fail app initialization
+        const errorMessage = error?.message || error?.toString() || String(error);
+        logger.warn(`⚠️ AI Services initialization failed (non-critical): ${errorMessage}`);
+        // Continue app initialization - AI features are optional
       }
-    }, 'AIServices', 5000);
+    }, 'AIServices', 10000); // Increased to 10 seconds
 
     isInitialized = true;
     isInitializing = false;
@@ -230,6 +317,8 @@ export async function shutdownApp() {
   seismicSensorService.stop();
   enkazDetectionService.stop();
   storageManagementService.stopMonitoring();
+  batteryMonitoringService.stop();
+  networkMonitoringService.stop();
   
   // Stop rescue beacon if active
   try {

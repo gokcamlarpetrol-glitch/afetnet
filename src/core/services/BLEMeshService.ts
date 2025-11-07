@@ -39,6 +39,8 @@ class BLEMeshService {
   };
   private readonly MAX_RETRY = 3;
   private sessionSecrets: Record<string, string> = {};
+  // Elite Security: Rate limiting storage for messages
+  private messageRateLimitStore: Map<string, number> = new Map();
 
   constructor() {
     // Don't initialize BleManager here - wait for start() to be called
@@ -192,6 +194,73 @@ class BLEMeshService {
     }
   }
 
+  /**
+   * Elite: Send notification for received BLE mesh messages
+   */
+  private async sendMessageNotification(message: MeshMessage) {
+    try {
+      // Check if app is in foreground (don't notify if user is actively using app)
+      const { AppState } = require('react-native');
+      if (AppState.currentState === 'active') {
+        // User is actively using app - notification might be redundant
+        // But still send for important messages
+        if (message.priority !== 'critical' && message.priority !== 'high') {
+          return;
+        }
+      }
+
+      const { notificationService } = await import('./NotificationService');
+      const { useMessageStore } = await import('../stores/messageStore');
+      
+      // Get sender name from peers or use device ID
+      const peer = useMeshStore.getState().peers[message.from];
+      const senderName = peer?.name || `Mesh-${message.from.slice(-4)}`;
+      
+      // Parse message content
+      let content = message.content;
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.type === 'SOS' || parsed.type === 'EARTHQUAKE_EMERGENCY') {
+          // Critical messages - use multi-channel alert
+          const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+          await multiChannelAlertService.sendAlert({
+            title: parsed.type === 'SOS' ? '🆘 Acil Yardım Çağrısı' : '🚨 Deprem Acil Durumu',
+            body: parsed.message || parsed.signal?.message || content,
+            priority: 'critical',
+            channels: {
+              pushNotification: true,
+              fullScreenAlert: true,
+              alarmSound: true,
+              vibration: true,
+              tts: true,
+            },
+            data: { type: 'mesh_message', messageId: message.id, from: message.from },
+          });
+          return;
+        }
+        content = parsed.message || parsed.content || content;
+      } catch {
+        // Not JSON, use as-is
+      }
+
+      // Regular message notification
+      await notificationService.showMessageNotification(senderName, content);
+      
+      // Update message store conversation
+      useMessageStore.getState().addMessage({
+        id: message.id,
+        from: message.from,
+        to: 'me',
+        content,
+        timestamp: message.timestamp,
+        delivered: true,
+        read: false,
+      });
+    } catch (error) {
+      logger.error('Failed to send message notification:', error);
+    }
+  }
+
   async start() {
     if (this.isRunning) return;
 
@@ -235,6 +304,24 @@ class BLEMeshService {
     } catch (error) {
       logger.error('Start error:', error);
       // Don't throw - allow app to continue without BLE
+    }
+  }
+
+  /**
+   * Elite Security: Rate limiting helpers for messages
+   */
+  private getMessageRateLimit(key: string): number | null {
+    return this.messageRateLimitStore.get(key) || null;
+  }
+
+  private setMessageRateLimit(key: string, time: number): void {
+    this.messageRateLimitStore.set(key, time);
+    // Cleanup old entries (older than 1 minute)
+    const oneMinuteAgo = Date.now() - 60 * 1000;
+    for (const [k, v] of this.messageRateLimitStore.entries()) {
+      if (v < oneMinuteAgo) {
+        this.messageRateLimitStore.delete(k);
+      }
     }
   }
 
@@ -284,28 +371,61 @@ class BLEMeshService {
     useMeshStore.getState().setConnected(false);
     useMeshStore.getState().setAdvertising(false);
     this.stopHeartbeat();
+    
+    // Elite Security: Clear rate limit store
+    this.messageRateLimitStore.clear();
   }
 
   getMyDeviceId(): string | null {
     return this.myDeviceId;
   }
 
+  /**
+   * Elite Security: Send message with input validation and rate limiting
+   */
   async sendMessage(content: string, to?: string) {
     if (!this.myDeviceId) {
       logger.error('Cannot send message: no device ID');
       return;
     }
 
-    // Validate and sanitize content
+    // Elite Security: Validate and sanitize input
+    if (typeof content !== 'string' || content.length === 0) {
+      logger.error('Message content cannot be empty');
+      return;
+    }
+    
+    // Elite: Validate and sanitize content
     if (!validateMessageContent(content)) {
       logger.error('Invalid message content');
       return;
     }
 
-    const sanitizedContent = sanitizeString(content, 5000);
-    if (!sanitizedContent) {
+    // Elite: Sanitize message content (prevent XSS, injection)
+    const sanitizedContent = sanitizeString(content, 10000); // Max 10KB
+    if (!sanitizedContent || sanitizedContent.length === 0) {
       logger.error('Message content is empty after sanitization');
       return;
+    }
+    
+    // Elite: Validate recipient device ID format
+    if (to && !validateDeviceId(to) && !to.match(/^afn-[a-zA-Z0-9]{8}$/)) {
+      logger.error('Invalid recipient device ID');
+      return;
+    }
+    
+    // Elite: Rate limiting per recipient (prevent spam)
+    if (to) {
+      const rateLimitKey = `message_${to}`;
+      const lastSent = this.getMessageRateLimit(rateLimitKey);
+      const now = Date.now();
+      const RATE_LIMIT_MS = 1000; // 1 second between messages to same recipient
+      
+      if (lastSent && (now - lastSent) < RATE_LIMIT_MS) {
+        logger.warn('Rate limit exceeded for recipient');
+        return;
+      }
+      this.setMessageRateLimit(rateLimitKey, now);
     }
 
     // Sanitize 'to' field if provided
@@ -746,6 +866,7 @@ class BLEMeshService {
       // Still forward heartbeat to extend visibility
     }
 
+    // Check for duplicate message (loop prevention)
     const isFresh = useMeshStore.getState().registerReceipt(message.from, message.sequence);
     if (!isFresh) {
       if (message.ackRequired && message.to === this.myDeviceId) {
@@ -755,12 +876,18 @@ class BLEMeshService {
       return;
     }
 
+    // Check if this device is already in route (loop prevention)
     if (!message.route) {
       message.route = [];
     }
-    if (!message.route.includes(this.myDeviceId)) {
-      message.route = [...message.route, this.myDeviceId];
+    if (message.route.includes(this.myDeviceId)) {
+      // Already processed this message - prevent loop
+      if (__DEV__) logger.info('Message loop detected, ignoring:', message.id);
+      return;
     }
+
+    // Add this device to route
+    message.route = [...message.route, this.myDeviceId];
 
     const isTargeted = !message.to || message.to === this.myDeviceId;
 
@@ -778,12 +905,18 @@ class BLEMeshService {
       useMeshStore.getState().incrementStat('messagesReceived');
       useMeshStore.getState().updateNetworkHealth({ avgHopCount: message.hops });
       this.notifyMessageCallbacks(message);
+      
+      // Elite: Send notification for received messages (except heartbeat and ack)
+      if (message.type !== 'heartbeat' && message.type !== 'ack' && message.type !== 'SOS_BEACON') {
+        this.sendMessageNotification(message);
+      }
     }
 
     if (message.ackRequired && message.to === this.myDeviceId) {
       await this.enqueueAck(message);
     }
 
+    // Forward message if not targeted or is broadcast
     if (!isTargeted || !message.to) {
       await this.forwardMessage(message);
     }
@@ -821,19 +954,22 @@ class BLEMeshService {
 
   private forwardMessage(message: MeshMessage) {
     if (!this.myDeviceId) return;
+    
+    // TTL check - don't forward if TTL is exhausted
     if (message.ttl <= 1) {
       useMeshStore.getState().recordDrop();
       return;
     }
-    if (message.route && message.route.includes(this.myDeviceId)) {
-      return;
-    }
 
+    // Route check already done in processIncomingMessage
+    // This device is already in route, so we can safely forward
+    
     const forwarded: MeshMessage = {
       ...message,
       ttl: message.ttl - 1,
       hops: message.hops + 1,
-      route: [...(message.route || []), this.myDeviceId],
+      // Route already includes this device from processIncomingMessage
+      route: message.route || [this.myDeviceId],
       attempts: 0,
       delivered: false,
     };
@@ -841,6 +977,8 @@ class BLEMeshService {
     this.enqueueMessage(forwarded);
     useMeshStore.getState().recordHopForwarded();
     useMeshStore.getState().updateNetworkHealth({ avgHopCount: forwarded.hops });
+    
+    if (__DEV__) logger.info(`Forwarding message ${message.id} (TTL: ${forwarded.ttl}, Hops: ${forwarded.hops})`);
   }
 
   private startHeartbeat() {

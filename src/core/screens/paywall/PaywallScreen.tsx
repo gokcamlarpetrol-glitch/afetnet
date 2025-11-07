@@ -13,16 +13,75 @@ import {
   Animated,
   ActivityIndicator,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTrialStore } from '../../stores/trialStore';
 import { usePremiumStore } from '../../stores/premiumStore';
 import { premiumService } from '../../services/PremiumService';
+import { ENV } from '../../config/env';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import * as Clipboard from 'expo-clipboard';
 
 const logger = createLogger('PaywallScreen');
+
+// Elite: Safe WebBrowser import with fallback
+let WebBrowser: any = null;
+try {
+  WebBrowser = require('expo-web-browser');
+} catch (error) {
+  logger.warn('expo-web-browser not available, using Linking fallback');
+}
+
+/**
+ * Elite: Open URL with in-app browser (if available) or fallback to system browser
+ * Apple requires functional Terms/Privacy links - this ensures they always work
+ */
+const openURL = async (url: string, title: string) => {
+  try {
+    // Try in-app browser first (preferred for Apple review)
+    if (WebBrowser && WebBrowser.openBrowserAsync) {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle?.FORM_SHEET || 'formSheet',
+        controlsColor: '#3b82f6',
+        toolbarColor: '#0f172a',
+        enableBarCollapsing: false,
+      });
+      return;
+    }
+    
+    // Fallback to system browser (works everywhere)
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      await Linking.openURL(url);
+    } else {
+      throw new Error('Cannot open URL');
+    }
+  } catch (error) {
+    logger.error(`Failed to open ${title}:`, error);
+    Alert.alert(
+      'Hata',
+      `${title} açılamadı. Lütfen daha sonra tekrar deneyin veya tarayıcınızdan şu adresi ziyaret edin:\n\n${url}`,
+      [
+        { text: 'Tamam', style: 'default' },
+        {
+          text: 'Kopyala',
+          onPress: async () => {
+            try {
+              await Clipboard.setStringAsync(url);
+              Alert.alert('Başarılı', 'URL panoya kopyalandı');
+            } catch (clipError) {
+              logger.error('Failed to copy URL:', clipError);
+            }
+          },
+        },
+      ]
+    );
+  }
+};
 
 const PREMIUM_FEATURES = [
   { 
@@ -522,9 +581,27 @@ export default function PaywallScreen({ navigation }: any) {
           {/* Footer */}
           <Text style={styles.footer}>
             Satın alarak{' '}
-            <Text style={styles.footerLink}>Kullanım Koşulları</Text>
+            <Text 
+              style={styles.footerLink}
+              onPress={async () => {
+                // CRITICAL: Apple requires Terms of Service link to be functional
+                const url = ENV.TERMS_OF_SERVICE_URL || 'https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html';
+                await openURL(url, 'Kullanım Koşulları');
+              }}
+            >
+              Kullanım Koşulları
+            </Text>
             {' '}ve{' '}
-            <Text style={styles.footerLink}>Gizlilik Politikası</Text>
+            <Text 
+              style={styles.footerLink}
+              onPress={async () => {
+                // CRITICAL: Apple requires Privacy Policy link to be functional
+                const url = ENV.PRIVACY_POLICY_URL || 'https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html';
+                await openURL(url, 'Gizlilik Politikası');
+              }}
+            >
+              Gizlilik Politikası
+            </Text>
             'nı kabul etmiş olursunuz.
           </Text>
         </Animated.View>

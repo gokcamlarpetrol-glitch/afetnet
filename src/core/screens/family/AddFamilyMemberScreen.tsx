@@ -137,7 +137,14 @@ export default function AddFamilyMemberScreen({ navigation }: any) {
             placeholder="Üye ID'sini buraya girin..."
             placeholderTextColor={colors.text.tertiary}
             value={manualId}
-            onChangeText={setManualId}
+            onChangeText={(text) => {
+              // Elite Security: Sanitize input - only allow alphanumeric and dash
+              const sanitized = text.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 20); // Max 20 chars
+              setManualId(sanitized);
+            }}
+            maxLength={20}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
           <Pressable style={styles.addButton} onPress={handleManualAdd}>
             <Ionicons name="add" size={24} color="#fff" />

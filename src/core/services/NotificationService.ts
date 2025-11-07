@@ -65,6 +65,23 @@ class NotificationService {
         return;
       }
 
+      // Elite: Set up push notification listener for BACKEND EARLY WARNINGS
+      // This receives push notifications from backend BEFORE earthquake happens
+      try {
+        Notifications.addNotificationReceivedListener(async (notification) => {
+          await this.handlePushNotification(notification);
+        });
+        
+        // Also handle notification responses (when user taps notification)
+        Notifications.addNotificationResponseReceivedListener(async (response) => {
+          await this.handleNotificationResponse(response);
+        });
+        
+        if (__DEV__) logger.info('Push notification listeners registered');
+      } catch (error) {
+        logger.error('Failed to set up push notification listeners:', error);
+      }
+
       // Create channels (Android)
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('earthquake', {
@@ -93,6 +110,27 @@ class NotificationService {
           vibrationPattern: [0, 200, 200],
           sound: 'default',
         });
+
+        await Notifications.setNotificationChannelAsync('family', {
+          name: 'Aile Bildirimleri',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 200, 200],
+          sound: 'default',
+        });
+
+        await Notifications.setNotificationChannelAsync('trapped', {
+          name: 'Enkaz Bildirimleri',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 500, 500, 500],
+          sound: 'default',
+          bypassDnd: true,
+        });
+
+        await Notifications.setNotificationChannelAsync('system', {
+          name: 'Sistem Bildirimleri',
+          importance: Notifications.AndroidImportance.DEFAULT,
+          sound: 'default',
+        });
       }
 
       this.isInitialized = true;
@@ -114,7 +152,8 @@ class NotificationService {
           body: location,
           sound: 'default',
           priority: Notifications.AndroidNotificationPriority.MAX,
-          data: { type: 'earthquake' },
+          channelId: 'earthquake',
+          data: { type: 'earthquake', magnitude, location },
         },
         trigger: null, // Show immediately
       });
@@ -134,6 +173,7 @@ class NotificationService {
           body: `${from} yardım istiyor!`,
           sound: 'default',
           priority: Notifications.AndroidNotificationPriority.MAX,
+          channelId: 'sos',
           data: { type: 'sos', from },
         },
         trigger: null,
@@ -148,12 +188,16 @@ class NotificationService {
       const Notifications = getNotifications();
       if (!Notifications) return;
       
+      const truncatedContent = this.truncate(content, 100);
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `💬 ${from}`,
-          body: content,
+          body: truncatedContent,
           sound: 'default',
           data: { type: 'message', from },
+          priority: Notifications.AndroidNotificationPriority.DEFAULT,
+          channelId: 'messages',
         },
         trigger: null,
       });
@@ -204,6 +248,220 @@ class NotificationService {
       });
     } catch (error) {
       logger.error('News notification error:', error);
+    }
+  }
+
+  /**
+   * Elite: Show family member location update notification
+   */
+  async showFamilyLocationUpdateNotification(memberName: string, latitude: number, longitude: number) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `📍 ${memberName} Konum Güncellendi`,
+          body: `Yeni konum: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.DEFAULT,
+          channelId: 'family',
+          data: {
+            type: 'family_location',
+            memberName,
+            latitude,
+            longitude,
+          },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('Family location notification error:', error);
+    }
+  }
+
+  /**
+   * Elite: Show trapped user proximity notification
+   */
+  async showTrappedUserProximityNotification(userName: string, distance: number) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
+      const distanceText = distance < 1000 
+        ? `${Math.round(distance)}m uzaklıkta` 
+        : `${(distance / 1000).toFixed(1)}km uzaklıkta`;
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `🚨 Enkaz Altında Kişi Yakında`,
+          body: `${userName} ${distanceText}`,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.MAX,
+          channelId: 'trapped',
+          data: {
+            type: 'trapped_proximity',
+            userName,
+            distance,
+          },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('Trapped user proximity notification error:', error);
+    }
+  }
+
+  /**
+   * Elite: Show battery low notification
+   */
+  async showBatteryLowNotification(batteryLevel: number) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🔋 Düşük Pil Uyarısı',
+          body: `Pil seviyesi %${batteryLevel}. Acil durum modunda pil tasarrufu aktif.`,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          channelId: 'system',
+          data: {
+            type: 'battery_low',
+            batteryLevel,
+          },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('Battery low notification error:', error);
+    }
+  }
+
+  /**
+   * Elite: Show network status notification
+   */
+  async showNetworkStatusNotification(isConnected: boolean) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
+      // Only notify when going offline (not when coming online)
+      if (isConnected) return;
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '📡 İnternet Bağlantısı Kesildi',
+          body: 'Offline mod aktif. BLE Mesh iletişimi devam ediyor.',
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.DEFAULT,
+          channelId: 'system',
+          data: {
+            type: 'network_status',
+            isConnected: false,
+          },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('Network status notification error:', error);
+    }
+  }
+
+  /**
+   * ELITE: Handle incoming push notifications from backend (REAL EARLY WARNING)
+   * CRITICAL: Backend sends warnings BEFORE earthquake happens
+   * This is FIRST-TO-ALERT from backend - we MUST handle immediately
+   */
+  private async handlePushNotification(notification: any) {
+    try {
+      const data = notification.request.content.data;
+      const notificationTime = Date.now();
+      
+      // ELITE: Handle multiple early warning types
+      if (data?.type === 'eew' || data?.type === 'earthquake_warning' || data?.type === 'backend_early_warning' || data?.type === 'first_to_alert') {
+        const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+        const { useEarthquakeStore } = await import('../stores/earthquakeStore');
+        
+        const magnitude = data.magnitude || data.event?.magnitude || 0;
+        const region = data.region || data.event?.region || data.location || 'Bilinmeyen bölge';
+        const secondsRemaining = data.etaSec || data.warning?.secondsRemaining || data.etaSeconds || 0;
+        const latitude = data.latitude || data.event?.latitude || data.location?.latitude;
+        const longitude = data.longitude || data.event?.longitude || data.location?.longitude;
+        const priority = data.priority || (magnitude >= 6.0 ? 'critical' : magnitude >= 5.0 ? 'high' : magnitude >= 4.0 ? 'high' : 'normal');
+        
+        // ELITE: Log FIRST-TO-ALERT from backend
+        logger.info(`🚨🚨🚨 FIRST-TO-ALERT: Backend early warning received`, {
+          magnitude,
+          region,
+          secondsRemaining,
+          source: 'BACKEND_PUSH',
+          notificationTime: new Date(notificationTime).toISOString(),
+        });
+        
+        // ELITE: IMMEDIATE multi-channel alert for backend early warning
+        // CRITICAL: This is FIRST-TO-ALERT - send immediately
+        await multiChannelAlertService.sendAlert({
+          title: secondsRemaining > 0 
+            ? `🚨🚨🚨 İLK HABER - ${secondsRemaining}s KALDI 🚨🚨🚨`
+            : `🚨🚨🚨 İLK HABER - Deprem Algılandı! 🚨🚨🚨`,
+          body: secondsRemaining > 0
+            ? `AfetNet ${magnitude.toFixed(1)} büyüklüğünde deprem ${secondsRemaining} saniye içinde bekleniyor! ${region} - Güvenli yere geçin!`
+            : `AfetNet ${magnitude.toFixed(1)} büyüklüğünde deprem algıladı! ${region} - Güvenli yere geçin!`,
+          priority: priority as any,
+          channels: {
+            pushNotification: true,
+            fullScreenAlert: magnitude >= 5.0,
+            alarmSound: magnitude >= 5.0,
+            vibration: true,
+            tts: true,
+            bluetooth: magnitude >= 6.0,
+          },
+          vibrationPattern: magnitude >= 6.0 
+            ? [0, 600, 200, 600, 200, 600, 200, 1200, 200, 600]
+            : magnitude >= 5.0
+            ? [0, 500, 150, 500, 150, 500, 150, 1000, 150, 500]
+            : [0, 300, 100, 300, 100, 300],
+          sound: magnitude >= 5.0 ? 'emergency' : 'default',
+          duration: magnitude >= 6.0 ? 0 : magnitude >= 5.0 ? 45 : 30,
+          data: {
+            type: 'backend_early_warning',
+            ...data,
+          },
+        });
+        
+        if (__DEV__) {
+          logger.info('🚨 Backend early warning received:', {
+            magnitude,
+            region,
+            secondsRemaining,
+            priority,
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to handle push notification:', error);
+    }
+  }
+
+  /**
+   * Elite: Handle notification response (when user taps notification)
+   */
+  private async handleNotificationResponse(response: any) {
+    try {
+      const data = response.notification.request.content.data;
+      
+      // Navigate to appropriate screen based on notification type
+      if (data?.type === 'eew' || data?.type === 'earthquake_warning' || data?.type === 'backend_early_warning') {
+        // Navigate to earthquake screen or show details
+        // This will be handled by navigation system
+        if (__DEV__) {
+          logger.info('User tapped earthquake warning notification');
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to handle notification response:', error);
     }
   }
 

@@ -26,7 +26,8 @@ export interface EarthquakeWarning {
 
 class EarthquakeWarningService {
   private readonly WARNING_RADIUS_KM = 500; // Send warnings within 500km radius
-  private readonly MIN_MAGNITUDE = 4.0; // Only warn for significant earthquakes
+  // Elite: LOWER threshold for EARLIER warnings (save more lives)
+  private readonly MIN_MAGNITUDE = 3.5; // Warn for smaller earthquakes too (earlier warning)
   private lastProcessedEvent?: number;
   
   /**
@@ -35,13 +36,15 @@ class EarthquakeWarningService {
   startMonitoring() {
     console.log('🚨 Starting earthquake warning service monitoring...');
     
+    // Elite: ULTRA-FAST monitoring for REAL early warning (1 second)
+    // Check every 1 second to send warnings IMMEDIATELY
     setInterval(async () => {
       try {
         await this.processNewEarthquakes();
       } catch (error) {
         console.error('❌ Warning service error:', error);
       }
-    }, 5000); // Check every 5 seconds
+    }, 1_000); // Check every 1 second - MAXIMUM SPEED
   }
 
   /**
@@ -79,8 +82,9 @@ class EarthquakeWarningService {
           user.longitude
         );
         
-        // Only send if significant time remaining
-        if (eta.secondsRemaining > 0 && eta.secondsRemaining <= 120) {
+        // Elite: Send warning IMMEDIATELY if ANY time remaining (even 1 second can save lives)
+        // Extended range to 300 seconds (5 minutes) for maximum early warning
+        if (eta.secondsRemaining > 0 && eta.secondsRemaining <= 300) {
           const warning: EarthquakeWarning = {
             event,
             eta,
@@ -185,10 +189,17 @@ class EarthquakeWarningService {
     };
     
     try {
+      // Elite: Use environment variable for base URL or default to localhost for development
+      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+      const pushServiceUrl = `${baseUrl}/push/send-warning`;
+      
       // Send to push service endpoint
-      const response = await fetch('http://localhost:3001/push/send-warning', {
+      const response = await fetch(pushServiceUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-org-secret': process.env.ORG_SECRET || '',
+        },
         body: JSON.stringify({
           pushToken: warning.target.pushToken,
           deviceType: warning.target.deviceType,
@@ -198,6 +209,8 @@ class EarthquakeWarningService {
       
       if (!response.ok) {
         console.error(`❌ Failed to send warning: ${response.statusText}`);
+      } else {
+        console.log(`✅ Warning sent successfully to ${warning.target.userId}`);
       }
     } catch (error) {
       console.error('❌ Warning send error:', error);

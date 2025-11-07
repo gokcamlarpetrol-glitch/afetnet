@@ -165,8 +165,17 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                   style={styles.featuredEqItem}
                   activeOpacity={0.7}
                   onPress={() => { 
-                    haptics.impactLight(); 
-                    navigation?.navigate?.('EarthquakeDetail', { earthquake: latestEarthquake });
+                    haptics.impactLight();
+                    // CRITICAL: Navigate with error handling
+                    try {
+                      if (navigation && typeof navigation.navigate === 'function') {
+                        navigation.navigate('EarthquakeDetail', { earthquake: latestEarthquake });
+                      } else {
+                        console.warn('Navigation not available for earthquake detail');
+                      }
+                    } catch (error) {
+                      console.error('Failed to navigate to earthquake detail:', error);
+                    }
                   }}
                 >
                 <View style={styles.featuredHeader}>
@@ -204,8 +213,17 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                       style={styles.smallEqItem}
                       activeOpacity={0.7}
                       onPress={() => { 
-                        haptics.impactLight(); 
-                        navigation?.navigate?.('EarthquakeDetail', { earthquake: eq });
+                        haptics.impactLight();
+                        // CRITICAL: Navigate with error handling
+                        try {
+                          if (navigation && typeof navigation.navigate === 'function') {
+                            navigation.navigate('EarthquakeDetail', { earthquake: eq });
+                          } else {
+                            console.warn('Navigation not available for earthquake detail');
+                          }
+                        } catch (error) {
+                          console.error('Failed to navigate to earthquake detail:', error);
+                        }
                       }}
                     >
                       <View style={[styles.smallMagBadge, { backgroundColor: getMagnitudeColor(eq.magnitude) }]}>
@@ -247,7 +265,18 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
             </View>
           )}
 
-          <TouchableOpacity style={styles.viewAllBtn} onPress={() => { haptics.impactLight(); onViewAll(); }}>
+          <TouchableOpacity 
+            style={styles.viewAllBtn} 
+            onPress={() => { 
+              haptics.impactLight();
+              // CRITICAL: Navigate with error handling
+              try {
+                onViewAll();
+              } catch (error) {
+                console.error('Failed to navigate to all earthquakes:', error);
+              }
+            }}
+          >
             <Text style={styles.viewAllText}>Tüm Depremleri Gör</Text>
             <Ionicons name="arrow-forward" size={16} color="#fff" />
           </TouchableOpacity>

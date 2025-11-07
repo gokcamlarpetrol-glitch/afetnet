@@ -55,23 +55,50 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     ).start();
   }, []);
 
-  // Auto-activate if trapped
+  // CRITICAL: Auto-activate if trapped - MUST work reliably
   useEffect(() => {
     if (status === 'trapped') {
       // Enable battery saver
-      batterySaverService.enable();
+      try {
+        batterySaverService.enable();
+      } catch (batteryError) {
+        console.error('Battery saver enable failed:', batteryError);
+        // Continue - other features still work
+      }
       
-      // Auto-start whistle and flashlight
-      handleWhistle();
-      handleFlashlight();
+      // CRITICAL: Auto-start whistle and flashlight with error handling
+      handleWhistle().catch((whistleError) => {
+        console.error('Auto-whistle failed:', whistleError);
+        // Continue - flashlight may still work
+      });
       
-      Alert.alert(
-        'Enkaz Algılandı',
-        'Düdük ve fener otomatik başlatıldı. Pil tasarrufu aktif.',
-        [{ text: 'Tamam' }]
-      );
+      handleFlashlight().catch((flashError) => {
+        console.error('Auto-flashlight failed:', flashError);
+        // Continue - whistle may still work
+      });
+      
+      // Show alert after a short delay to ensure services started
+      setTimeout(() => {
+        Alert.alert(
+          '🚨 Enkaz Algılandı',
+          'Düdük ve fener otomatik başlatıldı. Pil tasarrufu aktif. Yardım gelene kadar bekleyin.',
+          [{ text: 'Tamam' }]
+        );
+      }, 500);
     }
-  }, [status]);
+    
+    // Cleanup: Stop whistle and flashlight when status changes from trapped
+    return () => {
+      if (status !== 'trapped') {
+        if (whistleActive) {
+          whistleService.stop().catch((err) => console.error('Whistle stop failed:', err));
+        }
+        if (flashActive) {
+          flashlightService.stop().catch((err) => console.error('Flashlight stop failed:', err));
+        }
+      }
+    };
+  }, [status, whistleActive, flashActive]);
 
   const handlePressIn = () => {
     setIsPressed(true);
@@ -133,14 +160,25 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     haptics.impactMedium();
     logDebug('Düdük butonu tıklandı, mevcut durum:', whistleActive);
     
-    if (whistleActive) {
-      await whistleService.stop();
+    try {
+      if (whistleActive) {
+        await whistleService.stop();
+        setWhistleActive(false);
+        logDebug('Düdük durduruldu');
+      } else {
+        await whistleService.playSOSWhistle('morse');
+        setWhistleActive(true);
+        logDebug('Düdük başlatıldı');
+      }
+    } catch (error) {
+      console.error('❌ Whistle operation failed:', error);
+      Alert.alert(
+        'Düdük Hatası',
+        'Düdük başlatılamadı. Lütfen ses izinlerini kontrol edin.',
+        [{ text: 'Tamam' }]
+      );
+      // Reset state on error
       setWhistleActive(false);
-      logDebug('Düdük durduruldu');
-    } else {
-      await whistleService.playSOSWhistle('morse');
-      setWhistleActive(true);
-      logDebug('Düdük başlatıldı');
     }
   };
 
@@ -148,14 +186,25 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     haptics.impactMedium();
     logDebug('Fener butonu tıklandı, mevcut durum:', flashActive);
     
-    if (flashActive) {
-      await flashlightService.stop();
+    try {
+      if (flashActive) {
+        await flashlightService.stop();
+        setFlashActive(false);
+        logDebug('Fener kapatıldı');
+      } else {
+        await flashlightService.flashSOSMorse();
+        setFlashActive(true);
+        logDebug('Fener açıldı (SOS Morse)');
+      }
+    } catch (error) {
+      console.error('❌ Flashlight operation failed:', error);
+      Alert.alert(
+        'Fener Hatası',
+        'Fener başlatılamadı. Lütfen kamera izinlerini kontrol edin.',
+        [{ text: 'Tamam' }]
+      );
+      // Reset state on error
       setFlashActive(false);
-      logDebug('Fener kapatıldı');
-    } else {
-      await flashlightService.flashSOSMorse();
-      setFlashActive(true);
-      logDebug('Fener açıldı (SOS Morse)');
     }
   };
 
@@ -163,13 +212,40 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     haptics.impactHeavy();
     logDebug('112 arama butonu tıklandı');
     
-    // Direct call - no confirmation needed in emergency
+    // CRITICAL: Direct call - no confirmation needed in emergency
+    // But provide fallback options if call fails
     try {
+      const canOpen = await Linking.canOpenURL('tel:112');
+      if (!canOpen) {
+        throw new Error('Cannot open phone dialer');
+      }
+      
       await Linking.openURL('tel:112');
       logDebug('112 arama başlatıldı');
     } catch (error) {
-      console.error('112 arama hatası:', error);
-      Alert.alert('Hata', '112 aranırken bir hata oluştu. Lütfen manuel olarak arayın.');
+      console.error('❌ CRITICAL: 112 call failed:', error);
+      
+      // CRITICAL: Provide alternative options
+      Alert.alert(
+        '⚠️ 112 Aranamadı',
+        '112 aranırken bir hata oluştu. Lütfen manuel olarak arayın veya alternatif yöntemleri kullanın.',
+        [
+          { 
+            text: 'Tekrar Dene', 
+            onPress: handle112Call,
+            style: 'default'
+          },
+          { 
+            text: 'SOS Gönder', 
+            onPress: onPress,
+            style: 'destructive'
+          },
+          { 
+            text: 'Tamam', 
+            style: 'cancel'
+          }
+        ]
+      );
     }
   };
 

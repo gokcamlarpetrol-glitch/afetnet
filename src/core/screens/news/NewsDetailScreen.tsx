@@ -25,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RenderHTML from 'react-native-render-html';
+import { useNavigation } from '@react-navigation/native';
 import { colors, spacing, typography } from '../../theme';
 import { NewsArticle } from '../../ai/types/news.types';
 import { newsAggregatorService } from '../../ai/services/NewsAggregatorService';
@@ -41,10 +42,10 @@ interface NewsDetailScreenProps {
       article: NewsArticle;
     };
   };
-  navigation: any;
 }
 
-export default function NewsDetailScreen({ route, navigation }: NewsDetailScreenProps) {
+export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
+  const navigation = useNavigation();
   const { article } = route.params;
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabType>('summary');
@@ -427,7 +428,9 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
           style={styles.backButton}
           onPress={() => {
             haptics.impactLight();
-            navigation.goBack();
+            if (navigation && 'goBack' in navigation) {
+              navigation.goBack();
+            }
           }}
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
@@ -485,7 +488,15 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
 
         <TouchableOpacity
           style={[styles.tab, activeTab === 'original' && styles.tabActive]}
-          onPress={() => switchTab('original')}
+          onPress={() => {
+            switchTab('original');
+            // Orijinal haber tab'ına tıklayınca direkt modal aç
+            if (hasValidUrl && !browserVisible) {
+              setTimeout(() => {
+                openAfetNetBrowser();
+              }, 100);
+            }
+          }}
         >
           <Ionicons
             name="newspaper-outline"
@@ -533,119 +544,23 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
               <Ionicons name="alert-circle-outline" size={48} color={colors.text.tertiary} />
               <Text style={styles.noUrlText}>Orijinal haber bağlantısı bulunamadı.</Text>
             </View>
-          ) : showWebView ? (
-            <>
-              <View style={styles.webViewWrapper}>
-                <NativeWebView
-                  source={{ uri: article.url ?? '' }}
-                  style={styles.webView}
-                  startInLoadingState
-                  renderLoading={() => (
-                    <View style={styles.webViewLoading}>
-                      <ActivityIndicator size="large" color={colors.accent.primary} />
-                      <Text style={styles.loadingText}>Orijinal haber yükleniyor...</Text>
-                    </View>
-                  )}
-                  javaScriptEnabled
-                  domStorageEnabled
-                  allowsInlineMediaPlayback={false}
-                  onError={(event) => {
-                    logger.error('WebView error:', event.nativeEvent);
-                    setArticleContentError('Haber sayfası yüklenemedi. Aşağıdaki sade metni kullanabilirsiniz.');
-                    setWebViewStatus('unavailable');
-                  }}
-                  onHttpError={(event) => {
-                    logger.error('WebView HTTP error:', event.nativeEvent);
-                    setArticleContentError('Haber sayfası şu anda ulaşılamıyor. Aşağıdaki sade metni kullanabilirsiniz.');
-                    setWebViewStatus('unavailable');
-                  }}
-                />
-              </View>
-              <View style={styles.originalActions}>
-                <TouchableOpacity
-                  style={[styles.originalButton, styles.originalButtonInline]}
-                  onPress={openAfetNetBrowser}
-                >
-                  <LinearGradient
-                    colors={[colors.accent.primary, colors.accent.secondary]}
-                    style={styles.originalButtonGradient}
-                  >
-                    <Ionicons name="open-outline" size={20} color="#fff" />
-                    <Text style={styles.originalButtonText}>AfetNet Tarayıcıda Aç</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : showWebViewLoading ? (
-            <View style={styles.webViewLoading}>
-              <ActivityIndicator size="large" color={colors.accent.primary} />
-              <Text style={styles.loadingText}>Orijinal haber yükleniyor...</Text>
-            </View>
           ) : (
-            <ScrollView style={styles.fallbackScroll} contentContainerStyle={styles.contentPadding}>
-              <View style={styles.articleCard}>
-                <View style={styles.articleHeader}>
-                  <Ionicons name="newspaper-outline" size={22} color={colors.accent.primary} />
-                  <Text style={styles.articleTitle}>Haber Metni</Text>
-                </View>
-
-                {articleContentLoading ? (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.accent.primary} />
-                    <Text style={styles.loadingText}>Haber içeriği yükleniyor...</Text>
-                  </View>
-                ) : articleHtml || articlePlainText ? (
-                  articleHtml ? (
-                    <RenderHTML
-                      contentWidth={contentWidth}
-                      source={{ html: articleHtml }}
-                      defaultTextProps={{
-                        selectable: true,
-                      }}
-                      enableExperimentalMarginCollapsing
-                      tagsStyles={htmlTagStyles}
-                      ignoredDomTags={ignoredDomTags}
-                    />
-                  ) : articlePlainText ? (
-                    <Text style={styles.articleText}>{articlePlainText}</Text>
-                  ) : (
-                    <Text style={styles.articleText}>
-                      İçerik çözümlenemedi. Orijinal bağlantıyı kullanabilirsiniz.
-                    </Text>
-                  )
-                ) : articleContentError ? (
-                  <View style={styles.errorBox}>
-                    <Ionicons name="warning-outline" size={18} color="#f87171" />
-                    <Text style={styles.errorText}>
-                      {articleContentError || 'Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyebilirsiniz.'}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.articleText}>
-                    İçerik hazırlanıyor. Lütfen birkaç saniye içinde tekrar deneyin.
-                  </Text>
-                )}
-              </View>
-
-              {webViewStatus === 'unavailable' && (
-                <View style={styles.inlineNotice}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.text.tertiary} />
-                  <Text style={styles.inlineNoticeText}>
-                    Cihazda yerleşik web bileşeni bulunmadığı için sadeleştirilmiş metin gösteriliyor.
-                  </Text>
-                </View>
-              )}
-
+            <View style={styles.originalPromptContainer}>
+              <Ionicons name="newspaper-outline" size={64} color={colors.accent.primary} />
+              <Text style={styles.originalPromptTitle}>Orijinal Haber</Text>
+              <Text style={styles.originalPromptText}>
+                Orijinal haberi uygulama içinde görüntülemek için aşağıdaki butona tıklayın.
+              </Text>
               <TouchableOpacity style={styles.originalButton} onPress={openAfetNetBrowser}>
                 <LinearGradient
                   colors={[colors.accent.primary, colors.accent.secondary]}
                   style={styles.originalButtonGradient}
                 >
                   <Ionicons name="open-outline" size={20} color="#fff" />
-                  <Text style={styles.originalButtonText}>AfetNet Tarayıcıda Aç</Text>
+                  <Text style={styles.originalButtonText}>Orijinal Haberi Aç</Text>
                 </LinearGradient>
               </TouchableOpacity>
-            </ScrollView>
+            </View>
           )}
         </View>
       )}
@@ -1103,6 +1018,27 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     lineHeight: 22,
+  },
+  originalPromptContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 48,
+  },
+  originalPromptTitle: {
+    ...typography.h3,
+    color: colors.text.primary,
+    marginTop: 24,
+    marginBottom: 12,
+    fontWeight: '700',
+  },
+  originalPromptText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 32,
   },
 });
 

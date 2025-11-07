@@ -117,13 +117,19 @@ export default function NewsCard() {
   }, []);
 
   const loadNews = async ({ background = false }: { background?: boolean } = {}) => {
+    // CRITICAL: News loading with timeout and error recovery
     try {
       if (!background) {
         useNewsStore.getState().setLoading(true);
       }
       
-      // Haber kaynaklarindan veri cek
-      const allNews = await newsAggregatorService.fetchLatestNews();
+      // CRITICAL: Fetch news with timeout (30 seconds)
+      const fetchPromise = newsAggregatorService.fetchLatestNews();
+      const timeoutPromise = new Promise<NewsArticle[]>((_, reject) => 
+        setTimeout(() => reject(new Error('News fetch timeout')), 30000)
+      );
+      
+      const allNews = await Promise.race([fetchPromise, timeoutPromise]);
 
       // Sirala (en yeni once)
       allNews.sort(
@@ -183,9 +189,18 @@ export default function NewsCard() {
       }
 
       useNewsStore.getState().setArticles(allNews.slice(0, 5)); // En son 5 haber
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to load news:', error);
-      useNewsStore.getState().setError('Haberler yuklenemedi');
+      
+      // CRITICAL: Try to use cached articles if available
+      const currentArticles = useNewsStore.getState().articles;
+      if (currentArticles.length === 0) {
+        // Only show error if we have no cached articles
+        useNewsStore.getState().setError('Haberler yuklenemedi');
+      } else {
+        // Keep showing cached articles, just log the error
+        logger.warn('Using cached news articles due to fetch failure');
+      }
     } finally {
       if (!background) {
         useNewsStore.getState().setLoading(false);
@@ -195,8 +210,23 @@ export default function NewsCard() {
 
   const handleArticlePress = (article: NewsArticle) => {
     haptics.impactLight();
-    // Navigate to NewsDetailScreen instead of opening external link
-    (navigation as any).navigate('NewsDetail', { article });
+    // CRITICAL: Navigate to NewsDetailScreen with error handling
+    try {
+      if (navigation && 'navigate' in navigation) {
+        (navigation as { navigate: (screen: string, params?: any) => void }).navigate('NewsDetail', { article });
+      } else {
+        logger.warn('Navigation not available for news article');
+      }
+    } catch (error) {
+      logger.error('Failed to navigate to news detail:', error);
+      // Fallback: Try to open URL if navigation fails
+      if (article.url && article.url !== '#') {
+        const Linking = require('react-native').Linking;
+        Linking.openURL(article.url).catch((linkError: any) => {
+          logger.error('Failed to open news URL:', linkError);
+        });
+      }
+    }
   };
 
   const getTimeAgo = (timestamp: number): string => {

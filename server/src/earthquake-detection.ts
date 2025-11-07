@@ -7,7 +7,9 @@
  * Safety is paramount - zero false positives
  */
 
-import fetch from 'node-fetch';
+// Elite: Use native fetch (Node.js 18+) or fallback to node-fetch
+// Node.js 18+ has native fetch support
+const fetch = globalThis.fetch || require('node-fetch');
 
 export interface EarthquakeEvent {
   timestamp: number;
@@ -31,7 +33,20 @@ class EarthquakeDetectionService {
   private readonly KOERI_API = 'http://www.koeri.boun.edu.tr/scripts/lst3.asp';
   private events: Map<number, EarthquakeEvent> = new Map();
   private verificationQueue: EarthquakeEvent[] = [];
-  private readonly VERIFICATION_WINDOW_MS = 30_000; // 30 seconds for multi-source confirmation
+  // Elite: REDUCED verification window for FASTER early warning
+  // Multi-source verification is important but speed is critical for saving lives
+  private readonly VERIFICATION_WINDOW_MS = 5_000; // 5 seconds - FAST verification
+  
+  // Elite: Circuit breaker pattern for EMSC API failures
+  private emscFailureCount = 0;
+  private emscLastFailureTime = 0;
+  private emscCircuitOpen = false;
+  private readonly EMSC_MAX_FAILURES = 5; // Open circuit after 5 consecutive failures
+  private readonly EMSC_CIRCUIT_RESET_MS = 5 * 60 * 1000; // Reset after 5 minutes
+  
+  // Elite: Rate limiting to prevent API abuse
+  private emscLastFetchTime = 0;
+  private readonly EMSC_MIN_INTERVAL_MS = 5000; // Minimum 5 seconds between requests
   
   constructor() {
     // Start continuous monitoring
@@ -41,17 +56,32 @@ class EarthquakeDetectionService {
 
   /**
    * Monitor multiple seismic data sources
+   * Elite: Adaptive polling with circuit breaker awareness
    */
   private async startMonitoring() {
     console.log('🌍 Starting earthquake detection monitoring...');
     
-    setInterval(async () => {
-      try {
-        await this.fetchEMSCEvents();
-      } catch (error) {
-        console.error('❌ EMSC fetch failed:', error);
-      }
-    }, 10_000); // Every 10 seconds
+    // Elite: Recursive polling with adaptive interval
+    const scheduleEMSCFetch = () => {
+      setTimeout(async () => {
+        try {
+          await this.fetchEMSCEvents();
+        } catch (error: any) {
+          // Errors are handled inside fetchEMSCEvents - this is just a safety net
+          // Only log if it's not a JSON parsing error (which is expected)
+          const errorMessage = (error.message || String(error) || '').toLowerCase();
+          if (!errorMessage.includes('invalid json') && !errorMessage.includes('json') && !errorMessage.includes('<html>')) {
+            console.error('❌ EMSC fetch unexpected error:', error.message || error);
+          }
+        }
+        
+        // Schedule next fetch with adaptive interval
+        scheduleEMSCFetch();
+      }, this.getEMSCPollInterval());
+    };
+    
+    // Start EMSC polling
+    scheduleEMSCFetch();
     
     setInterval(async () => {
       try {
@@ -59,42 +89,181 @@ class EarthquakeDetectionService {
       } catch (error) {
         console.error('❌ KOERI fetch failed:', error);
       }
-    }, 15_000); // Every 15 seconds
+    }, 3_000); // Every 3 seconds - MAXIMUM SPEED
   }
 
   /**
    * Fetch events from EMSC (European-Mediterranean Seismological Centre)
+   * Elite Security: Graceful error handling with circuit breaker and rate limiting
    */
   private async fetchEMSCEvents() {
+    const now = Date.now();
+    
+    // Elite: Circuit breaker check - skip if circuit is open
+    if (this.emscCircuitOpen) {
+      const timeSinceFailure = now - this.emscLastFailureTime;
+      if (timeSinceFailure > this.EMSC_CIRCUIT_RESET_MS) {
+        // Reset circuit breaker after cooldown period
+        this.emscCircuitOpen = false;
+        this.emscFailureCount = 0;
+        console.log('🔄 EMSC circuit breaker reset - retrying');
+      } else {
+        // Circuit still open - skip silently
+        return;
+      }
+    }
+    
+    // Elite: Rate limiting - prevent too frequent requests
+    const timeSinceLastFetch = now - this.emscLastFetchTime;
+    if (timeSinceLastFetch < this.EMSC_MIN_INTERVAL_MS) {
+      // Too soon since last fetch - skip silently
+      return;
+    }
+    
     try {
-      const response = await fetch(
-        `${this.EMSC_API}?starttime=${new Date(Date.now() - 3600000).toISOString()}&minmagnitude=3.0&format=json`
-      );
-      const data: any = await response.json();
+      const url = `${this.EMSC_API}?starttime=${new Date(Date.now() - 3600000).toISOString()}&minmagnitude=3.0&format=json`;
       
-      if (data?.features) {
+      // Elite: Add timeout and proper error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      this.emscLastFetchTime = now;
+      
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'AfetNet-Backend/1.0',
+          'Accept': 'application/json',
+        },
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Elite: Check response status
+      if (!response.ok) {
+        this.handleEMSCFailure(`HTTP ${response.status}`);
+        return;
+      }
+      
+      // Elite: Get response text ONCE (can only be read once)
+      const responseText = await response.text();
+      
+      // Elite: Verify content-type is JSON before parsing
+      const contentType = response.headers.get('content-type') || '';
+      const isJSONContentType = contentType.includes('application/json') || contentType.includes('text/json');
+      
+      // Elite: Check if response is HTML (error page)
+      if (!isJSONContentType || responseText.trim().startsWith('<') || responseText.trim().startsWith('<!DOCTYPE')) {
+        this.handleEMSCFailure('HTML response instead of JSON');
+        return;
+      }
+      
+      // Elite: Safe JSON parsing with error handling
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError: any) {
+        this.handleEMSCFailure(`JSON parse error: ${parseError.message}`);
+        return;
+      }
+      
+      // Elite: Success - reset failure count
+      this.emscFailureCount = 0;
+      this.emscCircuitOpen = false;
+      
+      if (data?.features && Array.isArray(data.features)) {
         for (const feature of data.features) {
-          const props = feature.properties;
-          const coords = feature.geometry?.coordinates;
-          
-          if (coords && props.mag) {
-            const event: EarthquakeEvent = {
-              timestamp: props.time,
-              latitude: coords[1],
-              longitude: coords[0],
-              magnitude: props.mag,
-              depth: coords[2] || 10,
-              source: 'emsc',
-              region: props.place || 'Unknown',
-              verified: false,
-            };
+          try {
+            const props = feature.properties;
+            const coords = feature.geometry?.coordinates;
             
-            this.processNewEvent(event);
+            if (coords && Array.isArray(coords) && coords.length >= 2 && props?.mag) {
+              const event: EarthquakeEvent = {
+                timestamp: props.time || Date.now(),
+                latitude: coords[1],
+                longitude: coords[0],
+                magnitude: props.mag,
+                depth: coords[2] || 10,
+                source: 'emsc',
+                region: props.place || 'Unknown',
+                verified: false,
+              };
+              
+              this.processNewEvent(event);
+            }
+          } catch (featureError) {
+            // Skip malformed features
+            continue;
           }
         }
       }
-    } catch (error) {
-      console.error('❌ EMSC fetch error:', error);
+    } catch (error: any) {
+      // Elite: Handle different error types gracefully
+      // node-fetch v2 throws FetchError with 'type' property and specific message patterns
+      const errorType = error.type || error.name || '';
+      const errorMessage = (error.message || String(error) || '').toLowerCase();
+      const errorStack = (error.stack || '').toLowerCase();
+      
+      // Check for timeout errors
+      if (errorType === 'AbortError' || errorType === 'TimeoutError' || errorMessage.includes('timeout') || errorMessage.includes('aborted')) {
+        this.handleEMSCFailure('Request timeout');
+        return;
+      }
+      
+      // Check for JSON parsing errors (this is the main issue we're fixing)
+      const isJSONError = 
+        errorType === 'invalid-json' ||
+        errorMessage.includes('invalid json') ||
+        errorMessage.includes('unexpected token') ||
+        errorMessage.includes('<html>') ||
+        errorStack.includes('invalid json') ||
+        errorStack.includes('json.parse');
+      
+      if (isJSONError) {
+        // This is expected when EMSC returns HTML - handle silently
+        this.handleEMSCFailure('Invalid JSON response');
+        return;
+      }
+      
+      // Only log truly unexpected errors
+      console.error('❌ EMSC unexpected error:', {
+        type: errorType,
+        message: error.message || String(error),
+      });
+      this.handleEMSCFailure('Network error');
+    }
+  }
+  
+  /**
+   * Elite: Get adaptive polling interval based on circuit breaker state
+   */
+  private getEMSCPollInterval(): number {
+    if (this.emscCircuitOpen) {
+      return 30_000; // 30 seconds when circuit is open
+    } else if (this.emscFailureCount > 0) {
+      return 10_000; // 10 seconds when there are some failures
+    } else {
+      return 5_000; // 5 seconds when everything is working
+    }
+  }
+  
+  /**
+   * Elite: Handle EMSC API failures with circuit breaker pattern
+   */
+  private handleEMSCFailure(reason: string) {
+    this.emscFailureCount++;
+    this.emscLastFailureTime = Date.now();
+    
+    // Open circuit breaker after max failures
+    if (this.emscFailureCount >= this.EMSC_MAX_FAILURES) {
+      this.emscCircuitOpen = true;
+      console.warn(`🔴 EMSC circuit breaker OPEN (${this.emscFailureCount} failures) - pausing requests for ${this.EMSC_CIRCUIT_RESET_MS / 1000}s`);
+    } else {
+      // Silent failure - only log first few failures to reduce log spam
+      if (this.emscFailureCount <= 2) {
+        console.warn(`⚠️ EMSC API issue (${this.emscFailureCount}/${this.EMSC_MAX_FAILURES}): ${reason} - skipping this fetch`);
+      }
+      // After 2 failures, fail silently to reduce log noise
     }
   }
 

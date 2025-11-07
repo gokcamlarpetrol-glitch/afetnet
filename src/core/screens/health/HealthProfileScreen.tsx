@@ -4,6 +4,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('HealthProfileScreen');
 import {
   View,
   Text,
@@ -22,39 +25,111 @@ import { colors, typography, spacing } from '../../theme';
 
 export default function HealthProfileScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const { profile, updateProfile } = useHealthProfileStore();
+  const { profile, updateProfile, loadProfile } = useHealthProfileStore();
+  
+  // CRITICAL: Safe data extraction with fallbacks and data consistency
+  const [bloodType, setBloodType] = useState('');
+  const [allergies, setAllergies] = useState('');
+  const [chronicDiseases, setChronicDiseases] = useState('');
+  const [medications, setMedications] = useState('');
+  const [contact1Name, setContact1Name] = useState('');
+  const [contact1Phone, setContact1Phone] = useState('');
+  const [contact2Name, setContact2Name] = useState('');
+  const [contact2Phone, setContact2Phone] = useState('');
+  const [contact3Name, setContact3Name] = useState('');
+  const [contact3Phone, setContact3Phone] = useState('');
+  
+  // CRITICAL: Load profile on mount with error handling
+  useEffect(() => {
+    const loadProfileData = async () => {
+      try {
+        await loadProfile();
+      } catch (error) {
+        logger.error('Failed to load health profile:', error);
+        // Continue - user can still edit and save
+      }
+    };
+    
+    loadProfileData();
+  }, [loadProfile]);
 
-  const [bloodType, setBloodType] = useState(profile.bloodType || '');
-  const [allergies, setAllergies] = useState(Array.isArray(profile.allergies) ? profile.allergies.join(', ') : '');
-  const [chronicDiseases, setChronicDiseases] = useState(Array.isArray(profile.chronicDiseases) ? profile.chronicDiseases.join(', ') : '');
-  const [medications, setMedications] = useState(Array.isArray(profile.emergencyMedications) ? profile.emergencyMedications.join(', ') : '');
-  const [contact1Name, setContact1Name] = useState(profile.emergencyContacts?.[0]?.name || '');
-  const [contact1Phone, setContact1Phone] = useState(profile.emergencyContacts?.[0]?.phone || '');
-  const [contact2Name, setContact2Name] = useState(profile.emergencyContacts?.[1]?.name || '');
-  const [contact2Phone, setContact2Phone] = useState(profile.emergencyContacts?.[1]?.phone || '');
-  const [contact3Name, setContact3Name] = useState(profile.emergencyContacts?.[2]?.name || '');
-  const [contact3Phone, setContact3Phone] = useState(profile.emergencyContacts?.[2]?.phone || '');
+  // CRITICAL: Update form state when profile changes
+  useEffect(() => {
+    if (profile) {
+      setBloodType(profile.bloodType || '');
+      setAllergies(Array.isArray(profile.allergies) ? profile.allergies.join(', ') : '');
+      
+      const chronicConditionsData = profile.chronicConditions || profile.chronicDiseases || [];
+      setChronicDiseases(Array.isArray(chronicConditionsData) ? chronicConditionsData.join(', ') : '');
+      
+      const medicationsData = profile.medications || profile.emergencyMedications || [];
+      setMedications(Array.isArray(medicationsData) ? medicationsData.join(', ') : '');
+      
+      setContact1Name(profile.emergencyContacts?.[0]?.name || '');
+      setContact1Phone(profile.emergencyContacts?.[0]?.phone || '');
+      setContact2Name(profile.emergencyContacts?.[1]?.name || '');
+      setContact2Phone(profile.emergencyContacts?.[1]?.phone || '');
+      setContact3Name(profile.emergencyContacts?.[2]?.name || '');
+      setContact3Phone(profile.emergencyContacts?.[2]?.phone || '');
+    }
+  }, [profile]);
 
   const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', '0+', '0-'];
+
+  // CRITICAL: Phone number validation
+  const validatePhoneNumber = (phone: string): boolean => {
+    if (!phone || phone.trim().length === 0) return false;
+    // Remove spaces, dashes, parentheses
+    const cleaned = phone.replace(/[\s\-\(\)]/g, '');
+    // Check if it's a valid Turkish phone number (10 digits starting with 5) or international format
+    return /^(\+90|0)?5\d{9}$/.test(cleaned) || /^\+\d{10,15}$/.test(cleaned);
+  };
 
   const handleSave = async () => {
     haptics.impactMedium();
 
+    // CRITICAL: Input validation
     const emergencyContacts = [
-      { id: '1', name: contact1Name, phone: contact1Phone, relationship: 'Acil Kişi 1' },
-      { id: '2', name: contact2Name, phone: contact2Phone, relationship: 'Acil Kişi 2' },
-      { id: '3', name: contact3Name, phone: contact3Phone, relationship: 'Acil Kişi 3' },
+      { id: '1', name: contact1Name.trim(), phone: contact1Phone.trim(), relationship: 'Acil Kişi 1' },
+      { id: '2', name: contact2Name.trim(), phone: contact2Phone.trim(), relationship: 'Acil Kişi 2' },
+      { id: '3', name: contact3Name.trim(), phone: contact3Phone.trim(), relationship: 'Acil Kişi 3' },
     ].filter((c) => c.name && c.phone);
 
-    await updateProfile({
-      bloodType,
-      allergies: allergies.split(',').map((a) => a.trim()).filter(Boolean),
-      chronicDiseases: chronicDiseases.split(',').map((d) => d.trim()).filter(Boolean),
-      emergencyMedications: medications.split(',').map((m) => m.trim()).filter(Boolean),
-      emergencyContacts,
-    });
+    // CRITICAL: Validate phone numbers
+    const invalidContacts = emergencyContacts.filter(c => !validatePhoneNumber(c.phone));
+    if (invalidContacts.length > 0) {
+      Alert.alert(
+        'Geçersiz Telefon Numarası',
+        `Lütfen geçerli telefon numaraları girin:\n${invalidContacts.map(c => c.name).join(', ')}`,
+        [{ text: 'Tamam' }]
+      );
+      return;
+    }
 
-    Alert.alert('Başarılı', 'Sağlık profiliniz kaydedildi.', [{ text: 'Tamam' }]);
+    // CRITICAL: Save with comprehensive error handling
+    try {
+      await updateProfile({
+        bloodType: bloodType.trim(),
+        allergies: allergies.split(',').map((a) => a.trim()).filter(Boolean),
+        chronicConditions: chronicDiseases.split(',').map((d) => d.trim()).filter(Boolean),
+        chronicDiseases: chronicDiseases.split(',').map((d) => d.trim()).filter(Boolean), // Backward compatibility
+        medications: medications.split(',').map((m) => m.trim()).filter(Boolean),
+        emergencyMedications: medications.split(',').map((m) => m.trim()).filter(Boolean), // Backward compatibility
+        emergencyContacts,
+      });
+
+      Alert.alert('Başarılı', 'Sağlık profiliniz kaydedildi.', [{ text: 'Tamam' }]);
+    } catch (error: any) {
+      console.error('❌ CRITICAL: Health profile save failed:', error);
+      Alert.alert(
+        'Kayıt Hatası',
+        'Sağlık profiliniz kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.',
+        [
+          { text: 'Tekrar Dene', onPress: handleSave },
+          { text: 'Tamam', style: 'cancel' }
+        ]
+      );
+    }
   };
 
   return (
@@ -68,7 +143,16 @@ export default function HealthProfileScreen({ navigation }: any) {
           style={styles.backButton}
           onPress={() => {
             haptics.impactLight();
-            navigation.goBack();
+            // CRITICAL: Navigation with error handling
+            try {
+              if (navigation && typeof navigation.goBack === 'function') {
+                navigation.goBack();
+              } else {
+                console.warn('Navigation goBack not available');
+              }
+            } catch (error) {
+              console.error('Navigation error:', error);
+            }
           }}
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
@@ -161,11 +245,16 @@ export default function HealthProfileScreen({ navigation }: any) {
             />
             <TextInput
               style={styles.input}
-              placeholder="Telefon"
+              placeholder="Telefon (05XX XXX XX XX)"
               placeholderTextColor={colors.text.tertiary}
               keyboardType="phone-pad"
               value={contact1Phone}
-              onChangeText={setContact1Phone}
+              onChangeText={(text) => {
+                // CRITICAL: Format phone number as user types
+                const cleaned = text.replace(/[^\d+]/g, '');
+                setContact1Phone(cleaned);
+              }}
+              maxLength={15}
             />
           </View>
 
@@ -180,11 +269,16 @@ export default function HealthProfileScreen({ navigation }: any) {
             />
             <TextInput
               style={styles.input}
-              placeholder="Telefon"
+              placeholder="Telefon (05XX XXX XX XX)"
               placeholderTextColor={colors.text.tertiary}
               keyboardType="phone-pad"
               value={contact2Phone}
-              onChangeText={setContact2Phone}
+              onChangeText={(text) => {
+                // CRITICAL: Format phone number as user types
+                const cleaned = text.replace(/[^\d+]/g, '');
+                setContact2Phone(cleaned);
+              }}
+              maxLength={15}
             />
           </View>
 
@@ -199,11 +293,16 @@ export default function HealthProfileScreen({ navigation }: any) {
             />
             <TextInput
               style={styles.input}
-              placeholder="Telefon"
+              placeholder="Telefon (05XX XXX XX XX)"
               placeholderTextColor={colors.text.tertiary}
               keyboardType="phone-pad"
               value={contact3Phone}
-              onChangeText={setContact3Phone}
+              onChangeText={(text) => {
+                // CRITICAL: Format phone number as user types
+                const cleaned = text.replace(/[^\d+]/g, '');
+                setContact3Phone(cleaned);
+              }}
+              maxLength={15}
             />
           </View>
         </View>

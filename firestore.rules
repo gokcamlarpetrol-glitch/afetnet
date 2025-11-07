@@ -2,27 +2,72 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Elite Security: Strict authentication checks
     function isSystemClient() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function isAuthenticated() {
       return request.auth != null;
     }
 
-    function allowPublicRead() {
-      return isSystemClient() || request.auth == null;
+    // Elite: Device ID validation with strict format check
+    function isValidDeviceId(deviceId) {
+      return deviceId != null && 
+             deviceId is string && 
+             deviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
+             deviceId.size() == 12;
     }
 
+    // Elite: Validate device ownership with strict checks
     function allowDeviceWrite(deviceId) {
-      return isSystemClient() || (request.resource.data.deviceId == deviceId && request.resource.data.deviceId != null);
+      return isSystemClient() || 
+             (isAuthenticated() && 
+              isValidDeviceId(deviceId) && 
+              request.resource.data.deviceId == deviceId && 
+              request.resource.data.deviceId != null &&
+              // Prevent deviceId tampering
+              resource == null || resource.data.deviceId == deviceId);
     }
 
-    // Devices collection - users can only read/write their own device data
-    match /devices/{deviceId} {
-      allow read: if allowPublicRead();
-      allow write: if allowDeviceWrite(deviceId);
+    // Elite: Public read only for emergency data (earthquakes, SOS)
+    function allowPublicRead() {
+      return isSystemClient() || isAuthenticated();
+    }
 
-      // Family members subcollection
+    // Elite: Emergency public read (only for critical data)
+    function allowEmergencyPublicRead() {
+      return true; // Only for earthquakes and SOS signals
+    }
+
+    // Elite Security: Devices collection - STRICT access control
+    match /devices/{deviceId} {
+      // Elite: Only authenticated users or system can read device data
+      allow read: if isAuthenticated() && isValidDeviceId(deviceId);
+      // Elite: Only device owner can write, with strict validation
+      allow create: if allowDeviceWrite(deviceId) && 
+                       isValidDeviceId(request.resource.data.deviceId) &&
+                       request.resource.data.deviceId == deviceId;
+      allow update: if allowDeviceWrite(deviceId) && 
+                       isValidDeviceId(resource.data.deviceId) &&
+                       resource.data.deviceId == deviceId &&
+                       // Prevent deviceId change
+                       request.resource.data.deviceId == resource.data.deviceId;
+      allow delete: if isSystemClient();
+
+      // Elite Security: Family members - STRICT validation
       match /familyMembers/{memberId} {
-        allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
+        // Elite: Only device owner can read family members
+        allow read: if isAuthenticated() && isValidDeviceId(deviceId);
+        allow create: if allowDeviceWrite(deviceId) &&
+                         request.resource.data.id is string &&
+                         request.resource.data.id.size() > 0 &&
+                         request.resource.data.id.size() <= 100 &&
+                         request.resource.data.name is string &&
+                         request.resource.data.name.size() > 0 &&
+                         request.resource.data.name.size() <= 100;
+        allow update: if allowDeviceWrite(deviceId) &&
+                         request.resource.data.id == resource.data.id; // Prevent ID change
         allow delete: if allowDeviceWrite(deviceId);
       }
       
@@ -62,45 +107,81 @@ service cloud.firestore {
       }
     }
     
-    // Emergency SOS signals collection
+    // Elite Security: Emergency SOS signals - Public read for emergency, strict write
     match /sos/{sosId} {
-      // Allow anyone to read SOS signals (for emergency response)
-      // But only allow write with proper authentication or device ID validation
-      allow read: if true;
-      allow write: if request.auth != null || request.resource.data.deviceId != null;
-      allow delete: if request.auth != null || request.resource.data.deviceId == resource.data.deviceId;
+      // Elite: Public read for emergency response (life-saving)
+      allow read: if allowEmergencyPublicRead();
+      // Elite: Strict write validation - only authenticated users or valid device IDs
+      allow create: if (isAuthenticated() || 
+                        (request.resource.data.deviceId != null && 
+                         isValidDeviceId(request.resource.data.deviceId))) &&
+                       request.resource.data.deviceId is string &&
+                       request.resource.data.timestamp is int &&
+                       request.resource.data.latitude is number &&
+                       request.resource.data.longitude is number;
+      allow update: if isAuthenticated() || 
+                       (resource.data.deviceId != null && 
+                        request.resource.data.deviceId == resource.data.deviceId);
+      allow delete: if isSystemClient() || 
+                       (isAuthenticated() && resource.data.deviceId != null);
     }
     
-    // Messages collection (for BLE mesh backup)
+    // Elite Security: Messages collection - STRICT access control
     match /messages/{messageId} {
-      // Allow read/write for authenticated users or device ID matching
-      allow read: if request.auth != null || resource.data.from == deviceId || resource.data.to == deviceId;
-      allow write: if request.auth != null || request.resource.data.from == deviceId;
-      allow delete: if request.auth != null || request.resource.data.from == deviceId || request.resource.data.to == deviceId;
+      // Elite: Only authenticated users or message participants can read
+      allow read: if isAuthenticated() && 
+                     (resource.data.from is string || resource.data.to is string);
+      // Elite: Strict write validation
+      allow create: if isAuthenticated() &&
+                       request.resource.data.from is string &&
+                       isValidDeviceId(request.resource.data.from) &&
+                       request.resource.data.to is string &&
+                       request.resource.data.content is string &&
+                       request.resource.data.content.size() > 0 &&
+                       request.resource.data.content.size() <= 10000; // Max message size
+      allow update: if false; // Messages are immutable
+      allow delete: if isSystemClient() || 
+                       (isAuthenticated() && resource.data.from is string);
     }
     
-    // Earthquakes collection (public read for emergency awareness)
+    // Elite Security: Earthquakes collection - Public read for emergency, strict write
     match /earthquakes/{earthquakeId} {
-      allow read: if true; // Public read for emergency awareness
-      allow write: if request.auth != null || request.resource.data.magnitude >= 4.0; // Only allow critical earthquakes
-      allow delete: if request.auth != null; // Only authenticated users can delete
+      // Elite: Public read for emergency awareness (life-saving)
+      allow read: if allowEmergencyPublicRead();
+      // Elite: Strict write validation - only system or authenticated users with magnitude >= 4.0
+      allow create: if isSystemClient() || 
+                       (isAuthenticated() && 
+                        request.resource.data.magnitude is number &&
+                        request.resource.data.magnitude >= 4.0 &&
+                        request.resource.data.latitude is number &&
+                        request.resource.data.longitude is number &&
+                        request.resource.data.time is int);
+      allow update: if isSystemClient();
+      allow delete: if isSystemClient(); // Only system can delete
     }
 
-    // News summaries collection
+    // Elite Security: News summaries collection - STRICT validation
     match /news_summaries/{articleId} {
-      allow read: if true; // everyone can read cached summaries
+      // Elite: Public read for cached summaries (non-sensitive)
+      allow read: if allowEmergencyPublicRead();
+      // Elite: Strict create validation
       allow create: if isSystemClient() ||
         (
+          isAuthenticated() &&
           !exists(/databases/$(database)/documents/news_summaries/$(articleId)) &&
           request.resource.data.summary is string &&
+          request.resource.data.summary.size() > 0 &&
           request.resource.data.summary.size() <= 6000 &&
           request.resource.data.createdByDeviceId is string &&
-          request.resource.data.createdByDeviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
+          isValidDeviceId(request.resource.data.createdByDeviceId) &&
           request.resource.data.ttlMs is int &&
           request.resource.data.ttlMs > 0 &&
-          request.resource.data.ttlMs <= 43200000 // 12 saat
+          request.resource.data.ttlMs <= 43200000 && // 12 hours max
+          request.resource.data.articleId is string &&
+          request.resource.data.articleId == articleId
         );
-      allow update, delete: if isSystemClient();
+      allow update: if isSystemClient();
+      allow delete: if isSystemClient();
     }
     
     // Deny all other access

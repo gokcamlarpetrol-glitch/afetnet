@@ -288,6 +288,49 @@ export default function AllEarthquakesScreen({ navigation }: any) {
           offset: 100 * index,
           index,
         })}
+        ListEmptyComponent={
+          loading ? null : (
+            <View style={styles.emptyState}>
+              <LinearGradient
+                colors={['#1e293b', '#0f172a']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.emptyIcon}
+              >
+                <Ionicons name="pulse-outline" size={64} color={colors.earthquake.moderate} />
+              </LinearGradient>
+              <Text style={styles.emptyText}>
+                {earthquakes.length === 0 
+                  ? 'Henüz deprem verisi yok' 
+                  : 'Filtre sonucu bulunamadı'}
+              </Text>
+              <Text style={styles.emptySubtext}>
+                {earthquakes.length === 0
+                  ? 'Deprem verileri yükleniyor veya şu anda aktif deprem yok'
+                  : 'Farklı filtreler deneyerek tekrar arayabilirsiniz'}
+              </Text>
+              {earthquakes.length === 0 && (
+                <TouchableOpacity
+                  style={styles.emptyButton}
+                  onPress={() => {
+                    haptics.impactMedium();
+                    refresh();
+                  }}
+                >
+                  <LinearGradient
+                    colors={['#3b82f6', '#2563eb']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.emptyButtonGradient}
+                  >
+                    <Ionicons name="refresh" size={20} color="#fff" />
+                    <Text style={styles.emptyButtonText}>Yenile</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </View>
+          )
+        }
       />
     </View>
   );
@@ -458,6 +501,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  emptyButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  emptyButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  emptyButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

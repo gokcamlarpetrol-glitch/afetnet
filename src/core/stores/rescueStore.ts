@@ -50,13 +50,21 @@ export interface RescueState {
 
 export const useRescueStore = create<RescueState>()(
   persist(
-    (set, get) => ({
-      // Initial state
-      isRescueTeamMode: false,
-      trappedUsers: [],
-      isBeaconActive: false,
-      beaconStartTime: null,
-      beaconInterval: 10, // Default: 10 seconds
+    (set, get) => {
+      // Elite: Clean expired trapped users on load
+      const cleanupExpiredUsers = (users: TrappedUser[]): TrappedUser[] => {
+        const now = Date.now();
+        const expiryTime = 30 * 60 * 1000; // 30 minutes
+        return users.filter((user) => now - user.lastSeen < expiryTime);
+      };
+
+      return {
+        // Initial state
+        isRescueTeamMode: false,
+        trappedUsers: [],
+        isBeaconActive: false,
+        beaconStartTime: null,
+        beaconInterval: 10, // Default: 10 seconds
 
       // Rescue team mode actions
       enableRescueTeamMode: () => {
@@ -80,17 +88,23 @@ export const useRescueStore = create<RescueState>()(
         set((state) => {
           // Check if user already exists
           const exists = state.trappedUsers.find((u) => u.id === user.id);
+          let updatedUsers: TrappedUser[];
+          
           if (exists) {
             // Update existing user
-            return {
-              trappedUsers: state.trappedUsers.map((u) =>
-                u.id === user.id ? { ...u, ...user, lastSeen: Date.now() } : u
-              ),
-            };
+            updatedUsers = state.trappedUsers.map((u) =>
+              u.id === user.id ? { ...u, ...user, lastSeen: Date.now() } : u
+            );
+          } else {
+            // Add new user
+            updatedUsers = [...state.trappedUsers, { ...user, lastSeen: Date.now() }];
           }
-          // Add new user
+          
+          // Elite: Clean expired users periodically
+          const cleanedUsers = cleanupExpiredUsers(updatedUsers);
+          
           return {
-            trappedUsers: [...state.trappedUsers, { ...user, lastSeen: Date.now() }],
+            trappedUsers: cleanedUsers,
           };
         });
       },
@@ -125,14 +139,20 @@ export const useRescueStore = create<RescueState>()(
       setBeaconInterval: (seconds: number) => {
         set({ beaconInterval: seconds });
       },
-    }),
+      };
+    },
     {
       name: '@afetnet:rescue',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         isRescueTeamMode: state.isRescueTeamMode,
         beaconInterval: state.beaconInterval,
-        // Don't persist trapped users (they expire)
+        // Elite: Persist trapped users for offline access (filter expired on load)
+        trappedUsers: state.trappedUsers.filter((user) => {
+          const now = Date.now();
+          const expiryTime = 30 * 60 * 1000; // 30 minutes (longer for offline)
+          return now - user.lastSeen < expiryTime;
+        }),
       }),
     }
   )

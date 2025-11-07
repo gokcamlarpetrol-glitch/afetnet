@@ -45,11 +45,18 @@ class SOSService {
       this.currentSignal = signal;
       this.isActive = true;
 
-      // Broadcast via BLE
-      await this.broadcastViaBLE(signal);
+      // CRITICAL: Broadcast via BLE - MUST attempt even if one method fails
+      // Don't await - fire and forget to ensure all methods are attempted
+      this.broadcastViaBLE(signal).catch((bleError) => {
+        logger.error('❌ BLE broadcast failed (non-critical):', bleError);
+        // Continue - other methods may still work
+      });
 
-      // Notify nearby devices
-      await this.notifyNearbyDevices(signal);
+      // CRITICAL: Notify nearby devices - MUST attempt
+      this.notifyNearbyDevices(signal).catch((notifError) => {
+        logger.error('❌ Nearby device notification failed (non-critical):', notifError);
+        // Continue - SOS signal still sent
+      });
 
       // Save to Firestore (backup)
       try {

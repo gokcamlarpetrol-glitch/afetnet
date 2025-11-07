@@ -1,8 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Pressable, Alert, ActionSheetIOS, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, FadeInDown } from 'react-native-reanimated';
+import { Swipeable } from 'react-native-gesture-handler';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { FamilyMember } from '../../stores/familyStore';
@@ -13,11 +14,14 @@ interface MemberCardProps {
   member: FamilyMember;
   onPress: () => void;
   index: number;
+  onEdit?: (member: FamilyMember) => void;
+  onDelete?: (memberId: string) => void;
 }
 
-export function MemberCard({ member, onPress, index }: MemberCardProps) {
+export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberCardProps) {
   const scale = useSharedValue(1);
   const { color, text } = getStatusRenderInfo(member.status);
+  const [swipeableRef, setSwipeableRef] = useState<Swipeable | null>(null);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -25,47 +29,160 @@ export function MemberCard({ member, onPress, index }: MemberCardProps) {
 
   const handlePressIn = () => { scale.value = withSpring(0.98); };
   const handlePressOut = () => { scale.value = withSpring(1); };
+  
   const handlePress = () => {
     haptics.impactLight();
     onPress();
   };
 
+  const handleLongPress = () => {
+    haptics.impactMedium();
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['İptal', 'Düzenle', 'Sil'],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 2,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1 && onEdit) {
+            onEdit(member);
+          } else if (buttonIndex === 2 && onDelete) {
+            handleDelete();
+          }
+        }
+      );
+    } else {
+      Alert.alert(
+        member.name,
+        'Ne yapmak istersiniz?',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Düzenle',
+            onPress: () => onEdit && onEdit(member),
+          },
+          {
+            text: 'Sil',
+            style: 'destructive',
+            onPress: handleDelete,
+          },
+        ]
+      );
+    }
+  };
+
+  const handleDelete = () => {
+    Alert.alert(
+      'Üyeyi Sil',
+      `${member.name} adlı üyeyi silmek istediğinizden emin misiniz?`,
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: () => {
+            haptics.notificationError();
+            onDelete && onDelete(member.id);
+            swipeableRef?.close();
+          },
+        },
+      ]
+    );
+  };
+
+  const renderRightActions = () => {
+    if (!onDelete) return null;
+    
+    return (
+      <View style={styles.rightActions}>
+        <Pressable
+          style={styles.deleteButton}
+          onPress={handleDelete}
+        >
+          <Ionicons name="trash" size={24} color="#fff" />
+          <Text style={styles.deleteButtonText}>Sil</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
+  const renderLeftActions = () => {
+    if (!onEdit) return null;
+    
+    return (
+      <View style={styles.leftActions}>
+        <Pressable
+          style={styles.editButton}
+          onPress={() => {
+            haptics.impactLight();
+            onEdit(member);
+            swipeableRef?.close();
+          }}
+        >
+          <Ionicons name="create" size={24} color="#fff" />
+          <Text style={styles.editButtonText}>Düzenle</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
   const hasLocation = member.latitude !== 0 && member.longitude !== 0;
   const lastSeenText = formatLastSeen(member.lastSeen);
 
+  const cardContent = (
+    <Pressable
+      onPress={handlePress}
+      onLongPress={handleLongPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+    >
+      <LinearGradient colors={[colors.background.secondary, '#1a2436']} style={styles.memberCardGradient}>
+        {/* Header: Name and Status */}
+        <View style={styles.memberHeader}>
+          <View style={styles.memberInfo}>
+            <Text style={styles.memberName}>{member.name}</Text>
+            <Text style={styles.memberTime}>{lastSeenText}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: color + '20' }]}>
+            <View style={[styles.statusDot, { backgroundColor: color }]} />
+            <Text style={[styles.statusText, { color }]}>{text}</Text>
+          </View>
+        </View>
+
+        {/* Location Info */}
+        {hasLocation && (
+          <View style={styles.locationRow}>
+            <Ionicons name="location" size={16} color={colors.text.tertiary} />
+            <Text style={styles.locationText}>
+              Konum: {member.latitude.toFixed(4)}, {member.longitude.toFixed(4)}
+            </Text>
+          </View>
+        )}
+
+        {/* View on Map Button */}
+        <Pressable style={styles.viewMapButton} onPress={handlePress}>
+          <Ionicons name="map-outline" size={16} color={colors.brand.primary} />
+          <Text style={styles.viewMapText}>Haritada Göster</Text>
+        </Pressable>
+      </LinearGradient>
+    </Pressable>
+  );
+
   return (
     <Animated.View entering={FadeInDown.delay(index * 100).springify()} style={animatedStyle}>
-      <Pressable onPress={handlePress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
-        <LinearGradient colors={[colors.background.secondary, '#1a2436']} style={styles.memberCardGradient}>
-          {/* Header: Name and Status */}
-          <View style={styles.memberHeader}>
-            <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{member.name}</Text>
-              <Text style={styles.memberTime}>{lastSeenText}</Text>
-            </View>
-            <View style={[styles.statusBadge, { backgroundColor: color + '20' }]}>
-              <View style={[styles.statusDot, { backgroundColor: color }]} />
-              <Text style={[styles.statusText, { color }]}>{text}</Text>
-            </View>
-          </View>
-
-          {/* Location Info */}
-          {hasLocation && (
-            <View style={styles.locationRow}>
-              <Ionicons name="location" size={16} color={colors.text.tertiary} />
-              <Text style={styles.locationText}>
-                Konum: {member.latitude.toFixed(4)}, {member.longitude.toFixed(4)}
-              </Text>
-            </View>
-          )}
-
-          {/* View on Map Button */}
-          <Pressable style={styles.viewMapButton} onPress={handlePress}>
-            <Ionicons name="map-outline" size={16} color={colors.brand.primary} />
-            <Text style={styles.viewMapText}>Haritada Göster</Text>
-          </Pressable>
-        </LinearGradient>
-      </Pressable>
+      {(onEdit || onDelete) ? (
+        <Swipeable
+          ref={(ref) => setSwipeableRef(ref)}
+          renderRightActions={renderRightActions}
+          renderLeftActions={renderLeftActions}
+          onSwipeableOpen={() => haptics.impactMedium()}
+        >
+          {cardContent}
+        </Swipeable>
+      ) : (
+        cardContent
+      )}
     </Animated.View>
   );
 }
@@ -156,5 +273,47 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.brand.primary,
     fontWeight: '600',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 12,
+  },
+  deleteButton: {
+    backgroundColor: colors.status.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
+    gap: 4,
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  leftActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 12,
+  },
+  editButton: {
+    backgroundColor: colors.brand.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
+    gap: 4,
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

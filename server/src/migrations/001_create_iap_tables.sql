@@ -172,3 +172,21 @@ COMMENT ON COLUMN purchases.status IS 'Purchase status: active, expired, refunde
 COMMENT ON COLUMN purchases.is_lifetime IS 'True for lifetime purchases, false for subscriptions';
 COMMENT ON COLUMN purchases.last_event IS 'Last Apple Server Notification event data';
 COMMENT ON COLUMN entitlements.source IS 'Premium source: monthly, yearly, lifetime';
+
+-- Create user_locations table for earthquake warning system
+CREATE TABLE IF NOT EXISTS user_locations (
+    user_id VARCHAR(255) PRIMARY KEY,
+    push_token VARCHAR(500),
+    last_latitude DECIMAL(10, 8),
+    last_longitude DECIMAL(11, 8),
+    device_type VARCHAR(20) CHECK (device_type IN ('ios', 'android')),
+    provinces TEXT[],
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create index for location queries
+CREATE INDEX IF NOT EXISTS idx_user_locations_updated_at ON user_locations(updated_at);
+CREATE INDEX IF NOT EXISTS idx_user_locations_push_token ON user_locations(push_token) WHERE push_token IS NOT NULL;
+
+COMMENT ON TABLE user_locations IS 'User locations and push tokens for earthquake warning system';

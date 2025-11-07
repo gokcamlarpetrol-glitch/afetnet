@@ -93,6 +93,12 @@ export default function HomeHeader() {
                 setVideoLoaded(true);
                 logDebug('✅ Video yüklendi');
               }}
+              onError={(error) => {
+                // CRITICAL: Video loading error - fallback to gradient
+                logDebug('⚠️ Video yükleme hatası:', error);
+                setVideoLoaded(false);
+                // Keep fallback gradient visible
+              }}
             />
             {/* Fallback: Video yüklenene kadar gradient göster */}
             {!videoLoaded && (

@@ -17,6 +17,7 @@ import {
   Linking,
   ActionSheetIOS,
   Platform,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -52,6 +53,9 @@ export default function FamilyScreen({ navigation }: any) {
   const myStatusRef = useRef<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const [showIdModal, setShowIdModal] = useState(false);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
+  const [editName, setEditName] = useState('');
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -680,11 +684,54 @@ export default function FamilyScreen({ navigation }: any) {
 
   const safeCount = members.filter(m => m.status === 'safe').length;
 
+  const handleEditMember = (member: FamilyMember) => {
+    setEditingMember(member);
+    setEditName(member.name);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMember || !editName.trim()) {
+      Alert.alert('Hata', 'Lütfen geçerli bir isim girin.');
+      return;
+    }
+
+    try {
+      await useFamilyStore.getState().updateMember(editingMember.id, {
+        name: editName.trim(),
+      });
+      haptics.notificationSuccess();
+      setShowEditModal(false);
+      setEditingMember(null);
+      setEditName('');
+    } catch (error) {
+      logger.error('Failed to update member:', error);
+      Alert.alert('Hata', 'Üye güncellenemedi. Lütfen tekrar deneyin.');
+    }
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
+    try {
+      await useFamilyStore.getState().removeMember(memberId);
+      haptics.notificationSuccess();
+    } catch (error) {
+      logger.error('Failed to delete member:', error);
+      Alert.alert('Hata', 'Üye silinemedi. Lütfen tekrar deneyin.');
+    }
+  };
+
+  const handleGroupChat = () => {
+    haptics.impactMedium();
+    navigation.navigate('FamilyGroupChat');
+  };
+
   const renderMember = ({ item, index }: { item: FamilyMember; index: number }) => (
     <MemberCard
       member={item}
       index={index}
       onPress={() => navigation.navigate('Map', { focusOnMember: item.id })}
+      onEdit={handleEditMember}
+      onDelete={handleDeleteMember}
     />
   );
 
@@ -725,6 +772,22 @@ export default function FamilyScreen({ navigation }: any) {
           <StatusButton status="critical" onPress={handleStatusButtonPress} />
           <StatusButton status="location" active={isSharingLocation} onPress={handleStatusButtonPress} />
         </View>
+
+        {/* Group Chat Button */}
+        {members.length > 0 && (
+          <View style={styles.groupChatSection}>
+            <Pressable style={styles.groupChatButton} onPress={handleGroupChat}>
+              <LinearGradient
+                colors={[colors.brand.primary, colors.brand.secondary]}
+                style={styles.groupChatGradient}
+              >
+                <Ionicons name="chatbubbles" size={24} color="#fff" />
+                <Text style={styles.groupChatText}>Aile Grubu Sohbeti</Text>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </LinearGradient>
+            </Pressable>
+          </View>
+        )}
 
         {/* Member List */}
         <View style={styles.membersSection}>
@@ -819,6 +882,70 @@ export default function FamilyScreen({ navigation }: any) {
             ) : (
               <Text style={styles.errorText}>ID alınamadı</Text>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Member Modal */}
+      <Modal
+        visible={showEditModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowEditModal(false);
+          setEditingMember(null);
+          setEditName('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Pressable 
+              style={styles.modalCloseButton} 
+              onPress={() => {
+                setShowEditModal(false);
+                setEditingMember(null);
+                setEditName('');
+              }}
+            >
+              <Ionicons name="close" size={28} color={colors.text.primary} />
+            </Pressable>
+            
+            <Text style={styles.modalTitle}>Üyeyi Düzenle</Text>
+            <Text style={styles.modalSubtitle}>
+              Üye ismini değiştirin
+            </Text>
+
+            <View style={styles.editInputContainer}>
+              <Text style={styles.editInputLabel}>İsim</Text>
+              <TextInput
+                style={styles.editInput}
+                placeholder="Üye ismi"
+                placeholderTextColor={colors.text.tertiary}
+                value={editName}
+                onChangeText={setEditName}
+                autoFocus
+                maxLength={50}
+              />
+            </View>
+
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingMember(null);
+                  setEditName('');
+                }}
+              >
+                <Text style={styles.modalButtonTextCancel}>İptal</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonSave]}
+                onPress={handleSaveEdit}
+              >
+                <Text style={styles.modalButtonTextSave}>Kaydet</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1134,5 +1261,65 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.status.danger,
     textAlign: 'center',
+  },
+  groupChatSection: {
+    marginBottom: 20,
+  },
+  groupChatButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  groupChatGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  groupChatText: {
+    ...typography.body,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+  },
+  editInputContainer: {
+    width: '100%',
+    marginBottom: 24,
+  },
+  editInputLabel: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginBottom: 8,
+  },
+  editInput: {
+    backgroundColor: colors.background.secondary,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    ...typography.body,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  modalButtonCancel: {
+    backgroundColor: colors.background.secondary,
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  modalButtonSave: {
+    backgroundColor: colors.brand.primary,
+  },
+  modalButtonTextCancel: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  modalButtonTextSave: {
+    ...typography.body,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

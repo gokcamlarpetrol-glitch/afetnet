@@ -14,7 +14,15 @@ import * as haptics from '../../../utils/haptics';
 export default function MeshNetworkPanel() {
   const [expanded, setExpanded] = useState(false);
   const heightAnim = useRef(new Animated.Value(0)).current;
-  const { peers, isConnected, messages } = useMesh();
+  
+  // CRITICAL: Call hook unconditionally (React hooks rules)
+  // Hook itself won't throw, but store data might be undefined
+  const meshData = useMesh();
+  
+  // CRITICAL: Safe data extraction with fallbacks
+  const peers = meshData?.peers || {};
+  const isConnected = meshData?.isConnected || false;
+  const messages = meshData?.messages || [];
   const peerCount = Object.keys(peers).length;
 
   // Real data from mesh store

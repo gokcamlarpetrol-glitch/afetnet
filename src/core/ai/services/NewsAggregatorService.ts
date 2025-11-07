@@ -477,7 +477,67 @@ class NewsAggregatorService {
     return this.cachedDeviceId;
   }
 
+  /**
+   * Elite Security: Safe URL fetching with SSRF protection
+   */
   private async fetchWithTimeout(url: string): Promise<string> {
+    // Elite Security: SSRF Protection - Validate URL
+    if (typeof url !== 'string' || url.length === 0 || url.length > 2048) {
+      throw new Error('Invalid URL');
+    }
+    
+    // Elite: Only allow HTTP/HTTPS protocols
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error('Invalid URL format');
+    }
+    
+    // Elite: Block dangerous protocols and internal networks
+    const allowedProtocols = ['http:', 'https:'];
+    if (!allowedProtocols.includes(parsedUrl.protocol)) {
+      throw new Error('Only HTTP and HTTPS protocols allowed');
+    }
+    
+    // Elite: Block private/internal IP addresses (SSRF protection)
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const blockedHosts = [
+      'localhost',
+      '127.0.0.1',
+      '0.0.0.0',
+      '::1',
+      '169.254.169.254', // AWS metadata
+      'metadata.google.internal', // GCP metadata
+    ];
+    
+    // Check for private IP ranges
+    const isPrivateIP = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(hostname);
+    
+    if (blockedHosts.includes(hostname) || isPrivateIP || hostname.startsWith('169.254.')) {
+      throw new Error('Access to internal networks blocked');
+    }
+    
+    // Elite: Only allow known news sources (whitelist approach)
+    const allowedDomains = [
+      'hurriyet.com.tr',
+      'cnnturk.com',
+      'ntv.com.tr',
+      'aa.com.tr',
+      'sozcu.com.tr',
+      'haberturk.com',
+      'sabah.com.tr',
+      'milliyet.com.tr',
+      'bbc.com',
+      'reuters.com',
+      'ap.org',
+    ];
+    
+    const isAllowedDomain = allowedDomains.some(domain => hostname.includes(domain));
+    if (!isAllowedDomain && !__DEV__) {
+      throw new Error('Domain not in allowed list');
+    }
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
 
@@ -489,7 +549,18 @@ class NewsAggregatorService {
           Accept: 'application/rss+xml, application/xml, text/xml, */*',
         },
         signal: controller.signal,
+        // Elite: Prevent redirects to internal networks
+        redirect: 'manual', // Handle redirects manually
       });
+
+      // Elite: Handle redirects safely
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (location) {
+          // Recursively validate redirect URL
+          return this.fetchWithTimeout(location);
+        }
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

@@ -223,6 +223,7 @@ class RescueBeaconService {
       }
 
       // Add or update trapped user in store
+      const isNewUser = !rescueStore.trappedUsers.find(u => u.id === payload.userId);
       rescueStore.addTrappedUser({
         id: payload.userId,
         name: payload.userName,
@@ -234,6 +235,11 @@ class RescueBeaconService {
         battery: payload.battery,
         message: payload.message,
       });
+
+      // Elite: Send notification for trapped users (only for new users or critical updates)
+      if (isNewUser || payload.status === 'trapped') {
+        await this.sendTrappedUserNotification(payload, rssi, distance);
+      }
     } catch (error) {
       logger.error('Failed to handle received beacon:', error);
     }
@@ -251,12 +257,66 @@ class RescueBeaconService {
   }
 
   /**
-   * Cleanup expired trapped users (not seen for 5 minutes)
+   * Elite: Send notification for trapped users
+   */
+  private async sendTrappedUserNotification(payload: BeaconPayload, rssi?: number, distance?: number) {
+    try {
+      const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+      
+      const distanceText = distance 
+        ? distance < 1000 
+          ? `${Math.round(distance)}m uzaklıkta` 
+          : `${(distance / 1000).toFixed(1)}km uzaklıkta`
+        : rssi 
+          ? `Sinyal gücü: ${rssi} dBm`
+          : 'Yakın bölgede';
+      
+      const batteryText = payload.battery !== undefined ? `Pil: %${payload.battery}` : '';
+      const locationText = payload.location 
+        ? `Konum: ${payload.location.latitude.toFixed(4)}, ${payload.location.longitude.toFixed(4)}`
+        : '';
+      
+      const body = [
+        payload.message || `${payload.userName} yardım bekliyor`,
+        distanceText,
+        batteryText,
+        locationText,
+      ].filter(Boolean).join(' • ');
+
+      await multiChannelAlertService.sendAlert({
+        title: payload.status === 'trapped' 
+          ? '🚨 ENKAZ ALTINDA KİŞİ TESPİT EDİLDİ' 
+          : '⚠️ YARDIM GEREKEN KİŞİ TESPİT EDİLDİ',
+        body,
+        priority: payload.status === 'trapped' ? 'critical' : 'high',
+        channels: {
+          pushNotification: true,
+          fullScreenAlert: payload.status === 'trapped',
+          alarmSound: payload.status === 'trapped',
+          vibration: true,
+          tts: true,
+        },
+        data: {
+          type: 'trapped_user',
+          userId: payload.userId,
+          status: payload.status,
+          location: payload.location,
+        },
+        duration: payload.status === 'trapped' ? 0 : 30, // Critical alerts stay until dismissed
+      });
+    } catch (error) {
+      logger.error('Failed to send trapped user notification:', error);
+    }
+  }
+
+  /**
+   * Cleanup expired trapped users (not seen for 30 minutes - longer for offline mode)
+   * Elite: Extended expiry time for offline scenarios
    */
   cleanupExpiredUsers() {
     const rescueStore = useRescueStore.getState();
     const now = Date.now();
-    const expiryTime = 5 * 60 * 1000; // 5 minutes
+    const expiryTime = 30 * 60 * 1000; // 30 minutes (extended for offline)
 
     rescueStore.trappedUsers.forEach((user) => {
       if (now - user.lastSeen > expiryTime) {

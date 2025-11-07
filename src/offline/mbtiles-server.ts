@@ -50,7 +50,23 @@ export async function startMbtilesServer(): Promise<ServerHandle> {
             const urlMatch = request.match(/GET\s+\/tiles\/(\d+)\/(\d+)\/(\d+)/);
 
             if (urlMatch && mbtilesInstance) {
-              const [, z, x, y] = urlMatch.map(Number);
+              const [, zStr, xStr, yStr] = urlMatch;
+              
+              // Elite Security: Validate tile coordinates to prevent path traversal
+              const z = parseInt(zStr, 10);
+              const x = parseInt(xStr, 10);
+              const y = parseInt(yStr, 10);
+              
+              // Elite: Strict validation - prevent invalid coordinates
+              if (isNaN(z) || isNaN(x) || isNaN(y) || 
+                  z < 0 || z > 20 || // Max zoom level 20
+                  x < 0 || x >= Math.pow(2, z) || // X must be within zoom level bounds
+                  y < 0 || y >= Math.pow(2, z)) { // Y must be within zoom level bounds
+                const badRequestResponse = 'HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid tile coordinates';
+                socket.write(badRequestResponse);
+                socket.end();
+                return;
+              }
 
               logger.debug(`📋 Tile request: ${z}/${x}/${y}`);
 

@@ -55,6 +55,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSMicrophoneUsageDescription: "AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.",
       NSCameraUsageDescription: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
       NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.",
+      NSContactsUsageDescription: "AfetNet, acil durum kişilerinize hızlı erişim için kişilerinize erişir.",
+      NSPhotoLibraryUsageDescription: "AfetNet, acil durum fotoğraflarını görüntülemek için fotoğraf kütüphanenize erişir.",
+      NSPhotoLibraryAddUsageDescription: "AfetNet, acil durum fotoğraflarını kaydetmek için fotoğraf kütüphanenize erişir.",
+      NSFaceIDUsageDescription: "AfetNet, uygulama güvenliği için Face ID kullanır.",
+      NSLocationAlwaysUsageDescription: "AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.",
       UIBackgroundModes: [
         "fetch",
         "remote-notification",
@@ -69,7 +74,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Apple Developer Portal'da capabilities aktif edilmedikçe çoğu entitlement hata verir
     // Background modes Info.plist'te UIBackgroundModes ile tanımlı (yeterli)
     entitlements: {
-      "aps-environment": "development", // Development için "development"
+      "aps-environment": "production", // CRITICAL: Production için "production" (App Store için zorunlu)
       "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
       // Push notifications - Apple Developer Portal'da aktif edildiyse true yapın
       // "com.apple.developer.push-notifications": true,
