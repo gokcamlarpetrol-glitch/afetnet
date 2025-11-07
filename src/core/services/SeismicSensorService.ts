@@ -668,6 +668,20 @@ class SeismicSensorService {
       location: event.location,
     });
     
+    // ELITE: Track seismic detection analytics
+    try {
+      const { firebaseAnalyticsService } = await import('./FirebaseAnalyticsService');
+      firebaseAnalyticsService.logEvent('seismic_detection', {
+        magnitude: String(event.estimatedMagnitude),
+        confidence: String(event.confidence),
+        detectionDelayMs: String(detectionDelay),
+        pWaveDetected: String(event.pWaveDetected),
+        sWaveDetected: String(event.sWaveDetected),
+      });
+    } catch {
+      // Ignore analytics errors
+    }
+    
     try {
       const { multiChannelAlertService } = await import('./MultiChannelAlertService');
       

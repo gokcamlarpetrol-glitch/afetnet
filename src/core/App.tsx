@@ -55,11 +55,26 @@ const Stack = createStackNavigator();
 
 export default function CoreApp() {
   useEffect(() => {
+    // ELITE: Track app startup time
+    (global as any).__AFETNET_START_TIME__ = Date.now();
+    
     // CRITICAL: Initialize app with proper error handling
     // MUST await to catch initialization errors
     initializeApp().catch((error) => {
       // CRITICAL: Log initialization failure but don't crash app
       console.error('❌ CRITICAL: App initialization failed:', error);
+      
+      // Report to crashlytics
+      try {
+        const { firebaseCrashlyticsService } = require('./services/FirebaseCrashlyticsService');
+        firebaseCrashlyticsService.recordError(
+          error instanceof Error ? error : new Error(String(error)),
+          { source: 'app_initialization' }
+        );
+      } catch {
+        // Silently fail if crashlytics not available
+      }
+      
       // Try to continue anyway - some services may still work
     });
 
@@ -75,6 +90,7 @@ export default function CoreApp() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <OfflineIndicator />
+            <SyncStatusIndicator />
             <NavigationContainer>
               <Stack.Navigator
                 initialRouteName="MainTabs"

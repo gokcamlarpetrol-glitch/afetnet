@@ -108,11 +108,47 @@ export async function initializeApp() {
              const { firebaseStorageService } = await import('./services/FirebaseStorageService');
              await firebaseStorageService.initialize();
              
-             // Analytics and Crashlytics disabled by default (Apple review compliance)
-             // const { firebaseAnalyticsService } = await import('./services/FirebaseAnalyticsService');
-             // await firebaseAnalyticsService.initialize();
-             // const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
-             // await firebaseCrashlyticsService.initialize();
+             // Step 10: ELITE Analytics and Crashlytics (ENABLED)
+             // CRITICAL: Analytics and crash reporting for production monitoring
+             try {
+               logger.info('Step 10: Initializing Analytics and Crashlytics...');
+               const { firebaseAnalyticsService } = await import('./services/FirebaseAnalyticsService');
+               await firebaseAnalyticsService.initialize();
+               
+               const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
+               await firebaseCrashlyticsService.initialize();
+               
+               // Track app startup time
+               const startupTime = Date.now() - (global as any).__AFETNET_START_TIME__;
+               firebaseAnalyticsService.trackAppStartup(startupTime);
+               
+               logger.info('✅ Analytics and Crashlytics initialized');
+             } catch (error) {
+               logger.error('Analytics/Crashlytics initialization failed:', error);
+               // Continue without analytics - app should still work
+             }
+             
+             // Step 10.1: ELITE Global Error Handler
+             try {
+               logger.info('Step 10.1: Initializing Global Error Handler...');
+               const { globalErrorHandlerService } = await import('./services/GlobalErrorHandler');
+               await globalErrorHandlerService.initialize();
+               logger.info('✅ Global Error Handler initialized');
+             } catch (error) {
+               logger.error('Global Error Handler initialization failed:', error);
+               // Continue without global error handler - ErrorBoundary will still work
+             }
+             
+             // Step 10.2: ELITE Offline Sync Service
+             try {
+               logger.info('Step 10.2: Initializing Offline Sync Service...');
+               const { offlineSyncService } = await import('./services/OfflineSyncService');
+               await offlineSyncService.initialize();
+               logger.info('✅ Offline Sync Service initialized');
+             } catch (error) {
+               logger.error('Offline Sync Service initialization failed:', error);
+               // Continue without offline sync - Firebase will handle offline persistence
+             }
            }, 'FirebaseServices', 15000); // 15 seconds timeout
 
     // Step 3: Location Service

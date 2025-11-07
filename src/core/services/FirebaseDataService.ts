@@ -883,6 +883,64 @@ class FirebaseDataService {
       return () => {};
     }
   }
+
+  /**
+   * ELITE: Save with offline sync queue (conflict resolution)
+   */
+  async saveWithSync(
+    collection: string,
+    documentId: string,
+    data: any,
+    priority: 'low' | 'normal' | 'high' | 'critical' = 'normal'
+  ): Promise<boolean> {
+    // Try to save immediately if online
+    if (this._isInitialized) {
+      try {
+        const success = await this.saveDirectly(collection, documentId, data);
+        if (success) {
+          return true;
+        }
+      } catch (error) {
+        logger.warn('Direct save failed, queuing for sync:', error);
+      }
+    }
+
+    // Queue for offline sync
+    try {
+      const { offlineSyncService } = await import('./OfflineSyncService');
+      await offlineSyncService.queueOperation({
+        type: 'save',
+        collection,
+        documentId,
+        data,
+        priority,
+      });
+      return true; // Queued successfully
+    } catch (error) {
+      logger.error('Failed to queue operation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ELITE: Save directly to Firebase (internal method)
+   */
+  private async saveDirectly(collection: string, documentId: string, data: any): Promise<boolean> {
+    const db = getFirestoreInstance();
+    if (!db) return false;
+
+    try {
+      const docRef = doc(db, collection, documentId);
+      await setDoc(docRef, {
+        ...data,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+      return true;
+    } catch (error) {
+      logger.error('Direct save failed:', error);
+      return false;
+    }
+  }
 }
 
 export const firebaseDataService = new FirebaseDataService();

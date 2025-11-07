@@ -108,17 +108,52 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
     
-    // Save to Firebase (lazy load to avoid circular dependency)
+    // ELITE: Save to Firebase with offline sync queue
     try {
       const deviceId = await getDeviceId();
       if (deviceId) {
         const firebaseService = getFirebaseDataService();
         if (firebaseService?.isInitialized) {
-          await firebaseService.saveFamilyMember(deviceId, newMember);
+          // Try direct save first, fallback to sync queue
+          const success = await firebaseService.saveFamilyMember(deviceId, newMember);
+          if (!success) {
+            // Queue for offline sync
+            const { offlineSyncService } = await import('../services/OfflineSyncService');
+            await offlineSyncService.queueOperation({
+              type: 'save',
+              collection: 'familyMembers',
+              documentId: newMember.id,
+              data: newMember,
+              priority: 'normal',
+            });
+          }
+        } else {
+          // Firebase not initialized - queue for later
+          const { offlineSyncService } = await import('../services/OfflineSyncService');
+          await offlineSyncService.queueOperation({
+            type: 'save',
+            collection: 'familyMembers',
+            documentId: newMember.id,
+            data: newMember,
+            priority: 'normal',
+          });
         }
       }
     } catch (error) {
       console.error('Failed to save to Firebase:', error);
+      // Queue for offline sync on error
+      try {
+        const { offlineSyncService } = await import('../services/OfflineSyncService');
+        await offlineSyncService.queueOperation({
+          type: 'save',
+          collection: 'familyMembers',
+          documentId: newMember.id,
+          data: newMember,
+          priority: 'normal',
+        });
+      } catch (syncError) {
+        console.error('Failed to queue for sync:', syncError);
+      }
     }
   },
   
@@ -131,18 +166,52 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
     
-    // Save to Firebase (lazy load to avoid circular dependency)
+    // ELITE: Save to Firebase with offline sync queue
     if (updatedMember) {
       try {
         const deviceId = await getDeviceId();
         if (deviceId) {
           const firebaseService = getFirebaseDataService();
           if (firebaseService?.isInitialized) {
-            await firebaseService.saveFamilyMember(deviceId, updatedMember);
+            const success = await firebaseService.saveFamilyMember(deviceId, updatedMember);
+            if (!success) {
+              // Queue for offline sync
+              const { offlineSyncService } = await import('../services/OfflineSyncService');
+              await offlineSyncService.queueOperation({
+                type: 'update',
+                collection: 'familyMembers',
+                documentId: updatedMember.id,
+                data: updatedMember,
+                priority: 'normal',
+              });
+            }
+          } else {
+            // Queue for offline sync
+            const { offlineSyncService } = await import('../services/OfflineSyncService');
+            await offlineSyncService.queueOperation({
+              type: 'update',
+              collection: 'familyMembers',
+              documentId: updatedMember.id,
+              data: updatedMember,
+              priority: 'normal',
+            });
           }
         }
       } catch (error) {
         console.error('Failed to update in Firebase:', error);
+        // Queue for offline sync on error
+        try {
+          const { offlineSyncService } = await import('../services/OfflineSyncService');
+          await offlineSyncService.queueOperation({
+            type: 'update',
+            collection: 'familyMembers',
+            documentId: updatedMember.id,
+            data: updatedMember,
+            priority: 'normal',
+          });
+        } catch (syncError) {
+          console.error('Failed to queue for sync:', syncError);
+        }
       }
     }
   },
@@ -155,17 +224,51 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
     
-    // Delete from Firebase (lazy load to avoid circular dependency)
+    // ELITE: Delete from Firebase with offline sync queue
     try {
       const deviceId = await getDeviceId();
       if (deviceId) {
         const firebaseService = getFirebaseDataService();
         if (firebaseService?.isInitialized) {
-          await firebaseService.deleteFamilyMember(deviceId, id);
+          const success = await firebaseService.deleteFamilyMember(deviceId, id);
+          if (!success) {
+            // Queue for offline sync
+            const { offlineSyncService } = await import('../services/OfflineSyncService');
+            await offlineSyncService.queueOperation({
+              type: 'delete',
+              collection: 'familyMembers',
+              documentId: id,
+              data: {},
+              priority: 'normal',
+            });
+          }
+        } else {
+          // Queue for offline sync
+          const { offlineSyncService } = await import('../services/OfflineSyncService');
+          await offlineSyncService.queueOperation({
+            type: 'delete',
+            collection: 'familyMembers',
+            documentId: id,
+            data: {},
+            priority: 'normal',
+          });
         }
       }
     } catch (error) {
       console.error('Failed to delete from Firebase:', error);
+      // Queue for offline sync on error
+      try {
+        const { offlineSyncService } = await import('../services/OfflineSyncService');
+        await offlineSyncService.queueOperation({
+          type: 'delete',
+          collection: 'familyMembers',
+          documentId: id,
+          data: {},
+          priority: 'normal',
+        });
+      } catch (syncError) {
+        console.error('Failed to queue for sync:', syncError);
+      }
     }
   },
   

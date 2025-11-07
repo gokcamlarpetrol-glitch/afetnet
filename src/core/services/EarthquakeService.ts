@@ -307,6 +307,20 @@ class EarthquakeService {
           try {
             await this.sendInstantEarthquakeNotification(eq);
             const notificationDelay = Date.now() - notificationStartTime;
+            
+            // ELITE: Track notification performance
+            try {
+              const { firebaseAnalyticsService } = await import('./FirebaseAnalyticsService');
+              firebaseAnalyticsService.logEvent('earthquake_notification_sent', {
+                magnitude: String(eq.magnitude),
+                detectionDelaySeconds: String(detectionDelay),
+                notificationDelayMs: String(notificationDelay),
+                location: eq.location.substring(0, 50),
+              });
+            } catch {
+              // Ignore analytics errors
+            }
+            
             if (notificationDelay > 1000) {
               logger.warn(`⚠️ Bildirim gönderimi ${notificationDelay}ms sürdü (beklenenden yavaş)`);
             }
@@ -585,6 +599,7 @@ class EarthquakeService {
       
       logger.debug('📡 AFAD API çağrılıyor', { url, startDate, endDate });
 
+      const apiStartTime = Date.now();
       let response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -593,6 +608,15 @@ class EarthquakeService {
         },
         signal: controller.signal,
       });
+      const apiResponseTime = Date.now() - apiStartTime;
+
+      // ELITE: Track API performance
+      try {
+        const { firebaseAnalyticsService } = await import('./FirebaseAnalyticsService');
+        firebaseAnalyticsService.trackAPIResponseTime('afad_api', apiResponseTime, response.ok);
+      } catch {
+        // Ignore analytics errors
+      }
 
       clearTimeout(timeoutId);
 
