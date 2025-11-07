@@ -14,6 +14,33 @@ import { filterByDistance, sortByDistance, ISTANBUL_CENTER, calculateDistance } 
 import * as haptics from '../../utils/haptics';
 import { Earthquake } from '../../stores/earthquakeStore';
 
+const formatTimestamp = (timestamp: number): string => {
+  if (!timestamp) return '---';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '---';
+
+  const diffMs = Date.now() - date.getTime();
+  const within48h = diffMs <= 48 * 60 * 60 * 1000;
+
+  const formatter = new Intl.DateTimeFormat('tr-TR', within48h
+    ? {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Istanbul',
+        hour12: false,
+      }
+    : {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Istanbul',
+        hour12: false,
+      });
+
+  return formatter.format(date);
+};
+
 type TimeFilter = '1h' | '24h' | '7d' | '30d' | 'all';
 type LocationFilter = 25 | 50 | 100 | 999999; // 999999 = all Turkey
 type MagnitudeFilter = 0 | 3 | 4 | 5;
@@ -77,28 +104,6 @@ export default function AllEarthquakesScreen({ navigation }: any) {
     if (mag >= 5.0) return colors.earthquake.major;
     if (mag >= 4.0) return colors.earthquake.moderate;
     return colors.earthquake.minor;
-  };
-
-  const formatTimestamp = (timestamp: number): string => {
-    const diffMs = Date.now() - timestamp;
-    const formatterShort = new Intl.DateTimeFormat('tr-TR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Europe/Istanbul',
-    });
-
-    if (diffMs > 48 * 60 * 60 * 1000) {
-      const formatterLong = new Intl.DateTimeFormat('tr-TR', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Europe/Istanbul',
-      });
-      return formatterLong.format(new Date(timestamp));
-    }
-
-    return formatterShort.format(new Date(timestamp));
   };
 
   const renderItem = ({ item }: { item: Earthquake }) => {

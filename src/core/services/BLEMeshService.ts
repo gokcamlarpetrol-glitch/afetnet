@@ -3,9 +3,9 @@
  * Simple BLE mesh implementation for offline messaging
  */
 
-import { BleManager, Device, State } from 'react-native-ble-plx';
+import { BleManager, Device, State, Characteristic } from 'react-native-ble-plx';
 import { PermissionsAndroid, Platform } from 'react-native';
-import { useMeshStore, MeshPeer, MeshMessage } from '../stores/meshStore';
+import { useMeshStore, MeshPeer, MeshMessage, MeshPriority } from '../stores/meshStore';
 import * as Crypto from 'expo-crypto';
 import { Buffer } from 'buffer';
 import { createLogger } from '../utils/logger';
@@ -27,10 +27,18 @@ class BLEMeshService {
   private scanTimer: NodeJS.Timeout | null = null;
   private connectTimer: NodeJS.Timeout | null = null;
   private advertisingTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
   private myDeviceId: string | null = null;
   private messageQueue: MeshMessage[] = [];
   private messageCallbacks: MessageCallback[] = [];
   private deviceSubscriptions: Map<string, any> = new Map();
+  private readonly priorityRank: Record<MeshPriority, number> = {
+    critical: 0,
+    high: 1,
+    normal: 2,
+  };
+  private readonly MAX_RETRY = 3;
+  private sessionSecrets: Record<string, string> = {};
 
   constructor() {
     // Don't initialize BleManager here - wait for start() to be called
@@ -47,6 +55,121 @@ class BLEMeshService {
       logger.error('BLE Manager creation failed:', error);
       return null;
     }
+  }
+
+  private getSessionSecret(peerId?: string): string | null {
+    if (!this.myDeviceId || !peerId) {
+      return null;
+    }
+    if (this.sessionSecrets[peerId]) {
+      return this.sessionSecrets[peerId];
+    }
+    const [a, b] = [this.myDeviceId, peerId].sort();
+    const combined = `${a}|${b}`;
+    const secret = Buffer.from(combined).toString('base64');
+    this.sessionSecrets[peerId] = secret;
+    return secret;
+  }
+
+  private xorCipher(data: string, secret: string): string {
+    const dataBuffer = Buffer.from(data, 'utf-8');
+    const secretBuffer = Buffer.from(secret, 'utf-8');
+    const result = Buffer.alloc(dataBuffer.length);
+    for (let i = 0; i < dataBuffer.length; i += 1) {
+      result[i] = dataBuffer[i] ^ secretBuffer[i % secretBuffer.length];
+    }
+    return result.toString('base64');
+  }
+
+  private xorDecipher(payload: string, secret: string): string {
+    const payloadBuffer = Buffer.from(payload, 'base64');
+    const secretBuffer = Buffer.from(secret, 'utf-8');
+    const result = Buffer.alloc(payloadBuffer.length);
+    for (let i = 0; i < payloadBuffer.length; i += 1) {
+      result[i] = payloadBuffer[i] ^ secretBuffer[i % secretBuffer.length];
+    }
+    return result.toString('utf-8');
+  }
+
+  private async serializeMessage(message: MeshMessage): Promise<string> {
+    const secret = this.getSessionSecret(message.to);
+    if (secret && message.type !== 'ack' && message.type !== 'broadcast' && message.type !== 'heartbeat') {
+      const iv = Math.random().toString(36).slice(2, 10);
+      const payload = this.xorCipher(`${iv}:${message.content}`, secret);
+      const signature = Buffer.from(`${secret}:${message.sequence}:${iv}`).toString('base64');
+      return JSON.stringify({ ...message, content: payload, signature, iv });
+    }
+    return JSON.stringify(message);
+  }
+
+  private deserializeMessage(raw: MeshMessage): MeshMessage {
+    const secret = this.getSessionSecret(raw.from);
+    if (secret && raw.signature && raw.type !== 'ack' && raw.type !== 'broadcast' && raw.type !== 'heartbeat') {
+      const iv = raw.iv ?? '';
+      const expectedSignature = Buffer.from(`${secret}:${raw.sequence}:${iv}`).toString('base64');
+      if (raw.signature === expectedSignature) {
+        try {
+          const decrypted = this.xorDecipher(raw.content, secret);
+          const separatorIndex = decrypted.indexOf(':');
+          const content = separatorIndex >= 0 ? decrypted.slice(separatorIndex + 1) : decrypted;
+          return { ...raw, content };
+        } catch (error) {
+          logger.error('Failed to decrypt payload:', error);
+          return raw;
+        }
+      }
+    }
+    return raw;
+  }
+
+  private enqueueMessage(message: MeshMessage) {
+    if (!this.myDeviceId) return;
+    if (!message.route || message.route.length === 0) {
+      message.route = [this.myDeviceId];
+    }
+    const exists = this.messageQueue.find(
+      (item) => item.id === message.id && item.from === message.from && item.sequence === message.sequence
+    );
+    if (exists) {
+      return;
+    }
+    this.messageQueue.push(message);
+    this.sortQueue();
+  }
+
+  private sortQueue() {
+    this.messageQueue.sort((a, b) => {
+      const priorityDiff = this.priorityRank[a.priority] - this.priorityRank[b.priority];
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+      if (a.timestamp !== b.timestamp) {
+        return a.timestamp - b.timestamp;
+      }
+      return a.sequence - b.sequence;
+    });
+  }
+
+  private cleanupQueue() {
+    const state = useMeshStore.getState();
+    this.messageQueue = this.messageQueue.filter((msg) => {
+      if (msg.type === 'ack') {
+        return !msg.delivered;
+      }
+      const waitingAck = msg.ackRequired && !!state.pendingAcks[msg.id];
+      if (msg.delivered && !waitingAck) {
+        return false;
+      }
+      if (msg.attempts >= this.MAX_RETRY && !waitingAck) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private hasPendingAck(messageId: string): boolean {
+    const state = useMeshStore.getState();
+    return !!state.pendingAcks[messageId];
   }
 
   onMessage(callback: MessageCallback) {
@@ -106,6 +229,7 @@ class BLEMeshService {
 
       // Start scanning cycle
       this.startScanCycle();
+      this.startHeartbeat();
 
       if (__DEV__) logger.info('Started successfully - Mesh network active');
     } catch (error) {
@@ -159,6 +283,7 @@ class BLEMeshService {
     useMeshStore.getState().setScanning(false);
     useMeshStore.getState().setConnected(false);
     useMeshStore.getState().setAdvertising(false);
+    this.stopHeartbeat();
   }
 
   getMyDeviceId(): string | null {
@@ -195,14 +320,22 @@ class BLEMeshService {
       timestamp: Date.now(),
       ttl: 5,
       hops: 0,
+      priority: 'normal',
+      sequence: useMeshStore.getState().nextSequence(),
+      route: [this.myDeviceId],
+      ackRequired: false,
+      attempts: 0,
       delivered: false,
     };
 
     // Add to queue
-    this.messageQueue.push(message);
+    this.enqueueMessage(message);
 
     // Add to store
     useMeshStore.getState().addMessage(message);
+    if (message.ackRequired) {
+      useMeshStore.getState().trackPendingAck(message);
+    }
     useMeshStore.getState().incrementStat('messagesSent');
 
     // Save to Firestore (backup)
@@ -235,13 +368,21 @@ class BLEMeshService {
       content: 'SOS - Acil yardım gerekiyor!',
       type: 'sos',
       timestamp: Date.now(),
-      ttl: 10, // Higher TTL for SOS
+      ttl: 12, // Higher TTL for SOS
       hops: 0,
+      priority: 'critical',
+      sequence: useMeshStore.getState().nextSequence(),
+      route: [this.myDeviceId],
+      ackRequired: true,
+      attempts: 0,
       delivered: false,
     };
 
-    this.messageQueue.push(message);
+    this.enqueueMessage(message);
     useMeshStore.getState().addMessage(message);
+    if (message.ackRequired) {
+      useMeshStore.getState().trackPendingAck(message);
+    }
     useMeshStore.getState().incrementStat('messagesSent');
 
     if (__DEV__) logger.info('SOS sent:', message.id);
@@ -263,9 +404,17 @@ class BLEMeshService {
         timestamp: Date.now(),
         ttl: 5,
         hops: 0,
+        priority: 'normal',
+        sequence: useMeshStore.getState().nextSequence(),
+        route: [this.myDeviceId],
+        ackRequired: false,
+        attempts: 0,
         delivered: false,
       };
-      this.messageQueue.push(fullMessage);
+      this.enqueueMessage(fullMessage);
+      if (fullMessage.ackRequired) {
+        useMeshStore.getState().trackPendingAck(fullMessage);
+      }
       useMeshStore.getState().incrementStat('messagesSent');
       if (__DEV__) logger.info('Broadcast message queued (string)');
       return;
@@ -278,13 +427,20 @@ class BLEMeshService {
       content: message.content || '',
       type: message.type || 'broadcast',
       timestamp: message.timestamp || Date.now(),
-      ttl: 5, // Lower TTL for broadcasts
+      ttl: message.ttl ?? 5,
       hops: 0,
+      priority: message.priority ?? 'normal',
+      sequence: useMeshStore.getState().nextSequence(),
+      route: [this.myDeviceId],
+      ackRequired: message.ackRequired ?? false,
+      attempts: 0,
       delivered: false,
-      ...message,
     };
 
-    this.messageQueue.push(fullMessage);
+    this.enqueueMessage(fullMessage);
+    if (fullMessage.ackRequired) {
+      useMeshStore.getState().trackPendingAck(fullMessage);
+    }
     useMeshStore.getState().incrementStat('messagesSent');
 
     if (__DEV__) logger.info('Broadcast message queued:', fullMessage.type);
@@ -348,9 +504,10 @@ class BLEMeshService {
     this.scan();
 
     // Schedule next scan
+    const interval = this.getAdaptiveScanInterval();
     this.scanTimer = setTimeout(() => {
       this.startScanCycle();
-    }, SCAN_INTERVAL);
+    }, interval);
   }
 
   private scan() {
@@ -411,6 +568,30 @@ class BLEMeshService {
     }
   }
 
+  private getAdaptiveScanInterval(): number {
+    const { networkHealth } = useMeshStore.getState();
+    if (!networkHealth.lastUpdated) {
+      return SCAN_INTERVAL;
+    }
+    if (networkHealth.nodeCount <= 1) {
+      return Math.max(5000, SCAN_INTERVAL / 2);
+    }
+    if (networkHealth.nodeCount >= 6) {
+      return SCAN_INTERVAL * 1.5;
+    }
+    return SCAN_INTERVAL;
+  }
+
+  private cleanupPeers(maxAgeMs = SCAN_INTERVAL * 3) {
+    const now = Date.now();
+    const peers = useMeshStore.getState().peers;
+    Object.values(peers).forEach((peer) => {
+      if (now - peer.lastSeen > maxAgeMs) {
+        useMeshStore.getState().removePeer(peer.id);
+      }
+    });
+  }
+
   private async connectToPeers(devices: Device[]) {
     for (const device of devices.slice(0, 3)) { // Connect to max 3 peers
       try {
@@ -432,77 +613,270 @@ class BLEMeshService {
         logger.error('Connection error:', error);
       }
     }
+    this.cleanupPeers();
+    useMeshStore.getState().updateNetworkHealth({});
   }
 
   private async exchangeMessages(device: Device) {
     try {
-      // Send queued messages
-      for (const message of this.messageQueue) {
-        const payload = JSON.stringify(message);
-        
-        try {
-          // Try to write to characteristic
-          const services = await device.services();
-          if (services && services.length > 0) {
-            const characteristics = await services[0].characteristics();
-            if (characteristics && characteristics.length > 0) {
-              const char = characteristics[0];
-              const base64Payload = Buffer.from(payload).toString('base64');
-              await char.writeWithResponse(base64Payload);
-              
-              // Mark as delivered
-              useMeshStore.getState().markMessageDelivered(message.id);
-              useMeshStore.getState().incrementStat('messagesSent');
-              
-              if (__DEV__) logger.info('Message sent:', message.id);
-            }
-          }
-        } catch (writeError) {
-          logger.error('Write error:', writeError);
-          // Keep in queue for retry
-          continue;
-        }
+      const services = await device.services();
+      if (!services?.length) {
+        return;
       }
-
-      // Clear successfully sent messages
-      this.messageQueue = this.messageQueue.filter(msg => !msg.delivered);
-
-      // Read incoming messages
-      try {
-        const services = await device.services();
-        if (services && services.length > 0) {
-          const characteristics = await services[0].characteristics();
-          if (characteristics && characteristics.length > 0) {
-            const char = characteristics[0];
-            const value = await char.read();
-            
-            if (value && value.value) {
-              const payload = Buffer.from(value.value, 'base64').toString('utf-8');
-              const incomingMessage = JSON.parse(payload) as MeshMessage;
-              
-              // Handle beacon messages
-              if (incomingMessage.type === 'SOS_BEACON') {
-                await this.handleBeaconMessage(incomingMessage, device.rssi);
-              }
-              
-              // Add to store if not duplicate
-              useMeshStore.getState().addMessage(incomingMessage);
-              useMeshStore.getState().incrementStat('messagesReceived');
-              
-              // Notify callbacks
-              this.notifyMessageCallbacks(incomingMessage);
-              
-              if (__DEV__) logger.info('Message received:', incomingMessage.id);
-            }
-          }
-        }
-      } catch (readError) {
-        logger.error('Read error:', readError);
+      const characteristics = await services[0].characteristics();
+      if (!characteristics?.length) {
+        return;
       }
+      const characteristic = characteristics[0];
 
+      await this.processOutgoingMessages(characteristic);
+      await this.readIncomingMessage(characteristic, device);
+
+      this.cleanupQueue();
+      useMeshStore.getState().updateNetworkHealth({});
     } catch (error) {
       logger.error('Message exchange error:', error);
     }
+  }
+
+  private async processOutgoingMessages(characteristic: Characteristic) {
+    this.sortQueue();
+    for (const message of [...this.messageQueue]) {
+      if (message.type !== 'ack' && message.ackRequired && this.hasPendingAck(message.id)) {
+        continue; // waiting for ack
+      }
+
+      if (message.delivered) {
+        continue;
+      }
+
+      if (message.attempts >= this.MAX_RETRY) {
+        useMeshStore.getState().recordDrop();
+        this.removeFromQueue(message.id);
+        continue;
+      }
+
+      message.attempts += 1;
+
+      try {
+        const payload = await this.serializeMessage(message);
+        const base64Payload = Buffer.from(payload).toString('base64');
+        await characteristic.writeWithResponse(base64Payload);
+        useMeshStore.getState().incrementStat('messagesSent');
+
+        if (message.type === 'ack') {
+          message.delivered = true;
+          this.removeFromQueue(message.id);
+        } else if (message.ackRequired) {
+          useMeshStore.getState().trackPendingAck(message);
+        } else {
+          message.delivered = true;
+          useMeshStore.getState().markMessageDelivered(message.id);
+          useMeshStore.getState().markSequenceDelivered(message.from, message.sequence);
+          this.removeFromQueue(message.id);
+        }
+
+        if (__DEV__) {
+          logger.info('Message sent:', message.id);
+        }
+      } catch (error) {
+        logger.error('Write error:', error);
+        useMeshStore.getState().recordRetry();
+      }
+    }
+  }
+
+  private async readIncomingMessage(characteristic: Characteristic, device: Device) {
+    try {
+      const value = await characteristic.read();
+      if (!value?.value) {
+        return;
+      }
+
+      const payload = Buffer.from(value.value, 'base64').toString('utf-8');
+      const incomingRaw = JSON.parse(payload) as MeshMessage;
+      const incomingMessage = this.deserializeMessage(incomingRaw);
+      await this.processIncomingMessage(incomingMessage, device);
+    } catch (error) {
+      logger.error('Read error:', error);
+    }
+  }
+
+  private async processIncomingMessage(message: MeshMessage, device: Device) {
+    if (!this.myDeviceId) return;
+
+    if (message.type === 'ack') {
+      try {
+        const payload = JSON.parse(message.content);
+        const ackId = payload?.ack || message.content;
+        if (ackId) {
+          useMeshStore.getState().resolvePendingAck(ackId);
+          useMeshStore.getState().markMessageDelivered(ackId);
+          this.removeFromQueue(ackId);
+        }
+      } catch (error) {
+        logger.error('Failed to process ack payload:', error);
+      }
+      return;
+    }
+
+    if (message.type === 'heartbeat') {
+      try {
+        const payload = JSON.parse(message.content);
+        const { timestamp } = payload;
+        const state = useMeshStore.getState();
+        const existing = state.peers[message.from];
+        if (existing) {
+          state.updatePeer(message.from, {
+            lastSeen: timestamp || Date.now(),
+            rssi: device.rssi ?? existing.rssi,
+          });
+        } else {
+          state.addPeer({
+            id: message.from,
+            name: device.name || `Mesh-${message.from.slice(-4)}`,
+            lastSeen: timestamp || Date.now(),
+            rssi: device.rssi ?? -85,
+          });
+        }
+        state.updateNetworkHealth({ avgHopCount: message.hops });
+      } catch (error) {
+        logger.error('Failed to process heartbeat payload:', error);
+      }
+      // Still forward heartbeat to extend visibility
+    }
+
+    const isFresh = useMeshStore.getState().registerReceipt(message.from, message.sequence);
+    if (!isFresh) {
+      if (message.ackRequired && message.to === this.myDeviceId) {
+        await this.enqueueAck(message);
+      }
+      if (__DEV__) logger.info('Duplicate message ignored:', message.id);
+      return;
+    }
+
+    if (!message.route) {
+      message.route = [];
+    }
+    if (!message.route.includes(this.myDeviceId)) {
+      message.route = [...message.route, this.myDeviceId];
+    }
+
+    const isTargeted = !message.to || message.to === this.myDeviceId;
+
+    if (message.ttl <= 0) {
+      useMeshStore.getState().recordDrop();
+      return;
+    }
+
+    if (message.type === 'SOS_BEACON') {
+      await this.handleBeaconMessage(message, device.rssi);
+    }
+
+    if (isTargeted) {
+      useMeshStore.getState().addMessage(message);
+      useMeshStore.getState().incrementStat('messagesReceived');
+      useMeshStore.getState().updateNetworkHealth({ avgHopCount: message.hops });
+      this.notifyMessageCallbacks(message);
+    }
+
+    if (message.ackRequired && message.to === this.myDeviceId) {
+      await this.enqueueAck(message);
+    }
+
+    if (!isTargeted || !message.to) {
+      await this.forwardMessage(message);
+    }
+  }
+
+  private removeFromQueue(messageId: string) {
+    this.messageQueue = this.messageQueue.filter((msg) => msg.id !== messageId);
+  }
+
+  private async enqueueAck(originalMessage: MeshMessage) {
+    if (!this.myDeviceId) return;
+    const ackPayload = {
+      ack: originalMessage.id,
+      seq: originalMessage.sequence,
+      from: this.myDeviceId,
+    };
+    const ack: MeshMessage = {
+      id: `ack_${originalMessage.id}_${Date.now()}`,
+      from: this.myDeviceId,
+      to: originalMessage.from,
+      content: JSON.stringify(ackPayload),
+      type: 'ack',
+      timestamp: Date.now(),
+      ttl: 4,
+      hops: 0,
+      priority: 'high',
+      sequence: useMeshStore.getState().nextSequence(),
+      route: [this.myDeviceId],
+      ackRequired: false,
+      attempts: 0,
+      delivered: false,
+    };
+    this.enqueueMessage(ack);
+  }
+
+  private forwardMessage(message: MeshMessage) {
+    if (!this.myDeviceId) return;
+    if (message.ttl <= 1) {
+      useMeshStore.getState().recordDrop();
+      return;
+    }
+    if (message.route && message.route.includes(this.myDeviceId)) {
+      return;
+    }
+
+    const forwarded: MeshMessage = {
+      ...message,
+      ttl: message.ttl - 1,
+      hops: message.hops + 1,
+      route: [...(message.route || []), this.myDeviceId],
+      attempts: 0,
+      delivered: false,
+    };
+
+    this.enqueueMessage(forwarded);
+    useMeshStore.getState().recordHopForwarded();
+    useMeshStore.getState().updateNetworkHealth({ avgHopCount: forwarded.hops });
+  }
+
+  private startHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+    }
+    this.heartbeatTimer = setInterval(() => {
+      this.broadcastHeartbeat();
+    }, 15000);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private broadcastHeartbeat() {
+    if (!this.myDeviceId) return;
+    const heartbeat: MeshMessage = {
+      id: `hb_${Date.now()}`,
+      from: this.myDeviceId,
+      content: JSON.stringify({ timestamp: Date.now() }),
+      type: 'heartbeat',
+      timestamp: Date.now(),
+      ttl: 3,
+      hops: 0,
+      priority: 'normal',
+      sequence: useMeshStore.getState().nextSequence(),
+      route: [this.myDeviceId],
+      ackRequired: false,
+      attempts: 0,
+      delivered: false,
+    };
+    this.enqueueMessage(heartbeat);
   }
 }
 

@@ -248,7 +248,13 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
               )}
               {!loading && (
                 <Text style={styles.lastUpdateText}>
-                  Son güncelleme: {lastUpdate.toLocaleTimeString('tr-TR')}
+                  Son güncelleme: {lastUpdate.toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZone: 'Europe/Istanbul',
+                    hour12: false,
+                  })}
                 </Text>
               )}
             </View>

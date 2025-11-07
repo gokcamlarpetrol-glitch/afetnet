@@ -41,7 +41,6 @@ class NotificationService {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
             shouldPlaySound: true,
             shouldSetBadge: true,
             shouldShowBanner: true,
@@ -85,6 +84,13 @@ class NotificationService {
         await Notifications.setNotificationChannelAsync('messages', {
           name: 'Mesajlar',
           importance: Notifications.AndroidImportance.DEFAULT,
+          sound: 'default',
+        });
+
+        await Notifications.setNotificationChannelAsync('news', {
+          name: 'Haber Bildirimleri',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 200, 200],
           sound: 'default',
         });
       }
@@ -154,6 +160,58 @@ class NotificationService {
     } catch (error) {
       logger.error('Message notification error:', error);
     }
+  }
+
+  async showNewsNotification(params: {
+    title: string;
+    summary?: string;
+    source?: string;
+    url?: string;
+    articleId?: string;
+  }) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+
+      const titleParts = [];
+      if (params.source) {
+        titleParts.push(params.source.trim());
+      }
+      titleParts.push(params.title.trim());
+      const header = titleParts.join(' • ') || 'Son Dakika Haber';
+      const notificationTitle = this.truncate(`📰 ${header}`, 110);
+
+      const cleanedSummary = (params.summary || '').replace(/\s+/g, ' ').trim();
+      const notificationBody = this.truncate(
+        cleanedSummary.length > 0 ? cleanedSummary : 'Detaylar için AfetNet uygulamasını açın.',
+        220
+      );
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: notificationTitle,
+          body: notificationBody,
+          sound: 'default',
+          data: {
+            type: 'news',
+            url: params.url,
+            articleId: params.articleId,
+          },
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          channelId: 'news',
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('News notification error:', error);
+    }
+  }
+
+  private truncate(text: string, maxLength: number): string {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
   }
 }
 

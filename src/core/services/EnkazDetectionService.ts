@@ -201,7 +201,13 @@ class EnkazDetectionService {
         priority: 'high',
         sound: 'default',
         vibrationPattern: [0, 500, 200, 500], // Warning pattern
-        ttsText: 'Durum kontrolü. Hareketsiz görünüyorsunuz. İyi misiniz?',
+        duration: 12,
+        channels: {
+          fullScreenAlert: false,
+          alarmSound: false,
+          tts: false,
+          bluetooth: false,
+        },
       });
       
       logger.info('Warning notification sent');

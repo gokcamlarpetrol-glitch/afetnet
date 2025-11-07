@@ -4,7 +4,7 @@
  * Premium feature with 2 tabs: AI Summary + Original Article (WebView)
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,17 @@ import {
   ActivityIndicator,
   Share,
   Linking,
+  NativeModules,
+  Platform,
+  useWindowDimensions,
+  Modal,
+  Pressable,
 } from 'react-native';
 import type { WebViewProps } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import RenderHTML from 'react-native-render-html';
 import { colors, spacing, typography } from '../../theme';
 import { NewsArticle } from '../../ai/types/news.types';
 import { newsAggregatorService } from '../../ai/services/NewsAggregatorService';
@@ -39,37 +46,184 @@ interface NewsDetailScreenProps {
 
 export default function NewsDetailScreen({ route, navigation }: NewsDetailScreenProps) {
   const { article } = route.params;
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabType>('summary');
   const [aiSummary, setAiSummary] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [articleContent, setArticleContent] = useState<string>('');
+  const [articleHtml, setArticleHtml] = useState<string>('');
+  const [articlePlainText, setArticlePlainText] = useState<string>('');
   const [articleContentLoading, setArticleContentLoading] = useState(false);
   const [articleContentError, setArticleContentError] = useState<string | null>(null);
+  const [webViewComponent, setWebViewComponent] = useState<React.ComponentType<WebViewProps> | null>(null);
+  const [webViewStatus, setWebViewStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const [browserVisible, setBrowserVisible] = useState(false);
+  const [browserMode, setBrowserMode] = useState<'webview' | 'html'>('html');
 
-  const WebViewComponent = useMemo<React.ComponentType<WebViewProps> | null>(() => {
-    try {
-      const { WebView } = require('react-native-webview');
-      return WebView as React.ComponentType<WebViewProps>;
-    } catch (error) {
-      logger.warn('react-native-webview module unavailable; falling back to external browser.', error);
-      return null;
+  const hasValidUrl = Boolean(article.url && article.url !== '#');
+  const NativeWebView = webViewComponent;
+  const showWebView = Boolean(NativeWebView && hasValidUrl && webViewStatus === 'ready');
+  const showWebViewLoading = hasValidUrl && webViewStatus === 'loading';
+  const { width: windowWidth } = useWindowDimensions();
+
+  const contentWidth = useMemo(() => {
+    if (!windowWidth) {
+      return 360;
     }
+    const horizontalPadding = 32;
+    const computed = windowWidth - horizontalPadding;
+    return Math.min(Math.max(computed, 320), 820);
+  }, [windowWidth]);
+
+  const htmlTagStyles = useMemo(
+    () => ({
+      div: {
+        color: colors.text.primary,
+        fontSize: 15,
+        lineHeight: 24,
+      },
+      p: {
+        marginBottom: 12,
+      },
+      h1: {
+        fontSize: 24,
+        fontWeight: '700' as const,
+        marginBottom: 16,
+        color: colors.text.primary,
+      },
+      h2: {
+        fontSize: 20,
+        fontWeight: '700' as const,
+        marginBottom: 14,
+        color: colors.text.primary,
+      },
+      h3: {
+        fontSize: 18,
+        fontWeight: '700' as const,
+        marginBottom: 12,
+        color: colors.text.primary,
+      },
+      ul: {
+        marginBottom: 12,
+        paddingLeft: 18,
+      },
+      ol: {
+        marginBottom: 12,
+        paddingLeft: 18,
+      },
+      li: {
+        marginBottom: 6,
+        color: colors.text.primary,
+      },
+      a: {
+        color: colors.accent.primary,
+        textDecorationLine: 'underline' as const,
+      },
+      img: {
+        width: '100%',
+        height: undefined,
+        borderRadius: 12,
+        marginVertical: 16,
+      },
+      blockquote: {
+        borderLeftWidth: 3,
+        borderLeftColor: colors.accent.primary,
+        paddingLeft: 12,
+        marginVertical: 16,
+        color: colors.text.secondary,
+        fontStyle: 'italic' as const,
+      },
+      strong: {
+        fontWeight: '700' as const,
+      },
+      em: {
+        fontStyle: 'italic' as const,
+      },
+    }),
+    [colors]
+  );
+  const ignoredDomTags = useMemo(() => ['script', 'style', 'link', 'form', 'input', 'button', 'iframe', 'svg', 'path', 'cwiz'], []);
+
+  const isNativeWebViewRegistered = useCallback(() => {
+    const nativeModules = NativeModules as Record<string, unknown>;
+    if (nativeModules.RNCWebView || nativeModules.RNCWebViewModule) {
+      return true;
+    }
+
+    if (Platform.OS === 'ios' && (nativeModules.RNCWKWebView || nativeModules.RNCUIWebView)) {
+      return true;
+    }
+
+    if (Platform.OS === 'android' && (nativeModules.RNCWebViewManager || nativeModules.RNCWebViewTurboModule)) {
+      return true;
+    }
+
+    return false;
   }, []);
 
-  const sanitizeArticleContent = (html: string): string => {
-    return html
+  const sanitizeArticleHtml = (html: string): string => {
+    if (!html) {
+      return '';
+    }
+
+    let sanitized = html;
+    sanitized = sanitized.replace(/<!DOCTYPE[^>]*>/gi, '');
+    sanitized = sanitized.replace(/<head[\s\S]*?<\/head>/gi, '');
+    sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/gi, '');
+    sanitized = sanitized.replace(/<style[\s\S]*?<\/style>/gi, '');
+    sanitized = sanitized.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
+    sanitized = sanitized.replace(/<header[\s\S]*?<\/header>/gi, '');
+    sanitized = sanitized.replace(/<footer[\s\S]*?<\/footer>/gi, '');
+    sanitized = sanitized.replace(/<nav[\s\S]*?<\/nav>/gi, '');
+    sanitized = sanitized.replace(/<!--[\s\S]*?-->/g, '');
+
+    sanitized = sanitized.replace(/<body[^>]*>/gi, '<div>');
+    sanitized = sanitized.replace(/<\/body>/gi, '</div>');
+    sanitized = sanitized.replace(/<html[^>]*>/gi, '<div>');
+    sanitized = sanitized.replace(/<\/html>/gi, '</div>');
+
+    // Remove inline event handlers and scripts
+    sanitized = sanitized.replace(/ on\w+="[^"]*"/gi, '');
+    sanitized = sanitized.replace(/ on\w+='[^']*'/gi, '');
+    sanitized = sanitized.replace(/javascript:/gi, '');
+
+    // Normalize line breaks for block-level tags
+    sanitized = sanitized.replace(/<(p|div|section|article|h[1-6]|ul|ol|li|blockquote)[^>]*>/gi, '<$1>');
+
+    return sanitized;
+  };
+
+  const sanitizeArticleText = (html: string): string => {
+    if (!html) {
+      return '';
+    }
+
+    const withBreaks = html
+      .replace(/\r?\n|\r/g, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|section|article|li|h[1-6])>/gi, '\n\n')
+      .replace(/<\/tr>/gi, '\n')
+      .replace(/<\/td>/gi, ' ');
+
+    const withoutTags = withBreaks
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<header[\s\S]*?<\/header>/gi, '')
-      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
-      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
       .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .replace(/\u00a0/g, ' ');
+
+    return withoutTags
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n\n');
   };
 
   const loadArticleContent = useCallback(async () => {
-    if (!article.url || article.url === '#') return;
+    if (!article.url || article.url === '#') {
+      setArticleHtml('');
+      setArticlePlainText('');
+      setArticleContentError('Bu haber için tam metin bağlantısı sağlanmamış.');
+      return;
+    }
 
     try {
       setArticleContentLoading(true);
@@ -88,16 +242,22 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
       }
 
       const rawHtml = await response.text();
-      const sanitized = sanitizeArticleContent(rawHtml);
+      const sanitizedHtml = sanitizeArticleHtml(rawHtml);
+      const plainText = sanitizeArticleText(sanitizedHtml);
 
-      if (sanitized.length > 0) {
-        setArticleContent(sanitized);
+      if (sanitizedHtml.length > 0) {
+        setArticleHtml(`<div class="afetnet-article">${sanitizedHtml}</div>`);
+        setArticlePlainText(plainText);
       } else {
+        setArticleHtml('');
+        setArticlePlainText('');
         setArticleContentError('Haber içeriği çözümlenemedi.');
       }
     } catch (err) {
       logger.error('Failed to fetch article content:', err);
       setArticleContentError('Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyin.');
+      setArticleHtml('');
+      setArticlePlainText('');
     } finally {
       setArticleContentLoading(false);
     }
@@ -108,10 +268,83 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
   }, []);
 
   useEffect(() => {
-    if (!WebViewComponent && article.url && article.url !== '#') {
+    if (!hasValidUrl) {
+      if (webViewStatus !== 'unavailable') {
+        setWebViewStatus('unavailable');
+      }
+      return;
+    }
+
+    if (activeTab !== 'original' || webViewStatus !== 'idle') {
+      return;
+    }
+
+    if (!isNativeWebViewRegistered()) {
+      logger.info('Native WebView module not registered; using inline renderer.');
+      setWebViewComponent(null);
+      setWebViewStatus('unavailable');
+      return;
+    }
+
+    let isMounted = true;
+    setWebViewStatus('loading');
+
+    import('react-native-webview')
+      .then((module) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const { WebView } = module;
+        if (!WebView) {
+          setWebViewComponent(null);
+          setWebViewStatus('unavailable');
+          return;
+        }
+
+        setWebViewComponent(() => WebView as React.ComponentType<WebViewProps>);
+        setWebViewStatus('ready');
+      })
+      .catch((error) => {
+        if (!isMounted) {
+          return;
+        }
+        logger.warn('react-native-webview module unavailable; showing inline reader instead.', error);
+        setWebViewComponent(null);
+        setWebViewStatus('unavailable');
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, hasValidUrl, webViewStatus, isNativeWebViewRegistered]);
+
+  useEffect(() => {
+    if (article.url && article.url !== '#') {
       void loadArticleContent();
     }
-  }, [WebViewComponent, article.url, loadArticleContent]);
+  }, [article.url, loadArticleContent]);
+
+  useEffect(() => {
+    if (
+      browserVisible &&
+      browserMode === 'html' &&
+      hasValidUrl &&
+      !articleHtml &&
+      !articlePlainText &&
+      !articleContentLoading
+    ) {
+      void loadArticleContent();
+    }
+  }, [
+    browserVisible,
+    browserMode,
+    hasValidUrl,
+    articleHtml,
+    articlePlainText,
+    articleContentLoading,
+    loadArticleContent,
+  ]);
 
   const loadAISummary = async () => {
     try {
@@ -139,11 +372,43 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
     }
   };
 
-  const handleOpenExternal = () => {
-    haptics.impactLight();
-    if (article.url && article.url !== '#') {
-      Linking.openURL(article.url);
+  const openAfetNetBrowser = () => {
+    if (!hasValidUrl) {
+      return;
     }
+
+    haptics.impactLight();
+
+    if (showWebView) {
+      setBrowserMode('webview');
+      setBrowserVisible(true);
+      return;
+    }
+
+    setBrowserMode('html');
+    setBrowserVisible(true);
+
+    if (!articleHtml && !articlePlainText && !articleContentLoading) {
+      void loadArticleContent();
+    }
+  };
+
+  const openExternalBrowser = async () => {
+    if (!hasValidUrl) {
+      return;
+    }
+
+    haptics.impactLight();
+
+    try {
+      await Linking.openURL(article.url!);
+    } catch (error) {
+      logger.error('Failed to open URL with Linking:', error);
+    }
+  };
+
+  const closeBrowser = () => {
+    setBrowserVisible(false);
   };
 
   const switchTab = (tab: TabType) => {
@@ -156,7 +421,7 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
       {/* Header */}
       <LinearGradient
         colors={[colors.gradients.header[0], colors.gradients.header[1]]}
-        style={styles.header}
+        style={[styles.header, { paddingTop: insets.top + 12 }]}
       >
         <TouchableOpacity
           style={styles.backButton}
@@ -255,99 +520,222 @@ export default function NewsDetailScreen({ route, navigation }: NewsDetailScreen
               <View style={styles.disclaimer}>
                 <Ionicons name="information-circle-outline" size={16} color={colors.text.tertiary} />
                 <Text style={styles.disclaimerText}>
-                  Bu özet yapay zeka tarafından oluşturulmuştur. Detaylı bilgi için orijinal haberi okuyun.
+                  Bu özet yapay zeka tarafından oluşturulmuştur. Detaylı bilgi için haber metnini okuyun.
                 </Text>
               </View>
-
-              {/* Open Original Button */}
-              {article.url && article.url !== '#' && (
-                <TouchableOpacity style={styles.originalButton} onPress={handleOpenExternal}>
-                  <LinearGradient
-                    colors={[colors.accent.primary, colors.accent.secondary]}
-                    style={styles.originalButtonGradient}
-                  >
-                    <Ionicons name="open-outline" size={20} color="#fff" />
-                    <Text style={styles.originalButtonText}>Orijinal Haberi Aç</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              )}
             </>
           )}
         </ScrollView>
       ) : (
-        <View style={styles.webViewContainer}>
-          {article.url && article.url !== '#' ? (
-            WebViewComponent ? (
-              <WebViewComponent
-                source={{ uri: article.url }}
-                style={styles.webView}
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={styles.webViewLoading}>
-                    <ActivityIndicator size="large" color={colors.accent.primary} />
-                    <Text style={styles.loadingText}>Haber yükleniyor...</Text>
-                  </View>
-                )}
-                javaScriptEnabled
-                domStorageEnabled={false}
-                thirdPartyCookiesEnabled={false}
-                sharedCookiesEnabled={false}
-                allowsInlineMediaPlayback={false}
-                mediaPlaybackRequiresUserAction
-                allowsBackForwardNavigationGestures={false}
-                onShouldStartLoadWithRequest={(request) => {
-                  const url = request.url;
-                  if (!url.startsWith('https://')) {
-                    logger.warn('Blocked non-HTTPS URL:', url);
-                    return false;
-                  }
-                  return true;
-                }}
-                onError={(event) => {
-                  const { nativeEvent } = event;
-                  logger.error('WebView error:', nativeEvent);
-                }}
-              />
-            ) : (
-              <View style={styles.webViewUnavailableContainer}>
-                <Ionicons name="alert-circle-outline" size={48} color={colors.text.tertiary} />
-                <Text style={styles.webViewUnavailableTitle}>WebView kullanılabilir değil</Text>
-                <Text style={styles.webViewUnavailableText}>
-                  Cihazınızda web içerik bileşeni yüklü değil. Aşağıda haberin sadeleştirilmiş metnini görüntüleyebilir veya tarayıcıda açabilirsiniz.
-                </Text>
-                {articleContentLoading ? (
-                  <View style={styles.articleFallbackLoading}>
-                    <ActivityIndicator size="large" color={colors.accent.primary} />
-                    <Text style={styles.articleFallbackLoadingText}>Haber içeriği yükleniyor...</Text>
-                  </View>
-                ) : articleContent ? (
-                  <ScrollView style={styles.articleFallbackScroll}>
-                    <Text style={styles.articleFallbackText}>{articleContent}</Text>
-                  </ScrollView>
-                ) : (
-                  <Text style={styles.articleFallbackText}>
-                    {articleContentError || 'Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyebilirsiniz.'}
-                  </Text>
-                )}
-                <TouchableOpacity style={styles.originalButton} onPress={handleOpenExternal}>
+        <View style={styles.originalContainer}>
+          {!hasValidUrl ? (
+            <View style={styles.noUrlContainer}>
+              <Ionicons name="alert-circle-outline" size={48} color={colors.text.tertiary} />
+              <Text style={styles.noUrlText}>Orijinal haber bağlantısı bulunamadı.</Text>
+            </View>
+          ) : showWebView ? (
+            <>
+              <View style={styles.webViewWrapper}>
+                <NativeWebView
+                  source={{ uri: article.url ?? '' }}
+                  style={styles.webView}
+                  startInLoadingState
+                  renderLoading={() => (
+                    <View style={styles.webViewLoading}>
+                      <ActivityIndicator size="large" color={colors.accent.primary} />
+                      <Text style={styles.loadingText}>Orijinal haber yükleniyor...</Text>
+                    </View>
+                  )}
+                  javaScriptEnabled
+                  domStorageEnabled
+                  allowsInlineMediaPlayback={false}
+                  onError={(event) => {
+                    logger.error('WebView error:', event.nativeEvent);
+                    setArticleContentError('Haber sayfası yüklenemedi. Aşağıdaki sade metni kullanabilirsiniz.');
+                    setWebViewStatus('unavailable');
+                  }}
+                  onHttpError={(event) => {
+                    logger.error('WebView HTTP error:', event.nativeEvent);
+                    setArticleContentError('Haber sayfası şu anda ulaşılamıyor. Aşağıdaki sade metni kullanabilirsiniz.');
+                    setWebViewStatus('unavailable');
+                  }}
+                />
+              </View>
+              <View style={styles.originalActions}>
+                <TouchableOpacity
+                  style={[styles.originalButton, styles.originalButtonInline]}
+                  onPress={openAfetNetBrowser}
+                >
                   <LinearGradient
                     colors={[colors.accent.primary, colors.accent.secondary]}
                     style={styles.originalButtonGradient}
                   >
                     <Ionicons name="open-outline" size={20} color="#fff" />
-                    <Text style={styles.originalButtonText}>Tarayıcıda Aç</Text>
+                    <Text style={styles.originalButtonText}>AfetNet Tarayıcıda Aç</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
-            )
-          ) : (
-            <View style={styles.noUrlContainer}>
-              <Ionicons name="alert-circle-outline" size={64} color={colors.text.tertiary} />
-              <Text style={styles.noUrlText}>Orijinal haber linki bulunamadı</Text>
+            </>
+          ) : showWebViewLoading ? (
+            <View style={styles.webViewLoading}>
+              <ActivityIndicator size="large" color={colors.accent.primary} />
+              <Text style={styles.loadingText}>Orijinal haber yükleniyor...</Text>
             </View>
+          ) : (
+            <ScrollView style={styles.fallbackScroll} contentContainerStyle={styles.contentPadding}>
+              <View style={styles.articleCard}>
+                <View style={styles.articleHeader}>
+                  <Ionicons name="newspaper-outline" size={22} color={colors.accent.primary} />
+                  <Text style={styles.articleTitle}>Haber Metni</Text>
+                </View>
+
+                {articleContentLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.accent.primary} />
+                    <Text style={styles.loadingText}>Haber içeriği yükleniyor...</Text>
+                  </View>
+                ) : articleHtml || articlePlainText ? (
+                  articleHtml ? (
+                    <RenderHTML
+                      contentWidth={contentWidth}
+                      source={{ html: articleHtml }}
+                      defaultTextProps={{
+                        selectable: true,
+                      }}
+                      enableExperimentalMarginCollapsing
+                      tagsStyles={htmlTagStyles}
+                      ignoredDomTags={ignoredDomTags}
+                    />
+                  ) : articlePlainText ? (
+                    <Text style={styles.articleText}>{articlePlainText}</Text>
+                  ) : (
+                    <Text style={styles.articleText}>
+                      İçerik çözümlenemedi. Orijinal bağlantıyı kullanabilirsiniz.
+                    </Text>
+                  )
+                ) : articleContentError ? (
+                  <View style={styles.errorBox}>
+                    <Ionicons name="warning-outline" size={18} color="#f87171" />
+                    <Text style={styles.errorText}>
+                      {articleContentError || 'Haber içeriği yüklenemedi. Tarayıcıda açmayı deneyebilirsiniz.'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.articleText}>
+                    İçerik hazırlanıyor. Lütfen birkaç saniye içinde tekrar deneyin.
+                  </Text>
+                )}
+              </View>
+
+              {webViewStatus === 'unavailable' && (
+                <View style={styles.inlineNotice}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.text.tertiary} />
+                  <Text style={styles.inlineNoticeText}>
+                    Cihazda yerleşik web bileşeni bulunmadığı için sadeleştirilmiş metin gösteriliyor.
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.originalButton} onPress={openAfetNetBrowser}>
+                <LinearGradient
+                  colors={[colors.accent.primary, colors.accent.secondary]}
+                  style={styles.originalButtonGradient}
+                >
+                  <Ionicons name="open-outline" size={20} color="#fff" />
+                  <Text style={styles.originalButtonText}>AfetNet Tarayıcıda Aç</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
           )}
         </View>
       )}
+      <Modal
+        visible={browserVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closeBrowser}
+        statusBarTranslucent
+      >
+        <View style={styles.browserModal}>
+          <LinearGradient
+            colors={[colors.gradients.header[0], colors.gradients.header[1]]}
+            style={[styles.browserHeader, { paddingTop: insets.top + 10 }]}
+          >
+            <Pressable style={styles.browserCloseButton} onPress={closeBrowser} hitSlop={12}>
+              <Ionicons name="close" size={24} color={colors.text.primary} />
+            </Pressable>
+
+            <View style={styles.browserHeaderCenter}>
+              <Text style={styles.browserHeaderTitle} numberOfLines={1}>
+                {article.source}
+              </Text>
+              <Text style={styles.browserHeaderSubtitle} numberOfLines={1}>
+                {article.title}
+              </Text>
+            </View>
+
+            <View style={styles.browserHeaderActions}>
+              <Pressable style={styles.browserActionButton} onPress={handleShare} hitSlop={12}>
+                <Ionicons name="share-social-outline" size={22} color={colors.text.primary} />
+              </Pressable>
+              <Pressable style={styles.browserActionButton} onPress={openExternalBrowser} hitSlop={12}>
+                <Ionicons name="open-outline" size={22} color={colors.text.primary} />
+              </Pressable>
+            </View>
+          </LinearGradient>
+
+          {browserMode === 'webview' && showWebView ? (
+            <NativeWebView
+              source={{ uri: article.url ?? '' }}
+              style={styles.browserWebView}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.browserLoading}>
+                  <ActivityIndicator size="large" color={colors.accent.primary} />
+                  <Text style={styles.browserLoadingText}>Orijinal haber yükleniyor...</Text>
+                </View>
+              )}
+              onError={() => {
+                logger.warn('In-app WebView failed; falling back to HTML reader.');
+                setBrowserMode('html');
+              }}
+              onHttpError={() => {
+                logger.warn('In-app WebView HTTP error; falling back to HTML reader.');
+                setBrowserMode('html');
+              }}
+            />
+          ) : (
+            <ScrollView style={styles.browserHtmlScroll} contentContainerStyle={styles.browserHtmlContent}>
+              {articleContentLoading && !articleHtml && !articlePlainText ? (
+                <View style={styles.browserLoading}>
+                  <ActivityIndicator size="large" color={colors.accent.primary} />
+                  <Text style={styles.browserLoadingText}>Haber içeriği hazırlanıyor...</Text>
+                </View>
+              ) : articleHtml ? (
+                <RenderHTML
+                  contentWidth={contentWidth}
+                  source={{ html: articleHtml }}
+                  defaultTextProps={{ selectable: true }}
+                  enableExperimentalMarginCollapsing
+                  tagsStyles={htmlTagStyles}
+                  ignoredDomTags={ignoredDomTags}
+                />
+              ) : articlePlainText ? (
+                <Text style={styles.browserHtmlText}>{articlePlainText}</Text>
+              ) : articleContentError ? (
+                <View style={styles.errorBox}>
+                  <Ionicons name="warning-outline" size={18} color="#f87171" />
+                  <Text style={styles.errorText}>
+                    {articleContentError || 'Haber içeriği gösterilemedi. Dış tarayıcıdan açmayı deneyebilirsiniz.'}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.browserHtmlText}>İçerik yüklenemedi.</Text>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -362,7 +750,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 60,
+    paddingTop: 16,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.light,
@@ -462,6 +850,10 @@ const styles = StyleSheet.create({
   contentPadding: {
     padding: 20,
   },
+  fallbackScroll: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -518,6 +910,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 20,
   },
+  originalButtonInline: {
+    marginBottom: 0,
+  },
   originalButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -529,75 +924,184 @@ const styles = StyleSheet.create({
     ...typography.button,
     color: '#fff',
   },
-  webViewContainer: {
+  browserModal: {
     flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  browserHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.light,
+  },
+  browserCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.24)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  browserHeaderCenter: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  browserHeaderTitle: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  browserHeaderSubtitle: {
+    ...typography.body,
+    color: colors.text.primary,
+    marginTop: 4,
+  },
+  browserHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  browserActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.24)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  browserWebView: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  browserLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 48,
+    gap: 16,
+  },
+  browserLoadingText: {
+    ...typography.body,
+    color: colors.text.secondary,
+  },
+  browserHtmlScroll: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  browserHtmlContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    gap: 16,
+  },
+  browserHtmlText: {
+    ...typography.body,
+    color: colors.text.primary,
+    lineHeight: 24,
+  },
+  originalContainer: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  originalActions: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    backgroundColor: colors.background.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.light,
+  },
+  webViewWrapper: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
   },
   webView: {
     flex: 1,
+    backgroundColor: colors.background.primary,
   },
   webViewLoading: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 60,
     backgroundColor: colors.background.primary,
+  },
+  articleCard: {
+    backgroundColor: colors.background.card,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    marginBottom: 20,
+  },
+  articleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  articleTitle: {
+    ...typography.h4,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  articleText: {
+    ...typography.body,
+    color: colors.text.primary,
+    lineHeight: 24,
+  },
+  inlineNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.24)',
+    marginBottom: 20,
+  },
+  inlineNoticeText: {
+    flex: 1,
+    ...typography.small,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    backgroundColor: 'rgba(248, 113, 113, 0.08)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.4)',
+  },
+  errorText: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text.secondary,
+    lineHeight: 20,
   },
   noUrlContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
   },
   noUrlText: {
+    marginTop: 16,
+    textAlign: 'center',
     ...typography.body,
     color: colors.text.secondary,
-    marginTop: 20,
-    textAlign: 'center',
-  },
-  webViewUnavailableContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    gap: 16,
-  },
-  webViewUnavailableTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  webViewUnavailableText: {
-    ...typography.body,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  articleFallbackLoading: {
-    alignItems: 'center',
-    marginTop: spacing[4],
-    marginBottom: spacing[3],
-    gap: spacing[2],
-  },
-  articleFallbackLoadingText: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  articleFallbackScroll: {
-    maxHeight: 240,
-    marginTop: spacing[4],
-    marginBottom: spacing[3],
-    padding: spacing[4],
-    backgroundColor: colors.background.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border.light,
-  },
-  articleFallbackText: {
-    ...typography.body,
-    color: colors.text.primary,
     lineHeight: 22,
   },
 });

@@ -3,7 +3,7 @@
  * Modern offline messaging interface
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -24,25 +24,37 @@ import { SwipeableConversationCard } from '../../components/messages/SwipeableCo
 import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
 import { useMeshStore } from '../../stores/meshStore';
+import QRCode from 'react-native-qrcode-svg';
+import { Modal, TouchableOpacity } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 
 export default function MessagesScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const conversations = useMessageStore((state) => state.conversations);
   const isMeshConnected = useMeshStore((state) => state.isConnected);
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setConversations(useMessageStore.getState().conversations);
-    }, 500);
+  const myDeviceId = useMeshStore((state) => state.myDeviceId);
+  const networkHealth = useMeshStore((state) => state.networkHealth);
+  const peers = useMeshStore((state) => state.peers);
+  const [qrModalVisible, setQrModalVisible] = useState(false);
+  const [qrValue, setQrValue] = useState<string | null>(null);
 
-    return () => clearInterval(interval);
-  }, []);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredConversations = conversations.filter((conv) => {
+    const name = conv.userName?.toLowerCase?.() ?? '';
+    const last = conv.lastMessage?.toLowerCase?.() ?? '';
+    if (normalizedQuery.length === 0) {
+      return true;
+    }
+    return name.includes(normalizedQuery) || last.includes(normalizedQuery);
+  });
 
-  const filteredConversations = conversations.filter(conv =>
-    conv.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const peerCount = (peers ? Object.keys(peers).length : 0) + 1;
+  const deliveryPercent = Math.round(Math.min(1, Math.max(0, networkHealth.deliveryRatio)) * 100);
+  const avgHop = Number.isFinite(networkHealth.avgHopCount) && networkHealth.avgHopCount > 0
+    ? networkHealth.avgHopCount.toFixed(1)
+    : '1.0';
 
   const handleDeleteConversation = (userId: string) => {
     Alert.alert(
@@ -64,6 +76,23 @@ export default function MessagesScreen({ navigation }: any) {
   const handleNewMessage = () => {
     haptics.impactMedium();
     navigation?.navigate('NewMessage');
+  };
+
+  const handleShowQr = () => {
+    const id = myDeviceId || useMeshStore.getState().myDeviceId;
+    if (!id) {
+      Alert.alert(
+        'Cihaz ID hazır değil',
+        'Bluetooth ve konum izinlerini açarak mesh ağını başlatın.'
+      );
+      return;
+    }
+    setQrValue(id);
+    setQrModalVisible(true);
+  };
+
+  const handleCloseQr = () => {
+    setQrModalVisible(false);
   };
 
   const renderConversation = ({ item, index }: { item: Conversation; index: number }) => (
@@ -116,14 +145,77 @@ export default function MessagesScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
+      <Modal
+        visible={qrModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseQr}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Benim AfetNet ID’m</Text>
+            {qrValue && (
+              <View style={styles.modalQrWrapper}>
+                <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
+                <Text style={styles.modalIdText}>{qrValue}</Text>
+              </View>
+            )}
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalSecondary} onPress={handleCloseQr}>
+                <Text style={styles.modalSecondaryText}>Kapat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimary}
+                onPress={async () => {
+                  if (qrValue) {
+                    await Clipboard.setStringAsync(qrValue);
+                    haptics.notificationSuccess();
+                  }
+                  handleCloseQr();
+                }}
+              >
+                <Ionicons name="copy-outline" size={16} color="#0f172a" />
+                <Text style={styles.modalPrimaryText}>Kimliği Kopyala</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header - Fixed */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Mesajlar</Text>
-          <View style={[styles.meshBadge, isMeshConnected ? styles.meshBadgeActive : styles.meshBadgeInactive]}>
-            <View style={[styles.meshDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#f97316' }]} />
-            <Text style={[styles.meshText, { color: isMeshConnected ? '#bbf7d0' : '#fcd34d' }]}>Mesh {isMeshConnected ? 'aktif' : 'pasif'}</Text>
+          <View style={styles.meshRow}>
+            <Text
+              style={[
+                styles.meshStatus,
+                { color: isMeshConnected ? '#4ade80' : '#f97316' },
+              ]}
+            >
+              Mesh {isMeshConnected ? 'aktif' : 'pasif'}
+            </Text>
+            <Pressable style={styles.meshQrButton} onPress={handleShowQr}>
+              <Ionicons name="qr-code-outline" size={18} color="#60a5fa" />
+              <Text style={styles.meshQrText}>QR</Text>
+            </Pressable>
+          </View>
+          <View style={styles.telemetryCard}>
+            <View style={styles.telemetryColumn}>
+              <Text style={styles.telemetryLabel}>Cihaz</Text>
+              <Text style={styles.telemetryValue}>{peerCount}</Text>
+            </View>
+            <View style={styles.telemetryDivider} />
+            <View style={styles.telemetryColumn}>
+              <Text style={styles.telemetryLabel}>Teslim</Text>
+              <Text style={styles.telemetryValue}>{deliveryPercent}%</Text>
+            </View>
+            <View style={styles.telemetryDivider} />
+            <View style={styles.telemetryColumn}>
+              <Text style={styles.telemetryLabel}>Hops</Text>
+              <Text style={styles.telemetryValue}>{avgHop}</Text>
+            </View>
           </View>
         </View>
         <Pressable 
@@ -214,30 +306,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(59,130,246,0.12)',
   },
-  meshBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  meshStatus: {
     marginTop: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  meshBadgeActive: {
-    backgroundColor: 'rgba(34,197,94,0.15)',
-  },
-  meshBadgeInactive: {
-    backgroundColor: 'rgba(249,115,22,0.15)',
-  },
-  meshDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  meshText: {
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  meshRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  meshQrButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(96,165,250,0.12)',
+  },
+  meshQrText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#60a5fa',
+  },
+  telemetryCard: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(15,23,42,0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,234,212,0.12)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  telemetryColumn: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  telemetryLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  telemetryValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#e2e8f0',
+  },
+  telemetryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: 'rgba(94,234,212,0.18)',
   },
   searchContainer: {
     paddingHorizontal: 16,
@@ -411,6 +536,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 24,
+    padding: 24,
+    backgroundColor: 'rgba(15,23,42,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  modalQrWrapper: {
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#1f2a44',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.2)',
+    marginBottom: 20,
+  },
+  modalIdText: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#cbd5f5',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalSecondary: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(148,163,184,0.18)',
+  },
+  modalSecondaryText: {
+    color: '#e2e8f0',
+    fontWeight: '600',
+  },
+  modalPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#38bdf8',
+  },
+  modalPrimaryText: {
+    fontWeight: '700',
+    color: '#0f172a',
   },
   // FAB styles removed - using header button instead
 });

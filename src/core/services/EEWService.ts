@@ -331,67 +331,73 @@ class EEWService {
           // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-          
-          const response = await fetch(url, {
-            headers: {
-              'Accept': 'application/json',
-              'User-Agent': 'AfetNet/1.0',
-            },
-            signal: controller.signal,
-          });
-          
-          clearTimeout(timeoutId);
+          try {
+            const response = await fetch(url, {
+              headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'AfetNet/1.0',
+              },
+              signal: controller.signal,
+            });
 
-          if (!response.ok) {
+            if (!response.ok) {
+              if (__DEV__) {
+                logger.warn(`AFAD API response not OK: ${response.status}`);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 60000));
+              continue;
+            }
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType?.includes('application/json')) {
+              if (__DEV__) {
+                logger.warn(`Non-JSON response from AFAD: ${contentType}`);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 60000));
+              continue;
+            }
+
+            const text = await response.text();
+
+            if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
+              if (__DEV__) {
+                logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 60000));
+              continue;
+            }
+
+            const data = JSON.parse(text);
+            const eventsArray = Array.isArray(data) ? data : (data.events || []);
+
+            for (const eventData of eventsArray) {
+              const event = this.normalizeEvent(eventData);
+              if (event && !this.seenEvents.has(event.id)) {
+                this.seenEvents.add(event.id);
+                this.notifyCallbacks(event);
+              }
+            }
+
+            if (__DEV__ && eventsArray.length > 0) {
+              logger.info(`Polled ${eventsArray.length} events from AFAD`);
+            }
+          } catch (error: any) {
             if (__DEV__) {
-              logger.warn(`AFAD API response not OK: ${response.status}`);
+              const message = error?.message ?? String(error);
+              if (error?.name === 'AbortError') {
+                logger.warn('EEW poll request timed out; retrying.');
+              } else if (typeof message === 'string' && message.toLowerCase().includes('network request failed')) {
+                logger.warn('EEW poll network request failed; will retry automatically.');
+              } else {
+                logger.warn('EEW poll error:', message);
+              }
             }
-            // Continue to next poll cycle
-            await new Promise((resolve) => setTimeout(resolve, 60000));
-            continue;
-          }
-
-          // Check if response is JSON
-          const contentType = response.headers.get('content-type');
-          if (!contentType?.includes('application/json')) {
-            if (__DEV__) {
-              logger.warn(`Non-JSON response from AFAD: ${contentType}`);
-            }
-            await new Promise((resolve) => setTimeout(resolve, 60000));
-            continue;
-          }
-
-          const text = await response.text();
-          
-          // Validate JSON before parsing
-          if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
-            if (__DEV__) {
-              logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
-            }
-            await new Promise((resolve) => setTimeout(resolve, 60000));
-            continue;
-          }
-
-          const data = JSON.parse(text);
-          
-          // AFAD returns array of events
-          const eventsArray = Array.isArray(data) ? data : (data.events || []);
-          
-          for (const eventData of eventsArray) {
-            const event = this.normalizeEvent(eventData);
-            if (event && !this.seenEvents.has(event.id)) {
-              this.seenEvents.add(event.id);
-              this.notifyCallbacks(event);
-            }
-          }
-
-          if (__DEV__ && eventsArray.length > 0) {
-            logger.info(`Polled ${eventsArray.length} events from AFAD`);
+          } finally {
+            clearTimeout(timeoutId);
           }
         } catch (error) {
-          // Only log errors in dev mode
           if (__DEV__) {
-            logger.error('Poll error:', error);
+            logger.warn('EEW poll loop unexpected error:', error);
           }
         }
       }

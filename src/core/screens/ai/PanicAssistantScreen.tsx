@@ -3,18 +3,17 @@
  * Provides emergency actions during disasters
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
-import { panicAssistantService } from '../../ai/services/PanicAssistantService';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
 
 const logger = createLogger('PanicAssistantScreen');
-const LOAD_TIMEOUT = 5000; // 5 seconds
 
 const phaseOrder: Record<'before' | 'during' | 'after' | 'check', number> = {
   before: 0,
@@ -53,55 +52,21 @@ const getPhaseGradient = (phase: 'before' | 'during' | 'after' | 'check'): [stri
 
 export default function PanicAssistantScreen() {
   const { panicAssistant, panicAssistantLoading } = useAIAssistantStore();
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    loadActions();
-    
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
+    aiAssistantCoordinator.ensurePanicAssistant('earthquake').catch((error) => {
+      logger.error('Panic assistant preload failed:', error);
+    });
   }, []);
 
-  const loadActions = async () => {
+  const refreshActions = useCallback(async () => {
     try {
-      useAIAssistantStore.getState().setPanicAssistantLoading(true);
-      
-      // Timeout ekle - 5 saniye sonra fallback'e geç
-      timeoutRef.current = setTimeout(() => {
-        logger.warn('Panic assistant loading timeout, using fallback');
-        useAIAssistantStore.getState().setPanicAssistantLoading(false);
-      }, LOAD_TIMEOUT);
-      
-      const actions = await panicAssistantService.getEmergencyActions('earthquake');
-      
-      // Timeout'u iptal et
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      
-      useAIAssistantStore.getState().setPanicAssistant({
-        isActive: true,
-        currentScenario: 'earthquake',
-        actions,
-        lastUpdate: Date.now(),
-      });
+      await aiAssistantCoordinator.ensurePanicAssistant('earthquake', true);
       haptics.impactHeavy();
     } catch (error) {
-      logger.error('Failed to load actions:', error);
-      useAIAssistantStore.getState().setPanicAssistantError('Aksiyonlar yuklenemedi');
-    } finally {
-      // Her durumda loading'i kapat
-      useAIAssistantStore.getState().setPanicAssistantLoading(false);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
+      logger.error('Panic assistant refresh failed:', error);
     }
-  };
+  }, []);
 
   const toggleAction = (actionId: string) => {
     if (!panicAssistant) return;
@@ -133,7 +98,7 @@ export default function PanicAssistantScreen() {
       <View style={styles.emptyContainer}>
         <Ionicons name="shield-checkmark-outline" size={64} color={colors.text.tertiary} />
         <Text style={styles.emptyText}>Aksiyon bulunamadi</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadActions}>
+        <TouchableOpacity style={styles.retryButton} onPress={refreshActions}>
           <Text style={styles.retryButtonText}>Tekrar Dene</Text>
         </TouchableOpacity>
       </View>

@@ -59,8 +59,6 @@ const TEMPLATES: MessageTemplate[] = [
 ];
 
 export default function MessageTemplates() {
-  const isMeshConnected = useMeshStore((state) => state.isConnected);
-
   const ensureMeshReady = async (): Promise<boolean> => {
     const meshStore = useMeshStore.getState();
     let deviceId = bleMeshService.getMyDeviceId() || meshStore.myDeviceId;
@@ -152,18 +150,8 @@ export default function MessageTemplates() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.header}>Hızlı Mesajlar</Text>
-          <Text style={styles.subtitle}>Tek dokunuşla acil durum mesajı gönderin</Text>
-        </View>
-        <View style={[styles.statusPill, { backgroundColor: isMeshConnected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }] }>
-          <View style={[styles.statusDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#ef4444' }]} />
-          <Text style={[styles.statusText, { color: isMeshConnected ? '#22c55e' : '#ef4444' }]}>
-            {isMeshConnected ? 'Mesh aktif' : 'Mesh pasif'}
-          </Text>
-        </View>
-      </View>
+      <Text style={styles.header}>Hızlı Mesajlar</Text>
+      <Text style={styles.subtitle}>Tek dokunuşla acil durum mesajı gönderin</Text>
 
       <View style={styles.grid}>
         {TEMPLATES.map((template) => (
@@ -212,7 +200,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   header: {
     ...typography.h3,
@@ -223,24 +211,6 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     marginBottom: 24,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.3,
   },
   grid: {
     gap: 16,

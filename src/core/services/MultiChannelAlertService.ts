@@ -93,6 +93,7 @@ class MultiChannelAlertService {
   private soundInstance: any = null; // Audio.Sound | null
   private ledInterval: NodeJS.Timeout | null = null;
   private vibrationInterval: NodeJS.Timeout | null = null;
+  private vibrationStopTimeout: NodeJS.Timeout | null = null;
   private dismissTimeout: NodeJS.Timeout | null = null;
   private currentAlert: AlertOptions | null = null;
   private isAlerting = false;
@@ -119,9 +120,10 @@ class MultiChannelAlertService {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
             shouldPlaySound: true,
             shouldSetBadge: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
           }),
         });
       } catch (error) {
@@ -152,6 +154,8 @@ class MultiChannelAlertService {
     this.isAlerting = true;
 
     const channels = { ...DEFAULT_CHANNELS, ...optimizedOptions.channels };
+    const effectiveDuration = optimizedOptions.duration ?? this.getDefaultDuration(optimizedOptions.priority);
+    optimizedOptions.duration = effectiveDuration;
 
     try {
       // 1. Push Notification (always on)
@@ -171,7 +175,7 @@ class MultiChannelAlertService {
 
       // 4. Vibration
       if (channels.vibration) {
-        await this.startVibration(optimizedOptions.vibrationPattern);
+        await this.startVibration(optimizedOptions.vibrationPattern, optimizedOptions.duration);
       }
 
       // 5. LED Flash
@@ -293,6 +297,10 @@ class MultiChannelAlertService {
       if (this.vibrationInterval) {
         clearInterval(this.vibrationInterval);
         this.vibrationInterval = null;
+      }
+      if (this.vibrationStopTimeout) {
+        clearTimeout(this.vibrationStopTimeout);
+        this.vibrationStopTimeout = null;
       }
 
       // Cancel TTS
@@ -466,12 +474,21 @@ class MultiChannelAlertService {
     }
   }
 
-  private async startVibration(pattern?: number[]) {
+  private async startVibration(pattern?: number[], durationSeconds?: number) {
     try {
       const HapticsModule = getHaptics();
       if (!HapticsModule) {
         logger.warn('Haptics module not available; skipping vibration');
         return;
+      }
+
+      if (this.vibrationInterval) {
+        clearInterval(this.vibrationInterval);
+        this.vibrationInterval = null;
+      }
+      if (this.vibrationStopTimeout) {
+        clearTimeout(this.vibrationStopTimeout);
+        this.vibrationStopTimeout = null;
       }
 
       if (Platform.OS === 'ios') {
@@ -513,6 +530,15 @@ class MultiChannelAlertService {
           }, 1000);
         }
       }
+
+      if (durationSeconds && durationSeconds > 0 && this.vibrationInterval) {
+        this.vibrationStopTimeout = setTimeout(() => {
+          if (this.vibrationInterval) {
+            clearInterval(this.vibrationInterval);
+            this.vibrationInterval = null;
+          }
+        }, durationSeconds * 1000);
+      }
     } catch (error) {
       logger.error('Vibration error:', error);
     }
@@ -543,6 +569,17 @@ class MultiChannelAlertService {
       await SpeechModule.speak(text, options);
     } catch (error) {
       logger.error('TTS error:', error);
+    }
+  }
+
+  private getDefaultDuration(priority: AlertOptions['priority']): number {
+    switch (priority) {
+      case 'critical':
+        return 45;
+      case 'high':
+        return 30;
+      default:
+        return 15;
     }
   }
 

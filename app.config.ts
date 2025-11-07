@@ -22,6 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-secure-store",
     "expo-location",
     "expo-notifications",
+    "expo-web-browser",
     [
       "expo-camera",
       {

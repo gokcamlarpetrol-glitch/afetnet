@@ -69,11 +69,13 @@ export default function CoreApp() {
             <OfflineIndicator />
             <NavigationContainer>
               <Stack.Navigator
+                initialRouteName="MainTabs"
                 screenOptions={{
-                  headerShown: false,
+                  headerBackTitleVisible: false,
+                  headerBackTitle: ' ',
                 }}
               >
-              <Stack.Screen name="MainTabs" component={MainTabs} />
+              <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
               <Stack.Screen 
                 name="Paywall" 
                 component={PaywallScreen}
@@ -82,10 +84,12 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="AllEarthquakes" 
                 component={AllEarthquakesScreen}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="EarthquakeDetail" 
                 component={EarthquakeDetailScreen}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="DisasterMap" 
@@ -139,7 +143,7 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="NewMessage" 
                 component={NewMessageScreen}
-                options={{ presentation: 'modal' }}
+                options={{ presentation: 'modal', headerShown: false }}
               />
               <Stack.Screen 
                 name="Conversation" 
@@ -150,7 +154,7 @@ export default function CoreApp() {
                 component={RiskScoreScreen}
                 options={{ 
                   headerShown: true,
-                  headerTitle: 'Risk Skorum',
+                  headerTitle: 'Risk Skoru',
                   headerStyle: { backgroundColor: colors.background.primary },
                   headerTintColor: colors.text.primary,
                 }}
@@ -160,7 +164,7 @@ export default function CoreApp() {
                 component={PreparednessPlanScreen}
                 options={{ 
                   headerShown: true,
-                  headerTitle: 'Hazirlik Plani',
+                  headerTitle: 'Hazırlık Planı',
                   headerStyle: { backgroundColor: colors.background.primary },
                   headerTintColor: colors.text.primary,
                 }}
@@ -170,7 +174,7 @@ export default function CoreApp() {
                 component={PanicAssistantScreen}
                 options={{ 
                   headerShown: true,
-                  headerTitle: 'Afet Ani Rehberi',
+                  headerTitle: 'Afet Rehberi',
                   headerStyle: { backgroundColor: colors.background.primary },
                   headerTintColor: colors.text.primary,
                 }}
@@ -178,6 +182,7 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="NewsDetail" 
                 component={NewsDetailScreen}
+                options={{ headerShown: false }}
               />
               </Stack.Navigator>
             </NavigationContainer>

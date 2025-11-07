@@ -157,7 +157,12 @@ export default function ConversationScreen({ navigation, route }: any) {
       });
 
       // Send via mesh store
-      await useMeshStore.getState().sendMessage(messagePayload, 'text', userId);
+      const meshMessage = await useMeshStore.getState().sendMessage(messagePayload, {
+        type: 'text',
+        to: userId,
+        priority: 'normal',
+        ackRequired: false,
+      });
       
       // Also broadcast for mesh routing
       await useMeshStore.getState().broadcastMessage(messagePayload, 'text');

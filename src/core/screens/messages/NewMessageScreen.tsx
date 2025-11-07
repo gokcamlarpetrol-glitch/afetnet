@@ -14,6 +14,9 @@ import {
   ScrollView,
   StatusBar,
   ActivityIndicator,
+  Modal,
+  TouchableOpacity,
+  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +30,7 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
 
 const logger = createLogger('NewMessageScreen');
 
@@ -40,6 +44,8 @@ export default function NewMessageScreen({ navigation }: any) {
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [torchEnabled, setTorchEnabled] = useState(false);
+  const [qrModalVisible, setQrModalVisible] = useState(false);
+  const [qrValue, setQrValue] = useState<string | null>(null);
   const isScanningRef = useRef(isScanning);
   const scanCountdownStateRef = useRef(0);
   const discoveryUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -80,14 +86,13 @@ export default function NewMessageScreen({ navigation }: any) {
       );
       return;
     }
-
-    Alert.alert(
-      'Benim AfetNet ID’m',
-      `${id}
-
-Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sağlayabilirsiniz.`
-    );
+    setQrValue(id);
+    setQrModalVisible(true);
   }, []);
+
+  const handleCloseQrModal = () => {
+    setQrModalVisible(false);
+  };
 
   const getSignalLabel = (rssi?: number) => {
     if (typeof rssi !== 'number') return undefined;
@@ -354,9 +359,10 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
     startConversation(selectedDeviceId);
   };
 
-  const handleCopyId = useCallback(async () => {
-    const idToCopy = myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
+  const handleCopyId = useCallback(async (explicitId?: string) => {
+    const idToCopy = explicitId || myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
     if (!idToCopy) return;
+
     await Clipboard.setStringAsync(idToCopy);
     haptics.notificationSuccess();
     Alert.alert('Kopyalandı', 'Cihaz ID panoya kaydedildi.');
@@ -367,7 +373,7 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
       label: 'Cihaz ID',
       value: myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...',
       icon: 'finger-print' as const,
-      action: myDeviceId ? handleCopyId : undefined,
+      action: myDeviceId ? (() => handleCopyId()) : undefined,
     },
     {
       label: 'Mesh Durumu',
@@ -552,36 +558,29 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
     </View>
   );
 
-  if (activeTab === 'qr' && !permission) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <View style={styles.permissionContainer}>
-          <Text style={styles.permissionText}>QR kod okumak için kamera izni gereklidir.</Text>
-          <Pressable style={styles.permissionButton} onPress={requestPermission}>
-            <Text style={styles.permissionButtonText}>İzin Ver</Text>
-          </Pressable>
-        </View>
+  const renderPermissionFallback = (message: string, actionLabel: string) => (
+    <SafeAreaView style={styles.permissionScreen}>
+      <StatusBar barStyle="light-content" backgroundColor="#060b1b" />
+      <LinearGradient colors={['#060b1b', '#0b1228']} style={styles.gradientOverlay} />
+      <View style={[styles.container, styles.permissionContainer, { paddingTop: insets.top + 24 }] }>
+        <Text style={styles.permissionText}>{message}</Text>
+        <Pressable style={styles.permissionButton} onPress={requestPermission}>
+          <Text style={styles.permissionButtonText}>{actionLabel}</Text>
+        </Pressable>
       </View>
-    );
+    </SafeAreaView>
+  );
+
+  if (activeTab === 'qr' && !permission) {
+    return renderPermissionFallback('QR kod okumak için kamera izni gereklidir.', 'İzin Ver');
   }
 
   if (activeTab === 'qr' && !permission?.granted) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <View style={styles.permissionContainer}>
-          <Text style={styles.permissionText}>Kamera izni reddedildi.</Text>
-          <Pressable style={styles.permissionButton} onPress={requestPermission}>
-            <Text style={styles.permissionButtonText}>Tekrar Dene</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
+    return renderPermissionFallback('Kamera izni reddedildi.', 'Tekrar Dene');
   }
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor="#060b1b" />
 
       <LinearGradient colors={['#060b1b', '#0b1228']} style={styles.gradientOverlay} />
@@ -590,7 +589,6 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
         style={[
           styles.container,
           {
-            paddingTop: Math.max(insets.top - 22, 0),
             paddingBottom: Math.max(insets.bottom, 24),
           },
         ]}
@@ -630,7 +628,7 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
                     (!myDeviceId && !meshStoreDeviceId) && styles.connectionActionDisabled,
                     pressed && styles.connectionActionPressed,
                   ]}
-                  onPress={handleCopyId}
+                  onPress={() => handleCopyId()}
                   disabled={!myDeviceId && !meshStoreDeviceId}
                 >
                   <Ionicons name="copy-outline" size={16} color="#0ea5e9" />
@@ -698,8 +696,49 @@ Bu ID’yi paylaşarak arkadaşlarınızın sizi QR kod taratmadan eklemesini sa
             {activeTab === 'id' && renderIDCard()}
             {activeTab === 'scan' && renderScanCard()}
         </ScrollView>
+
+        <Modal
+          visible={qrModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={handleCloseQrModal}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Benim AfetNet ID&apos;m</Text>
+              {qrValue && (
+                <View style={styles.qrWrapper}>
+                  <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
+                  <Text style={styles.modalIdText}>{qrValue}</Text>
+                </View>
+              )}
+              <Text style={styles.modalHint}>
+                Bu QR kodu yakınınızdakiler taradığında sizi doğrudan ekleyebilir. Kimliğinizi kopyalayarak da paylaşabilirsiniz.
+              </Text>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalActionSecondary} onPress={handleCloseQrModal}>
+                  <Text style={styles.modalActionSecondaryText}>Kapat</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalActionPrimary}
+                  onPress={async () => {
+                    if (qrValue) {
+                      await Clipboard.setStringAsync(qrValue);
+                      haptics.notificationSuccess();
+                    }
+                    handleCloseQrModal();
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#0f172a" />
+                  <Text style={styles.modalActionPrimaryText}>Kimliği Kopyala</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -708,12 +747,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#060b1b',
   },
+  permissionScreen: {
+    flex: 1,
+    backgroundColor: '#060b1b',
+  },
   gradientOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    paddingHorizontal: spacing[5],
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  permissionText: {
+    fontSize: 15,
+    color: '#cbd5f5',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  permissionButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: colors.brand.primary,
+  },
+  permissionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
   },
   headerRow: {
     paddingHorizontal: 20,
@@ -1138,27 +1205,77 @@ const styles = StyleSheet.create({
     color: '#f97316',
     flex: 1,
   },
-  permissionContainer: {
+  modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: 24,
   },
-  permissionText: {
-    fontSize: 15,
-    color: '#cbd5f5',
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 24,
+    padding: 24,
+    backgroundColor: 'rgba(15,23,42,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  permissionButton: {
-    paddingHorizontal: 24,
+  qrWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.2)',
+    marginBottom: 20,
+  },
+  modalIdText: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#cbd5f5',
+  },
+  modalHint: {
+    fontSize: 12,
+    color: '#cbd5f5',
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalActionSecondary: {
+    paddingHorizontal: 18,
     paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: colors.brand.primary,
+    borderRadius: 14,
+    backgroundColor: 'rgba(148,163,184,0.18)',
   },
-  permissionButtonText: {
-    fontSize: 14,
+  modalActionSecondaryText: {
+    color: '#e2e8f0',
+    fontWeight: '600',
+  },
+  modalActionPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#38bdf8',
+  },
+  modalActionPrimaryText: {
     fontWeight: '700',
     color: '#0f172a',
   },

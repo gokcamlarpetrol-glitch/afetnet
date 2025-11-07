@@ -11,6 +11,23 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FirebaseDataService');
 
+const DEFAULT_NEWS_SUMMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 saat
+
+export interface NewsSummaryRecord {
+  articleId: string;
+  summary: string;
+  source?: string | null;
+  title?: string | null;
+  url?: string | null;
+  publishedAt?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  expiresAt?: string;
+  ttlMs?: number;
+  version?: number;
+  createdByDeviceId?: string | null;
+}
+
 // Import Firebase app getter function
 import getFirebaseApp from '../../lib/firebase';
 
@@ -592,6 +609,128 @@ class FirebaseDataService {
     } catch (error) {
       logger.error('Failed to save earthquake alert:', error);
       return false;
+    }
+  }
+
+  /**
+   * Save AI generated news summary so it can be reused by other clients
+   */
+  async saveNewsSummary(articleId: string, payload: {
+    summary: string;
+    source?: string;
+    title?: string;
+    url?: string;
+    publishedAt?: number;
+    createdByDeviceId: string;
+    ttlMs?: number;
+  }): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveNewsSummary');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      const summaryRef = doc(db, 'news_summaries', articleId);
+      const ttlMs = payload.ttlMs ?? DEFAULT_NEWS_SUMMARY_TTL_MS;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + ttlMs);
+
+      let createdAtIso = now.toISOString();
+      try {
+        const existing = await getDoc(summaryRef);
+        if (existing.exists()) {
+          const data = existing.data() as NewsSummaryRecord;
+          if (data?.createdAt) {
+            createdAtIso = data.createdAt;
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed to read existing news summary metadata:', error);
+      }
+
+      await setDoc(summaryRef, {
+        articleId,
+        summary: payload.summary,
+        source: payload.source ?? null,
+        title: payload.title ?? null,
+        url: payload.url ?? null,
+        publishedAt: payload.publishedAt ?? null,
+        ttlMs,
+        createdByDeviceId: payload.createdByDeviceId,
+        updatedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        createdAt: createdAtIso,
+        version: 1,
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info(`News summary saved to Firestore: ${articleId}`);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save news summary:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Load cached news summary from Firestore
+   */
+  async getNewsSummary(articleId: string): Promise<NewsSummaryRecord | null> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, cannot get news summary');
+      return null;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return null;
+      }
+
+      const summaryRef = doc(db, 'news_summaries', articleId);
+      const snapshot = await getDoc(summaryRef);
+      if (!snapshot.exists()) {
+        return null;
+      }
+
+      const data = snapshot.data() as NewsSummaryRecord;
+      if (!data?.summary) {
+        return null;
+      }
+
+      if (data.expiresAt) {
+        const expiresMs = new Date(data.expiresAt).getTime();
+        if (!Number.isNaN(expiresMs) && expiresMs < Date.now()) {
+          logger.info(`News summary expired in Firestore: ${articleId}`);
+          return null;
+        }
+      }
+
+      return {
+        articleId,
+        summary: data.summary,
+        source: data.source ?? null,
+        title: data.title ?? null,
+        url: data.url ?? null,
+        publishedAt: data.publishedAt ?? null,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+        expiresAt: data.expiresAt,
+        ttlMs: data.ttlMs ?? DEFAULT_NEWS_SUMMARY_TTL_MS,
+        version: data.version ?? 1,
+        createdByDeviceId: data.createdByDeviceId ?? null,
+      };
+    } catch (error) {
+      logger.error('Failed to load news summary:', error);
+      return null;
     }
   }
 

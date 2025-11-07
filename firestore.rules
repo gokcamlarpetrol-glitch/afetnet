@@ -2,57 +2,63 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSystemClient() {
+      return request.auth != null;
+    }
+
+    function allowPublicRead() {
+      return isSystemClient() || request.auth == null;
+    }
+
+    function allowDeviceWrite(deviceId) {
+      return isSystemClient() || (request.resource.data.deviceId == deviceId && request.resource.data.deviceId != null);
+    }
+
     // Devices collection - users can only read/write their own device data
     match /devices/{deviceId} {
-      // Allow read/write only if the deviceId matches the authenticated user's device ID
-      // Since we're using device IDs (not Firebase Auth), we'll allow public read/write
-      // but restrict based on deviceId matching
-      // In production, you should add additional security checks
-      
-      allow read: if request.auth != null || resource.data.deviceId == deviceId;
-      allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-      
+      allow read: if allowPublicRead();
+      allow write: if allowDeviceWrite(deviceId);
+
       // Family members subcollection
       match /familyMembers/{memberId} {
-        // Allow read/write only for the device owner
-        allow read: if request.auth != null || true; // Allow for offline mesh communication
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || true;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
       
       // Health profile subcollection
       match /healthProfile/{profileId} {
-        allow read: if request.auth != null || true; // Allow for emergency access
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
       
       // ICE (In Case of Emergency) subcollection
       match /ice/{iceId} {
-        allow read: if request.auth != null || true; // Allow for emergency access
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
       
       // Location updates subcollection
       match /locationUpdates/{locationId} {
-        allow read: if request.auth != null || true; // Allow for family member tracking
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
       
       // Status updates subcollection
       match /statusUpdates/{statusId} {
-        allow read: if request.auth != null || true; // Allow for family member tracking
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
       
       // Earthquake alerts subcollection
       match /earthquakeAlerts/{alertId} {
-        allow read: if request.auth != null || resource.data.deviceId == deviceId;
-        allow write: if request.auth != null || request.resource.data.deviceId == deviceId;
-        allow delete: if request.auth != null || request.resource.data.deviceId == deviceId;
+        allow read: if allowPublicRead();
+        allow write: if allowDeviceWrite(deviceId);
+        allow delete: if allowDeviceWrite(deviceId);
       }
     }
     
@@ -78,6 +84,23 @@ service cloud.firestore {
       allow read: if true; // Public read for emergency awareness
       allow write: if request.auth != null || request.resource.data.magnitude >= 4.0; // Only allow critical earthquakes
       allow delete: if request.auth != null; // Only authenticated users can delete
+    }
+
+    // News summaries collection
+    match /news_summaries/{articleId} {
+      allow read: if true; // everyone can read cached summaries
+      allow create: if isSystemClient() ||
+        (
+          !exists(/databases/$(database)/documents/news_summaries/$(articleId)) &&
+          request.resource.data.summary is string &&
+          request.resource.data.summary.size() <= 6000 &&
+          request.resource.data.createdByDeviceId is string &&
+          request.resource.data.createdByDeviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
+          request.resource.data.ttlMs is int &&
+          request.resource.data.ttlMs > 0 &&
+          request.resource.data.ttlMs <= 43200000 // 12 saat
+        );
+      allow update, delete: if isSystemClient();
     }
     
     // Deny all other access

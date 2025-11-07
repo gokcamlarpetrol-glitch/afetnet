@@ -83,7 +83,7 @@ export default function MeshNetworkPanel() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[colors.background.secondary, colors.background.elevated]}
+        colors={['#1a1f2e', '#141824']}
         style={styles.gradient}
       >
         {/* Header - Tıklanabilir Accordion */}
@@ -94,7 +94,9 @@ export default function MeshNetworkPanel() {
         >
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Ionicons name="git-network" size={20} color={colors.mesh.primary} />
+              <View style={styles.headerLeftIcon}>
+                <Ionicons name="git-network" size={18} color={colors.mesh.primary} />
+              </View>
               <Text style={styles.title}>Mesh Ağı</Text>
             </View>
             <View style={styles.headerRight}>
@@ -230,15 +232,14 @@ export default function MeshNetworkPanel() {
 const styles = StyleSheet.create({
   container: {
     marginBottom: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-    ...shadows.md,
   },
   gradient: {
-    padding: spacing[6],
-    paddingTop: spacing[4],
-    paddingBottom: spacing[4],
-    minHeight: 60, // Kapalıyken minimum yükseklik
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[4],
+    minHeight: 56,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.border.light,
   },
   headerButton: {
     // TouchableOpacity için
@@ -247,16 +248,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: spacing[2],
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
+  },
+  headerLeftIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(59, 130, 246, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing[1],
   },
   chevron: {
     // Animasyon Animated.View ile yapılıyor
@@ -265,16 +275,17 @@ const styles = StyleSheet.create({
     // Animated.View için
   },
   title: {
-    ...typography.h3,
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.text.primary,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 16,
+    gap: 6,
     borderWidth: 1,
   },
   statusDot: {
@@ -283,9 +294,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusText: {
-    ...typography.caption,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.6,
   },
   statsGrid: {
     flexDirection: 'row',

@@ -10,12 +10,34 @@ import { useEarthquakeStore, Earthquake } from '../stores/earthquakeStore';
 import { createLogger } from '../utils/logger';
 import { autoCheckinService } from './AutoCheckinService';
 import { emergencyModeService } from './EmergencyModeService';
+import { notificationService } from './NotificationService';
 
 const logger = createLogger('EarthquakeService');
 
 const CACHE_KEY = 'afetnet_earthquakes_cache';
 const LAST_FETCH_KEY = 'afetnet_earthquakes_last_fetch';
 const POLL_INTERVAL = 30000; // 30 seconds - Real-time AFAD updates
+const parseAfadDate = (raw?: string): number | null => {
+  if (!raw) return null;
+  let normalized = raw.trim();
+  if (!normalized) return null;
+
+  if (normalized.includes(' ') && !normalized.includes('T')) {
+    normalized = normalized.replace(' ', 'T');
+  }
+
+  if (!/[zZ]|[+\-]\d{2}:\d{2}$/.test(normalized)) {
+    normalized = `${normalized}Z`;
+  }
+
+  let parsed = Date.parse(normalized);
+  if (!Number.isNaN(parsed)) {
+    return parsed;
+  }
+
+  parsed = Date.parse(`${normalized.replace(/Z$/, '')}+03:00`);
+  return Number.isNaN(parsed) ? null : parsed;
+};
 
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
@@ -124,6 +146,7 @@ class EarthquakeService {
           await AsyncStorage.setItem('last_checked_earthquake', latestEq.id);
           logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
           autoCheckinService.startCheckIn(latestEq.magnitude);
+            await notificationService.showEarthquakeNotification(latestEq.magnitude, latestEq.location);
           
           // 🤖 AI ANALIZI: Deprem analizi ve doğrulama
           try {
@@ -418,11 +441,9 @@ class EarthquakeService {
           
           // Time parsing - Handle multiple formats
           let time = Date.now();
-          if (eventDate) {
-            const parsedDate = new Date(eventDate);
-            if (!isNaN(parsedDate.getTime())) {
-              time = parsedDate.getTime();
-            }
+          const parsedTime = parseAfadDate(eventDate);
+          if (parsedTime) {
+            time = parsedTime;
           }
           
           return {
@@ -574,7 +595,7 @@ class EarthquakeService {
         magnitude: parseFloat(data.mag || data.magnitude || data.ml || '0'),
         location: data.location || data.title || data.place || 'Türkiye',
         depth: parseFloat(data.depth || data.derinlik || '10'),
-        time: data.eventDate ? new Date(data.eventDate).getTime() : Date.now(),
+        time: parseAfadDate(data.eventDate) ?? Date.now(),
         latitude: parseFloat(data.geojson?.coordinates?.[1] || data.latitude || data.lat || '0'),
         longitude: parseFloat(data.geojson?.coordinates?.[0] || data.longitude || data.lng || '0'),
         source: 'AFAD' as const,

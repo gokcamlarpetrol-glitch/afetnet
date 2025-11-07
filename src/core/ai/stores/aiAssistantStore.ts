@@ -12,16 +12,19 @@ interface AIAssistantState {
   riskScore: RiskScore | null;
   riskScoreLoading: boolean;
   riskScoreError: string | null;
+  riskScoreFetchedAt: number | null;
 
   // Hazirlik Plani
   preparednessPlan: PreparednessPlan | null;
   preparednessPlanLoading: boolean;
   preparednessPlanError: string | null;
+  preparednessPlanFetchedAt: number | null;
 
   // Afet Ani Asistan
   panicAssistant: PanicAssistantState | null;
   panicAssistantLoading: boolean;
   panicAssistantError: string | null;
+  panicAssistantFetchedAt: number | null;
 }
 
 interface AIAssistantActions {
@@ -48,28 +51,39 @@ const initialState: AIAssistantState = {
   riskScore: null,
   riskScoreLoading: false,
   riskScoreError: null,
+  riskScoreFetchedAt: null,
 
   preparednessPlan: null,
   preparednessPlanLoading: false,
   preparednessPlanError: null,
+  preparednessPlanFetchedAt: null,
 
   panicAssistant: null,
   panicAssistantLoading: false,
   panicAssistantError: null,
+  panicAssistantFetchedAt: null,
 };
 
 export const useAIAssistantStore = create<AIAssistantState & AIAssistantActions>((set) => ({
   ...initialState,
 
-  setRiskScore: (score) => set({ riskScore: score, riskScoreError: null }),
+  setRiskScore: (score) => set({ riskScore: score, riskScoreError: null, riskScoreFetchedAt: Date.now() }),
   setRiskScoreLoading: (loading) => set({ riskScoreLoading: loading }),
   setRiskScoreError: (error) => set({ riskScoreError: error, riskScoreLoading: false }),
 
-  setPreparednessPlan: (plan) => set({ preparednessPlan: plan, preparednessPlanError: null }),
+  setPreparednessPlan: (plan) => set({
+    preparednessPlan: plan,
+    preparednessPlanError: null,
+    preparednessPlanFetchedAt: Date.now(),
+  }),
   setPreparednessPlanLoading: (loading) => set({ preparednessPlanLoading: loading }),
   setPreparednessPlanError: (error) => set({ preparednessPlanError: error, preparednessPlanLoading: false }),
 
-  setPanicAssistant: (state) => set({ panicAssistant: state, panicAssistantError: null }),
+  setPanicAssistant: (state) => set({
+    panicAssistant: state,
+    panicAssistantError: null,
+    panicAssistantFetchedAt: Date.now(),
+  }),
   setPanicAssistantLoading: (loading) => set({ panicAssistantLoading: loading }),
   setPanicAssistantError: (error) => set({ panicAssistantError: error, panicAssistantLoading: false }),
 

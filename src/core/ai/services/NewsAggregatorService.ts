@@ -7,6 +7,9 @@
 import { NewsArticle, NewsCategory } from '../types/news.types';
 import { createLogger } from '../../utils/logger';
 import { openAIService } from './OpenAIService';
+import { AICache } from '../utils/AICache';
+import type { NewsSummaryRecord } from '../../services/FirebaseDataService';
+import { getDeviceId } from '../../../lib/device';
 
 interface NewsSource {
   id: string;
@@ -48,7 +51,7 @@ const NEWS_SOURCES: NewsSource[] = [
   {
     id: 'ntv-sondakika',
     name: 'NTV',
-    url: 'https://www.ntv.com.tr/rss/son-depremler',
+    url: 'https://www.ntv.com.tr/rss/sondakika',
     category: 'earthquake',
     keywords: ['deprem', 'sarsıntı', 'son deprem'],
     maxItems: 20,
@@ -74,10 +77,14 @@ const NEWS_SOURCES: NewsSource[] = [
 class NewsAggregatorService {
   private isInitialized = false;
   private summaryCache = new Map<string, { summary: string; timestamp: number }>();
-  private readonly CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+  private readonly SUMMARY_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 saat
+  private readonly SUMMARY_CACHE_KEY_PREFIX = 'news-summary:';
+  private readonly FALLBACK_SUMMARY_TTL = 2 * 60 * 60 * 1000; // 2 saat
   private readonly REQUEST_TIMEOUT = 12_000; // 12 seconds
   private readonly DEFAULT_KEYWORDS = ['deprem', 'sarsıntı', 'afet'];
   private readonly MAX_TOTAL_ARTICLES = 60;
+  private cachedDeviceId: string | null = null;
+  private deviceIdPromise: Promise<string | null> | null = null;
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -108,14 +115,15 @@ class NewsAggregatorService {
       const combined = this.deduplicateArticles([...earthquakeNews, ...aggregated]);
       const sorted = combined.sort((a, b) => b.publishedAt - a.publishedAt);
       const limited = sorted.slice(0, this.MAX_TOTAL_ARTICLES);
+      const stableArticles = this.ensureStableIds(limited);
 
       if (limited.length === 0) {
         logger.warn('No news articles fetched; returning fallback content');
         return this.getFallbackArticles();
       }
 
-      logger.info(`Aggregated ${limited.length} news articles from ${NEWS_SOURCES.length} sources`);
-      return limited;
+      logger.info(`Aggregated ${stableArticles.length} news articles from ${NEWS_SOURCES.length} sources`);
+      return stableArticles;
     } catch (error) {
       logger.error('Failed to fetch news from aggregator sources:', error);
       return this.getFallbackArticles();
@@ -146,7 +154,7 @@ class NewsAggregatorService {
         if (title && link) {
           const cleanTitle = this.cleanHTML(title);
           const cleanSummary = this.cleanHTML(description || title);
-          const sanitizedUrl = this.sanitizeUrl(link);
+          const sanitizedUrl = this.sanitizeUrl(link, newsSource.url);
 
           articles.push({
             id: `news_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -180,8 +188,10 @@ class NewsAggregatorService {
         .sort((a, b) => b.publishedAt - a.publishedAt)
         .slice(0, source.maxItems ?? 20);
 
-      logger.info(`Fetched ${limited.length}/${parsedArticles.length} articles from ${source.name}`);
-      return limited;
+      const stable = this.ensureStableIds(limited);
+
+      logger.info(`Fetched ${stable.length}/${parsedArticles.length} articles from ${source.name}`);
+      return stable;
     } catch (error) {
       logger.warn(
         `News source unavailable (${source.name})`,
@@ -215,7 +225,7 @@ class NewsAggregatorService {
       .trim();
   }
 
-  private sanitizeUrl(url: string): string {
+  private sanitizeUrl(url: string, baseUrl?: string): string {
     try {
       const trimmed = url.trim();
       if (!trimmed) return '#';
@@ -225,6 +235,16 @@ class NewsAggregatorService {
       }
       return parsed.toString();
     } catch (error) {
+      if (baseUrl) {
+        try {
+          const resolved = new URL(url, baseUrl);
+          if (['http:', 'https:'].includes(resolved.protocol)) {
+            return resolved.toString();
+          }
+        } catch (resolveError) {
+          logger.warn('Failed to resolve relative URL', { url, baseUrl, error: resolveError });
+        }
+      }
       logger.warn('Invalid URL in news article', { url });
       return '#';
     }
@@ -272,6 +292,189 @@ class NewsAggregatorService {
       return article.title.toLowerCase();
     }
     return null;
+  }
+
+  private ensureStableIds(articles: NewsArticle[]): NewsArticle[] {
+    return articles.map((article) => {
+      const key = this.buildArticleKey(article);
+      if (key) {
+        return {
+          ...article,
+          id: this.sanitizeId(key),
+        };
+      }
+
+      if (article.id && !article.id.startsWith('news_')) {
+        return article;
+      }
+
+      const fallbackSource = article.source
+        ? article.source.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+        : 'haber';
+      const fallbackTitle = (article.title || 'news').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const fallbackBase = `${fallbackSource}-${fallbackTitle}-${article.publishedAt}`;
+
+      return {
+        ...article,
+        id: this.sanitizeId(fallbackBase),
+      };
+    });
+  }
+
+  private sanitizeId(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/https?:\/\//g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 90) || `news-${Date.now()}`;
+  }
+
+  private resolveArticleKey(article: NewsArticle): string {
+    if (article.id) {
+      return article.id;
+    }
+
+    const base = `${article.source ?? 'haber'}-${article.title ?? article.url ?? Date.now().toString()}`;
+    return this.sanitizeId(base);
+  }
+
+  private buildSummaryCacheKey(articleKey: string): string {
+    return `${this.SUMMARY_CACHE_KEY_PREFIX}${articleKey}`;
+  }
+
+  private async getPersistedSummary(article: NewsArticle, cacheKey: string): Promise<string | null> {
+    try {
+      const localSummary = await AICache.get<string>(this.buildSummaryCacheKey(cacheKey));
+      if (localSummary) {
+        return localSummary;
+      }
+    } catch (error) {
+      logger.warn('Local summary cache read failed:', error);
+    }
+
+    if (!article.id) {
+      return null;
+    }
+
+    const cloudRecord = await this.loadSummaryFromCloud(article.id);
+    if (cloudRecord?.summary) {
+      const ttlMs = this.calculateRemainingTtl(cloudRecord);
+      await this.persistSummaryLocally(cacheKey, cloudRecord.summary, ttlMs);
+      return cloudRecord.summary;
+    }
+
+    return null;
+  }
+
+  private async persistSummaryLocally(cacheKey: string, summary: string, ttlMs: number): Promise<void> {
+    try {
+      const ttl = Math.max(ttlMs, 5 * 60 * 1000); // En az 5 dakika
+      await AICache.set(this.buildSummaryCacheKey(cacheKey), summary, ttl);
+    } catch (error) {
+      logger.warn('Failed to persist news summary locally:', error);
+    }
+  }
+
+  private async persistSummaryToCloud(
+    article: NewsArticle,
+    summary: string,
+    ttlMs: number,
+  ): Promise<void> {
+    if (!article.id) {
+      return;
+    }
+
+    try {
+      const deviceId = await this.getDeviceIdForSummary();
+      if (!deviceId) {
+        return;
+      }
+
+      const { firebaseDataService } = await import('../../services/FirebaseDataService');
+      if (!firebaseDataService.isInitialized) {
+        await firebaseDataService.initialize();
+      }
+      if (!firebaseDataService.isInitialized) {
+        return;
+      }
+
+      await firebaseDataService.saveNewsSummary(article.id, {
+        summary,
+        source: article.source,
+        title: article.title,
+        url: article.url,
+        publishedAt: article.publishedAt,
+        createdByDeviceId: deviceId,
+        ttlMs,
+      });
+    } catch (error) {
+      logger.warn('Failed to persist news summary to Firestore:', error);
+    }
+  }
+
+  private async loadSummaryFromCloud(articleId: string): Promise<NewsSummaryRecord | null> {
+    try {
+      const { firebaseDataService } = await import('../../services/FirebaseDataService');
+      if (!firebaseDataService.isInitialized) {
+        await firebaseDataService.initialize();
+      }
+      if (!firebaseDataService.isInitialized) {
+        return null;
+      }
+      return await firebaseDataService.getNewsSummary(articleId);
+    } catch (error) {
+      logger.warn('Failed to load news summary from Firestore:', error);
+      return null;
+    }
+  }
+
+  private calculateRemainingTtl(record?: NewsSummaryRecord | null): number {
+    if (record?.expiresAt) {
+      const expiresMs = new Date(record.expiresAt).getTime();
+      if (!Number.isNaN(expiresMs)) {
+        const remaining = expiresMs - Date.now();
+        if (remaining > 5 * 60 * 1000) {
+          return remaining;
+        }
+      }
+    }
+
+    if (record?.ttlMs && record.ttlMs > 0) {
+      return record.ttlMs;
+    }
+
+    return this.SUMMARY_CACHE_TTL;
+  }
+
+  private async useFallbackSummary(article: NewsArticle, cacheKey: string, ttlMs: number): Promise<string> {
+    const fallback = (article.summary && article.summary.trim().length > 0)
+      ? article.summary.trim()
+      : (article.title || 'Detaylar için AfetNet uygulamasını açın.');
+
+    this.summaryCache.set(cacheKey, { summary: fallback, timestamp: Date.now() });
+    await this.persistSummaryLocally(cacheKey, fallback, ttlMs);
+    void this.persistSummaryToCloud(article, fallback, ttlMs);
+
+    return fallback;
+  }
+
+  private async getDeviceIdForSummary(): Promise<string | null> {
+    if (this.cachedDeviceId) {
+      return this.cachedDeviceId;
+    }
+
+    if (!this.deviceIdPromise) {
+      this.deviceIdPromise = getDeviceId()
+        .then((id) => (id && id.startsWith('afn-') ? id : null))
+        .catch((error) => {
+          logger.warn('Failed to resolve device ID for news summary:', error);
+          return null;
+        });
+    }
+
+    this.cachedDeviceId = await this.deviceIdPromise;
+    return this.cachedDeviceId;
   }
 
   private async fetchWithTimeout(url: string): Promise<string> {
@@ -347,19 +550,28 @@ class NewsAggregatorService {
    * OpenAI GPT-4 kullanarak Turkce, anlasilir ozet olustur
    */
   async summarizeArticle(article: NewsArticle): Promise<string> {
+    const cacheKey = this.resolveArticleKey(article);
+    const now = Date.now();
+
     try {
-      // Cache kontrolu
-      const cacheKey = article.id;
+      // In-memory cache
       const cached = this.summaryCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      if (cached && now - cached.timestamp < this.SUMMARY_CACHE_TTL) {
         logger.info('Returning cached summary for:', article.title);
         return cached.summary;
       }
 
-      // OpenAI ile ozet olustur
+      // Local / cloud cache
+      const persisted = await this.getPersistedSummary(article, cacheKey);
+      if (persisted) {
+        logger.info('Returning persisted summary for:', article.title);
+        this.summaryCache.set(cacheKey, { summary: persisted, timestamp: now });
+        return persisted;
+      }
+
       if (!openAIService.isConfigured()) {
-        logger.warn('OpenAI not configured, returning article summary');
-        return article.summary || article.title;
+        logger.warn('OpenAI not configured, using fallback summary.');
+        return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
       }
 
       const prompt = `Aşağıdaki haber içeriğini Türkçe olarak özetle. Özet 3-5 paragraf olmalı, anlaşılır ve bilgilendirici olmalı. Deprem ve afet güvenliği açısından önemli detayları vurgula.
@@ -383,15 +595,15 @@ Lütfen sadece özet metnini döndür, başlık veya ek açıklama ekleme.`;
         temperature: 0.7,
       });
 
-      // Cache'e kaydet
-      this.summaryCache.set(cacheKey, { summary, timestamp: Date.now() });
+      this.summaryCache.set(cacheKey, { summary, timestamp: now });
+      await this.persistSummaryLocally(cacheKey, summary, this.SUMMARY_CACHE_TTL);
+      void this.persistSummaryToCloud(article, summary, this.SUMMARY_CACHE_TTL);
 
       logger.info('Generated AI summary for:', article.title);
       return summary;
     } catch (error) {
       logger.error('Failed to summarize article:', error);
-      // Fallback: Orijinal ozet
-      return article.summary || article.title;
+      return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
     }
   }
 }

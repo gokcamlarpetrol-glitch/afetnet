@@ -8,46 +8,188 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView } from '
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/core';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing } from '../../../theme';
 import * as haptics from '../../../utils/haptics';
 import { useNewsStore } from '../../../ai/stores/newsStore';
 import { newsAggregatorService } from '../../../ai/services/NewsAggregatorService';
 import { NewsArticle } from '../../../ai/types/news.types';
+import { notificationService } from '../../../services/NotificationService';
+import { createLogger } from '../../../utils/logger';
+
+const logger = createLogger('NewsCard');
+const NOTIFICATION_FRESH_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+const NOTIFIED_NEWS_STORAGE_KEY = 'afn_news_notified_v1';
+const NOTIFICATION_MEMORY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 saat
 
 export default function NewsCard() {
   const navigation = useNavigation();
   const { articles, loading } = useNewsStore();
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const notifiedNewsRef = useRef<Record<string, number>>({});
+
+  const persistNotified = async () => {
+    try {
+      await AsyncStorage.setItem(
+        NOTIFIED_NEWS_STORAGE_KEY,
+        JSON.stringify(notifiedNewsRef.current),
+      );
+    } catch (error) {
+      logger.warn('Failed to persist notified news cache:', error);
+    }
+  };
+
+  const pruneExpiredNotified = () => {
+    const entries = notifiedNewsRef.current;
+    const now = Date.now();
+    let mutated = false;
+    for (const key of Object.keys(entries)) {
+      const timestamp = entries[key];
+      if (!timestamp || now - timestamp > NOTIFICATION_MEMORY_WINDOW_MS) {
+        delete entries[key];
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      void persistNotified();
+    }
+  };
+
+  const hydrateNotifiedNews = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(NOTIFIED_NEWS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          notifiedNewsRef.current = parsed as Record<string, number>;
+        }
+      }
+      pruneExpiredNotified();
+    } catch (error) {
+      logger.warn('Failed to hydrate notified news cache:', error);
+    }
+  };
+
+  const hasBeenNotified = (articleId: string | undefined): boolean => {
+    if (!articleId) return false;
+    pruneExpiredNotified();
+    return Boolean(notifiedNewsRef.current[articleId]);
+  };
+
+  const markArticlesAsNotified = (items: NewsArticle[]) => {
+    if (items.length === 0) return;
+    const now = Date.now();
+    let mutated = false;
+    for (const article of items) {
+      if (article.id) {
+        notifiedNewsRef.current[article.id] = now;
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      void persistNotified();
+    }
+  };
 
   useEffect(() => {
-    // Haberleri yukle
-    loadNews();
+    let mounted = true;
+    let intervalId: NodeJS.Timeout | null = null;
+
+    (async () => {
+      await hydrateNotifiedNews();
+      if (!mounted) return;
+      await loadNews();
+      if (!mounted) return;
+
+      intervalId = setInterval(() => {
+        loadNews({ background: true }).catch((error) => {
+          logger.error('Background news refresh failed:', error);
+        });
+      }, 2 * 60 * 1000); // 2 dakikada bir yenile
+    })();
+
+    return () => {
+      mounted = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, []);
 
-  const loadNews = async () => {
+  const loadNews = async ({ background = false }: { background?: boolean } = {}) => {
     try {
-      useNewsStore.getState().setLoading(true);
+      if (!background) {
+        useNewsStore.getState().setLoading(true);
+      }
       
       // Haber kaynaklarindan veri cek
-      const [newsArticles, earthquakeNews] = await Promise.all([
-        newsAggregatorService.fetchLatestNews(),
-        newsAggregatorService.convertEarthquakesToNews(),
-      ]);
+      const allNews = await newsAggregatorService.fetchLatestNews();
 
-      // Birlestir ve sirala (en yeni once)
-      const allNews = [...earthquakeNews, ...newsArticles].sort(
+      // Sirala (en yeni once)
+      allNews.sort(
         (a, b) => b.publishedAt - a.publishedAt
       );
 
+      const previousArticles = useNewsStore.getState().articles;
+      const previousIds = new Set(previousArticles.map((item) => item.id).filter(Boolean));
+      const hadPrevious = previousArticles.length > 0;
+
+      const candidateArticles = allNews.filter((article) => {
+        if (!article.id) {
+          return false;
+        }
+        if (!article.url || article.url === '#') {
+          return false;
+        }
+        if (previousIds.has(article.id)) {
+          return false;
+        }
+        if (hasBeenNotified(article.id)) {
+          return false;
+        }
+        return Date.now() - article.publishedAt <= NOTIFICATION_FRESH_WINDOW_MS;
+      });
+
+      const notificationsToSend = hadPrevious ? candidateArticles.slice(0, 5) : [];
+
+      if (notificationsToSend.length > 0) {
+        logger.info(`Detected ${candidateArticles.length} new articles`);
+      }
+
+      if (notificationsToSend.length > 0) {
+        await notificationService.initialize().catch((error: unknown) => {
+          logger.error('Notification initialization failed:', error);
+        });
+
+        for (const article of notificationsToSend) {
+          try {
+            const summary = await newsAggregatorService
+              .summarizeArticle(article)
+              .then((text) => text.replace(/\s+/g, ' ').trim());
+
+            await notificationService.showNewsNotification({
+              title: article.title,
+              summary,
+              source: article.source,
+              url: article.url && article.url !== '#' ? article.url : undefined,
+              articleId: article.id,
+            });
+          } catch (error) {
+            logger.error('Failed to send news notification:', error, { articleId: article.id });
+          }
+        }
+
+        markArticlesAsNotified(notificationsToSend);
+      }
+
       useNewsStore.getState().setArticles(allNews.slice(0, 5)); // En son 5 haber
     } catch (error) {
-      if (__DEV__) {
-        const logger = await import('../../../utils/logger').then(m => m.createLogger('NewsCard'));
-        logger.error('Failed to load news:', error);
-      }
+      logger.error('Failed to load news:', error);
       useNewsStore.getState().setError('Haberler yuklenemedi');
     } finally {
-      useNewsStore.getState().setLoading(false);
+      if (!background) {
+        useNewsStore.getState().setLoading(false);
+      }
     }
   };
 
@@ -83,7 +225,7 @@ export default function NewsCard() {
             </View>
             <Text style={styles.title}>Son Dakika Haberler</Text>
           </View>
-          <TouchableOpacity onPress={loadNews}>
+          <TouchableOpacity onPress={() => loadNews()}>
             <Ionicons 
               name="refresh" 
               size={20} 
@@ -107,9 +249,9 @@ export default function NewsCard() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.newsScroll}
           >
-            {articles.map((article) => (
+            {articles.map((article, index) => (
               <TouchableOpacity
-                key={article.id}
+                key={`${article.id}-${index}`}
                 style={styles.newsItem}
                 onPress={() => handleArticlePress(article)}
                 activeOpacity={0.8}

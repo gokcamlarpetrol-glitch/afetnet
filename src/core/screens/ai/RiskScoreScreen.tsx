@@ -3,66 +3,36 @@
  * Displays user's earthquake risk score and recommendations
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
-import { riskScoringService } from '../../ai/services/RiskScoringService';
 import { RiskLevel, RiskTrend } from '../../ai/types/ai.types';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
 
 const logger = createLogger('RiskScoreScreen');
-const LOAD_TIMEOUT = 5000; // 5 seconds
 
 export default function RiskScoreScreen() {
   const { riskScore, riskScoreLoading } = useAIAssistantStore();
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    loadRiskScore();
-    
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
+    aiAssistantCoordinator.ensureRiskScore().catch((error) => {
+      logger.error('Risk score preload failed:', error);
+    });
   }, []);
 
-  const loadRiskScore = async () => {
+  const refreshRiskScore = useCallback(async () => {
     try {
-      useAIAssistantStore.getState().setRiskScoreLoading(true);
-      
-      // Timeout ekle - 5 saniye sonra fallback'e geç
-      timeoutRef.current = setTimeout(() => {
-        logger.warn('Risk score loading timeout, using fallback');
-        useAIAssistantStore.getState().setRiskScoreLoading(false);
-      }, LOAD_TIMEOUT);
-      
-      const score = await riskScoringService.calculateRiskScore({});
-      
-      // Timeout'u iptal et
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      
-      useAIAssistantStore.getState().setRiskScore(score);
+      await aiAssistantCoordinator.ensureRiskScore(true);
       haptics.impactLight();
     } catch (error) {
-      logger.error('Failed to load risk score:', error);
-      useAIAssistantStore.getState().setRiskScoreError('Risk skoru yuklenemedi');
-    } finally {
-      // Her durumda loading'i kapat
-      useAIAssistantStore.getState().setRiskScoreLoading(false);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
+      logger.error('Risk score refresh failed:', error);
     }
-  };
+  }, []);
 
   const getRiskColor = (level: RiskLevel) => {
     switch (level) {
@@ -138,7 +108,7 @@ export default function RiskScoreScreen() {
       <View style={styles.emptyContainer}>
         <Ionicons name="analytics-outline" size={64} color={colors.text.tertiary} />
         <Text style={styles.emptyText}>Risk skoru bulunamadi</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadRiskScore}>
+        <TouchableOpacity style={styles.retryButton} onPress={refreshRiskScore}>
           <Text style={styles.retryButtonText}>Tekrar Dene</Text>
         </TouchableOpacity>
       </View>

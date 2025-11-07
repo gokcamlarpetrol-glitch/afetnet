@@ -83,6 +83,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
       hour: '2-digit',
       minute: '2-digit',
       timeZone: 'Europe/Istanbul',
+      hour12: false,
     });
 
     if (diffMs > 48 * 60 * 60 * 1000) {
@@ -92,6 +93,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
         hour: '2-digit',
         minute: '2-digit',
         timeZone: 'Europe/Istanbul',
+        hour12: false,
       });
       return formatterLong.format(new Date(timestamp));
     }
