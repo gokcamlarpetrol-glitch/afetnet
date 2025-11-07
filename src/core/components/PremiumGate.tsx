@@ -80,6 +80,9 @@ export default function PremiumGate({ featureName, onUpgradePress, children }: P
         <Pressable
           style={styles.upgradeButton}
           onPress={handleUpgrade}
+          accessibilityRole="button"
+          accessibilityLabel="Premium'a Geç"
+          accessibilityHint="Premium üyelik satın almak için basın"
         >
           <Ionicons name="star" size={20} color="#fff" />
           <Text style={styles.upgradeButtonText}>Premium'a Geç</Text>

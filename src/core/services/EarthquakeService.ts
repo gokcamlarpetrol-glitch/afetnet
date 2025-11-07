@@ -599,6 +599,15 @@ class EarthquakeService {
       
       logger.debug('📡 AFAD API çağrılıyor', { url, startDate, endDate });
 
+      // ELITE: Check cache first
+      const { httpCacheService } = await import('./HTTPCacheService');
+      const cachedData = await httpCacheService.getCachedResponse(url);
+      
+      if (cachedData) {
+        logger.info('📦 Using cached AFAD data');
+        return this.parseAFADResponse(cachedData);
+      }
+
       const apiStartTime = Date.now();
       let response = await fetch(url, {
         method: 'GET',
@@ -617,6 +626,17 @@ class EarthquakeService {
       } catch {
         // Ignore analytics errors
       }
+
+      if (!response.ok) {
+        throw new Error(`AFAD API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // ELITE: Cache successful response (5 minutes TTL)
+      await httpCacheService.cacheResponse(url, data, 5 * 60 * 1000, {
+        'content-type': response.headers.get('content-type') || 'application/json',
+      });
 
       clearTimeout(timeoutId);
 
@@ -773,6 +793,102 @@ class EarthquakeService {
       // Silent fail - return empty array, cache will be used
       return [];
     }
+  }
+
+  /**
+   * ELITE: Parse AFAD response (used for cached data)
+   */
+  private parseAFADResponse(data: any): Earthquake[] {
+    // AFAD apiv2 returns array directly OR object with data property
+    let events: any[] = [];
+    if (Array.isArray(data)) {
+      events = data;
+    } else if (data && Array.isArray(data.data)) {
+      events = data.data;
+    } else if (data && Array.isArray(data.events)) {
+      events = data.events;
+    } else if (data && Array.isArray(data.results)) {
+      events = data.results;
+    }
+    
+    if (events.length === 0) {
+      return [];
+    }
+    
+    const earthquakes = events
+      .map((item: any) => {
+        const eventDate = item.eventDate || item.date || item.originTime || item.tarih || item.time;
+        const magnitude = parseFloat(item.mag || item.magnitude || item.ml || item.richter || '0');
+        
+        const locationParts = [
+          item.location,
+          item.yer || item.placeName,
+          item.ilce,
+          item.sehir || item.city,
+          item.title,
+          item.place,
+          item.epicenter,
+        ].filter(Boolean);
+        
+        const location = locationParts.length > 0 
+          ? locationParts.join(', ') 
+          : 'Türkiye';
+        
+        let latitude = 0;
+        let longitude = 0;
+        
+        if (item.geojson?.coordinates && Array.isArray(item.geojson.coordinates)) {
+          longitude = parseFloat(item.geojson.coordinates[0]) || 0;
+          latitude = parseFloat(item.geojson.coordinates[1]) || 0;
+        } else if (item.latitude && item.longitude) {
+          latitude = parseFloat(item.latitude) || 0;
+          longitude = parseFloat(item.longitude) || 0;
+        } else if (item.lat && item.lng) {
+          latitude = parseFloat(item.lat) || 0;
+          longitude = parseFloat(item.lng) || 0;
+        } else if (item.enlem && item.boylam) {
+          latitude = parseFloat(item.enlem) || 0;
+          longitude = parseFloat(item.boylam) || 0;
+        }
+        
+        const depth = parseFloat(item.depth || item.derinlik || item.derinlikKm || '10') || 10;
+        
+        let time = Date.now();
+        const parsedTime = parseAfadDate(eventDate);
+        if (parsedTime) {
+          time = parsedTime;
+        }
+        
+        return {
+          id: `afad-${item.eventID || item.eventId || item.id || item.earthquakeId || Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          magnitude,
+          location,
+          depth,
+          time,
+          latitude,
+          longitude,
+          source: 'AFAD' as const,
+        };
+      })
+      .filter((eq: Earthquake) => {
+        const isValid = 
+          eq.latitude !== 0 && 
+          eq.longitude !== 0 &&
+          !isNaN(eq.latitude) &&
+          !isNaN(eq.longitude) &&
+          eq.latitude >= -90 && eq.latitude <= 90 &&
+          eq.longitude >= -180 && eq.longitude <= 180 &&
+          eq.magnitude >= 1.0 &&
+          eq.magnitude <= 10.0 &&
+          !isNaN(eq.time) &&
+          eq.time > 0;
+        
+        return isValid;
+      })
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 100);
+
+    return earthquakes;
   }
 
   private async fetchFromUSGS(): Promise<Earthquake[]> {

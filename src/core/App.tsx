@@ -12,6 +12,7 @@ import { initializeApp, shutdownApp } from './init';
 import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
+import SyncStatusIndicator from './components/SyncStatusIndicator';
 
 // Screens
 import HomeScreen from './screens/home';

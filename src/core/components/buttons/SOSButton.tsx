@@ -84,6 +84,10 @@ export default function SOSButton({ onPress, disabled = false }: SOSButtonProps)
       <Pressable
         onPress={onPress}
         disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel="Acil Durum SOS Butonu"
+        accessibilityHint="Acil durumda yardım çağrısı göndermek için basın"
+        accessibilityState={{ disabled }}
         style={({ pressed }) => [
           styles.button,
           pressed && styles.pressed,

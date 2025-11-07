@@ -269,6 +269,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           activeOpacity={1}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
+          accessibilityRole="button"
+          accessibilityLabel="Acil Durum SOS Butonu"
+          accessibilityHint="3 saniye basılı tutarak acil durum çağrısı gönderin"
+          accessibilityState={{ disabled: false }}
         >
           <LinearGradient
             colors={isPressed 
@@ -323,6 +327,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           style={styles.quickButton}
           onPress={handleWhistle}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={whistleActive ? 'Düdük Durdur' : 'Düdük Başlat'}
+          accessibilityHint="SOS düdük sinyali göndermek için basın"
+          accessibilityState={{ disabled: false }}
         >
           <LinearGradient
             colors={whistleActive ? ['#f59e0b', '#d97706'] : ['rgba(245, 158, 11, 0.2)', 'rgba(217, 119, 6, 0.1)']}
@@ -340,6 +348,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           style={styles.quickButton}
           onPress={handleFlashlight}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={flashActive ? 'Fener Kapat' : 'Fener Aç'}
+          accessibilityHint="SOS fener sinyali göndermek için basın"
+          accessibilityState={{ disabled: false }}
         >
           <LinearGradient
             colors={flashActive ? ['#eab308', '#ca8a04'] : ['rgba(234, 179, 8, 0.2)', 'rgba(202, 138, 4, 0.1)']}
@@ -357,6 +369,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           style={styles.quickButton}
           onPress={handle112Call}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="112 Acil Çağrı"
+          accessibilityHint="112 acil servisi aramak için basın"
+          accessibilityState={{ disabled: false }}
         >
           <LinearGradient
             colors={['rgba(220, 38, 38, 0.2)', 'rgba(185, 28, 28, 0.1)']}

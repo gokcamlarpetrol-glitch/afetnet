@@ -31,7 +31,14 @@ export function StatusButton({ status, onPress, active = false }: StatusButtonPr
 
   return (
     <Animated.View style={[styles.statusButtonContainer, animatedStyle]}>
-      <Pressable onPress={handlePress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+      <Pressable 
+        onPress={handlePress} 
+        onPressIn={handlePressIn} 
+        onPressOut={handlePressOut}
+        accessibilityRole="button"
+        accessibilityLabel={text}
+        accessibilityHint={`${text} durumunu seçmek için basın`}
+      >
         <LinearGradient colors={gradientColors as any} style={styles.statusButtonGradient}>
           <Ionicons name={icon as any} size={24} color="#fff" />
           <Text style={styles.statusButtonText}>{text}</Text>

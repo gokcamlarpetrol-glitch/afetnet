@@ -197,6 +197,10 @@ const PremiumButton: React.FC<PremiumButtonProps> = ({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={disabled || loading}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ disabled: disabled || loading }}
+        accessibilityHint={disabled ? 'Bu buton şu anda devre dışı' : `${title} butonuna basmak için dokunun`}
       >
         {renderContent()}
       </AnimatedPressable>
@@ -222,6 +226,10 @@ const PremiumButton: React.FC<PremiumButtonProps> = ({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: disabled || loading }}
+      accessibilityHint={disabled ? 'Bu buton şu anda devre dışı' : `${title} butonuna basmak için dokunun`}
     >
       <LinearGradient
         colors={variantStyles.gradient.length === 3 

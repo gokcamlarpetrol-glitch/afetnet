@@ -32,6 +32,10 @@ export default function Button({
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={children}
+      accessibilityState={{ disabled: disabled || loading }}
+      accessibilityHint={disabled ? 'Bu buton şu anda devre dışı' : `${children} butonuna basmak için dokunun`}
       style={({ pressed }) => [
         styles.button,
         styles[variant],
