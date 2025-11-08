@@ -111,6 +111,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     RC_ANDROID_KEY: process.env.RC_ANDROID_KEY || '',
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+    ORG_SECRET: process.env.ORG_SECRET || '',
+    API_BASE_URL: process.env.API_BASE_URL || 'https://afetnet-backend.onrender.com',
     privacyPolicyUrl: "https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html",
     termsOfServiceUrl: "https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app",
