@@ -12,7 +12,7 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
   if (fromExtra) return String(fromExtra);
   
   // Try process.env
-  const fromProcess = (process.env as any)[key];
+  const fromProcess = (process.env as Record<string, string | undefined>)[key];
   if (fromProcess) return String(fromProcess);
   
   // Return default

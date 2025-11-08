@@ -13,7 +13,7 @@
     "skipLibCheck": true,
     "strict": false,
     "noImplicitAny": false,
-    "noImplicitReturns": false,
+    "noImplicitReturns": true,
     "noImplicitThis": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

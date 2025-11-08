@@ -46,7 +46,9 @@ const TURKEY_CENTER = {
 };
 
 export default function DisasterMapScreen({ navigation }: any) {
-  const [isPremium, setIsPremium] = useState(false);
+  // CRITICAL: Read premium status from store (includes trial check)
+  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
+  const isPremium = usePremiumStore((state) => state.isPremium);
   const [earthquakes, setEarthquakes] = useState<any[]>([]);
   const [disasterEvents, setDisasterEvents] = useState<DisasterEvent[]>([]);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -56,7 +58,6 @@ export default function DisasterMapScreen({ navigation }: any) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setIsPremium(usePremiumStore.getState().isPremium);
       const eqData = useEarthquakeStore.getState().items;
       setEarthquakes(eqData);
       

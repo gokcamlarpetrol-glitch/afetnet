@@ -90,7 +90,7 @@ const PremiumCountdownModal = React.forwardRef<any, PremiumCountdownModalProps>(
     if (!visible || !displayData) {
       setCountdown(0);
       setIsDismissed(false);
-      return;
+      return undefined;
     }
     
     setCountdown(Math.max(0, Math.floor(displayData.secondsRemaining)));

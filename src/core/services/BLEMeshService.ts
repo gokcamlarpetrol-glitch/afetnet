@@ -227,31 +227,63 @@ class BLEMeshService {
       const peer = meshState?.peers?.[message.from];
       const senderName = peer?.name || `Mesh-${message.from.slice(-4)}`;
       
-      // Parse message content
+      // ELITE: Parse message content with security validation
       let content = message.content;
       try {
-        const parsed = JSON.parse(content);
-        if (parsed.type === 'SOS' || parsed.type === 'EARTHQUAKE_EMERGENCY') {
-          // Critical messages - use multi-channel alert
-          const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-          await multiChannelAlertService.sendAlert({
-            title: parsed.type === 'SOS' ? '🆘 Acil Yardım Çağrısı' : '🚨 Deprem Acil Durumu',
-            body: parsed.message || parsed.signal?.message || content,
-            priority: 'critical',
-            channels: {
-              pushNotification: true,
-              fullScreenAlert: true,
-              alarmSound: true,
-              vibration: true,
-              tts: true,
-            },
-            data: { type: 'mesh_message', messageId: message.id, from: message.from },
-          });
-          return;
+        // ELITE: Validate content is string and not too large (prevent DoS)
+        if (typeof content !== 'string' || content.length > 10000) {
+          logger.warn('Invalid message content length or type');
+          content = typeof content === 'string' ? content.substring(0, 1000) : String(content || '');
         }
-        content = parsed.message || parsed.content || content;
-      } catch {
-        // Not JSON, use as-is
+        
+        // ELITE: Use safe JSON parsing with depth limit
+        const { sanitizeJSON } = await import('../utils/inputSanitizer');
+        const parsed = sanitizeJSON(content);
+        
+        if (parsed && typeof parsed === 'object' && parsed !== null) {
+          // ELITE: Validate parsed object structure
+          const messageType = typeof parsed.type === 'string' ? parsed.type : null;
+          
+          if (messageType === 'SOS' || messageType === 'EARTHQUAKE_EMERGENCY') {
+            // ELITE: Sanitize message body before displaying
+            const { sanitizeString } = await import('../utils/validation');
+            const messageBody = sanitizeString(
+              parsed.message || parsed.signal?.message || content || '',
+              500
+            );
+            
+            // Critical messages - use multi-channel alert
+            const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+            await multiChannelAlertService.sendAlert({
+              title: messageType === 'SOS' ? '🆘 Acil Yardım Çağrısı' : '🚨 Deprem Acil Durumu',
+              body: messageBody,
+              priority: 'critical',
+              channels: {
+                pushNotification: true,
+                fullScreenAlert: true,
+                alarmSound: true,
+                vibration: true,
+                tts: true,
+              },
+              data: { type: 'mesh_message', messageId: message.id, from: message.from },
+            });
+            return;
+          }
+          
+          // ELITE: Extract content safely
+          if (typeof parsed.message === 'string') {
+            const { sanitizeString } = await import('../utils/validation');
+            content = sanitizeString(parsed.message, 5000);
+          } else if (typeof parsed.content === 'string') {
+            const { sanitizeString } = await import('../utils/validation');
+            content = sanitizeString(parsed.content, 5000);
+          }
+        }
+      } catch (error) {
+        // ELITE: Not JSON or parse failed - sanitize as plain text
+        logger.debug('Message content is not JSON, using as plain text:', error);
+        const { sanitizeString } = await import('../utils/validation');
+        content = sanitizeString(typeof content === 'string' ? content : String(content || ''), 5000);
       }
 
       // Regular message notification

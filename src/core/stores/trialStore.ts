@@ -6,6 +6,9 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { usePremiumStore } from './premiumStore';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('TrialStore');
 
 const TRIAL_START_KEY = 'afetnet_trial_start';
 const TRIAL_DURATION_DAYS = 3;
@@ -40,28 +43,96 @@ const initialState: TrialState = {
   isLoading: true,
 };
 
-const computeTrialStatus = (startTime: number) => {
-  const now = Date.now();
-  const elapsed = now - startTime;
-  const remainingMs = TRIAL_DURATION_MS - elapsed;
-  const isActive = remainingMs > 0;
-  const daysRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / MS_PER_DAY)) : 0;
-  const hoursRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))) : 0;
+// ELITE: Type-safe trial status computation with validation
+const computeTrialStatus = (startTime: number): {
+  isActive: boolean;
+  daysRemaining: number;
+  hoursRemaining: number;
+  remainingMs: number;
+} => {
+  try {
+    // ELITE: Validate startTime
+    if (!startTime || typeof startTime !== 'number' || isNaN(startTime) || startTime <= 0) {
+      return {
+        isActive: false,
+        daysRemaining: 0,
+        hoursRemaining: 0,
+        remainingMs: 0,
+      };
+    }
+    
+    const now = Date.now();
+    
+    // ELITE: Validate time values
+    if (isNaN(now) || now <= 0) {
+      return {
+        isActive: false,
+        daysRemaining: 0,
+        hoursRemaining: 0,
+        remainingMs: 0,
+      };
+    }
+    
+    const elapsed = Math.max(0, now - startTime); // ELITE: Prevent negative elapsed time
+    const remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsed);
+    const isActive = remainingMs > 0;
+    
+    // ELITE: Calculate remaining time with proper rounding
+    const daysRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / MS_PER_DAY)) : 0;
+    const hoursRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))) : 0;
 
-  return {
-    isActive,
-    daysRemaining,
-    hoursRemaining,
-    remainingMs: Math.max(0, remainingMs),
-  };
+    return {
+      isActive,
+      daysRemaining,
+      hoursRemaining,
+      remainingMs,
+    };
+  } catch (error) {
+    // ELITE: Fail-safe - return inactive trial on error
+    logger.error('computeTrialStatus error:', error);
+    return {
+      isActive: false,
+      daysRemaining: 0,
+      hoursRemaining: 0,
+      remainingMs: 0,
+    };
+  }
 };
 
 const syncPremiumAccess = (isTrialActive: boolean) => {
-  const premiumState = usePremiumStore.getState();
-  const hasPaidSubscription = premiumState.subscriptionType !== null;
+  try {
+    const premiumState = usePremiumStore.getState();
+    
+    // ELITE: Type-safe access to isLifetime
+    const premiumStateWithLifetime = premiumState as typeof premiumState & { isLifetime?: boolean };
+    
+    // CRITICAL: Check if user has paid subscription
+    // Paid subscriptions have:
+    //   - Regular: subscriptionType: 'monthly' | 'yearly', expiresAt: number
+    //   - Lifetime: subscriptionType: null, expiresAt: null, isLifetime: true
+    // Trial users have: subscriptionType: null, expiresAt: null, isLifetime: false, isPremium: true/false (trial dependent)
+    
+    // ELITE: Comprehensive paid subscription check
+    const hasPaidSubscription = 
+      premiumState.subscriptionType !== null || // Monthly/Yearly subscription
+      (premiumState.expiresAt !== null && premiumState.expiresAt > 0 && premiumState.isPremium) || // Has valid expiration = paid subscription
+      (premiumStateWithLifetime.isLifetime === true); // Lifetime purchase
 
-  if (!hasPaidSubscription) {
-    premiumState.setPremium(isTrialActive);
+    // CRITICAL: Only sync trial access if user doesn't have paid subscription
+    // If user has premium subscription, don't override it with trial status
+    if (!hasPaidSubscription) {
+      // ELITE: Set premium with explicit isLifetime: false for trial
+      premiumState.setPremium(isTrialActive, null, null, false);
+    } else {
+      // ELITE: Log when trial sync is skipped due to paid subscription
+      if (__DEV__) {
+        logger.info('Trial sync skipped - user has paid subscription');
+      }
+    }
+  } catch (error) {
+    // ELITE: Fail-safe error handling
+    logger.error('syncPremiumAccess error:', error);
+    // Don't crash - silently fail
   }
 };
 
@@ -94,13 +165,40 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
     try {
       set({ isLoading: true });
 
-      // Check if trial already started
-      const storedStart = await SecureStore.getItemAsync(TRIAL_START_KEY);
+      // ELITE: Check if trial already started with error handling
+      let storedStart: string | null = null;
+      try {
+        storedStart = await SecureStore.getItemAsync(TRIAL_START_KEY);
+      } catch (storeError) {
+        logger.warn('SecureStore read error (non-critical):', storeError);
+        // Continue - will create new trial
+      }
 
-      const startTime = storedStart ? parseInt(storedStart, 10) : Date.now();
-
-      if (!storedStart) {
-        await SecureStore.setItemAsync(TRIAL_START_KEY, String(startTime));
+      // ELITE: Validate and parse stored start time
+      let startTime: number;
+      if (storedStart) {
+        const parsed = parseInt(storedStart, 10);
+        if (!isNaN(parsed) && parsed > 0 && parsed <= Date.now()) {
+          startTime = parsed;
+        } else {
+          // ELITE: Invalid stored time - create new trial
+          logger.warn('Invalid stored trial start time, creating new trial');
+          startTime = Date.now();
+          try {
+            await SecureStore.setItemAsync(TRIAL_START_KEY, String(startTime));
+          } catch (writeError) {
+            logger.error('Failed to write trial start time:', writeError);
+          }
+        }
+      } else {
+        // ELITE: No stored trial - create new one
+        startTime = Date.now();
+        try {
+          await SecureStore.setItemAsync(TRIAL_START_KEY, String(startTime));
+        } catch (writeError) {
+          logger.error('Failed to write trial start time:', writeError);
+          // Continue anyway - trial will work in memory
+        }
       }
 
       const applyState = () => {
@@ -149,9 +247,7 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
         startTrialMonitor(applyState);
       }
     } catch (error) {
-      // Use logger instead of console.error for production safety
-      const { createLogger } = require('../utils/logger');
-      const logger = createLogger('TrialStore');
+      // ELITE: Use logger for production safety
       logger.error('Initialize error:', error);
       // On error, give user trial
       set({
@@ -179,24 +275,37 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
   },
 
   checkTrialStatus: () => {
-    const { trialStartTime, isTrialActive } = get();
+    try {
+      const { trialStartTime } = get();
 
-    if (!trialStartTime) {
+      // ELITE: Validate trialStartTime
+      if (!trialStartTime || typeof trialStartTime !== 'number' || isNaN(trialStartTime)) {
+        return false;
+      }
+
+      const { isActive, daysRemaining, hoursRemaining } = computeTrialStatus(trialStartTime);
+      
+      // ELITE: Update state atomically
+      set({
+        isTrialActive: isActive,
+        daysRemaining,
+        hoursRemaining,
+      });
+      
+      // ELITE: Sync premium access safely
+      syncPremiumAccess(isActive);
+      
+      // ELITE: Clean up monitor if trial expired
+      if (!isActive) {
+        stopTrialMonitor();
+      }
+
+      return isActive;
+    } catch (error) {
+      logger.error('checkTrialStatus error:', error);
+      // ELITE: Fail-safe - return false on error
       return false;
     }
-
-    const { isActive, daysRemaining, hoursRemaining } = computeTrialStatus(trialStartTime);
-    set({
-      isTrialActive: isActive,
-      daysRemaining,
-      hoursRemaining,
-    });
-    syncPremiumAccess(isActive);
-    if (!isActive) {
-      stopTrialMonitor();
-    }
-
-    return isActive;
   },
 
   getRemainingDays: () => {
@@ -221,9 +330,7 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       syncPremiumAccess(false);
       stopTrialMonitor();
     } catch (error) {
-      // Use logger instead of console.error for production safety
-      const { createLogger } = require('../utils/logger');
-      const logger = createLogger('TrialStore');
+      // ELITE: Use logger for production safety
       logger.error('End trial error:', error);
     }
   },

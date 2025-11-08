@@ -352,7 +352,36 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: () => navigation.navigate('Family'),
     },
-    // Sesli Komutlar kaldırıldı - Apple review compliance
+    {
+      icon: 'navigate',
+      title: 'PDR Konum Takibi',
+      subtitle: 'GPS olmadan adım sayarak konum belirleme',
+      type: 'switch',
+      value: false,
+      onPress: () => {
+        haptics.impactLight();
+        Alert.alert(
+          'PDR Konum Takibi',
+          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
+          [{ text: 'Tamam' }]
+        );
+      },
+    },
+    {
+      icon: 'location',
+      title: 'Yakınlık Uyarıları',
+      subtitle: 'Yakındaki acil durumlar için otomatik bildirim',
+      type: 'switch',
+      value: false,
+      onPress: () => {
+        haptics.impactLight();
+        Alert.alert(
+          'Yakınlık Uyarıları',
+          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
+          [{ text: 'Tamam' }]
+        );
+      },
+    },
     {
       icon: 'battery-charging',
       title: 'Pil Tasarrufu',
@@ -418,6 +447,21 @@ export default function SettingsScreen({ navigation }: any) {
       onPress: () => setSeismicSensorEnabled(!seismicSensorEnabled),
     },
     {
+      icon: 'alert-circle',
+      title: 'Tehlike Çıkarımı',
+      subtitle: 'AI ile otomatik tehlike bölgesi tespiti',
+      type: 'switch',
+      value: false,
+      onPress: () => {
+        haptics.impactLight();
+        Alert.alert(
+          'Tehlike Çıkarımı',
+          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
+          [{ text: 'Tamam' }]
+        );
+      },
+    },
+    {
       icon: 'settings',
       title: 'Deprem Ayarları',
       subtitle: 'Kapsamlı deprem bildirim ayarları',
@@ -437,6 +481,89 @@ export default function SettingsScreen({ navigation }: any) {
         haptics.impactLight();
         const parentNavigator = navigation.getParent?.() || navigation;
         parentNavigator.navigate('AllEarthquakes');
+      },
+    },
+  ];
+
+  const medicalSettings: SettingOption[] = [
+    {
+      icon: 'heart',
+      title: 'Sağlık Profili',
+      subtitle: 'Tıbbi bilgilerinizi güvenle saklayın',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('HealthProfile');
+      },
+    },
+    {
+      icon: 'document',
+      title: 'ICE Bilgileri',
+      subtitle: 'Acil durum kişileri ve tıbbi bilgiler',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('HealthProfile');
+      },
+    },
+    {
+      icon: 'medical',
+      title: 'Triage Sistemi',
+      subtitle: 'Hızlı yaralı sınıflandırma ve önceliklendirme',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('MedicalInformation');
+      },
+    },
+  ];
+
+  const rescueSettings: SettingOption[] = [
+    {
+      icon: 'home',
+      title: 'Enkaz Modu',
+      subtitle: 'Enkaz altı otomatik SOS ve konum paylaşımı',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('DrillMode');
+      },
+    },
+    {
+      icon: 'search',
+      title: 'SAR Modu',
+      subtitle: 'Arama kurtarma operasyonları için özel araçlar',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('RescueTeam');
+      },
+    },
+    {
+      icon: 'warning',
+      title: 'Tehlike Bölgeleri',
+      subtitle: 'Risk alanlarını işaretle ve paylaş',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('DisasterMap');
+      },
+    },
+    {
+      icon: 'cube',
+      title: 'Lojistik Yönetimi',
+      subtitle: 'Malzeme talep ve teklif sistemi',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('VolunteerModule');
       },
     },
   ];
@@ -645,8 +772,10 @@ export default function SettingsScreen({ navigation }: any) {
         {renderSection('Konum ve Harita', locationSettings, 3)}
         {renderSection('Mesh Ağı ve İletişim', meshSettings, 4)}
         {renderSection('Deprem İzleme', earthquakeSettings, 5)}
-        {renderSection('Genel', generalSettings, 6)}
-        {renderSection('Hakkında', aboutSettings, 7)}
+        {renderSection('Sağlık ve Tıbbi', medicalSettings, 6)}
+        {renderSection('Kurtarma ve Operasyon', rescueSettings, 7)}
+        {renderSection('Genel', generalSettings, 8)}
+        {renderSection('Hakkında', aboutSettings, 9)}
         
         {/* App Version */}
         <View style={styles.versionContainer}>

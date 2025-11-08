@@ -4,11 +4,14 @@
  */
 
 import React, { useEffect } from 'react';
+import { AppState, AppStateStatus, View, Text } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { initializeApp, shutdownApp } from './init';
+import { premiumService } from './services/PremiumService';
+import { usePremiumStore } from './stores/premiumStore';
 import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
@@ -53,11 +56,60 @@ import NewsDetailScreen from './screens/news/NewsDetailScreen';
 
 // Navigation
 import MainTabs from './navigation/MainTabs';
+import OnboardingNavigator from './navigation/OnboardingNavigator';
 import { colors } from './theme';
+import { hasCompletedOnboarding } from './utils/onboardingStorage';
 
 const Stack = createStackNavigator();
 
 export default function CoreApp() {
+  const [showOnboarding, setShowOnboarding] = React.useState<boolean | null>(null);
+
+  // Check onboarding status on mount and when app comes to foreground
+  const checkOnboardingStatus = React.useCallback(async () => {
+    try {
+      const completed = await hasCompletedOnboarding();
+      setShowOnboarding(!completed);
+    } catch (error) {
+      // On error, show onboarding (fail-safe)
+      setShowOnboarding(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    checkOnboardingStatus();
+  }, [checkOnboardingStatus]);
+
+  // ELITE: Listen for app state changes to check onboarding status
+  // This ensures that when onboarding is completed, the app switches to main tabs
+  React.useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        // App came to foreground - check onboarding status
+        void checkOnboardingStatus();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [checkOnboardingStatus]);
+
+  // ELITE: Poll onboarding status periodically when onboarding is shown
+  // This ensures immediate switch to main app when onboarding is completed
+  React.useEffect(() => {
+    if (showOnboarding === true) {
+      const intervalId = setInterval(() => {
+        void checkOnboardingStatus();
+      }, 500); // Check every 500ms when onboarding is active
+
+      return () => {
+        clearInterval(intervalId);
+      };
+    }
+    return undefined;
+  }, [showOnboarding, checkOnboardingStatus]);
   useEffect(() => {
     // ELITE: Track app startup time (safe initialization)
     if (typeof global !== 'undefined') {
@@ -90,8 +142,28 @@ export default function CoreApp() {
       // Try to continue anyway - some services may still work
     });
 
+    // CRITICAL: Check premium status when app comes to foreground
+    // This ensures premium status is always up-to-date
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        // App came to foreground - check premium status
+        void premiumService.checkPremiumStatus().catch((error) => {
+          // Silently fail - premium check is not critical for app functionality
+          if (__DEV__) {
+            console.warn('Premium status check failed:', error);
+          }
+        });
+        
+        // Also check expiration
+        usePremiumStore.getState().checkExpiration();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
     // Cleanup on unmount
     return () => {
+      subscription.remove();
       shutdownApp();
     };
   }, []);
@@ -137,18 +209,31 @@ export default function CoreApp() {
             />
             
             <NavigationContainer>
-              <Stack.Navigator
-                initialRouteName="MainTabs"
-                screenOptions={{
-                  headerBackTitleVisible: false,
-                  headerBackTitle: ' ',
-                }}
-              >
+              {showOnboarding === null ? (
+                // Loading state - show nothing or a simple loading indicator
+                <View style={{ flex: 1, backgroundColor: colors.background.primary, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ color: colors.text.secondary }}>Yükleniyor...</Text>
+                </View>
+              ) : showOnboarding ? (
+                // Show onboarding flow
+                <OnboardingNavigator />
+              ) : (
+                // Show main app
+                <Stack.Navigator
+                  initialRouteName="MainTabs"
+                  screenOptions={{
+                    headerBackTitleVisible: false,
+                    headerBackTitle: ' ',
+                  }}
+                >
               <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
               <Stack.Screen 
                 name="Paywall" 
                 component={PaywallScreen}
-                options={{ presentation: 'modal' }}
+                options={{ 
+                  presentation: 'modal',
+                  headerShown: false,
+                }}
               />
               <Stack.Screen 
                 name="AllEarthquakes" 
@@ -289,6 +374,7 @@ export default function CoreApp() {
                 }}
               />
               </Stack.Navigator>
+              )}
             </NavigationContainer>
           </SafeAreaProvider>
         </GestureHandlerRootView>

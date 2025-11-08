@@ -39,8 +39,8 @@ export function StatusButton({ status, onPress, active = false }: StatusButtonPr
         accessibilityLabel={text}
         accessibilityHint={`${text} durumunu seçmek için basın`}
       >
-        <LinearGradient colors={gradientColors as any} style={styles.statusButtonGradient}>
-          <Ionicons name={icon as any} size={24} color="#fff" />
+        <LinearGradient colors={gradientColors} style={styles.statusButtonGradient}>
+          <Ionicons name={icon} size={24} color="#fff" />
           <Text style={styles.statusButtonText}>{text}</Text>
         </LinearGradient>
       </Pressable>
@@ -48,7 +48,15 @@ export function StatusButton({ status, onPress, active = false }: StatusButtonPr
   );
 }
 
-function getStatusInfo(status: StatusButtonProps['status'], active: boolean) {
+// ELITE: Type-safe status info with proper return types
+function getStatusInfo(
+  status: StatusButtonProps['status'], 
+  active: boolean
+): {
+  icon: keyof typeof Ionicons.glyphMap;
+  text: string;
+  gradientColors: [string, string];
+} {
   switch (status) {
     case 'safe':
       return { icon: 'shield-checkmark', text: 'Güvendeyim', gradientColors: ['#10b981', '#059669'] };

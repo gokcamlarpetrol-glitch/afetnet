@@ -91,19 +91,13 @@ const ASSEMBLY_POINTS: AssemblyPoint[] = [
 ];
 
 export default function AssemblyPointsScreen({ navigation }: any) {
-  const [isPremium, setIsPremium] = useState(false);
+  // CRITICAL: Read premium status from store (includes trial check)
+  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
+  const isPremium = usePremiumStore((state) => state.isPremium);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [points, setPoints] = useState<AssemblyPoint[]>([]);
   const [selectedPoint, setSelectedPoint] = useState<AssemblyPoint | null>(null);
   const [sortBy, setSortBy] = useState<'distance' | 'capacity'>('distance');
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setIsPremium(usePremiumStore.getState().isPremium);
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     getUserLocation();

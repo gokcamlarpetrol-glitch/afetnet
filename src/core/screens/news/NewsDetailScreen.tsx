@@ -273,18 +273,18 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       if (webViewStatus !== 'unavailable') {
         setWebViewStatus('unavailable');
       }
-      return;
+      return undefined;
     }
 
     if (activeTab !== 'original' || webViewStatus !== 'idle') {
-      return;
+      return undefined;
     }
 
     if (!isNativeWebViewRegistered()) {
       logger.info('Native WebView module not registered; using inline renderer.');
       setWebViewComponent(null);
       setWebViewStatus('unavailable');
-      return;
+      return undefined;
     }
 
     let isMounted = true;

@@ -350,10 +350,6 @@ export default function AIAssistantCard({ navigation }: Props) {
             </View>
           </View>
           <View style={styles.headerRight}>
-            <View style={styles.badge}>
-              <Ionicons name="shield-checkmark" size={14} color="#0f172a" />
-              <Text style={styles.badgeText}>Proaktif</Text>
-            </View>
             <Ionicons
               name={expanded ? 'chevron-up-outline' : 'chevron-down-outline'}
               size={18}
@@ -506,22 +502,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     color: colors.text.secondary,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 16,
-    backgroundColor: 'rgba(56, 189, 248, 0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.45)',
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#38bdf8',
   },
   statsRow: {
     flexDirection: 'row',

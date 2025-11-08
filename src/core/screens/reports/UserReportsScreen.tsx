@@ -46,20 +46,14 @@ const INTENSITY_DESCRIPTIONS = [
 ];
 
 export default function UserReportsScreen({ navigation }: any) {
-  const [isPremium, setIsPremium] = useState(false);
+  // CRITICAL: Read premium status from store (includes trial check)
+  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
+  const isPremium = usePremiumStore((state) => state.isPremium);
   const [selectedIntensity, setSelectedIntensity] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      setIsPremium(usePremiumStore.getState().isPremium);
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, []);
 
   React.useEffect(() => {
     getUserLocation();

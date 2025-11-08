@@ -34,7 +34,15 @@ import QRCode from 'react-native-qrcode-svg';
 
 const logger = createLogger('NewMessageScreen');
 
-export default function NewMessageScreen({ navigation }: any) {
+// ELITE: Type-safe navigation props
+interface NewMessageScreenProps {
+  navigation: {
+    navigate: (screen: string, params?: Record<string, unknown>) => void;
+    goBack: () => void;
+  };
+}
+
+export default function NewMessageScreen({ navigation }: NewMessageScreenProps) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState<'qr' | 'id' | 'scan'>('qr');
@@ -211,37 +219,69 @@ export default function NewMessageScreen({ navigation }: any) {
       discoveryUnsubscribeRef.current = null;
     }
 
-    discoveryUnsubscribeRef.current = bleMeshService.onMessage((message) => {
+    discoveryUnsubscribeRef.current = bleMeshService.onMessage(async (message) => {
       try {
         // Check content for discovery info (mesh message content is string)
         const content = message.content;
         if (typeof content === 'string') {
+          // ELITE: Validate content length (prevent DoS)
+          if (content.length > 10000) {
+            logger.warn('Discovery message content too large, skipping');
+            return;
+          }
+          
           try {
-            const data = JSON.parse(content);
-            if (data.type === 'discovery' || data.type === 'beacon' || data.type === 'discovery_request') {
-              const discoveredId = data.deviceId || data.senderId || message.from;
-              if (discoveredId && discoveredId !== id) {
-                setScannedDevices(prev => {
-                  const exists = prev.find(d => d.deviceId === discoveredId);
-                  if (!exists) {
-                    const updated = [
-                      ...prev,
-                      {
-                        deviceId: discoveredId,
-                        name: data.name,
-                        rssi: data.rssi,
-                      },
-                    ];
-                    scannedDevicesRef.current = updated.length;
-                    return updated;
-                  }
-                  scannedDevicesRef.current = prev.length;
-                  return prev;
-                });
+            // ELITE: Use safe JSON parsing
+            const { sanitizeJSON } = await import('../../utils/inputSanitizer');
+            const { sanitizeDeviceId } = await import('../../utils/validation');
+            const { sanitizeString } = await import('../../utils/validation');
+            const data = sanitizeJSON(content);
+            
+            if (data && typeof data === 'object' && data !== null) {
+              // ELITE: Validate data structure
+              const messageType = typeof data.type === 'string' ? data.type : null;
+              
+              if (messageType === 'discovery' || messageType === 'beacon' || messageType === 'discovery_request') {
+                // ELITE: Sanitize device ID
+                const discoveredId = sanitizeDeviceId(
+                  data.deviceId || data.senderId || message.from || ''
+                );
+                
+                // ELITE: Validate device ID format
+                if (discoveredId && discoveredId.length >= 4 && discoveredId !== id) {
+                  // ELITE: Sanitize name
+                  const deviceName = typeof data.name === 'string' 
+                    ? sanitizeString(data.name, 50) 
+                    : undefined;
+                  
+                  // ELITE: Validate RSSI (must be number)
+                  const rssi = typeof data.rssi === 'number' && !isNaN(data.rssi)
+                    ? Math.max(-200, Math.min(0, data.rssi))
+                    : undefined;
+                  
+                  setScannedDevices(prev => {
+                    const exists = prev.find(d => d.deviceId === discoveredId);
+                    if (!exists) {
+                      const updated = [
+                        ...prev,
+                        {
+                          deviceId: discoveredId,
+                          name: deviceName,
+                          rssi: rssi,
+                        },
+                      ];
+                      scannedDevicesRef.current = updated.length;
+                      return updated;
+                    }
+                    scannedDevicesRef.current = prev.length;
+                    return prev;
+                  });
+                }
               }
             }
-          } catch {
-            // Not JSON, skip
+          } catch (error) {
+            // ELITE: Not JSON or parse failed - log and skip
+            logger.debug('Discovery message is not valid JSON, skipping:', error);
           }
         }
       } catch (error) {

@@ -51,6 +51,7 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
 
       return () => clearInterval(timer);
     }
+    return undefined;
   }, [visible]);
 
   const sendSOS = async () => {

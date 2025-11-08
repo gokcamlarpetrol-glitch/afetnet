@@ -4,7 +4,7 @@
  * Integrated with rubble detection for automatic activation
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Linking, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +56,22 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         }),
       ])
     ).start();
+  }, []);
+
+  // ELITE: Initialize services on mount
+  useEffect(() => {
+    const initializeServices = async () => {
+      try {
+        await whistleService.initialize();
+        await flashlightService.initialize();
+        logger.info('Emergency services initialized');
+      } catch (error) {
+        logger.error('Service initialization failed:', error);
+        // Continue - services may still work
+      }
+    };
+    
+    initializeServices();
   }, []);
 
   // CRITICAL: Auto-activate if trapped - MUST work reliably
@@ -159,79 +175,208 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     ]).start();
   };
 
-  const handleWhistle = async () => {
+  const handleWhistle = useCallback(async () => {
     haptics.impactMedium();
     logDebug('Düdük butonu tıklandı, mevcut durum:', whistleActive);
     
     try {
+      // ELITE: Ensure service is initialized
+      try {
+        await whistleService.initialize();
+      } catch (initError) {
+        logger.warn('WhistleService initialization warning:', initError);
+        // Continue - service may still work
+      }
+      
       if (whistleActive) {
-        await whistleService.stop();
-        setWhistleActive(false);
-        logDebug('Düdük durduruldu');
+        // ELITE: Stop whistle with proper error handling
+        try {
+          await whistleService.stop();
+          // ELITE: Wait a bit for cleanup to complete
+          await new Promise(resolve => setTimeout(resolve, 100));
+          setWhistleActive(false);
+          logDebug('✅ Düdük durduruldu');
+        } catch (stopError) {
+          logger.error('❌ Whistle stop failed:', stopError);
+          // Still update UI state
+          setWhistleActive(false);
+          // Show error to user
+          Alert.alert(
+            'Düdük Durdurma Hatası',
+            'Düdük durdurulurken bir hata oluştu. Lütfen tekrar deneyin.',
+            [{ text: 'Tamam' }]
+          );
+        }
       } else {
-        await whistleService.playSOSWhistle('morse');
-        setWhistleActive(true);
-        logDebug('Düdük başlatıldı');
+        // ELITE: Start whistle with proper error handling
+        try {
+          // ELITE: Ensure service is ready before starting
+          if (!whistleService.isActive || typeof whistleService.isActive !== 'function') {
+            await whistleService.initialize();
+          }
+          
+          await whistleService.playSOSWhistle('morse');
+          setWhistleActive(true);
+          logDebug('✅ Düdük başlatıldı (SOS Morse)');
+        } catch (playError) {
+          logger.error('❌ Whistle play failed:', playError);
+          setWhistleActive(false);
+          throw playError; // Re-throw to show alert
+        }
       }
     } catch (error) {
-      logger.error('Whistle operation failed:', error);
+      logger.error('❌ Whistle operation failed:', error);
       Alert.alert(
         'Düdük Hatası',
-        'Düdük başlatılamadı. Lütfen ses izinlerini kontrol edin.',
-        [{ text: 'Tamam' }]
+        'Düdük başlatılamadı. Lütfen ses izinlerini kontrol edin veya tekrar deneyin.',
+        [
+          { 
+            text: 'Tekrar Dene', 
+            onPress: handleWhistle,
+            style: 'default'
+          },
+          { text: 'Tamam', style: 'cancel' }
+        ]
       );
       // Reset state on error
       setWhistleActive(false);
     }
-  };
+  }, [whistleActive]);
 
-  const handleFlashlight = async () => {
+  const handleFlashlight = useCallback(async () => {
     haptics.impactMedium();
     logDebug('Fener butonu tıklandı, mevcut durum:', flashActive);
     
     try {
+      // ELITE: Ensure service is initialized
+      try {
+        await flashlightService.initialize();
+      } catch (initError) {
+        logger.warn('FlashlightService initialization warning:', initError);
+        // Continue - service may still work with haptic feedback
+      }
+      
+      // ELITE: Check permission but don't block - haptic feedback will work
+      if (!flashlightService.isAvailable || !flashlightService.isAvailable()) {
+        // Show info but continue - haptic feedback will work
+        logger.info('Camera permission not granted, using haptic feedback');
+      }
+      
       if (flashActive) {
-        await flashlightService.stop();
-        setFlashActive(false);
-        logDebug('Fener kapatıldı');
+        // ELITE: Stop flashlight with proper error handling
+        try {
+          await flashlightService.stop();
+          // ELITE: Wait a bit for cleanup to complete
+          await new Promise(resolve => setTimeout(resolve, 100));
+          setFlashActive(false);
+          logDebug('✅ Fener kapatıldı');
+        } catch (stopError) {
+          logger.error('❌ Flashlight stop failed:', stopError);
+          // Still update UI state
+          setFlashActive(false);
+          // Show error to user
+          Alert.alert(
+            'Fener Durdurma Hatası',
+            'Fener durdurulurken bir hata oluştu. Lütfen tekrar deneyin.',
+            [{ text: 'Tamam' }]
+          );
+        }
       } else {
-        await flashlightService.flashSOSMorse();
-        setFlashActive(true);
-        logDebug('Fener açıldı (SOS Morse)');
+        // ELITE: Start flashlight with proper error handling
+        try {
+          // ELITE: Start flashing (async pattern loop)
+          // Note: flashSOSMorse() will work with haptic feedback if torch unavailable
+          await flashlightService.flashSOSMorse();
+          setFlashActive(true);
+          logDebug('✅ Fener başlatıldı (SOS Morse)');
+        } catch (flashError) {
+          logger.error('❌ Flashlight play failed:', flashError);
+          setFlashActive(false);
+          throw flashError; // Re-throw to show alert
+        }
       }
     } catch (error) {
-      logger.error('Flashlight operation failed:', error);
+      logger.error('❌ Flashlight operation failed:', error);
       Alert.alert(
         'Fener Hatası',
-        'Fener başlatılamadı. Lütfen kamera izinlerini kontrol edin.',
-        [{ text: 'Tamam' }]
+        'Fener başlatılamadı. Titreşim modu ile çalışmaya devam edecektir.',
+        [
+          { 
+            text: 'Tekrar Dene', 
+            onPress: handleFlashlight,
+            style: 'default'
+          },
+          { text: 'Tamam', style: 'cancel' }
+        ]
       );
       // Reset state on error
       setFlashActive(false);
     }
-  };
+  }, [flashActive]);
 
-  const handle112Call = async () => {
+  const handle112Call = useCallback(async () => {
     haptics.impactHeavy();
     logDebug('112 arama butonu tıklandı');
+    
+    // ELITE: Input validation - ensure phone number is safe
+    const emergencyNumber = '112';
+    const phoneUrl = `tel:${emergencyNumber}`;
+    
+    // ELITE: Validate URL format to prevent injection
+    if (!phoneUrl.match(/^tel:\d+$/)) {
+      logger.error('❌ Invalid phone URL format:', phoneUrl);
+      Alert.alert(
+        'Hata',
+        'Geçersiz telefon numarası formatı.',
+        [{ text: 'Tamam' }]
+      );
+      return;
+    }
     
     // CRITICAL: Direct call - no confirmation needed in emergency
     // But provide fallback options if call fails
     try {
-      const canOpen = await Linking.canOpenURL('tel:112');
+      // ELITE: Check if phone dialer is available
+      const canOpen = await Linking.canOpenURL(phoneUrl);
       if (!canOpen) {
-        throw new Error('Cannot open phone dialer');
+        throw new Error('Cannot open phone dialer - device may not support phone calls');
       }
       
-      await Linking.openURL('tel:112');
-      logDebug('112 arama başlatıldı');
-    } catch (error) {
-      logger.error('CRITICAL: 112 call failed:', error);
+      // ELITE: Open phone dialer with timeout protection
+      const openPromise = Linking.openURL(phoneUrl);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Phone dialer timeout')), 5000)
+      );
+      
+      await Promise.race([openPromise, timeoutPromise]);
+      logDebug('✅ 112 arama başlatıldı');
+      
+      // ELITE: Log analytics event
+      try {
+        const { firebaseAnalyticsService } = await import('../../../services/FirebaseAnalyticsService');
+        firebaseAnalyticsService.logEvent('emergency_112_called', {
+          timestamp: Date.now(),
+        });
+      } catch (analyticsError) {
+        logger.debug('Analytics logging failed:', analyticsError);
+      }
+    } catch (error: any) {
+      logger.error('❌ CRITICAL: 112 call failed:', error);
+      
+      // ELITE: Extract user-friendly error message
+      let errorMessage = '112 aranırken bir hata oluştu.';
+      if (error?.message) {
+        if (error.message.includes('timeout')) {
+          errorMessage = 'Telefon arama ekranı açılırken zaman aşımı oluştu.';
+        } else if (error.message.includes('Cannot open')) {
+          errorMessage = 'Telefon arama özelliği kullanılamıyor. Cihazınızın telefon desteği olup olmadığını kontrol edin.';
+        }
+      }
       
       // CRITICAL: Provide alternative options
       Alert.alert(
         '⚠️ 112 Aranamadı',
-        '112 aranırken bir hata oluştu. Lütfen manuel olarak arayın veya alternatif yöntemleri kullanın.',
+        `${errorMessage} Lütfen manuel olarak arayın veya alternatif yöntemleri kullanın.`,
         [
           { 
             text: 'Tekrar Dene', 
@@ -250,7 +395,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         ]
       );
     }
-  };
+  }, [onPress]);
 
   const progressWidth = progressAnim.interpolate({
     inputRange: [0, 1],
@@ -341,7 +486,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           >
             <Ionicons name="megaphone" size={24} color={whistleActive ? '#ffffff' : '#f59e0b'} />
             <Text style={[styles.quickButtonText, whistleActive && styles.quickButtonTextActive]}>
-              DÜDÜK
+              {whistleActive ? 'DURDUR' : 'DÜDÜK'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -362,7 +507,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           >
             <Ionicons name="flashlight" size={24} color={flashActive ? '#ffffff' : '#eab308'} />
             <Text style={[styles.quickButtonText, flashActive && styles.quickButtonTextActive]}>
-              FENER
+              {flashActive ? 'DURDUR' : 'FENER'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>

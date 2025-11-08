@@ -158,9 +158,10 @@ export async function initializeApp() {
     // Elite: Increased timeout to 15 seconds for GPS location acquisition (first launch can be slow)
     await initWithTimeout(() => locationService.initialize(), 'LocationService', 15000);
 
-    // Step 4: Premium Service + Trial Store (3 gün deneme)
+    // Step 4: Premium Service (includes Trial Store initialization)
+    // CRITICAL: premiumService.initialize() already calls useTrialStore.getState().initializeTrial()
+    // Don't call it twice to avoid race conditions
     await initWithTimeout(() => premiumService.initialize(), 'PremiumService');
-    await initWithTimeout(() => useTrialStore.getState().initializeTrial(), 'TrialStore');
 
     // Step 5: Earthquake Service (CRITICAL)
     await initWithTimeout(() => earthquakeService.start(), 'EarthquakeService', 10000);

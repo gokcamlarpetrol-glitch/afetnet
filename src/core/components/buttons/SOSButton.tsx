@@ -18,7 +18,7 @@ export default function SOSButton({ onPress, disabled = false }: SOSButtonProps)
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (disabled) return;
+    if (disabled) return undefined;
 
     const pulse = Animated.loop(
       Animated.sequence([

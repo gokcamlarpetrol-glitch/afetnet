@@ -13,6 +13,9 @@ import { useMessageStore } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('MessageTemplates');
 
 interface MessageTemplate {
   id: string;
@@ -67,7 +70,8 @@ export default function MessageTemplates() {
       try {
         await bleMeshService.start();
       } catch (error) {
-        console.warn('[MessageTemplates] Mesh start error:', error);
+        // ELITE: Use logger for error handling
+        logger.warn('Mesh start error:', error);
       }
       deviceId = bleMeshService.getMyDeviceId() || meshStore.myDeviceId;
     }
@@ -96,6 +100,14 @@ export default function MessageTemplates() {
     try {
       haptics.impactMedium();
 
+      // ELITE: Validate template before sending
+      if (!template || !template.message || !template.id) {
+        logger.error('Invalid template:', template);
+        Alert.alert('Hata', 'Geçersiz mesaj şablonu.');
+        haptics.notificationError();
+        return;
+      }
+
       const meshReady = await ensureMeshReady();
       if (!meshReady) {
         return;
@@ -110,40 +122,69 @@ export default function MessageTemplates() {
         haptics.notificationError();
         return;
       }
-      
-      // Create message content
-      const messageContent = JSON.stringify({
-        type: 'template',
-        templateId: template.id,
-        message: template.message,
-        priority: template.priority,
-        timestamp: Date.now(),
-      });
-      
-      // Send via BLE mesh service (actual broadcast)
-      await bleMeshService.sendMessage(messageContent);
 
-      const timestamp = Date.now();
-      useMessageStore.getState().addMessage({
-        id: `template_${template.id}_${timestamp}`,
-        from: 'me',
-        to: 'broadcast',
-        content: template.message,
-        timestamp,
-        delivered: true,
-        read: true,
-      });
+      // ELITE: Validate message content length
+      if (template.message.length > 500) {
+        logger.error('Message too long:', template.message.length);
+        Alert.alert('Hata', 'Mesaj çok uzun. Maksimum 500 karakter.');
+        haptics.notificationError();
+        return;
+      }
       
-      Alert.alert(
-        'Mesaj Gönderildi',
-        `"${template.title}" mesajı mesh ağına yayınlandı.`,
-        [{ text: 'Tamam' }]
-      );
+      // ELITE: Create message content with proper structure
+      const messageContent = template.message; // Send plain message text, not JSON
       
-      haptics.notificationSuccess();
+      // ELITE: Send via BLE mesh service broadcast
+      try {
+        await bleMeshService.broadcastMessage({
+          content: messageContent,
+          priority: template.priority as 'critical' | 'high' | 'normal',
+          type: 'broadcast',
+        });
+
+        const timestamp = Date.now();
+        const messageId = `template_${template.id}_${timestamp}`;
+        
+        // ELITE: Add message to store for local display
+        useMessageStore.getState().addMessage({
+          id: messageId,
+          from: 'me',
+          to: 'broadcast',
+          content: template.message,
+          timestamp,
+          delivered: true,
+          read: true,
+        });
+
+        // ELITE: Update conversations
+        useMessageStore.getState().updateConversations();
+        
+        logger.info(`Template "${template.title}" sent successfully`);
+        
+        // ELITE: Show success feedback
+        Alert.alert(
+          'Mesaj Gönderildi',
+          `"${template.title}" mesajı mesh ağına yayınlandı.`,
+          [{ text: 'Tamam' }]
+        );
+        
+        haptics.notificationSuccess();
+      } catch (sendError) {
+        logger.error('BLE send error:', sendError);
+        Alert.alert(
+          'Gönderim Hatası',
+          'Mesaj gönderilirken bir hata oluştu. Lütfen Bluetooth\'un açık olduğundan emin olun ve tekrar deneyin.'
+        );
+        haptics.notificationError();
+      }
     } catch (error) {
-      console.error('Template send error:', error);
-      Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
+      // ELITE: Comprehensive error handling
+      logger.error('Template send error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
+      Alert.alert(
+        'Hata',
+        `Mesaj gönderilemedi: ${errorMessage}. Lütfen tekrar deneyin.`
+      );
       haptics.notificationError();
     }
   };
