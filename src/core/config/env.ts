@@ -51,6 +51,9 @@ export const ENV = {
   // Backend API
   API_BASE_URL: getEnvVar('API_BASE_URL', 'https://afetnet-backend.onrender.com'),
   
+  // Backend Worker Secret (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
+  ORG_SECRET: getEnvVar('ORG_SECRET', ''),
+  
   // EEW WebSocket URLs
   EEW_WS_TR_PRIMARY: getEnvVar('EEW_WS_TR_PRIMARY', 'wss://eew.afad.gov.tr/ws'),
   EEW_WS_TR_FALLBACK: getEnvVar('EEW_WS_TR_FALLBACK', 'wss://eew.kandilli.org/ws'),
