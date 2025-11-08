@@ -27,8 +27,9 @@ xcuserdata/
 
 # CocoaPods
 Pods/
-*.xcworkspace
-!default.xcworkspace
+# Note: *.xcworkspace/* is already ignored above, but we need ios/AfetNet.xcworkspace
+# Allow the main workspace file
+!ios/AfetNet.xcworkspace
 
 # Expo
 .expo/
