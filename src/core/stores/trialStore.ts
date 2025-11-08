@@ -149,9 +149,10 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
         startTrialMonitor(applyState);
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error('[TrialStore] Initialize error:', error);
-      }
+      // Use logger instead of console.error for production safety
+      const { createLogger } = require('../utils/logger');
+      const logger = createLogger('TrialStore');
+      logger.error('Initialize error:', error);
       // On error, give user trial
       set({
         trialStartTime: Date.now(),
@@ -220,9 +221,10 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       syncPremiumAccess(false);
       stopTrialMonitor();
     } catch (error) {
-      if (__DEV__) {
-        console.error('[TrialStore] End trial error:', error);
-      }
+      // Use logger instead of console.error for production safety
+      const { createLogger } = require('../utils/logger');
+      const logger = createLogger('TrialStore');
+      logger.error('End trial error:', error);
     }
   },
 }));

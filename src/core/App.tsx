@@ -68,7 +68,13 @@ export default function CoreApp() {
     // MUST await to catch initialization errors
     void initializeApp().catch(async (error) => {
       // CRITICAL: Log initialization failure but don't crash app
-      console.error('❌ CRITICAL: App initialization failed:', error);
+      if (__DEV__) {
+        console.error('❌ CRITICAL: App initialization failed:', error);
+      }
+      // Use production logger for production builds
+      const { createLogger } = require('./utils/logger');
+      const logger = createLogger('App');
+      logger.error('CRITICAL: App initialization failed:', error);
       
       // Report to crashlytics (use dynamic import to prevent circular dependencies)
       try {

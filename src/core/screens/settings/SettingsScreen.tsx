@@ -28,6 +28,9 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SettingItem as SettingItemRow } from '../../components/settings/SettingItem';
 import * as haptics from '../../utils/haptics';
 import { batterySaverService } from '../../services/BatterySaverService';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('SettingsScreen');
 import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 import { ENV } from '../../config/env';
 
@@ -86,7 +89,7 @@ export default function SettingsScreen({ navigation }: any) {
         await aiFeatureToggle.initialize();
         setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
       } catch (error) {
-        console.error('Failed to load AI features state:', error);
+        logger.error('Failed to load AI features state:', error);
       }
     };
     loadAIFeatures();
@@ -563,7 +566,7 @@ export default function SettingsScreen({ navigation }: any) {
           }
           await Linking.openURL(url);
         } catch (error) {
-          console.error('Gizlilik politikası açma hatası:', error);
+          logger.error('Gizlilik politikası açma hatası:', error);
           Alert.alert(
             'Gizlilik Politikası',
             'Gizlilik politikası şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html adresini ziyaret edin.',

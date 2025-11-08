@@ -14,6 +14,9 @@ import { useUserStatusStore } from '../../../stores/userStatusStore';
 import { whistleService } from '../../../services/WhistleService';
 import { flashlightService } from '../../../services/FlashlightService';
 import { batterySaverService } from '../../../services/BatterySaverService';
+import { createLogger } from '../../../utils/logger';
+
+const logger = createLogger('EmergencyButton');
 
 const logDebug = (...args: any[]) => {
   if (__DEV__) {
@@ -62,18 +65,18 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       try {
         batterySaverService.enable();
       } catch (batteryError) {
-        console.error('Battery saver enable failed:', batteryError);
+        logger.error('Battery saver enable failed:', batteryError);
         // Continue - other features still work
       }
-      
+
       // CRITICAL: Auto-start whistle and flashlight with error handling
       handleWhistle().catch((whistleError) => {
-        console.error('Auto-whistle failed:', whistleError);
+        logger.error('Auto-whistle failed:', whistleError);
         // Continue - flashlight may still work
       });
       
       handleFlashlight().catch((flashError) => {
-        console.error('Auto-flashlight failed:', flashError);
+        logger.error('Auto-flashlight failed:', flashError);
         // Continue - whistle may still work
       });
       
@@ -91,10 +94,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     return () => {
       if (status !== 'trapped') {
         if (whistleActive) {
-          whistleService.stop().catch((err) => console.error('Whistle stop failed:', err));
+          whistleService.stop().catch((err) => logger.error('Whistle stop failed:', err));
         }
         if (flashActive) {
-          flashlightService.stop().catch((err) => console.error('Flashlight stop failed:', err));
+          flashlightService.stop().catch((err) => logger.error('Flashlight stop failed:', err));
         }
       }
     };
@@ -171,7 +174,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         logDebug('Düdük başlatıldı');
       }
     } catch (error) {
-      console.error('❌ Whistle operation failed:', error);
+      logger.error('Whistle operation failed:', error);
       Alert.alert(
         'Düdük Hatası',
         'Düdük başlatılamadı. Lütfen ses izinlerini kontrol edin.',
@@ -197,7 +200,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         logDebug('Fener açıldı (SOS Morse)');
       }
     } catch (error) {
-      console.error('❌ Flashlight operation failed:', error);
+      logger.error('Flashlight operation failed:', error);
       Alert.alert(
         'Fener Hatası',
         'Fener başlatılamadı. Lütfen kamera izinlerini kontrol edin.',
@@ -223,7 +226,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       await Linking.openURL('tel:112');
       logDebug('112 arama başlatıldı');
     } catch (error) {
-      console.error('❌ CRITICAL: 112 call failed:', error);
+      logger.error('CRITICAL: 112 call failed:', error);
       
       // CRITICAL: Provide alternative options
       Alert.alert(

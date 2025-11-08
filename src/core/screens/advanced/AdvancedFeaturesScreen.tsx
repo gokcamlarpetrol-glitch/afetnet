@@ -9,6 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import Card from '../../components/Card';
 import * as haptics from '../../utils/haptics';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('AdvancedFeaturesScreen');
 
 interface FeatureCardProps {
   icon: keyof typeof Ionicons.glyphMap;
@@ -125,7 +128,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
                     navigation?.navigate?.(targetScreen);
                   }
                 } catch (error) {
-                  console.error(`Navigation error for ${feature.screen}:`, error);
+                  logger.error(`Navigation error for ${feature.screen}:`, error);
                   // Fallback: Show info about the feature
                   Alert.alert(
                     feature.title,

@@ -24,6 +24,9 @@ import * as Location from 'expo-location';
 import { Alert, Linking } from 'react-native';
 import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('HomeScreen');
 
 export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, error, refresh } = useEarthquakes();
@@ -57,7 +60,7 @@ export default function HomeScreen({ navigation }: any) {
         await aiFeatureToggle.initialize();
         setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
       } catch (error) {
-        console.error('AI feature check error:', error);
+        logger.error('AI feature check error:', error);
         // Hata durumunda da aktif göster
         setAiFeaturesEnabled(true);
       }
@@ -172,16 +175,16 @@ export default function HomeScreen({ navigation }: any) {
               locationStatus = 'low-accuracy';
             } catch (fallbackError) {
               locationStatus = 'failed';
-              console.warn('Location error (all methods failed):', fallbackError);
+              logger.warn('Location error (all methods failed):', fallbackError);
             }
           }
         } else {
           locationStatus = 'denied';
-          console.warn('Location permission denied');
+          logger.warn('Location permission denied');
         }
       } catch (locError) {
         locationStatus = 'error';
-        console.warn('Location error:', locError);
+        logger.warn('Location error:', locError);
         // Continue without location - SOS will still work
       }
 
@@ -202,7 +205,7 @@ export default function HomeScreen({ navigation }: any) {
           sosSent = true;
         } catch (sosError) {
           retryCount++;
-          console.error(`SOS send attempt ${retryCount} failed:`, sosError);
+          logger.error(`SOS send attempt ${retryCount} failed:`, sosError);
           
           if (retryCount < maxRetries) {
             // Wait before retry (exponential backoff)
@@ -210,7 +213,7 @@ export default function HomeScreen({ navigation }: any) {
           } else {
             // All retries failed - still show success to user (signal may have been sent)
             // In emergency, it's better to assume success than panic user
-            console.error('All SOS retry attempts failed');
+            logger.error('All SOS retry attempts failed');
           }
         }
       }
@@ -235,7 +238,7 @@ export default function HomeScreen({ navigation }: any) {
             style: 'destructive',
             onPress: () => {
               Linking.openURL('tel:112').catch((err) => {
-                console.error('112 call failed:', err);
+                logger.error('112 call failed:', err);
                 Alert.alert('Hata', '112 aranırken bir hata oluştu.');
               });
             }
@@ -245,7 +248,7 @@ export default function HomeScreen({ navigation }: any) {
 
       haptics.notificationSuccess();
     } catch (error) {
-      console.error('❌ CRITICAL: SOS send error:', error);
+      logger.error('CRITICAL: SOS send error:', error);
       
       // CRITICAL: Even on error, show user options
       Alert.alert(
@@ -258,7 +261,7 @@ export default function HomeScreen({ navigation }: any) {
             style: 'destructive',
             onPress: () => {
               Linking.openURL('tel:112').catch((err) => {
-                console.error('112 call failed:', err);
+                logger.error('112 call failed:', err);
                 Alert.alert('Hata', '112 aranırken bir hata oluştu.');
               });
             }
