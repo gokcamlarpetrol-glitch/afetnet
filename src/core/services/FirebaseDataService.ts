@@ -941,6 +941,109 @@ class FirebaseDataService {
       return false;
     }
   }
+
+  /**
+   * ELITE: Save felt earthquake report (LastQuake "I felt it" feature)
+   */
+  async saveFeltEarthquakeReport(report: {
+    earthquakeId: string;
+    deviceId: string;
+    timestamp: number;
+    location: { latitude: number; longitude: number };
+    intensity: string;
+    feltDuration: number;
+    effects: string[];
+    comments?: string;
+  }): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveFeltEarthquakeReport');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      // Save report under earthquake ID
+      const reportId = `${report.deviceId}_${report.timestamp}`;
+      const reportRef = doc(db, 'earthquakes', report.earthquakeId, 'felt_reports', reportId);
+      await setDoc(reportRef, {
+        ...report,
+        createdAt: new Date().toISOString(),
+      });
+
+      if (__DEV__) {
+        logger.info(`Felt earthquake report saved: ${report.earthquakeId} - ${report.intensity}`);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save felt earthquake report:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ELITE: Get intensity data for an earthquake (community-based)
+   */
+  async getIntensityData(earthquakeId: string): Promise<{
+    earthquakeId: string;
+    reports: any[];
+    averageIntensity: number;
+    reportCount: number;
+    lastUpdated: number;
+  } | null> {
+    if (!this._isInitialized) {
+      return null;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        return null;
+      }
+
+      const reportsRef = collection(db, 'earthquakes', earthquakeId, 'felt_reports');
+      const snapshot = await getDocs(reportsRef);
+
+      const reports: any[] = [];
+      snapshot.forEach((doc) => {
+        reports.push(doc.data());
+      });
+
+      if (reports.length === 0) {
+        return null;
+      }
+
+      // Calculate average intensity (convert to number)
+      const intensityMap: Record<string, number> = {
+        weak: 1,
+        moderate: 2,
+        strong: 3,
+        very_strong: 4,
+        severe: 5,
+      };
+
+      const totalIntensity = reports.reduce((sum, report) => {
+        return sum + (intensityMap[report.intensity] || 0);
+      }, 0);
+
+      const averageIntensity = totalIntensity / reports.length;
+
+      return {
+        earthquakeId,
+        reports,
+        averageIntensity: Math.round(averageIntensity * 10) / 10,
+        reportCount: reports.length,
+        lastUpdated: Date.now(),
+      };
+    } catch (error) {
+      logger.error('Failed to get intensity data:', error);
+      return null;
+    }
+  }
 }
 
 export const firebaseDataService = new FirebaseDataService();

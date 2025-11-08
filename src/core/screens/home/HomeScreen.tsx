@@ -145,7 +145,6 @@ export default function HomeScreen({ navigation }: any) {
           // Get position with timeout
           const positionPromise = Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.High,
-            maximumAge: 30000, // Accept cached location up to 30 seconds old
           });
           const positionTimeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Position timeout')), 10000)
@@ -164,7 +163,6 @@ export default function HomeScreen({ navigation }: any) {
             try {
               const position = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.Balanced,
-                maximumAge: 60000,
               });
               location = {
                 latitude: position.coords.latitude,

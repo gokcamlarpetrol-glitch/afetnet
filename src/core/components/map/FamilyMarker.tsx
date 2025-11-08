@@ -11,7 +11,7 @@ interface FamilyMarkerProps {
   status: 'safe' | 'need-help' | 'critical' | 'unknown';
 }
 
-export function FamilyMarker({ name, status }: FamilyMarkerProps) {
+export function FamilyMarker({ name, avatarUrl, status }: FamilyMarkerProps) {
   const pulse = useSharedValue(1);
   
   const getStatusColor = () => {
@@ -79,7 +79,7 @@ export function FamilyMarker({ name, status }: FamilyMarkerProps) {
       
       {/* Main marker */}
       <LinearGradient
-        colors={statusColors}
+        colors={statusColors as [string, string]}
         style={styles.marker}
       >
         {avatarUrl ? (

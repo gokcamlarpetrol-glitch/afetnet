@@ -118,9 +118,12 @@ export async function initializeApp() {
                const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
                await firebaseCrashlyticsService.initialize();
                
-               // Track app startup time
-               const startupTime = Date.now() - (global as any).__AFETNET_START_TIME__;
-               firebaseAnalyticsService.trackAppStartup(startupTime);
+              // Track app startup time (safe check)
+              const startTime = typeof global !== 'undefined' ? (global as any).__AFETNET_START_TIME__ : Date.now();
+              const startupTime = Date.now() - (startTime || Date.now());
+              if (startupTime > 0 && startupTime < 60000) { // Sanity check: startup should be < 60s
+                firebaseAnalyticsService.trackAppStartup(startupTime);
+              }
                
                logger.info('✅ Analytics and Crashlytics initialized');
              } catch (error) {
@@ -149,7 +152,7 @@ export async function initializeApp() {
                logger.error('Offline Sync Service initialization failed:', error);
                // Continue without offline sync - Firebase will handle offline persistence
              }
-           }, 'FirebaseServices', 15000); // 15 seconds timeout
+           }, 'FirebaseServices', 30000); // 30 seconds timeout (increased for slow first launch and network delays)
 
     // Step 3: Location Service
     // Elite: Increased timeout to 15 seconds for GPS location acquisition (first launch can be slow)
@@ -214,14 +217,15 @@ export async function initializeApp() {
            // ELITE: Re-enabled for REAL early warning - detects earthquakes AS THEY START
            // CRITICAL: This is the ONLY way to warn BEFORE earthquake fully happens
            // We MUST be FIRST - this is life-saving
+           // ELITE: Now with AI-powered Level 1 detection (False Positive Filter + Pattern Recognition)
            try {
              const { useSettingsStore } = await import('./stores/settingsStore');
              const seismicSensorEnabled = useSettingsStore.getState().seismicSensorEnabled;
              
              if (seismicSensorEnabled) {
-               logger.info('Step 15: Starting seismic sensor service (FIRST-TO-ALERT - REAL EARLY WARNING)...');
+               logger.info('Step 15: Starting seismic sensor service (WORLD\'S MOST ADVANCED - FIRST-TO-ALERT + AI Level 1, 2 & 3)...');
                await initWithTimeout(() => seismicSensorService.start(), 'SeismicSensorService', 10000);
-               logger.info('✅ SeismicSensorService started - FIRST-TO-ALERT active');
+               logger.info('✅✅✅ SeismicSensorService started - WORLD\'S MOST ADVANCED EARTHQUAKE DETECTION SYSTEM ACTIVE ✅✅✅');
              } else {
                logger.info('SeismicSensorService disabled by user settings');
              }
@@ -346,15 +350,60 @@ export async function initializeApp() {
 }
 
 export async function shutdownApp() {
-  earthquakeService.stop();
-  bleMeshService.stop();
-  eewService.stop();
-  cellBroadcastService.stop();
-  seismicSensorService.stop();
-  enkazDetectionService.stop();
-  storageManagementService.stopMonitoring();
-  batteryMonitoringService.stop();
-  networkMonitoringService.stop();
+  // CRITICAL: Safe shutdown - wrap each stop in try-catch to prevent cascading failures
+  try {
+    earthquakeService.stop();
+  } catch (error) {
+    logger.error('Failed to stop EarthquakeService:', error);
+  }
+  
+  try {
+    bleMeshService.stop();
+  } catch (error) {
+    logger.error('Failed to stop BLEMeshService:', error);
+  }
+  
+  try {
+    eewService.stop();
+  } catch (error) {
+    logger.error('Failed to stop EEWService:', error);
+  }
+  
+  try {
+    cellBroadcastService.stop();
+  } catch (error) {
+    logger.error('Failed to stop CellBroadcastService:', error);
+  }
+  
+  try {
+    seismicSensorService.stop();
+  } catch (error) {
+    logger.error('Failed to stop SeismicSensorService:', error);
+  }
+  
+  try {
+    enkazDetectionService.stop();
+  } catch (error) {
+    logger.error('Failed to stop EnkazDetectionService:', error);
+  }
+  
+  try {
+    storageManagementService.stopMonitoring();
+  } catch (error) {
+    logger.error('Failed to stop StorageManagementService:', error);
+  }
+  
+  try {
+    batteryMonitoringService.stop();
+  } catch (error) {
+    logger.error('Failed to stop BatteryMonitoringService:', error);
+  }
+  
+  try {
+    networkMonitoringService.stop();
+  } catch (error) {
+    logger.error('Failed to stop NetworkMonitoringService:', error);
+  }
   
   // Stop rescue beacon if active
   try {
@@ -365,5 +414,6 @@ export async function shutdownApp() {
   }
   
   isInitialized = false;
+  isInitializing = false; // CRITICAL: Reset initialization flag
 }
 

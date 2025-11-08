@@ -9,6 +9,7 @@ import * as Localization from 'expo-localization';
 import { createLogger } from '../utils/logger';
 import { multiChannelAlertService } from './MultiChannelAlertService';
 import { useEEWStore } from '../../eew/store';
+import { etaEstimationService, AlertLevel } from './ETAEstimationService';
 
 const logger = createLogger('EEWService');
 
@@ -39,6 +40,8 @@ class EEWService {
   private maxAttemptsReachedLogged = false; // Track if we've already logged max attempts
   private apiErrorCount = 0; // Track consecutive API errors for exponential backoff
   private lastApiErrorTime = 0; // Track when last API error occurred
+  private lastPolledCount = 0; // Track last polled count to reduce log spam
+  private pollCount = 0; // Track poll count for reduced logging
 
   // WebSocket URLs
   private wsUrls = {
@@ -216,7 +219,7 @@ class EEWService {
             
             if (eewEvent && !this.seenEvents.has(eewEvent.id)) {
               this.seenEvents.add(eewEvent.id);
-              this.notifyCallbacks(eewEvent);
+              void this.notifyCallbacks(eewEvent); // Fire-and-forget async call
             }
           } catch (error) {
             logger.error('Message parse error:', error);
@@ -327,6 +330,7 @@ class EEWService {
 
   private async pollLoop() {
     while (this.polling) {
+      this.pollCount++; // Increment poll count for reduced logging
       const netState = await NetInfo.fetch();
       
       if (netState.isConnected) {
@@ -414,12 +418,14 @@ class EEWService {
               if (event && !this.seenEvents.has(event.id)) {
                 this.seenEvents.add(event.id);
                 // Elite: IMMEDIATE notification - no delay
-                this.notifyCallbacks(event);
+                void this.notifyCallbacks(event); // Fire-and-forget async call
               }
             }
 
-            if (__DEV__ && eventsArray.length > 0) {
+            // ELITE: Reduced log spam - only log every 10th poll or if new events found
+            if (__DEV__ && eventsArray.length > 0 && (eventsArray.length !== this.lastPolledCount || this.pollCount % 10 === 0)) {
               logger.info(`Polled ${eventsArray.length} events from AFAD`);
+              this.lastPolledCount = eventsArray.length;
             }
           } catch (error: any) {
             if (__DEV__) {
@@ -451,7 +457,23 @@ class EEWService {
       });
       // ELITE: ULTRA-FAST polling for FIRST-TO-ALERT
       // CRITICAL: We MUST be first - faster polling = earlier detection
-      const pollInterval = recentCriticalActivity ? 500 : 1000; // 0.5s critical, 1s normal (was 1s/2s)
+      // ELITE: Battery-aware polling interval
+      let pollInterval = recentCriticalActivity ? 500 : 1000; // 0.5s critical, 1s normal (was 1s/2s)
+      
+      // Apply battery multiplier (lazy import to avoid circular dependency)
+      try {
+        const batteryModule = await import('./BatteryMonitoringService');
+        if (batteryModule?.batteryMonitoringService) {
+          const multiplier = batteryModule.batteryMonitoringService.getPollingIntervalMultiplier();
+          pollInterval = Math.round(pollInterval * multiplier);
+          
+          // CRITICAL: Never go below 500ms even when charging (safety limit)
+          pollInterval = Math.max(pollInterval, 500);
+        }
+      } catch {
+        // BatteryMonitoringService not available - use base interval
+      }
+      
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
   }
@@ -466,6 +488,7 @@ class EEWService {
     vibrationPattern: number[];
     sound?: string;
     duration: number;
+    data?: any;
   } {
     if (magnitude >= 7.0) {
       return {
@@ -482,6 +505,7 @@ class EEWService {
         vibrationPattern: [0, 600, 200, 600, 200, 600, 200, 1200, 200, 600, 200, 600],
         sound: 'emergency',
         duration: 0,
+        data: {},
       };
     } else if (magnitude >= 6.0) {
       return {
@@ -498,6 +522,7 @@ class EEWService {
         vibrationPattern: [0, 500, 150, 500, 150, 500, 150, 1000, 150, 500],
         sound: 'emergency',
         duration: 0,
+        data: {},
       };
     } else if (magnitude >= 5.0) {
       return {
@@ -513,6 +538,7 @@ class EEWService {
         vibrationPattern: [0, 400, 100, 400, 100, 400, 100, 800],
         sound: 'default',
         duration: 45,
+        data: {},
       };
     } else if (magnitude >= 4.5) {
       return {
@@ -527,6 +553,7 @@ class EEWService {
         },
         vibrationPattern: [0, 300, 100, 300, 100, 300],
         duration: 30,
+        data: {},
       };
     } else {
       return {
@@ -541,6 +568,7 @@ class EEWService {
         },
         vibrationPattern: [0, 200, 100, 200],
         duration: 20,
+        data: {},
       };
     }
   }
@@ -622,37 +650,132 @@ class EEWService {
     return events;
   }
 
-  private notifyCallbacks(event: EEWEvent) {
-    // Trigger multi-channel alert
-    const priority = event.certainty === 'high' ? 'critical' : 
-                     event.certainty === 'medium' ? 'high' : 'normal';
-    
+  private async notifyCallbacks(event: EEWEvent) {
     const magnitude = event.magnitude || 0;
-    const etaText = event.etaSec ? `Tahmini süre: ${Math.round(event.etaSec)} saniye` : '';
     
-    // Elite: Enhanced EEW alert configuration based on magnitude
+    // ELITE: Calculate ETA (Estimated Time of Arrival) for earthquake waves
+    // This allows us to warn users BEFORE waves reach them (Google AEA style)
+    const epicenter = { latitude: event.latitude, longitude: event.longitude };
+    const eta = await etaEstimationService.calculateETA(epicenter, null);
+    
+    // ELITE: Google AEA style alert levels based on ETA
+    let alertLevel: AlertLevel = AlertLevel.NONE;
+    let alertTitle = '';
+    let alertBody = '';
+    let recommendedAction = '';
+    
+    if (eta) {
+      alertLevel = eta.alertLevel;
+      recommendedAction = eta.recommendedAction;
+      
+      // ELITE: Google AEA style titles based on alert level
+      if (alertLevel === AlertLevel.IMMINENT) {
+        alertTitle = `🚨🚨🚨 HAREKETE GEÇ! 🚨🚨🚨`;
+        alertBody = etaEstimationService.formatETAMessage(eta, magnitude);
+      } else if (alertLevel === AlertLevel.ACTION) {
+        alertTitle = `⚠️ HAREKETE GEÇ`;
+        alertBody = etaEstimationService.formatETAMessage(eta, magnitude);
+      } else if (alertLevel === AlertLevel.CAUTION) {
+        alertTitle = `⚠️ DİKKATLİ OL`;
+        alertBody = etaEstimationService.formatETAMessage(eta, magnitude);
+      } else {
+        // Fallback to magnitude-based alert
+        const eewConfig = this.getEEWAlertConfig(magnitude);
+        alertTitle = eewConfig.title;
+        alertBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`;
+      }
+    } else {
+      // Fallback if ETA calculation fails
+      const eewConfig = this.getEEWAlertConfig(magnitude);
+      alertTitle = eewConfig.title;
+      const etaText = event.etaSec ? `Tahmini süre: ${Math.round(event.etaSec)} saniye` : '';
+      alertBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim();
+    }
+    
+    // ELITE: Determine priority based on alert level, magnitude, and certainty
     const eewConfig = this.getEEWAlertConfig(magnitude);
+    let priority: 'low' | 'normal' | 'high' | 'critical' = eewConfig.priority;
+    
+    if (alertLevel === AlertLevel.IMMINENT || event.certainty === 'high') {
+      priority = 'critical';
+    } else if (alertLevel === AlertLevel.ACTION || event.certainty === 'medium') {
+      priority = 'high';
+    } else if (alertLevel === AlertLevel.CAUTION) {
+      priority = 'high';
+    }
+    
+    // ELITE: Enhanced TTS with ETA and recommended action
+    const ttsText = eta && alertLevel !== AlertLevel.NONE
+      ? `${alertTitle.replace(/🚨|⚠️/g, '').trim()}. ${recommendedAction} ${Math.round(eta.sWaveETA)} saniye içinde ulaşabilir.`
+      : `ERKEN UYARI! ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${event.region || 'Bilinmeyen bölge'}.`;
     
     multiChannelAlertService.sendAlert({
-      title: eewConfig.title,
-      body: `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim(),
-      priority: eewConfig.priority,
-      ttsText: `ERKEN UYARI! ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${event.region || 'Bilinmeyen bölge'}. ${etaText}`.trim(),
-      channels: eewConfig.channels,
-      vibrationPattern: eewConfig.vibrationPattern,
-      sound: eewConfig.sound,
-      duration: eewConfig.duration,
+      title: alertTitle,
+      body: alertBody,
+      priority,
+      ttsText,
+      channels: {
+        ...eewConfig.channels,
+        fullScreenAlert: alertLevel === AlertLevel.IMMINENT || alertLevel === AlertLevel.ACTION || priority === 'critical',
+        alarmSound: alertLevel === AlertLevel.IMMINENT || alertLevel === AlertLevel.ACTION || priority === 'critical',
+      },
+      vibrationPattern: alertLevel === AlertLevel.IMMINENT || priority === 'critical'
+        ? [0, 200, 100, 200, 100, 200, 100, 500, 100, 500, 100, 500] // Critical pattern
+        : [0, 200, 100, 200, 100, 200], // Normal pattern
+      sound: alertLevel === AlertLevel.IMMINENT || priority === 'critical' ? 'emergency' : eewConfig.sound,
+      duration: alertLevel === AlertLevel.IMMINENT || priority === 'critical' ? 0 : eewConfig.duration,
       data: {
+        ...eewConfig.data,
+        warning: {
+          secondsRemaining: eta ? Math.max(0, Math.round(eta.sWaveETA)) : 30,
+          eta: eta ? {
+            pWaveETA: eta.pWaveETA,
+            sWaveETA: eta.sWaveETA,
+            distance: eta.distance,
+            alertLevel: eta.alertLevel,
+            recommendedAction: eta.recommendedAction,
+          } : undefined,
+        },
         type: 'eew',
         eventId: event.id,
         magnitude,
         location: { lat: event.latitude, lng: event.longitude },
-        etaSec: event.etaSec,
+        etaSec: eta ? eta.sWaveETA : event.etaSec,
         certainty: event.certainty,
+        eta: eta ? {
+          pWaveETA: eta.pWaveETA,
+          sWaveETA: eta.sWaveETA,
+          distance: eta.distance,
+          alertLevel: eta.alertLevel,
+        } : undefined,
+        recommendedAction: recommendedAction || undefined,
       },
     }).catch(error => {
       logger.error('Multi-channel alert error:', error);
     });
+    
+    // CRITICAL: Mark early warning as sent for this earthquake signature
+    // This prevents EarthquakeService from sending duplicate notification
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      // Create signature same as EarthquakeService uses
+      const timeKey = Math.floor(event.issuedAt / (5 * 60 * 1000)); // 5 minute buckets
+      const latKey = Math.round(event.latitude * 100); // ~1km precision
+      const lonKey = Math.round(event.longitude * 100);
+      const signature = `${timeKey}-${latKey}-${lonKey}-${Math.round(magnitude * 10)}`;
+      const earlyWarningKey = `early_warning_${signature}`;
+      await AsyncStorage.setItem(earlyWarningKey, 'true');
+      // Clean up after 1 hour
+      setTimeout(async () => {
+        try {
+          await AsyncStorage.removeItem(earlyWarningKey);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }, 60 * 60 * 1000);
+    } catch {
+      // Ignore storage errors
+    }
 
     // Notify callbacks
     for (const callback of this.callbacks) {

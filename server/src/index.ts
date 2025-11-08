@@ -8,6 +8,7 @@ import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
 import eewRoutes from './routes/eew';
+import earthquakesRoutes from './routes/earthquakes';
 import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
@@ -70,6 +71,7 @@ app.use('/api/iap', strictRateLimiter, iapRoutes); // Strict for IAP
 app.use('/push/register', pushRegistrationRateLimiter); // Very strict for registration
 app.use('/push', apiRateLimiter, pushRoutes); // Moderate for other push endpoints
 app.use('/api/eew', eewRateLimiter, eewRoutes); // Lenient for critical EEW service
+app.use('/api/earthquakes', eewRateLimiter, earthquakesRoutes); // Lenient for critical earthquake data
 app.use('/api', apiRateLimiter); // Moderate for other API endpoints
 
 // Health check with database status (public endpoint, lenient rate limit)

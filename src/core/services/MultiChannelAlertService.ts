@@ -488,28 +488,92 @@ class MultiChannelAlertService {
     return notificationId;
   }
 
+  /**
+   * ELITE: Show premium full-screen alert with countdown
+   * Modern, lüks ve zarif tasarımla premium bildirim
+   */
   private async showFullScreenAlert(options: AlertOptions) {
-    // This will be handled by a React component overlay
-    // For now, we'll use a high-priority notification that shows on lock screen
-    // The actual full-screen modal will be shown by the AlertModal component
-    
-    // Schedule a critical notification that shows on lock screen
-    if (Platform.OS === 'ios') {
-      const Notifications = getNotifications();
-      if (!Notifications) {
-        logger.warn('Notifications module not available; cannot show full-screen alert');
-        return;
+    try {
+      // ELITE: Premium countdown modal göster
+      const { premiumAlertManager } = await import('./PremiumAlertManager');
+      
+      // Extract earthquake data
+      const earthquake = options.data?.earthquake || options.data;
+      const warning = options.data?.warning || options.data;
+      const aiAnalysis = options.data?.aiAnalysis;
+      
+      // Calculate ETA if available
+      let secondsRemaining = 0;
+      let pWaveETA: number | undefined;
+      let sWaveETA: number | undefined;
+      let distance: number | undefined;
+      let alertLevel: 'caution' | 'action' | 'imminent' | undefined;
+      let recommendedAction: string | undefined;
+      
+      if (warning?.secondsRemaining) {
+        secondsRemaining = Math.max(0, Math.floor(warning.secondsRemaining));
       }
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: options.title,
-          body: options.body,
-          sound: 'default',
-          priority: Notifications.AndroidNotificationPriority.MAX,
-          data: { ...options.data, fullScreen: true },
-        },
-        trigger: null,
-      });
+      
+      if (warning?.eta) {
+        pWaveETA = warning.eta.pWaveETA;
+        sWaveETA = warning.eta.sWaveETA;
+        distance = warning.eta.distance;
+        alertLevel = warning.eta.alertLevel as any;
+        recommendedAction = warning.eta.recommendedAction;
+      }
+      
+      // Determine alert level from magnitude if not provided
+      if (!alertLevel && earthquake?.magnitude) {
+        if (secondsRemaining < 10) {
+          alertLevel = 'imminent';
+        } else if (secondsRemaining < 30) {
+          alertLevel = 'action';
+        } else if (secondsRemaining < 60) {
+          alertLevel = 'caution';
+        }
+      }
+      
+      // Get recommended action from AI analysis if available
+      if (!recommendedAction && aiAnalysis?.recommendations?.length > 0) {
+        recommendedAction = aiAnalysis.recommendations[0];
+      }
+      
+      // Create premium countdown data
+      const countdownData: any = {
+        eventId: earthquake?.id || `alert-${Date.now()}`,
+        magnitude: earthquake?.magnitude || 0,
+        location: earthquake?.location || 'Bilinmeyen',
+        region: earthquake?.region || earthquake?.location,
+        source: earthquake?.source || 'AfetNet',
+        secondsRemaining: secondsRemaining || 30, // Default 30 seconds if not provided
+        pWaveETA,
+        sWaveETA,
+        distance,
+        alertLevel,
+        recommendedAction: recommendedAction || 'Güvenli bir yere geçin ve çök-kapan-tutun pozisyonu alın.',
+      };
+      
+      // Show premium countdown modal
+      premiumAlertManager.showCountdown(countdownData);
+      
+      logger.info(`✅ Premium full-screen alert shown: ${countdownData.magnitude.toFixed(1)} magnitude, ${countdownData.secondsRemaining}s countdown`);
+    } catch (error) {
+      logger.error('Failed to show premium full-screen alert:', error);
+      
+      // Fallback: Use standard notification
+      const Notifications = getNotifications();
+      if (Notifications) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: options.title,
+            body: options.body,
+            sound: 'default',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            data: { ...options.data, fullScreen: true },
+          },
+          trigger: null,
+        });
+      }
     }
   }
 

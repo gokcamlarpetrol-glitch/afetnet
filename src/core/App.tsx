@@ -13,6 +13,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
 import SyncStatusIndicator from './components/SyncStatusIndicator';
+import PremiumCountdownModal from './components/PremiumCountdownModal';
 
 // Screens
 import HomeScreen from './screens/home';
@@ -32,6 +33,7 @@ import DrillModeScreen from './screens/drill/DrillModeScreen';
 import PsychologicalSupportScreen from './screens/support/PsychologicalSupportScreen';
 import UserReportsScreen from './screens/reports/UserReportsScreen';
 import VolunteerModuleScreen from './screens/volunteer/VolunteerModuleScreen';
+import RescueTeamScreen from './screens/rescue/RescueTeamScreen';
 import AddFamilyMemberScreen from './screens/family/AddFamilyMemberScreen';
 import HealthProfileScreen from './screens/health/HealthProfileScreen';
 import NewMessageScreen from './screens/messages/NewMessageScreen';
@@ -39,6 +41,7 @@ import ConversationScreen from './screens/messages/ConversationScreen';
 import FamilyGroupChatScreen from './screens/family/FamilyGroupChatScreen';
 import AdvancedSettingsScreen from './screens/settings/AdvancedSettingsScreen';
 import OfflineMapSettingsScreen from './screens/settings/OfflineMapSettingsScreen';
+import EarthquakeSettingsScreen from './screens/settings/EarthquakeSettingsScreen';
 
 // AI Screens
 import RiskScoreScreen from './screens/ai/RiskScoreScreen';
@@ -56,18 +59,20 @@ const Stack = createStackNavigator();
 
 export default function CoreApp() {
   useEffect(() => {
-    // ELITE: Track app startup time
-    (global as any).__AFETNET_START_TIME__ = Date.now();
+    // ELITE: Track app startup time (safe initialization)
+    if (typeof global !== 'undefined') {
+      (global as any).__AFETNET_START_TIME__ = Date.now();
+    }
     
     // CRITICAL: Initialize app with proper error handling
     // MUST await to catch initialization errors
-    initializeApp().catch((error) => {
+    void initializeApp().catch(async (error) => {
       // CRITICAL: Log initialization failure but don't crash app
       console.error('❌ CRITICAL: App initialization failed:', error);
       
-      // Report to crashlytics
+      // Report to crashlytics (use dynamic import to prevent circular dependencies)
       try {
-        const { firebaseCrashlyticsService } = require('./services/FirebaseCrashlyticsService');
+        const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
         firebaseCrashlyticsService.recordError(
           error instanceof Error ? error : new Error(String(error)),
           { source: 'app_initialization' }
@@ -85,6 +90,27 @@ export default function CoreApp() {
     };
   }, []);
 
+  // ELITE: Premium countdown modal state
+  const [countdownVisible, setCountdownVisible] = React.useState(false);
+  const [countdownData, setCountdownData] = React.useState<any>(null);
+  const countdownModalRef = React.useRef<any>(null);
+  
+  // ELITE: Initialize premium alert manager
+  React.useEffect(() => {
+    const { premiumAlertManager } = require('./services/PremiumAlertManager');
+    
+    // Set modal ref and callback
+    premiumAlertManager.setModalRef(countdownModalRef);
+    premiumAlertManager.setOnShowCallback((data: any) => {
+      setCountdownData(data);
+      setCountdownVisible(true);
+    });
+    premiumAlertManager.setOnDismissCallback(() => {
+      setCountdownVisible(false);
+      setCountdownData(null);
+    });
+  }, []);
+
   return (
     <ErrorBoundary>
       <PermissionGuard>
@@ -92,6 +118,18 @@ export default function CoreApp() {
           <SafeAreaProvider>
             <OfflineIndicator />
             <SyncStatusIndicator />
+            
+            {/* ELITE: Premium Countdown Modal */}
+            <PremiumCountdownModal
+              ref={countdownModalRef}
+              visible={countdownVisible}
+              data={countdownData}
+              onDismiss={() => {
+                setCountdownVisible(false);
+                setCountdownData(null);
+              }}
+            />
+            
             <NavigationContainer>
               <Stack.Navigator
                 initialRouteName="MainTabs"
@@ -155,6 +193,13 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="VolunteerModule" 
                 component={VolunteerModuleScreen}
+              />
+              <Stack.Screen 
+                name="RescueTeam" 
+                component={RescueTeamScreen}
+                options={{ 
+                  headerShown: false,
+                }}
               />
               <Stack.Screen 
                 name="AddFamilyMember" 
@@ -226,6 +271,13 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="OfflineMapSettings" 
                 component={OfflineMapSettingsScreen}
+                options={{ 
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen 
+                name="EarthquakeSettings" 
+                component={EarthquakeSettingsScreen}
                 options={{ 
                   headerShown: false,
                 }}

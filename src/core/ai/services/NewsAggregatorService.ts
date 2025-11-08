@@ -138,8 +138,13 @@ class NewsAggregatorService {
     
     try {
       // <item> tag'lerini bul
-      const itemRegex = /<item>(.*?)<\/item>/gs;
-      const matches = xmlText.matchAll(itemRegex);
+      // ELITE: Use compatible regex for all JS engines (including Hermes)
+      const itemRegex = /<item>(.*?)<\/item>/g;
+      const matches: RegExpExecArray[] = [];
+      let match: RegExpExecArray | null;
+      while ((match = itemRegex.exec(xmlText)) !== null) {
+        matches.push(match);
+      }
       
       for (const match of matches) {
         const itemXml = match[1];
@@ -177,6 +182,12 @@ class NewsAggregatorService {
   private async fetchFromSource(source: NewsSource): Promise<NewsArticle[]> {
     try {
       const xmlText = await this.fetchWithTimeout(source.url);
+      
+      // ELITE: Handle empty response (404 or unavailable source)
+      if (!xmlText || xmlText.trim().length === 0) {
+        return [];
+      }
+      
       const parsedArticles = this.parseRSSFeed(xmlText, source);
       const keywords = source.keywords ?? this.DEFAULT_KEYWORDS;
 
@@ -192,11 +203,16 @@ class NewsAggregatorService {
 
       logger.info(`Fetched ${stable.length}/${parsedArticles.length} articles from ${source.name}`);
       return stable;
-    } catch (error) {
-      logger.warn(
-        `News source unavailable (${source.name})`,
-        error instanceof Error ? error.message : error
-      );
+    } catch (error: any) {
+      // ELITE: Silent error handling for unavailable news sources
+      // 404 and network errors are expected - sources may be temporarily unavailable
+      // Only log in dev mode for non-critical errors (not 404)
+      const is404 = error?.message?.includes('404') || error?.status === 404;
+      const isNetworkError = error?.message?.includes('network') || error?.message?.includes('fetch');
+      
+      if (__DEV__ && !is404 && !isNetworkError) {
+        logger.debug(`News source unavailable (${source.name}):`, error?.message || error);
+      }
       return [];
     }
   }
@@ -205,7 +221,9 @@ class NewsAggregatorService {
    * XML tag'inden icerik cikar
    */
   private extractTag(xml: string, tag: string): string {
-    const regex = new RegExp(`<${tag}[^>]*>(.*?)<\/${tag}>`, 's');
+    // ELITE: Use compatible regex for all JS engines (including Hermes)
+    // Remove 's' flag and use [\s\S] instead of . for multiline matching
+    const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`);
     const match = xml.match(regex);
     return match ? match[1].trim() : '';
   }
@@ -214,8 +232,10 @@ class NewsAggregatorService {
    * HTML tag'lerini ve CDATA'yi temizle
    */
   private cleanHTML(text: string): string {
+    // ELITE: Use compatible regex for all JS engines (including Hermes)
+    // Remove 's' flag and use [\s\S] instead of . for multiline matching
     return text
-      .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
       .replace(/<[^>]+>/g, '')
       .replace(/&quot;/g, '"')
       .replace(/&apos;/g, "'")
@@ -563,6 +583,11 @@ class NewsAggregatorService {
       }
 
       if (!response.ok) {
+        // ELITE: Handle HTTP errors gracefully
+        // 404 is expected for some sources - don't throw, return empty
+        if (response.status === 404) {
+          return ''; // Return empty string for 404 - will be handled gracefully
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 

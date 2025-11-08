@@ -86,7 +86,6 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
           // Try high accuracy first
           const positionPromise = LocationModule.getCurrentPositionAsync({
             accuracy: LocationModule.Accuracy.High,
-            maximumAge: 30000,
           });
           const positionTimeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Position timeout')), 10000)
@@ -104,7 +103,6 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
           try {
             const position = await LocationModule.getCurrentPositionAsync({
               accuracy: LocationModule.Accuracy.Balanced,
-              maximumAge: 60000,
             });
             location = {
               latitude: position.coords.latitude,

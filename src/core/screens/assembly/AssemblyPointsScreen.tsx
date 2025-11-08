@@ -185,7 +185,6 @@ export default function AssemblyPointsScreen({ navigation }: any) {
       try {
         const positionPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
-          maximumAge: 60000, // Accept cached location up to 1 minute old
         });
         const positionTimeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Position timeout')), 15000)
@@ -202,7 +201,6 @@ export default function AssemblyPointsScreen({ navigation }: any) {
         try {
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Low,
-            maximumAge: 300000, // Accept cached location up to 5 minutes old
           });
           
           setUserLocation({

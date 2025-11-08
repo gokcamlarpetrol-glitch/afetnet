@@ -25,7 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RenderHTML from 'react-native-render-html';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/core';
 import { colors, spacing, typography } from '../../theme';
 import { NewsArticle } from '../../ai/types/news.types';
 import { newsAggregatorService } from '../../ai/services/NewsAggregatorService';

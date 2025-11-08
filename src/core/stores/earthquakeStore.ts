@@ -13,7 +13,7 @@ export interface Earthquake {
   time: number;
   latitude: number;
   longitude: number;
-  source: 'AFAD' | 'USGS' | 'KANDILLI';
+  source: 'AFAD' | 'USGS' | 'KANDILLI' | 'EMSC' | 'KOERI' | 'SEISMIC_SENSOR';
 }
 
 interface EarthquakeState {

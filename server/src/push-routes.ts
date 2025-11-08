@@ -118,10 +118,24 @@ router.post('/send-warning', async (req, res) => {
   }
   
   try {
-    const title = `🚨 Deprem Uyarısı - M${payload.event?.magnitude?.toFixed(1) || '?'}`;
-    const body = payload.warning?.secondsRemaining 
-      ? `${payload.warning.secondsRemaining} saniye içinde sarsıntı bekleniyor`
-      : `${payload.event?.region || 'Bilinmeyen bölge'} - ${payload.event?.magnitude?.toFixed(1) || '?'} büyüklüğünde deprem`;
+    // ELITE: Use AI analysis message if available (more personalized and informative)
+    let title: string;
+    let body: string;
+    
+    if (payload.aiAnalysis?.userMessage) {
+      // Use AI-generated message (more informative)
+      title = `🚨 Deprem Uyarısı - ${payload.aiAnalysis.riskLevel.toUpperCase()} RİSK`;
+      body = payload.aiAnalysis.userMessage;
+      if (payload.warning?.secondsRemaining) {
+        body = `${payload.warning.secondsRemaining} saniye içinde sarsıntı bekleniyor. ${body}`;
+      }
+    } else {
+      // Fallback to basic message
+      title = `🚨 Deprem Uyarısı - M${payload.event?.magnitude?.toFixed(1) || '?'}`;
+      body = payload.warning?.secondsRemaining 
+        ? `${payload.warning.secondsRemaining} saniye içinde sarsıntı bekleniyor`
+        : `${payload.event?.region || 'Bilinmeyen bölge'} - ${payload.event?.magnitude?.toFixed(1) || '?'} büyüklüğünde deprem`;
+    }
     
     if (deviceType === 'ios') {
       await sendApns(pushToken, title, body);

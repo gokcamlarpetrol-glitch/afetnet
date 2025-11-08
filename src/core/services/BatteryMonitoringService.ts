@@ -15,9 +15,62 @@ class BatteryMonitoringService {
   private checkInterval: NodeJS.Timeout | null = null;
   private lastNotifiedLevel: number | null = null;
   private appStateListener: any = null;
+  private currentBatteryLevel: number = 100; // Default to 100% if unknown
+  private isCharging: boolean = false;
   private readonly LOW_BATTERY_THRESHOLD = 20; // 20%
   private readonly CRITICAL_BATTERY_THRESHOLD = 10; // 10%
   private readonly CHECK_INTERVAL = 60000; // Check every minute
+  
+  /**
+   * ELITE: Get current battery level (0-100)
+   */
+  getBatteryLevel(): number {
+    return this.currentBatteryLevel;
+  }
+  
+  /**
+   * ELITE: Check if device is charging
+   */
+  isDeviceCharging(): boolean {
+    return this.isCharging;
+  }
+  
+  /**
+   * ELITE: Check if battery is low (needs power saving)
+   */
+  isBatteryLow(): boolean {
+    return this.currentBatteryLevel <= this.LOW_BATTERY_THRESHOLD;
+  }
+  
+  /**
+   * ELITE: Check if battery is critical (needs aggressive power saving)
+   */
+  isBatteryCritical(): boolean {
+    return this.currentBatteryLevel <= this.CRITICAL_BATTERY_THRESHOLD;
+  }
+  
+  /**
+   * ELITE: Get recommended polling interval multiplier based on battery level
+   * Returns: 1.0 (normal), 2.0 (low battery - slower), 3.0 (critical - much slower)
+   * CRITICAL: Safe to call even if service not fully initialized
+   */
+  getPollingIntervalMultiplier(): number {
+    // If service not running, return normal multiplier (safe fallback)
+    if (!this.isRunning) {
+      return 1.0;
+    }
+    
+    if (this.isCharging) {
+      return 0.8; // Faster when charging (can afford more frequent checks)
+    }
+    if (this.isBatteryCritical()) {
+      return 3.0; // 3x slower when critical
+    }
+    if (this.isBatteryLow()) {
+      return 2.0; // 2x slower when low
+    }
+    return 1.0; // Normal speed
+  }
 
   async start() {
     if (this.isRunning) return;
@@ -44,10 +97,26 @@ class BatteryMonitoringService {
     try {
       Battery.addBatteryLevelListener(({ batteryLevel }) => {
         const level = Math.round(batteryLevel * 100);
+        this.currentBatteryLevel = level;
         void this.handleBatteryLevel(level);
+      });
+      
+      // Listen to battery state changes (charging status)
+      Battery.addBatteryStateListener(({ batteryState }) => {
+        this.isCharging = batteryState === Battery.BatteryState.CHARGING || 
+                          batteryState === Battery.BatteryState.FULL;
       });
     } catch (error) {
       logger.warn('Battery level listener not available:', error);
+    }
+    
+    // Initial battery state check
+    try {
+      const batteryState = await Battery.getBatteryStateAsync();
+      this.isCharging = batteryState === Battery.BatteryState.CHARGING || 
+                        batteryState === Battery.BatteryState.FULL;
+    } catch {
+      // Ignore errors
     }
   }
 
@@ -72,6 +141,18 @@ class BatteryMonitoringService {
     try {
       const batteryLevel = await Battery.getBatteryLevelAsync();
       const level = Math.round(batteryLevel * 100);
+      this.currentBatteryLevel = level;
+      
+      // Check charging status
+      try {
+        const batteryState = await Battery.getBatteryStateAsync();
+        this.isCharging = batteryState === Battery.BatteryState.CHARGING || 
+                          batteryState === Battery.BatteryState.FULL;
+      } catch {
+        // Ignore charging status errors
+        this.isCharging = false;
+      }
+      
       await this.handleBatteryLevel(level);
     } catch (error) {
       logger.error('Failed to check battery level:', error);

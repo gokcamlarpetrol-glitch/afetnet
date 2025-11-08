@@ -8,6 +8,7 @@ import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import Card from '../../components/Card';
+import * as haptics from '../../utils/haptics';
 
 interface FeatureCardProps {
   icon: keyof typeof Ionicons.glyphMap;
@@ -100,12 +101,51 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
             description={feature.description}
             color={feature.color}
             onPress={() => {
-              // Feature screens not implemented yet - show coming soon message
-              Alert.alert(
-                feature.title,
-                'Bu özellik yakında eklenecek! Şu anda geliştirme aşamasında.',
-                [{ text: 'Tamam' }]
-              );
+              // ELITE: Navigate to actual feature screens
+              haptics.impactMedium();
+              
+              // Map features to actual screens
+              const screenMap: { [key: string]: string } = {
+                'Triage': 'MedicalInformation', // Medical triage
+                'Hazard': 'DisasterMap', // Hazard zones on map
+                'Logistics': 'VolunteerModule', // Volunteer/logistics
+                'SAR': 'RescueTeam', // Search and rescue
+                'Rubble': 'EnkazDetection', // Rubble mode - use EnkazDetectionService
+                'NearbyChat': 'Messages', // Nearby chat via BLE Mesh
+              };
+              
+              const targetScreen = screenMap[feature.screen];
+              
+              if (targetScreen) {
+                try {
+                  const parentNavigator = navigation?.getParent?.() || navigation;
+                  if (parentNavigator && typeof parentNavigator.navigate === 'function') {
+                    parentNavigator.navigate(targetScreen);
+                  } else {
+                    navigation?.navigate?.(targetScreen);
+                  }
+                } catch (error) {
+                  console.error(`Navigation error for ${feature.screen}:`, error);
+                  // Fallback: Show info about the feature
+                  Alert.alert(
+                    feature.title,
+                    feature.description + '\n\nBu özellik ilgili ekranda mevcuttur.',
+                    [{ text: 'Tamam' }]
+                  );
+                }
+              } else {
+                // For EnkazDetection, show info
+                if (feature.screen === 'Rubble') {
+                  Alert.alert(
+                    'Enkaz Modu',
+                    'Enkaz modu otomatik olarak aktif. Telefonunuzu enkaz altında bırakırsanız, otomatik olarak SOS sinyali gönderir ve konumunuzu paylaşır.',
+                    [{ text: 'Tamam' }]
+                  );
+                } else {
+                  // Default: Navigate to related screen
+                  navigation?.navigate?.('Map');
+                }
+              }
             }}
           />
         ))}

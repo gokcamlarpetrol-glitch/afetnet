@@ -8,6 +8,7 @@
 
 import { EarthquakeEvent, WarningETA, earthquakeDetectionService } from './earthquake-detection';
 import { pool } from './database';
+import { centralizedAIAnalysisService, CentralizedAnalysis } from './services/centralizedAIAnalysisService';
 
 export interface WarningTarget {
   userId: string;
@@ -22,6 +23,7 @@ export interface EarthquakeWarning {
   eta: WarningETA;
   target: WarningTarget;
   priority: 'critical' | 'high' | 'normal';
+  aiAnalysis?: CentralizedAnalysis; // ELITE: Centralized AI analysis (single call for all users)
 }
 
 class EarthquakeWarningService {
@@ -66,6 +68,18 @@ class EarthquakeWarningService {
       
       console.log(`🌍 Processing earthquake: M${event.magnitude.toFixed(1)} at ${event.region}`);
       
+      // ELITE: Perform centralized AI analysis (single call for all users)
+      let aiAnalysis: CentralizedAnalysis | null = null;
+      try {
+        aiAnalysis = await centralizedAIAnalysisService.analyzeEarthquake(event);
+        if (aiAnalysis) {
+          console.log(`✅ AI Analysis: ${aiAnalysis.riskLevel} risk, ${aiAnalysis.confidence}% confidence, ${aiAnalysis.aiTokensUsed} tokens used`);
+        }
+      } catch (error) {
+        console.error('❌ AI analysis failed (continuing without AI):', error);
+        // Continue without AI - fallback to basic warnings
+      }
+      
       // Get all registered users
       const users = await this.getRegisteredUsers();
       
@@ -90,6 +104,7 @@ class EarthquakeWarningService {
             eta,
             target: user,
             priority: eta.secondsRemaining < 10 ? 'critical' : 'high',
+            aiAnalysis: aiAnalysis || undefined, // ELITE: Include centralized AI analysis
           };
           
           await this.sendWarning(warning);
@@ -174,7 +189,8 @@ class EarthquakeWarningService {
       `📢 Sending ${warning.priority} warning: ${warning.eta.secondsRemaining}s to ${warning.target.userId}`
     );
     
-    const payload = {
+    // ELITE: Include AI analysis in payload (if available)
+    const payload: any = {
       event: {
         magnitude: warning.event.magnitude,
         region: warning.event.region,
@@ -187,6 +203,16 @@ class EarthquakeWarningService {
         priority: warning.priority,
       },
     };
+    
+    // ELITE: Include AI analysis in payload (from centralized service)
+    if (warning.aiAnalysis) {
+      payload.aiAnalysis = {
+        riskLevel: warning.aiAnalysis.riskLevel,
+        userMessage: warning.aiAnalysis.userMessage,
+        recommendations: warning.aiAnalysis.recommendations,
+        confidence: warning.aiAnalysis.confidence,
+      };
+    }
     
     try {
       // Elite: Use environment variable for base URL or default to localhost for development

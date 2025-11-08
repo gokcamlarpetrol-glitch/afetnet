@@ -65,7 +65,7 @@ class EarthquakeService {
     this.setupAppStateListener();
     
     // Elite: Dynamic polling - faster for critical earthquakes
-    this.startDynamicPolling();
+    void this.startDynamicPolling();
   }
   
   /**
@@ -76,7 +76,7 @@ class EarthquakeService {
   private setupSeismicSensorIntegration() {
     try {
       // Listen to seismic sensor detections
-      seismicSensorService.onDetection((seismicEvent) => {
+      seismicSensorService.onDetection(async (seismicEvent) => {
         logger.info('🔝 Seismic sensor detected earthquake - FIRST-TO-ALERT integration', {
           magnitude: seismicEvent.estimatedMagnitude,
           confidence: seismicEvent.confidence,
@@ -102,27 +102,34 @@ class EarthquakeService {
             source: 'SEISMIC_SENSOR',
           };
           
-          // Add to store (for UI display)
-          const store = useEarthquakeStore.getState();
-          const currentEarthquakes = store.items;
-          
-          // Check if already exists (avoid duplicates)
-          const exists = currentEarthquakes.find(eq => eq.id === earthquake.id);
-          if (!exists) {
-            const updated = [earthquake, ...currentEarthquakes].slice(0, 100); // Keep latest 100
-            store.setItems(updated);
-            logger.info('✅ Seismic detection added to earthquake store');
+          // Add to store (for UI display) - safe access
+          const store = useEarthquakeStore?.getState?.();
+          if (store) {
+            const currentEarthquakes = store.items || [];
+            
+            // Check if already exists (avoid duplicates)
+            const exists = currentEarthquakes.find(eq => eq.id === earthquake.id);
+            if (!exists) {
+              const updated = [earthquake, ...currentEarthquakes].slice(0, 100); // Keep latest 100
+              store.setItems(updated);
+              logger.info('✅ Seismic detection added to earthquake store');
+            }
+          } else {
+            logger.warn('⚠️ EarthquakeStore not available for seismic detection');
           }
           
           // CRITICAL: Mark as first-to-alert in Firebase
           // This helps backend verify and send to other users
           try {
-            const { firebaseDataService } = require('./FirebaseDataService');
+            const { firebaseDataService } = await import('./FirebaseDataService');
             if (firebaseDataService.isInitialized) {
+              // CRITICAL: Save with additional metadata (firstToAlert, confidence)
+              // These are not part of Earthquake type but are stored in Firebase
               firebaseDataService.saveEarthquake({
                 ...earthquake,
+                // @ts-ignore - Additional metadata for Firebase (not part of Earthquake type)
                 firstToAlert: true,
-                source: 'SEISMIC_SENSOR',
+                // @ts-ignore
                 confidence: seismicEvent.confidence,
               }).catch((error: any) => {
                 logger.error('Failed to save seismic detection to Firebase:', error);
@@ -142,9 +149,9 @@ class EarthquakeService {
   }
 
   /**
-   * Elite: Dynamic polling that adjusts based on recent earthquake activity
+   * ELITE: Dynamic polling that adjusts based on recent earthquake activity and battery level
    */
-  private startDynamicPolling() {
+  private async startDynamicPolling() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
     }
@@ -153,8 +160,24 @@ class EarthquakeService {
     const timeSinceCritical = Date.now() - this.lastCriticalEarthquakeTime;
     const isCriticalPeriod = timeSinceCritical < 10 * 60 * 1000; // 10 minutes
 
-    // Use faster polling during critical periods
-    this.currentPollInterval = isCriticalPeriod ? CRITICAL_POLL_INTERVAL : POLL_INTERVAL;
+    // Base polling interval based on critical period
+    let baseInterval = isCriticalPeriod ? CRITICAL_POLL_INTERVAL : POLL_INTERVAL;
+    
+    // ELITE: Apply battery-aware multiplier (lazy import to avoid circular dependency)
+    try {
+      const batteryModule = await import('./BatteryMonitoringService');
+      if (batteryModule?.batteryMonitoringService) {
+        const multiplier = batteryModule.batteryMonitoringService.getPollingIntervalMultiplier();
+        baseInterval = Math.round(baseInterval * multiplier);
+        
+        // CRITICAL: Never go below 1 second even when charging (safety limit for critical earthquakes)
+        baseInterval = Math.max(baseInterval, isCriticalPeriod ? 1000 : 2000);
+      }
+    } catch {
+      // BatteryMonitoringService not available - use base interval
+    }
+    
+    this.currentPollInterval = baseInterval;
 
     this.intervalId = setInterval(() => {
       // CRITICAL: Always handle errors - never use void for critical operations
@@ -162,8 +185,8 @@ class EarthquakeService {
         logger.error('❌ CRITICAL: Earthquake fetch failed:', error);
         // CRITICAL: Even on error, continue polling - we MUST keep trying
       });
-      // Re-evaluate polling interval
-      this.startDynamicPolling();
+      // Re-evaluate polling interval (check battery changes) - fire and forget
+      void this.startDynamicPolling();
     }, this.currentPollInterval);
 
     if (__DEV__) {
@@ -221,7 +244,14 @@ class EarthquakeService {
     }
 
     this.isFetching = true;
-    const store = useEarthquakeStore.getState();
+    // CRITICAL: Safe store access - check if store exists
+    const store = useEarthquakeStore?.getState?.();
+    if (!store) {
+      logger.error('❌ CRITICAL: EarthquakeStore not available');
+      this.isFetching = false; // CRITICAL: Reset flag before returning
+      return;
+    }
+    
     store.setLoading(true);
     store.setError(null); // Clear previous errors
 
@@ -231,17 +261,45 @@ class EarthquakeService {
       });
       let earthquakes: Earthquake[] = [];
 
+      // ELITE: MULTI-SOURCE VERIFICATION - 6 Kaynak Kontrolü
+      // Hayat kurtarmak için en doğru ve en hızlı bilgiyi kullanıcılara veriyoruz
+
       // 1. AFAD (Turkey - Primary source)
       const afadData = await this.fetchFromAFAD();
       if (afadData.length > 0) {
         earthquakes.push(...afadData);
       }
 
-      // 2. USGS - DISABLED for Turkey-only mode
-      // Will be re-enabled for global earthquake view
+      // 2. USGS - ACTIVE (Global earthquakes - ücretsiz API, maliyet yok)
+      // Türkiye çevresindeki depremler için de önemli (Yunanistan, İran, vb.)
+      try {
+        const usgsData = await this.fetchFromUSGS();
+        if (usgsData.length > 0) {
+          // Filter for Turkey region (25-45°N, 25-45°E) or nearby
+          const turkeyRegionData = usgsData.filter(eq => 
+            eq.latitude >= 25 && eq.latitude <= 45 && 
+            eq.longitude >= 25 && eq.longitude <= 45
+          );
+          if (turkeyRegionData.length > 0) {
+            earthquakes.push(...turkeyRegionData);
+          }
+        }
+      } catch (error) {
+        logger.warn('USGS fetch failed (non-critical):', error);
+        // Continue without USGS - other sources will handle it
+      }
       
-      // 3. Kandilli - DISABLED (HTTP endpoint doesn't work in React Native)
-      // Will be re-enabled when we have a proper API or proxy
+      // 3. Backend Sources (EMSC + KOERI) - Backend'den al
+      // Backend zaten EMSC ve KOERI'yi çekiyor, frontend'e entegre et
+      try {
+        const backendData = await this.fetchFromBackend();
+        if (backendData.length > 0) {
+          earthquakes.push(...backendData);
+        }
+      } catch (error) {
+        logger.warn('Backend sources fetch failed (non-critical):', error);
+        // Continue without backend sources - other sources will handle it
+      }
 
       // Deduplicate based on similar location and time (within 5 minutes and 10km)
       const uniqueEarthquakes = this.deduplicateEarthquakes(earthquakes);
@@ -250,47 +308,153 @@ class EarthquakeService {
       uniqueEarthquakes.sort((a, b) => b.time - a.time);
 
       if (uniqueEarthquakes.length > 0) {
-        // CRITICAL FIX: Use API fetch time instead of earthquake time for detection
-        // This ensures we catch earthquakes even if AFAD API has delay
+        // CRITICAL FIX: Use API fetch time for detection, NOT earthquake time
+        // AFAD API sometimes delays by 30-60 minutes, so we need to track by API fetch time
         const now = Date.now();
         const lastCheckedEq = await AsyncStorage.getItem('last_checked_earthquake');
         const lastCheckedTime = await AsyncStorage.getItem('last_checked_earthquake_time');
         const lastCheckedTimestamp = lastCheckedTime ? parseInt(lastCheckedTime, 10) : 0;
         
-        // CRITICAL: Check earthquakes that happened in the last 15 minutes OR are newer than last check
-        // This catches delayed API responses (AFAD sometimes delays by 5-10 minutes)
-        const RECENT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes window
+        // CRITICAL: Track seen earthquakes by unique signature (time + location + magnitude)
+        // AFAD API returns different IDs for the same earthquake on each fetch, so we use a stable signature
+        const seenEarthquakesKey = 'seen_earthquake_signatures';
+        const seenSignaturesJson = await AsyncStorage.getItem(seenEarthquakesKey);
+        const seenSignatures = seenSignaturesJson ? new Set<string>(JSON.parse(seenSignaturesJson)) : new Set<string>();
+        
+        // Helper function to create unique signature for an earthquake (same as deduplicateEarthquakes)
+        const createEarthquakeSignature = (eq: Earthquake): string => {
+          const timeKey = Math.floor(eq.time / (5 * 60 * 1000)); // 5 minute buckets
+          const latKey = Math.round(eq.latitude * 100); // ~1km precision
+          const lonKey = Math.round(eq.longitude * 100);
+          return `${timeKey}-${latKey}-${lonKey}-${Math.round(eq.magnitude * 10)}`;
+        };
+        
+        // CRITICAL: Accept earthquakes that:
+        // 1. Have not been seen before (by signature) - PRIMARY CHECK
+        // 2. Were fetched AFTER our last API fetch time (catches delayed API responses)
+        // 3. OR happened in the last 2 hours (safety net for very delayed responses, but only for first-time detection)
+        const RECENT_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours window
         const recentThreshold = now - RECENT_WINDOW_MS;
         
-        // Find all NEW earthquakes (not seen before AND either recent OR newer than last check)
+        // ELITE: MULTI-SOURCE VERIFICATION - 6 Kaynak Doğrulama
+        // Hayat kurtarmak için en doğru bilgiyi kullanıcılara veriyoruz
+        // Multi-source verification için tüm kaynakları topla
+        
+        // Find all NEW earthquakes (not seen before)
         const newEarthquakes = uniqueEarthquakes.filter(eq => {
-          // Skip if same ID as last checked
-          if (eq.id === lastCheckedEq) return false;
+          // CRITICAL: PRIMARY CHECK - Skip if already seen (by signature, not ID)
+          const signature = createEarthquakeSignature(eq);
+          if (seenSignatures.has(signature)) {
+            // ELITE: Silent skip - don't spam logs for already notified earthquakes
+            // Only log in dev mode if magnitude is significant (> 4.0)
+            if (__DEV__ && eq.magnitude > 4.0) {
+              logger.debug(`⏭️ Deprem zaten bildirildi (atlandı): ${eq.id} - ${eq.magnitude} - ${eq.location}`);
+            }
+            return false; // Already notified - skip
+          }
           
-          // CRITICAL: Accept if earthquake happened in last 15 minutes (catches delayed API responses)
-          // OR if earthquake time is newer than last check timestamp
+          // CRITICAL: Only accept if:
+          // 1. This is our first fetch (lastCheckedTimestamp === 0) - allow all recent earthquakes
+          // 2. OR earthquake happened in last 2 hours AND we haven't seen it before (catches delayed API responses)
+          const isFirstFetch = lastCheckedTimestamp === 0;
           const isRecent = eq.time > recentThreshold;
-          const isNewerThanLastCheck = eq.time > lastCheckedTimestamp;
           
-          return isRecent || isNewerThanLastCheck;
+          // Only accept if first fetch OR (recent AND not seen before)
+          const shouldNotify = isFirstFetch || isRecent;
+          
+          // ELITE: Silent skip - don't spam logs for old earthquakes
+          // Only log in dev mode if magnitude is significant (> 4.0)
+          if (!shouldNotify && __DEV__ && eq.magnitude > 4.0) {
+            logger.debug(`⏭️ Deprem çok eski (atlandı): ${eq.id} - ${eq.magnitude} - ${eq.location} (${Math.round((now - eq.time) / 1000 / 60)} dakika önce)`);
+          }
+          
+          return shouldNotify;
         });
+        
+        // Update seen signatures (keep last 2000 to prevent memory issues)
+        newEarthquakes.forEach(eq => {
+          const signature = createEarthquakeSignature(eq);
+          seenSignatures.add(signature);
+        });
+        const seenSignaturesArray = Array.from(seenSignatures).slice(-2000);
+        await AsyncStorage.setItem(seenEarthquakesKey, JSON.stringify(seenSignaturesArray));
         
         // Process all new earthquakes IMMEDIATELY
         for (const eq of newEarthquakes) {
+          // ELITE: Check user settings for notification filters
+          const { useSettingsStore } = await import('../stores/settingsStore');
+          const settings = useSettingsStore.getState();
+          
+          // Check magnitude threshold
+          if (eq.magnitude < settings.minMagnitudeForNotification) {
+            if (__DEV__) {
+              logger.debug(`⏭️ Deprem minimum büyüklük eşiğinin altında (${eq.magnitude.toFixed(1)} < ${settings.minMagnitudeForNotification.toFixed(1)}): ${eq.location}`);
+            }
+            continue; // Skip notification - below user's minimum threshold
+          }
+          
+          // Check distance threshold (if user location is available)
+          if (settings.maxDistanceForNotification > 0) {
+            try {
+              const { calculateDistance } = await import('../utils/mapUtils');
+              const { useUserStatusStore } = await import('../stores/userStatusStore');
+              const userStatus = useUserStatusStore.getState();
+              
+              if (userStatus.location) {
+                const distance = calculateDistance(
+                  userStatus.location.latitude,
+                  userStatus.location.longitude,
+                  eq.latitude,
+                  eq.longitude
+                );
+                
+                if (distance > settings.maxDistanceForNotification) {
+                  if (__DEV__) {
+                    logger.debug(`⏭️ Deprem maksimum mesafe eşiğinin dışında (${distance.toFixed(0)}km > ${settings.maxDistanceForNotification}km): ${eq.location}`);
+                  }
+                  continue; // Skip notification - outside user's distance threshold
+                }
+              }
+            } catch (error) {
+              // If distance calculation fails, continue with notification (better safe than sorry)
+              logger.warn('Distance calculation failed, continuing with notification:', error);
+            }
+          }
+          
+          // Check source selection
+          const sourceEnabled = 
+            (eq.source === 'AFAD' && settings.sourceAFAD) ||
+            (eq.source === 'USGS' && settings.sourceUSGS) ||
+            (eq.source === 'EMSC' && settings.sourceEMSC) ||
+            (eq.source === 'KOERI' && settings.sourceKOERI) ||
+            (eq.source === 'SEISMIC_SENSOR' && settings.sourceCommunity);
+          
+          if (!sourceEnabled) {
+            if (__DEV__) {
+              logger.debug(`⏭️ Deprem kaynağı kullanıcı tarafından devre dışı bırakılmış (${eq.source}): ${eq.location}`);
+            }
+            continue; // Skip notification - source disabled by user
+          }
+          
           const detectionDelay = Math.round((Date.now() - eq.time) / 1000);
+          const apiDelay = lastCheckedTimestamp > 0 ? Math.round((now - lastCheckedTimestamp) / 1000) : 0;
+          
           logger.info('🔝 Yeni deprem tespit edildi', {
             location: eq.location,
             magnitude: eq.magnitude,
             time: new Date(eq.time).toLocaleString('tr-TR'),
             secondsAgo: detectionDelay,
             detectionDelaySeconds: detectionDelay,
+            apiDelaySeconds: apiDelay,
           });
           
-          // CRITICAL: Log if detection delay is significant (> 2 minutes)
-          if (detectionDelay > 120) {
-            logger.warn(`⚠️ CRITICAL: Deprem bildirimi ${detectionDelay} saniye gecikmeyle geldi!`, {
+          // CRITICAL: Only warn if API delay is significant (> 5 minutes)
+          // This indicates AFAD API is slow, not our detection
+          if (apiDelay > 300 && detectionDelay > 300) {
+            logger.warn(`⚠️ AFAD API gecikmesi: ${Math.round(apiDelay / 60)} dakika (deprem ${Math.round(detectionDelay / 60)} dakika önce olmuş)`, {
               earthquakeTime: new Date(eq.time).toISOString(),
               detectionTime: new Date().toISOString(),
+              apiDelayMinutes: Math.round(apiDelay / 60),
               delayMinutes: Math.round(detectionDelay / 60),
             });
           }
@@ -298,14 +462,29 @@ class EarthquakeService {
           // Track critical earthquakes for dynamic polling
           if (eq.magnitude >= 6.0) {
             this.lastCriticalEarthquakeTime = Date.now();
-            this.startDynamicPolling(); // Switch to faster polling
+            void this.startDynamicPolling(); // Switch to faster polling
           }
           
-          // CRITICAL: INSTANT notification for ALL earthquakes - MUST NOT FAIL
+          // CRITICAL: Check if early warning was already sent by SeismicSensorService or EEWService
+          // If early warning was sent, this is just a confirmation (AFAD API data comes AFTER earthquake)
+          // We should still notify but with lower priority/less aggressive alert
+          const earlyWarningKey = `early_warning_${createEarthquakeSignature(eq)}`;
+          const earlyWarningSent = await AsyncStorage.getItem(earlyWarningKey);
+          const wasEarlyWarning = earlyWarningSent === 'true';
+          
+          if (wasEarlyWarning) {
+            // Early warning was already sent - this is just confirmation
+            // Log but don't send aggressive notification (user already got early warning)
+            logger.info(`✅ Erken uyarı zaten gönderilmişti - AFAD onayı: ${eq.magnitude.toFixed(1)} - ${eq.location}`);
+            // Still update store for data consistency
+            continue; // Skip notification - user already got early warning
+          }
+          
+          // CRITICAL: INSTANT notification for earthquakes WITHOUT early warning
           // This is life-saving - wrap in try-catch to ensure it always attempts
           const notificationStartTime = Date.now();
           try {
-            await this.sendInstantEarthquakeNotification(eq);
+            await this.sendInstantEarthquakeNotification(eq, settings);
             const notificationDelay = Date.now() - notificationStartTime;
             
             // ELITE: Track notification performance
@@ -336,6 +515,75 @@ class EarthquakeService {
             }
           }
           
+          // ELITE: MULTI-SOURCE VERIFICATION - 6 Kaynak Doğrulama
+          // Hayat kurtarmak için en doğru bilgiyi kullanıcılara veriyoruz
+          let verificationResult: any = null;
+          if (eq.magnitude >= 4.0) {
+            try {
+              const multiSourceModule = await import('./MultiSourceVerificationService');
+              const multiSourceVerificationService = multiSourceModule.multiSourceVerificationService;
+              
+              // Tüm kaynaklardan veri topla (uniqueEarthquakes listesinden)
+              // Define VerificationSource type inline to match the interface
+              type VerificationSource = {
+                source: 'sensor' | 'afad' | 'usgs' | 'kandilli' | 'emsc' | 'community';
+                magnitude: number;
+                location: { latitude: number; longitude: number };
+                timestamp: number;
+                confidence: number;
+              };
+              const verificationSources: VerificationSource[] = [];
+              
+              // 1. Mevcut deprem (AFAD, USGS, EMSC, KOERI)
+              verificationSources.push({
+                source: eq.source.toLowerCase() as any,
+                magnitude: eq.magnitude,
+                location: { latitude: eq.latitude, longitude: eq.longitude },
+                timestamp: eq.time,
+                confidence: eq.source === 'USGS' ? 85 : eq.source === 'AFAD' ? 80 : 80,
+              });
+              
+              // 2. Aynı deprem için diğer kaynakları bul
+              const matchingSources = uniqueEarthquakes.filter(e => 
+                e.id !== eq.id && // Farklı kaynak
+                Math.abs(e.latitude - eq.latitude) < 0.5 && // 50km içinde
+                Math.abs(e.longitude - eq.longitude) < 0.5 &&
+                Math.abs(e.time - eq.time) < 5 * 60 * 1000 // 5 dakika içinde
+              );
+              
+              for (const match of matchingSources) {
+                verificationSources.push({
+                  source: match.source.toLowerCase() as any,
+                  magnitude: match.magnitude,
+                  location: { latitude: match.latitude, longitude: match.longitude },
+                  timestamp: match.time,
+                  confidence: match.source === 'USGS' ? 85 : match.source === 'AFAD' ? 80 : 80,
+                });
+              }
+              
+              // Multi-source verification yap (minimum 2 kaynak gerekli)
+              if (verificationSources.length >= 2) {
+                verificationResult = multiSourceVerificationService.verify(verificationSources);
+                
+                if (verificationResult.verified && verificationResult.confidence > 75) {
+                  logger.info(`✅ MULTI-SOURCE VERIFIED: ${verificationResult.sourceCount} kaynak onayladı - ${verificationResult.confidence.toFixed(1)}% güven, ${verificationResult.consensusMagnitude.toFixed(1)} büyüklük`);
+                  
+                  // Verified magnitude ve location kullan (daha doğru)
+                  eq.magnitude = verificationResult.consensusMagnitude;
+                  eq.latitude = verificationResult.consensusLocation.latitude;
+                  eq.longitude = verificationResult.consensusLocation.longitude;
+                } else {
+                  logger.debug(`ℹ️ MULTI-SOURCE VERIFICATION: ${verificationSources.length} kaynak bulundu, ${verificationResult.confidence.toFixed(1)}% güven (minimum 75% gerekli)`);
+                }
+              } else {
+                logger.debug(`ℹ️ MULTI-SOURCE VERIFICATION SKIPPED: Sadece ${verificationSources.length} kaynak bulundu (minimum 2 gerekli)`);
+              }
+            } catch (error) {
+              logger.error('Multi-source verification error (non-critical):', error);
+              // Continue without verification - single source is still valid
+            }
+          }
+          
           // CRITICAL: Trigger auto check-in for significant earthquakes (magnitude >= 4.0)
           if (eq.magnitude >= 4.0) {
             try {
@@ -350,104 +598,100 @@ class EarthquakeService {
             }
           }
           
-          // Process AI analysis for significant earthquakes (>= 4.0)
+          // ELITE COST OPTIMIZATION: Use backend centralized AI analysis
+          // Backend performs single AI analysis and broadcasts to all users
+          // Frontend only checks Firebase for shared analysis (no AI calls)
           if (eq.magnitude >= 4.0) {
-            // 🤖 AI ANALIZI: Deprem analizi ve doğrulama (Paylaşılan Analiz)
+            // 🤖 AI ANALIZI: Backend'den gelen merkezi analizi kullan (maliyet optimizasyonu)
             try {
-              const { earthquakeAnalysisService } = await import('../ai/services/EarthquakeAnalysisService');
               const { firebaseDataService } = await import('./FirebaseDataService');
               
-              // Önce Firebase'den paylaşılan analizi kontrol et
+              // Backend'den gelen paylaşılan analizi kontrol et (merkezi AI analizi)
+              // Backend tek bir AI çağrısı yapıp tüm kullanıcılara push notification gönderiyor
+              // Frontend sadece Firebase'den analizi okuyor (AI maliyeti yok)
               let analysis = await firebaseDataService.getEarthquakeAnalysis(eq.id);
               
               if (!analysis) {
-                // Analiz yoksa yeni analiz yap
-                logger.info(`📊 Yeni deprem analizi yapılıyor: ${eq.id}`);
+                // ELITE: Backend henüz analiz yapmadıysa, backend'e analiz isteği gönder
+                // Ancak frontend'de AI çağrısı yapmıyoruz (maliyet optimizasyonu)
+                logger.info(`📊 Backend merkezi AI analizi bekleniyor: ${eq.id}`);
                 
-                // Kullanıcı konumunu al
-                let userLocation: { latitude: number; longitude: number } | undefined;
-                try {
-                  const Location = await import('expo-location');
-                  const { status } = await Location.requestForegroundPermissionsAsync();
-                  if (status === 'granted') {
-                    const position = await Location.getCurrentPositionAsync({
-                      accuracy: Location.Accuracy.Balanced,
-                    });
-                    userLocation = {
-                      latitude: position.coords.latitude,
-                      longitude: position.coords.longitude,
-                    };
-                  }
-                } catch (locError) {
-                  logger.warn('Could not get user location for analysis:', locError);
-                }
-
-                // AI analizi yap
-                const newAnalysis = await earthquakeAnalysisService.analyzeEarthquake(
-                  eq,
-                  userLocation
-                );
-
-                if (newAnalysis) {
-                  logger.info(`✅ AI Analizi tamamlandı: Risk=${newAnalysis.riskLevel}, Doğrulandı=${newAnalysis.verified}, Güven=${newAnalysis.confidence}%`);
-                  
-                  // Firebase'e kaydet (tüm kullanıcılar için paylaş)
-                  await firebaseDataService.saveEarthquakeAnalysis(eq.id, {
-                    ...newAnalysis,
-                    earthquakeId: eq.id,
-                    magnitude: eq.magnitude,
-                    location: eq.location,
-                    timestamp: eq.time,
-                  });
-                  
-                  analysis = {
-                    riskLevel: newAnalysis.riskLevel,
-                    userMessage: newAnalysis.userMessage,
-                    recommendations: newAnalysis.recommendations,
-                    verified: newAnalysis.verified,
-                    sources: newAnalysis.sources,
-                    confidence: newAnalysis.confidence,
-                    createdAt: new Date().toISOString(),
-                  };
-                } else {
-                  logger.warn('⚠️ AI analizi yapılamadı veya deprem doğrulanamadı');
-                }
+                // Backend push notification'dan gelen analizi bekliyoruz
+                // Kullanıcı push notification aldığında analiz Firebase'e kaydedilir
+                // Bu sayede her kullanıcı için ayrı AI çağrısı yapılmıyor
+                
+                // Fallback: Eğer backend analiz yapmadıysa, basit bir analiz göster
+                // (AI kullanmadan, sadece magnitude'a göre)
+                analysis = {
+                  riskLevel: eq.magnitude >= 7.0 ? 'critical' : eq.magnitude >= 6.0 ? 'high' : eq.magnitude >= 5.0 ? 'medium' : 'low',
+                  userMessage: `${eq.magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`,
+                  recommendations: [
+                    'Sakin kalın ve güvenli bir yere geçin',
+                    'Acil durum çantanızı hazır tutun',
+                    'Aile üyelerinizle iletişimde kalın',
+                  ],
+                  verified: false,
+                  sources: [eq.source],
+                  confidence: 70,
+                  createdAt: new Date().toISOString(),
+                };
               } else {
                 logger.info(`✅ Paylaşılan analiz kullanılıyor: ${eq.id} (${analysis.createdAt})`);
               }
 
               if (analysis) {
                 // Elite: AI analizi ile ENHANCED bildirim gönder
-                const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-                const alertConfig = this.getAlertConfigForMagnitude(eq.magnitude);
+              const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+                const alertConfig = this.getAlertConfigForMagnitude(eq.magnitude, settings);
                 
-                await multiChannelAlertService.sendAlert({
+                // ELITE: Use user settings for notification channels
+                const channels = {
+                  pushNotification: settings.notificationPush && alertConfig.channels.pushNotification,
+                  fullScreenAlert: settings.notificationFullScreen && alertConfig.channels.fullScreenAlert,
+                  alarmSound: settings.notificationSound && alertConfig.channels.alarmSound,
+                  vibration: settings.notificationVibration && alertConfig.channels.vibration,
+                  tts: settings.notificationTTS && alertConfig.channels.tts,
+                };
+                
+                // Determine priority based on user settings
+                let priority = alertConfig.priority;
+                if (eq.magnitude >= settings.criticalMagnitudeThreshold) {
+                  priority = settings.priorityCritical;
+                } else if (eq.magnitude >= 5.0) {
+                  priority = settings.priorityHigh;
+                } else if (eq.magnitude >= 4.0) {
+                  priority = settings.priorityMedium;
+                } else {
+                  priority = settings.priorityLow;
+                }
+                
+              await multiChannelAlertService.sendAlert({
                   title: `${eq.magnitude.toFixed(1)} Deprem${analysis.verified ? ' ✓ Doğrulandı' : ''} - ${alertConfig.titleSuffix}`,
-                  body: analysis.userMessage,
-                  priority: alertConfig.priority,
-                  channels: alertConfig.channels,
-                  vibrationPattern: alertConfig.vibrationPattern,
-                  sound: alertConfig.sound,
-                  ttsText: `Dikkat! ${eq.magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${eq.location}. ${analysis.userMessage}`,
+                body: analysis.userMessage,
+                  priority: priority as any,
+                  channels: channels as any,
+                  vibrationPattern: settings.notificationVibration ? alertConfig.vibrationPattern : undefined,
+                  sound: settings.notificationSound ? alertConfig.sound : undefined,
+                  ttsText: settings.notificationTTS ? `Dikkat! ${eq.magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${eq.location}. ${analysis.userMessage}` : undefined,
                   duration: alertConfig.duration,
-                  data: {
+                data: {
                     earthquake: eq,
-                    analysis,
-                    verified: analysis.verified,
-                    sources: analysis.sources,
-                  },
-                });
-              }
-            } catch (aiError) {
-              logger.error('AI analysis failed:', aiError);
-              // AI hatası durumunda normal akışa devam et
+                  analysis,
+                  verified: analysis.verified,
+                  sources: analysis.sources,
+                },
+              });
             }
-            
-            // Save to Firebase (for critical earthquakes >= 4.0)
-            try {
-              const { firebaseDataService } = await import('./FirebaseDataService');
-              if (firebaseDataService.isInitialized) {
-                await firebaseDataService.saveEarthquake({
+          } catch (aiError) {
+            logger.error('AI analysis failed:', aiError);
+            // AI hatası durumunda normal akışa devam et
+          }
+          
+          // Save to Firebase (for critical earthquakes >= 4.0)
+          try {
+            const { firebaseDataService } = await import('./FirebaseDataService');
+            if (firebaseDataService.isInitialized) {
+              await firebaseDataService.saveEarthquake({
                   id: eq.id,
                   location: eq.location,
                   magnitude: eq.magnitude,
@@ -455,26 +699,26 @@ class EarthquakeService {
                   time: eq.time,
                   latitude: eq.latitude,
                   longitude: eq.longitude,
-                });
-                
-                // Save alert for current user
-                const { getDeviceId } = await import('../../lib/device');
-                const deviceId = await getDeviceId();
-                if (deviceId) {
+              });
+              
+              // Save alert for current user
+              const { getDeviceId } = await import('../../lib/device');
+              const deviceId = await getDeviceId();
+              if (deviceId) {
                   await firebaseDataService.saveEarthquakeAlert(deviceId, eq.id, {
                     earthquakeId: eq.id,
                     magnitude: eq.magnitude,
                     location: eq.location,
                     timestamp: eq.time,
-                    notified: true,
-                  });
-                }
+                  notified: true,
+                });
               }
-            } catch (error) {
-              logger.error('Failed to save earthquake to Firebase:', error);
             }
-            
-            // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
+          } catch (error) {
+            logger.error('Failed to save earthquake to Firebase:', error);
+          }
+          
+          // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
             // MUST NOT FAIL - This is life-saving functionality
             if (emergencyModeService.shouldTriggerEmergencyMode(eq)) {
               logger.info(`🚨 CRITICAL EARTHQUAKE DETECTED: ${eq.magnitude} - Activating emergency mode`);
@@ -518,35 +762,42 @@ class EarthquakeService {
           logger.info(`✅ Last checked updated: EQ time=${new Date(latestEq.time).toISOString()}, API fetch time=${new Date(now).toISOString()}`);
         }
         
+        // CRITICAL: Safe store access - check if store still exists
+        if (store && typeof store.setItems === 'function') {
         store.setItems(uniqueEarthquakes);
         logger.info(`✅ Store güncellendi`, { count: uniqueEarthquakes.length });
+        }
         this.lastFetchedAt = Date.now();
         await AsyncStorage.setItem(LAST_FETCH_KEY, String(this.lastFetchedAt));
         await this.saveToCache(uniqueEarthquakes);
       } else {
         // Try cache if no new data
         const cached = await this.loadFromCache();
-        if (cached && cached.length > 0) {
+        if (cached && cached.length > 0 && store && typeof store.setItems === 'function') {
           store.setItems(cached);
           const lastFetchValue = await AsyncStorage.getItem(LAST_FETCH_KEY);
           this.lastFetchedAt = lastFetchValue ? Number(lastFetchValue) : this.lastFetchedAt;
-        } else {
+        } else if (store && typeof store.setError === 'function') {
           store.setError('Deprem verisi alınamadı. İnternet bağlantınızı kontrol edin.');
         }
       }
     } catch (error) {
+      logger.error('❌ CRITICAL: Earthquake fetch error:', error);
       // Try cache on error
       const cached = await this.loadFromCache();
-      if (cached && cached.length > 0) {
+      if (cached && cached.length > 0 && store && typeof store.setItems === 'function') {
         store.setItems(cached);
         const lastFetchValue = await AsyncStorage.getItem(LAST_FETCH_KEY);
         this.lastFetchedAt = lastFetchValue ? Number(lastFetchValue) : this.lastFetchedAt;
-      } else {
+      } else if (store && typeof store.setError === 'function') {
         store.setError('Deprem verisi alınamadı. Lütfen tekrar deneyin.');
       }
     } finally {
       this.isFetching = false;
+      // CRITICAL: Safe store access in finally block
+      if (store && typeof store.setLoading === 'function') {
       store.setLoading(false);
+      }
     }
   }
 
@@ -631,42 +882,27 @@ class EarthquakeService {
         throw new Error(`AFAD API error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
       
       // ELITE: Cache successful response (5 minutes TTL)
-      await httpCacheService.cacheResponse(url, data, 5 * 60 * 1000, {
+      await httpCacheService.cacheResponse(url, responseData, 5 * 60 * 1000, {
         'content-type': response.headers.get('content-type') || 'application/json',
       });
 
       clearTimeout(timeoutId);
 
-      // If primary endpoint fails, try fallback
-      if (!response.ok) {
-        console.warn('⚠️ Primary AFAD endpoint failed, trying fallback...');
-        const fallbackController = new AbortController();
-        const fallbackTimeout = setTimeout(() => fallbackController.abort(), 15000);
-        
-        response = await fetch(fallbackUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'AfetNet/1.0',
-          },
-          signal: fallbackController.signal,
-        });
-        
-        clearTimeout(fallbackTimeout);
-        
-        if (!response.ok) {
-          console.error('❌ Both AFAD endpoints failed');
+      return this.parseAFADResponse(responseData);
+      
+    } catch (error) {
+      // Silent fail - return empty array, cache will be used
           return [];
         }
-        
-        logger.info('✅ AFAD fallback endpoint successful');
-      }
+  }
 
-      const data = await response.json();
-      
+  /**
+   * ELITE: Parse AFAD response (used for cached data)
+   */
+  private parseAFADResponse(data: any): Earthquake[] {
       // AFAD apiv2 returns array directly OR object with data property
       let events: any[] = [];
       if (Array.isArray(data)) {
@@ -679,31 +915,15 @@ class EarthquakeService {
         events = data.results;
       }
       
-      logger.info('✅ AFAD verisi alındı', { count: events.length });
-      
       if (events.length === 0) {
-        logger.warn('⚠️ AFAD API boş veri döndü', { responsePreview: JSON.stringify(data).substring(0, 200) });
         return [];
-      }
-      
-      // İlk 3 depremi logla (debug için)
-      if (__DEV__) {
-        events.slice(0, 3).forEach((eq: any, i: number) => {
-          logger.debug(`📊 Deprem ${i + 1}`, {
-            location: eq.location || eq.title || eq.place || 'N/A',
-            magnitude: eq.mag || eq.magnitude || eq.ml || 'N/A',
-            date: eq.eventDate || eq.date || eq.originTime || 'N/A',
-          });
-        });
       }
       
       const earthquakes = events
         .map((item: any) => {
-          // AFAD apiv2 format - Try multiple field names
           const eventDate = item.eventDate || item.date || item.originTime || item.tarih || item.time;
           const magnitude = parseFloat(item.mag || item.magnitude || item.ml || item.richter || '0');
           
-          // Location parsing - Try multiple field combinations
           const locationParts = [
             item.location,
             item.yer || item.placeName,
@@ -718,35 +938,25 @@ class EarthquakeService {
             ? locationParts.join(', ') 
             : 'Türkiye';
           
-          // Coordinate parsing - Try multiple formats
           let latitude = 0;
           let longitude = 0;
           
-          // GeoJSON format
           if (item.geojson?.coordinates && Array.isArray(item.geojson.coordinates)) {
             longitude = parseFloat(item.geojson.coordinates[0]) || 0;
             latitude = parseFloat(item.geojson.coordinates[1]) || 0;
-          }
-          // Direct lat/lng fields
-          else if (item.latitude && item.longitude) {
+        } else if (item.latitude && item.longitude) {
             latitude = parseFloat(item.latitude) || 0;
             longitude = parseFloat(item.longitude) || 0;
-          }
-          // Alternative field names
-          else if (item.lat && item.lng) {
+        } else if (item.lat && item.lng) {
             latitude = parseFloat(item.lat) || 0;
             longitude = parseFloat(item.lng) || 0;
-          }
-          // Enlem/Boylam (Turkish)
-          else if (item.enlem && item.boylam) {
+        } else if (item.enlem && item.boylam) {
             latitude = parseFloat(item.enlem) || 0;
             longitude = parseFloat(item.boylam) || 0;
           }
           
-          // Depth parsing
           const depth = parseFloat(item.depth || item.derinlik || item.derinlikKm || '10') || 10;
           
-          // Time parsing - Handle multiple formats
           let time = Date.now();
           const parsedTime = parseAfadDate(eventDate);
           if (parsedTime) {
@@ -765,7 +975,6 @@ class EarthquakeService {
           };
         })
         .filter((eq: Earthquake) => {
-          // Validate earthquake data
           const isValid = 
             eq.latitude !== 0 && 
             eq.longitude !== 0 &&
@@ -773,122 +982,17 @@ class EarthquakeService {
             !isNaN(eq.longitude) &&
             eq.latitude >= -90 && eq.latitude <= 90 &&
             eq.longitude >= -180 && eq.longitude <= 180 &&
-            eq.magnitude >= 1.0 && // Minimum 1.0 magnitude
-            eq.magnitude <= 10.0 && // Maximum 10.0 (sanity check)
+          eq.magnitude >= 1.0 &&
+          eq.magnitude <= 10.0 &&
             !isNaN(eq.time) &&
             eq.time > 0;
           
-          if (!isValid && __DEV__) {
-            console.warn('⚠️ Invalid earthquake data filtered out:', eq);
-          }
-          
           return isValid;
         })
-        .sort((a, b) => b.time - a.time) // Newest first
-        .slice(0, 100); // Max 100
-
-      return earthquakes;
-      
-    } catch (error) {
-      // Silent fail - return empty array, cache will be used
-      return [];
-    }
-  }
-
-  /**
-   * ELITE: Parse AFAD response (used for cached data)
-   */
-  private parseAFADResponse(data: any): Earthquake[] {
-    // AFAD apiv2 returns array directly OR object with data property
-    let events: any[] = [];
-    if (Array.isArray(data)) {
-      events = data;
-    } else if (data && Array.isArray(data.data)) {
-      events = data.data;
-    } else if (data && Array.isArray(data.events)) {
-      events = data.events;
-    } else if (data && Array.isArray(data.results)) {
-      events = data.results;
-    }
-    
-    if (events.length === 0) {
-      return [];
-    }
-    
-    const earthquakes = events
-      .map((item: any) => {
-        const eventDate = item.eventDate || item.date || item.originTime || item.tarih || item.time;
-        const magnitude = parseFloat(item.mag || item.magnitude || item.ml || item.richter || '0');
-        
-        const locationParts = [
-          item.location,
-          item.yer || item.placeName,
-          item.ilce,
-          item.sehir || item.city,
-          item.title,
-          item.place,
-          item.epicenter,
-        ].filter(Boolean);
-        
-        const location = locationParts.length > 0 
-          ? locationParts.join(', ') 
-          : 'Türkiye';
-        
-        let latitude = 0;
-        let longitude = 0;
-        
-        if (item.geojson?.coordinates && Array.isArray(item.geojson.coordinates)) {
-          longitude = parseFloat(item.geojson.coordinates[0]) || 0;
-          latitude = parseFloat(item.geojson.coordinates[1]) || 0;
-        } else if (item.latitude && item.longitude) {
-          latitude = parseFloat(item.latitude) || 0;
-          longitude = parseFloat(item.longitude) || 0;
-        } else if (item.lat && item.lng) {
-          latitude = parseFloat(item.lat) || 0;
-          longitude = parseFloat(item.lng) || 0;
-        } else if (item.enlem && item.boylam) {
-          latitude = parseFloat(item.enlem) || 0;
-          longitude = parseFloat(item.boylam) || 0;
-        }
-        
-        const depth = parseFloat(item.depth || item.derinlik || item.derinlikKm || '10') || 10;
-        
-        let time = Date.now();
-        const parsedTime = parseAfadDate(eventDate);
-        if (parsedTime) {
-          time = parsedTime;
-        }
-        
-        return {
-          id: `afad-${item.eventID || item.eventId || item.id || item.earthquakeId || Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          magnitude,
-          location,
-          depth,
-          time,
-          latitude,
-          longitude,
-          source: 'AFAD' as const,
-        };
-      })
-      .filter((eq: Earthquake) => {
-        const isValid = 
-          eq.latitude !== 0 && 
-          eq.longitude !== 0 &&
-          !isNaN(eq.latitude) &&
-          !isNaN(eq.longitude) &&
-          eq.latitude >= -90 && eq.latitude <= 90 &&
-          eq.longitude >= -180 && eq.longitude <= 180 &&
-          eq.magnitude >= 1.0 &&
-          eq.magnitude <= 10.0 &&
-          !isNaN(eq.time) &&
-          eq.time > 0;
-        
-        return isValid;
-      })
       .sort((a, b) => b.time - a.time)
       .slice(0, 100);
 
-    return earthquakes;
+      return earthquakes;
   }
 
   private async fetchFromUSGS(): Promise<Earthquake[]> {
@@ -934,8 +1038,65 @@ class EarthquakeService {
     }
   }
 
+  /**
+   * ELITE: Fetch from backend proxy (Kandilli + EMSC + KOERI)
+   * Backend'de çalıştığı için React Native sorunları yok
+   * Maliyet yok - backend zaten bu kaynakları çekiyor
+   */
+  private async fetchFromBackend(): Promise<Earthquake[]> {
+    try {
+      // Backend URL from environment or use default
+      const Constants = require('expo-constants');
+      const baseUrl = 
+        process.env.BACKEND_URL || 
+        Constants?.expoConfig?.extra?.backendUrl ||
+        'https://afetnet-backend.onrender.com';
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      
+      // Backend'den son 2 saatteki depremleri al
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      const response = await fetch(
+        `${baseUrl}/api/earthquakes?since=${twoHoursAgo}&minmagnitude=3.0`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'AfetNet/1.0',
+          },
+          signal: controller.signal,
+        }
+      );
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        return [];
+      }
+      
+      const data = await response.json();
+      
+      // Backend format: { earthquakes: [...], sources: ['emsc', 'koeri'] }
+      const backendEarthquakes = (data.earthquakes || []).map((item: any) => ({
+        id: `backend-${item.source}-${item.id || Date.now()}`,
+        magnitude: item.magnitude || 0,
+        location: item.region || item.location || 'Unknown',
+        depth: item.depth || item.depthKm || 10,
+        time: item.timestamp || item.issuedAt || Date.now(),
+        latitude: item.lat || item.latitude || 0,
+        longitude: item.lon || item.longitude || 0,
+        source: (item.source || 'backend').toUpperCase() as 'EMSC' | 'KOERI' | 'AFAD',
+      })).filter((eq: Earthquake) => eq.magnitude >= 3.0);
+      
+      return backendEarthquakes;
+    } catch (error) {
+      // Silent fail - backend may be unavailable
+      return [];
+    }
+  }
+
   private async fetchFromKandilli(): Promise<Earthquake[]> {
-    // DISABLED: Kandilli HTTP endpoint doesn't work in React Native
+    // Backend proxy kullanılıyor (fetchFromBackend)
     return [];
   }
 
@@ -961,8 +1122,14 @@ class EarthquakeService {
   /**
    * Elite: Send instant earthquake notification based on magnitude
    * Optimized for zero-delay notifications
+   * Uses user settings for notification types and priorities
    */
-  private async sendInstantEarthquakeNotification(earthquake: Earthquake) {
+  private async sendInstantEarthquakeNotification(earthquake: Earthquake, settings?: any) {
+    // Get settings if not provided
+    if (!settings) {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      settings = useSettingsStore.getState();
+    }
     // CRITICAL: This is life-saving - MUST attempt all notification methods
     // Even if one fails, others must still be attempted
     
@@ -973,11 +1140,22 @@ class EarthquakeService {
     logger.info(`📢 Bildirim gönderiliyor: ${earthquake.magnitude.toFixed(1)} - ${earthquake.location} (${earthquakeAgeSeconds}s önce)`);
     
     // Step 1: IMMEDIATE basic notification (fastest, most reliable)
+    // CRITICAL: Use Promise.race to prevent blocking if notification is slow
     try {
       const { notificationService } = await import('./NotificationService');
-      await notificationService.showEarthquakeNotification(earthquake.magnitude, earthquake.location);
+      const notificationPromise = notificationService.showEarthquakeNotification(earthquake.magnitude, earthquake.location);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Notification timeout')), 2000) // 2 second timeout
+      );
+      
+      await Promise.race([notificationPromise, timeoutPromise]);
       const basicNotificationDelay = Date.now() - notificationStartTime;
       logger.info(`✅ Basic notification sent in ${basicNotificationDelay}ms`);
+      
+      // Warn if notification is slow (> 1 second)
+      if (basicNotificationDelay > 1000) {
+        logger.warn(`⚠️ Bildirim gönderimi ${basicNotificationDelay}ms sürdü (beklenenden yavaş)`);
+      }
     } catch (basicError) {
       logger.error('❌ CRITICAL: Basic notification failed:', basicError);
       // Continue - try multi-channel alert
@@ -987,22 +1165,53 @@ class EarthquakeService {
     if (earthquake.magnitude >= 3.0) {
       try {
         const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-        const alertConfig = this.getAlertConfigForMagnitude(earthquake.magnitude);
+        const alertConfig = this.getAlertConfigForMagnitude(earthquake.magnitude, settings);
+        
+        // ELITE: Use user settings for notification channels
+        const channels = {
+          pushNotification: settings.notificationPush && alertConfig.channels.pushNotification,
+          fullScreenAlert: settings.notificationFullScreen && alertConfig.channels.fullScreenAlert,
+          alarmSound: settings.notificationSound && alertConfig.channels.alarmSound,
+          vibration: settings.notificationVibration && alertConfig.channels.vibration,
+          tts: settings.notificationTTS && alertConfig.channels.tts,
+        };
+        
+        // Determine priority based on user settings
+        let priority = alertConfig.priority;
+        if (earthquake.magnitude >= settings.criticalMagnitudeThreshold) {
+          priority = settings.priorityCritical;
+        } else if (earthquake.magnitude >= 5.0) {
+          priority = settings.priorityHigh;
+        } else if (earthquake.magnitude >= 4.0) {
+          priority = settings.priorityMedium;
+        } else {
+          priority = settings.priorityLow;
+        }
+        
+        // CRITICAL: AFAD API provides data AFTER earthquake happens
+        // This is NOT an early warning - it's a confirmation/notification
+        // Message should reflect that earthquake already happened
+        const earthquakeAgeMinutes = Math.round((Date.now() - earthquake.time) / 1000 / 60);
+        const ageText = earthquakeAgeMinutes > 0 
+          ? `${earthquakeAgeMinutes} dakika önce`
+          : 'Az önce';
         
         await multiChannelAlertService.sendAlert({
-          title: `🚨 ${earthquake.magnitude.toFixed(1)} Deprem - ${alertConfig.titleSuffix}`,
-          body: `${earthquake.location} - ${earthquake.magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`,
-          priority: alertConfig.priority,
-          channels: alertConfig.channels,
-          vibrationPattern: alertConfig.vibrationPattern,
-          sound: alertConfig.sound,
-          ttsText: `Dikkat! ${earthquake.magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${earthquake.location}.`,
+          title: `📢 ${earthquake.magnitude.toFixed(1)} Deprem - ${alertConfig.titleSuffix}`,
+          body: `${earthquake.location} - ${earthquake.magnitude.toFixed(1)} büyüklüğünde deprem oldu (${ageText}).`,
+          priority: priority as any,
+          channels: channels as any,
+          vibrationPattern: settings.notificationVibration ? alertConfig.vibrationPattern : undefined,
+          sound: settings.notificationSound ? alertConfig.sound : undefined,
+          ttsText: settings.notificationTTS ? `Dikkat! ${earthquake.magnitude.toFixed(1)} büyüklüğünde deprem oldu. ${earthquake.location}. ${ageText}.` : undefined,
           duration: alertConfig.duration,
           data: {
             earthquake,
-            type: 'earthquake_instant',
+            type: 'earthquake_confirmation', // Changed from 'earthquake_instant' to indicate this is AFTER earthquake
             magnitude: earthquake.magnitude,
             location: earthquake.location,
+            isEarlyWarning: false, // CRITICAL: This is NOT an early warning
+            earthquakeAgeMinutes,
           },
         });
       } catch (multiChannelError) {
@@ -1016,7 +1225,7 @@ class EarthquakeService {
    * Elite: Get alert configuration based on earthquake magnitude
    * More aggressive alerts for larger earthquakes
    */
-  private getAlertConfigForMagnitude(magnitude: number): {
+  private getAlertConfigForMagnitude(magnitude: number, settings?: any): {
     priority: 'low' | 'normal' | 'high' | 'critical';
     titleSuffix: string;
     channels: any;

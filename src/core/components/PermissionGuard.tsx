@@ -44,11 +44,11 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     let isMounted = true;
     const timeoutId = setTimeout(() => {
       if (isMounted && !permissionsChecked) {
-        logger.warn('Permission timeout - skipping');
+        logger.warn('Permission timeout - skipping (continuing anyway)');
         setPermissionsChecked(true);
         setIsRequesting(false);
       }
-    }, 5000); // 5 second timeout
+    }, 30000); // 30 second timeout (increased for very slow devices and network delays)
 
     const init = async () => {
       try {
@@ -153,6 +153,20 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     setPermissionStatus(statuses);
     setPermissionsChecked(true);
     setIsRequesting(false);
+
+    // ELITE: Notify LocationService that permissions may have been granted
+    // This allows LocationService to recheck and update its permission status
+    Promise.resolve().then(async () => {
+      try {
+        const { locationService } = await import('../services/LocationService');
+        if (statuses.location && !locationService.permissionGranted) {
+          // Recheck permission in LocationService
+          await locationService.recheckPermission();
+        }
+      } catch (error) {
+        // Silent fail - LocationService will handle it
+      }
+    });
 
     // Log summary - always proceed
     const criticalGranted = statuses.location && statuses.notifications;

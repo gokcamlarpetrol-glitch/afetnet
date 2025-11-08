@@ -153,12 +153,18 @@ class BLEMeshService {
   }
 
   private cleanupQueue() {
-    const state = useMeshStore.getState();
+    // CRITICAL: Safe store access
+    const state = useMeshStore?.getState?.();
+    if (!state) {
+      logger.warn('⚠️ MeshStore not available for cleanup');
+      return;
+    }
+    
     this.messageQueue = this.messageQueue.filter((msg) => {
       if (msg.type === 'ack') {
         return !msg.delivered;
       }
-      const waitingAck = msg.ackRequired && !!state.pendingAcks[msg.id];
+      const waitingAck = msg.ackRequired && !!state.pendingAcks?.[msg.id];
       if (msg.delivered && !waitingAck) {
         return false;
       }
@@ -170,7 +176,11 @@ class BLEMeshService {
   }
 
   private hasPendingAck(messageId: string): boolean {
-    const state = useMeshStore.getState();
+    // CRITICAL: Safe store access
+    const state = useMeshStore?.getState?.();
+    if (!state || !state.pendingAcks) {
+      return false;
+    }
     return !!state.pendingAcks[messageId];
   }
 
@@ -212,8 +222,9 @@ class BLEMeshService {
       const { notificationService } = await import('./NotificationService');
       const { useMessageStore } = await import('../stores/messageStore');
       
-      // Get sender name from peers or use device ID
-      const peer = useMeshStore.getState().peers[message.from];
+      // Get sender name from peers or use device ID - safe access
+      const meshState = useMeshStore?.getState?.();
+      const peer = meshState?.peers?.[message.from];
       const senderName = peer?.name || `Mesh-${message.from.slice(-4)}`;
       
       // Parse message content
@@ -246,16 +257,21 @@ class BLEMeshService {
       // Regular message notification
       await notificationService.showMessageNotification(senderName, content);
       
-      // Update message store conversation
-      useMessageStore.getState().addMessage({
-        id: message.id,
-        from: message.from,
-        to: 'me',
-        content,
-        timestamp: message.timestamp,
-        delivered: true,
-        read: false,
-      });
+      // Update message store conversation - safe access
+      const messageStore = useMessageStore?.getState?.();
+      if (messageStore && typeof messageStore.addMessage === 'function') {
+        messageStore.addMessage({
+          id: message.id,
+          from: message.from,
+          to: 'me',
+          content,
+          timestamp: message.timestamp,
+          delivered: true,
+          read: false,
+        });
+      } else {
+        logger.warn('⚠️ MessageStore not available for message update');
+      }
     } catch (error) {
       logger.error('Failed to send message notification:', error);
     }
@@ -318,7 +334,8 @@ class BLEMeshService {
     this.messageRateLimitStore.set(key, time);
     // Cleanup old entries (older than 1 minute)
     const oneMinuteAgo = Date.now() - 60 * 1000;
-    for (const [k, v] of this.messageRateLimitStore.entries()) {
+    // CRITICAL: Use Array.from() for Map iteration compatibility
+    for (const [k, v] of Array.from(this.messageRateLimitStore.entries())) {
       if (v < oneMinuteAgo) {
         this.messageRateLimitStore.delete(k);
       }
@@ -409,7 +426,7 @@ class BLEMeshService {
     }
     
     // Elite: Validate recipient device ID format
-    if (to && !validateDeviceId(to) && !to.match(/^afn-[a-zA-Z0-9]{8}$/)) {
+    if (to && !to.match(/^afn-[a-zA-Z0-9]{8}$/)) {
       logger.error('Invalid recipient device ID');
       return;
     }
@@ -690,16 +707,32 @@ class BLEMeshService {
 
   private getAdaptiveScanInterval(): number {
     const { networkHealth } = useMeshStore.getState();
+    let baseInterval = SCAN_INTERVAL;
+    
     if (!networkHealth.lastUpdated) {
-      return SCAN_INTERVAL;
+      baseInterval = SCAN_INTERVAL;
+    } else if (networkHealth.nodeCount <= 1) {
+      baseInterval = Math.max(5000, SCAN_INTERVAL / 2);
+    } else if (networkHealth.nodeCount >= 6) {
+      baseInterval = SCAN_INTERVAL * 1.5;
     }
-    if (networkHealth.nodeCount <= 1) {
-      return Math.max(5000, SCAN_INTERVAL / 2);
+    
+    // ELITE: Apply battery-aware multiplier (lazy import to avoid circular dependency)
+    try {
+      // Use synchronous check - BatteryMonitoringService should be initialized by now
+      const batteryModule = require('./BatteryMonitoringService');
+      if (batteryModule?.batteryMonitoringService) {
+        const multiplier = batteryModule.batteryMonitoringService.getPollingIntervalMultiplier();
+        baseInterval = Math.round(baseInterval * multiplier);
+        
+        // CRITICAL: Never go below 5 seconds (BLE scanning minimum)
+        baseInterval = Math.max(baseInterval, 5000);
+      }
+    } catch {
+      // BatteryMonitoringService not available - use base interval
     }
-    if (networkHealth.nodeCount >= 6) {
-      return SCAN_INTERVAL * 1.5;
-    }
-    return SCAN_INTERVAL;
+    
+    return baseInterval;
   }
 
   private cleanupPeers(maxAgeMs = SCAN_INTERVAL * 3) {
@@ -825,6 +858,7 @@ class BLEMeshService {
   private async processIncomingMessage(message: MeshMessage, device: Device) {
     if (!this.myDeviceId) return;
 
+    // Handle ACK messages first (early return)
     if (message.type === 'ack') {
       try {
         const payload = JSON.parse(message.content);
@@ -837,9 +871,10 @@ class BLEMeshService {
       } catch (error) {
         logger.error('Failed to process ack payload:', error);
       }
-      return;
+      return; // ACK messages are handled here, don't continue
     }
-
+    
+    // Handle heartbeat messages (early return)
     if (message.type === 'heartbeat') {
       try {
         const payload = JSON.parse(message.content);
@@ -906,8 +941,8 @@ class BLEMeshService {
       useMeshStore.getState().updateNetworkHealth({ avgHopCount: message.hops });
       this.notifyMessageCallbacks(message);
       
-      // Elite: Send notification for received messages (except heartbeat and ack)
-      if (message.type !== 'heartbeat' && message.type !== 'ack' && message.type !== 'SOS_BEACON') {
+      // Elite: Send notification for received messages (except SOS_BEACON which has its own notification)
+      if (message.type !== 'SOS_BEACON') {
         this.sendMessageNotification(message);
       }
     }

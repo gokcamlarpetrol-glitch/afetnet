@@ -23,7 +23,7 @@ export interface Earthquake {
   longitude: number;
   depth: number;
   time: number;
-  source: 'AFAD' | 'USGS' | 'KANDILLI';
+  source: 'AFAD' | 'USGS' | 'KANDILLI' | 'EMSC' | 'KOERI' | 'SEISMIC_SENSOR';
 }
 
 class EmergencyModeService {

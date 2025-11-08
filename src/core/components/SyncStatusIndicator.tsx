@@ -14,7 +14,6 @@ interface SyncStatus {
   queueLength: number;
   isOnline: boolean;
   isRunning: boolean;
-  pendingOperations: number;
   failedOperations: number;
 }
 
@@ -23,7 +22,6 @@ export default function SyncStatusIndicator() {
     queueLength: 0,
     isOnline: true,
     isRunning: false,
-    pendingOperations: 0,
     failedOperations: 0,
   });
   const [isVisible, setIsVisible] = useState(false);
@@ -32,18 +30,27 @@ export default function SyncStatusIndicator() {
 
   useEffect(() => {
     // Update sync status every 5 seconds
-    const interval = setInterval(() => {
+    const updateStatus = () => {
       const status = offlineSyncService.getSyncStatus();
       setSyncStatus(status);
       
       // Show indicator if there are pending operations or if offline
-      setIsVisible(status.queueLength > 0 || !status.isOnline);
-    }, 5000);
+      const shouldBeVisible = status.queueLength > 0 || !status.isOnline;
+      setIsVisible(shouldBeVisible);
+      
+      // Animate visibility
+      Animated.timing(fadeAnim, {
+        toValue: shouldBeVisible ? 1 : 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    };
 
     // Initial update
-    const status = offlineSyncService.getSyncStatus();
-    setSyncStatus(status);
-    setIsVisible(status.queueLength > 0 || !status.isOnline);
+    updateStatus();
+
+    // Periodic updates
+    const interval = setInterval(updateStatus, 5000);
 
     // Monitor network state
     const unsubscribe = NetInfo.addEventListener(state => {
@@ -51,20 +58,15 @@ export default function SyncStatusIndicator() {
         ...prev,
         isOnline: state.isConnected ?? false,
       }));
+      // Update visibility when network changes
+      updateStatus();
     });
-
-    // Animate visibility
-    Animated.timing(fadeAnim, {
-      toValue: isVisible ? 1 : 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
 
     return () => {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [isVisible, fadeAnim]);
+  }, []); // Empty dependency array - only run once on mount
 
   const handlePress = () => {
     setIsExpanded(!isExpanded);
@@ -88,21 +90,21 @@ export default function SyncStatusIndicator() {
   const getStatusColor = () => {
     if (!syncStatus.isOnline) return colors.status.warning;
     if (syncStatus.failedOperations > 0) return colors.status.danger;
-    if (syncStatus.pendingOperations > 0) return colors.status.info;
+    if (syncStatus.queueLength > 0) return colors.status.info;
     return colors.status.success;
   };
 
   const getStatusIcon = () => {
     if (!syncStatus.isOnline) return 'cloud-offline';
     if (syncStatus.failedOperations > 0) return 'alert-circle';
-    if (syncStatus.pendingOperations > 0) return 'sync';
+    if (syncStatus.queueLength > 0) return 'sync';
     return 'checkmark-circle';
   };
 
   const getStatusText = () => {
     if (!syncStatus.isOnline) return 'Çevrimdışı';
     if (syncStatus.failedOperations > 0) return `${syncStatus.failedOperations} başarısız`;
-    if (syncStatus.pendingOperations > 0) return `${syncStatus.pendingOperations} bekliyor`;
+    if (syncStatus.queueLength > 0) return `${syncStatus.queueLength} bekliyor`;
     return 'Senkronize';
   };
 
@@ -130,9 +132,9 @@ export default function SyncStatusIndicator() {
       >
         <Ionicons name={getStatusIcon() as any} size={20} color={colors.text.primary} />
         <Text style={styles.statusText}>{getStatusText()}</Text>
-        {syncStatus.pendingOperations > 0 && (
+        {syncStatus.queueLength > 0 && (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{syncStatus.pendingOperations}</Text>
+            <Text style={styles.badgeText}>{syncStatus.queueLength}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -148,7 +150,7 @@ export default function SyncStatusIndicator() {
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Bekleyen:</Text>
-              <Text style={styles.detailValue}>{syncStatus.pendingOperations}</Text>
+              <Text style={styles.detailValue}>{syncStatus.queueLength}</Text>
             </View>
             {syncStatus.failedOperations > 0 && (
               <View style={styles.detailRow}>
@@ -160,7 +162,7 @@ export default function SyncStatusIndicator() {
             )}
           </View>
 
-          {syncStatus.isOnline && syncStatus.pendingOperations > 0 && (
+          {syncStatus.isOnline && syncStatus.queueLength > 0 && (
             <TouchableOpacity
               style={styles.syncButton}
               onPress={handleForceSync}
@@ -179,17 +181,17 @@ const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     top: 60,
-    left: spacing.md,
-    right: spacing.md,
+    left: spacing[12],
+    right: spacing[12],
     zIndex: 1000,
   },
   indicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
     borderRadius: borderRadius.lg,
-    gap: spacing.sm,
+    gap: spacing[8],
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -205,7 +207,7 @@ const styles = StyleSheet.create({
   badge: {
     backgroundColor: colors.background.primary,
     borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing[4],
     paddingVertical: 2,
     minWidth: 20,
     alignItems: 'center',
@@ -217,10 +219,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   expandedContent: {
-    marginTop: spacing.xs,
+    marginTop: spacing[4],
     backgroundColor: colors.background.secondary,
     borderRadius: borderRadius.md,
-    padding: spacing.md,
+    padding: spacing[12],
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -228,7 +230,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   details: {
-    gap: spacing.xs,
+    gap: spacing[4],
   },
   detailRow: {
     flexDirection: 'row',
@@ -249,11 +251,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.brand.primary,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[12],
     borderRadius: borderRadius.md,
-    marginTop: spacing.md,
-    gap: spacing.xs,
+    marginTop: spacing[12],
+    gap: spacing[4],
   },
   syncButtonText: {
     ...typography.button,

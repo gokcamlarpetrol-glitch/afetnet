@@ -415,9 +415,20 @@ export default function SettingsScreen({ navigation }: any) {
       onPress: () => setSeismicSensorEnabled(!seismicSensorEnabled),
     },
     {
+      icon: 'settings',
+      title: 'Deprem Ayarları',
+      subtitle: 'Kapsamlı deprem bildirim ayarları',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('EarthquakeSettings');
+      },
+    },
+    {
       icon: 'filter',
-      title: 'Büyüklük Filtresi',
-      subtitle: 'Detaylı filtreleri aç',
+      title: 'Deprem Listesi',
+      subtitle: 'Tüm depremleri görüntüle',
       type: 'arrow',
       onPress: () => {
         haptics.impactLight();
@@ -436,20 +447,7 @@ export default function SettingsScreen({ navigation }: any) {
         type: 'arrow',
         onPress: handleLanguageChange,
       },
-      {
-        icon: 'moon',
-        title: 'Karanlık Mod',
-        subtitle: 'Tema ayarları',
-        type: 'switch',
-        value: true,
-        onPress: () => {
-          Alert.alert(
-            'Karanlık Mod',
-            'Uygulama şu anda karanlık modda çalışıyor.',
-            [{ text: 'Tamam' }]
-          );
-        },
-      },
+      // Karanlık Mod kaldırıldı - uygulama zaten karanlık modda çalışıyor
       {
         icon: 'map',
         title: 'Çevrimdışı Haritalar',
