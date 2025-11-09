@@ -6,8 +6,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
-import { pool, pingDb } from './database';
-import { runMigrations, verifyTables } from './database-init';
+import { pool, pingDb, closePool } from './database';
+import { runMigrations, verifyTables, validateDatabase } from './database-init';
 import eewRoutes from './routes/eew';
 import earthquakesRoutes from './routes/earthquakes';
 import { startEEW } from './eew';
@@ -75,7 +75,7 @@ app.use('/api/eew', eewRateLimiter, eewRoutes); // Lenient for critical EEW serv
 app.use('/api/earthquakes', eewRateLimiter, earthquakesRoutes); // Lenient for critical earthquake data
 app.use('/api', apiRateLimiter); // Moderate for other API endpoints
 
-// Health check with database status (public endpoint, lenient rate limit)
+// ELITE: Comprehensive health check with detailed database metrics
 app.get('/health', publicRateLimiter, async (req, res) => {
   try {
     const dbConnected = await pingDb();
@@ -83,13 +83,26 @@ app.get('/health', publicRateLimiter, async (req, res) => {
     const poolStats = await getPoolStats();
     
     res.json({
-      status: 'OK',
+      status: poolStats.health === 'healthy' ? 'OK' : poolStats.health.toUpperCase(),
       timestamp: new Date().toISOString(),
-      database: dbConnected ? 'connected' : 'disconnected',
+      database: {
+        connected: dbConnected,
+        health: poolStats.health,
+      },
       pool: {
         total: poolStats.total,
         idle: poolStats.idle,
+        active: poolStats.active,
         waiting: poolStats.waiting,
+        max: 20,
+        utilization: `${Math.round((poolStats.total / 20) * 100)}%`,
+      },
+      metrics: {
+        totalQueries: poolStats.metrics.totalQueries,
+        failedQueries: poolStats.metrics.failedQueries,
+        averageQueryTime: `${Math.round(poolStats.metrics.averageQueryTime)}ms`,
+        slowQueries: poolStats.metrics.slowQueries,
+        connectionErrors: poolStats.metrics.connectionErrors,
       },
       monitoring: monitoringService ? 'active' : 'disabled',
     });
@@ -97,8 +110,31 @@ app.get('/health', publicRateLimiter, async (req, res) => {
     res.status(500).json({
       status: 'ERROR',
       timestamp: new Date().toISOString(),
-      database: 'error',
+      database: {
+        connected: false,
+        health: 'unhealthy',
+      },
       error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// ELITE: Database metrics endpoint (for monitoring)
+app.get('/health/db', apiRateLimiter, async (req, res) => {
+  try {
+    const { getPoolStats, getActiveConnections } = await import('./database');
+    const poolStats = await getPoolStats();
+    const activeConnections = getActiveConnections();
+    
+    res.json({
+      ...poolStats,
+      activeConnections: activeConnections,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -118,18 +154,18 @@ app.use((error: any, req: any, res: any, _next: any) => {
   });
 });
 
-// Graceful shutdown
+// ELITE: Graceful shutdown with proper cleanup
 process.on('SIGINT', async () => {
   console.log('🛑 Shutting down server...');
   await monitoringService.flush(2000); // Flush Sentry events
-  await pool.end();
+  await closePool(); // ELITE: Graceful pool closure
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('🛑 Shutting down server...');
   await monitoringService.flush(2000); // Flush Sentry events
-  await pool.end();
+  await closePool(); // ELITE: Graceful pool closure
   process.exit(0);
 });
 
@@ -170,6 +206,13 @@ app.listen(PORT, async () => {
     if (!tablesOk) {
       console.warn('⚠️ Some database tables are missing - features may not work properly');
       monitoringService.captureMessage('Database tables verification failed', 'warning');
+    }
+    
+    // ELITE: Validate database schema and configuration
+    const validationOk = await validateDatabase();
+    if (!validationOk) {
+      console.warn('⚠️ Database validation failed - some features may not work optimally');
+      monitoringService.captureMessage('Database validation failed', 'warning');
     }
   }
   

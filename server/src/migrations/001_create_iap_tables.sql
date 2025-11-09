@@ -188,5 +188,7 @@ CREATE TABLE IF NOT EXISTS user_locations (
 -- Create index for location queries
 CREATE INDEX IF NOT EXISTS idx_user_locations_updated_at ON user_locations(updated_at);
 CREATE INDEX IF NOT EXISTS idx_user_locations_push_token ON user_locations(push_token) WHERE push_token IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_locations_coordinates ON user_locations(last_latitude, last_longitude) WHERE last_latitude IS NOT NULL AND last_longitude IS NOT NULL;
 
 COMMENT ON TABLE user_locations IS 'User locations and push tokens for earthquake warning system';

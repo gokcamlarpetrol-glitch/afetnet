@@ -1,11 +1,12 @@
 /**
- * DATABASE INITIALIZATION MODULE
- * Runs migrations on server startup
+ * ELITE DATABASE INITIALIZATION MODULE
+ * Runs migrations, validates schema, and verifies configuration on server startup
  */
 
 import { pool } from './database';
 import * as fs from 'fs';
 import * as path from 'path';
+import { runAllValidations } from './database-validation';
 
 /**
  * Run database migrations
@@ -65,6 +66,47 @@ export async function runMigrations(): Promise<void> {
     console.error('❌ Database migration error:', error);
     // Don't throw - allow server to start even if migrations fail
     // (migrations might already be applied)
+  }
+}
+
+/**
+ * ELITE: Run database validations
+ */
+export async function validateDatabase(): Promise<boolean> {
+  try {
+    console.log('🔍 Validating database schema and configuration...');
+    const validations = await runAllValidations();
+    
+    // Report schema validation results
+    if (!validations.schema.valid) {
+      console.error('❌ Schema validation failed:');
+      validations.schema.errors.forEach(err => console.error(`   - ${err}`));
+    } else {
+      console.log('✅ Schema validation passed');
+    }
+    
+    if (validations.schema.warnings.length > 0) {
+      console.warn('⚠️ Schema validation warnings:');
+      validations.schema.warnings.forEach(warn => console.warn(`   - ${warn}`));
+    }
+    
+    // Report configuration validation results
+    if (!validations.configuration.valid) {
+      console.error('❌ Configuration validation failed:');
+      validations.configuration.errors.forEach(err => console.error(`   - ${err}`));
+    } else {
+      console.log('✅ Configuration validation passed');
+    }
+    
+    if (validations.configuration.warnings.length > 0) {
+      console.warn('⚠️ Configuration validation warnings:');
+      validations.configuration.warnings.forEach(warn => console.warn(`   - ${warn}`));
+    }
+    
+    return validations.schema.valid && validations.configuration.valid;
+  } catch (error) {
+    console.error('❌ Database validation error:', error);
+    return false;
   }
 }
 
