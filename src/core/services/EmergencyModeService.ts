@@ -23,7 +23,7 @@ export interface Earthquake {
   longitude: number;
   depth: number;
   time: number;
-  source: 'AFAD' | 'USGS' | 'KANDILLI';
+  source: 'AFAD' | 'USGS' | 'KANDILLI' | 'EMSC' | 'KOERI' | 'SEISMIC_SENSOR';
 }
 
 class EmergencyModeService {
@@ -126,7 +126,7 @@ class EmergencyModeService {
         useUserStatusStore.getState().updateStatus('needs_help', {
           latitude: location.latitude,
           longitude: location.longitude,
-          accuracy: location.accuracy,
+          accuracy: location.accuracy || null,
         });
       }
     } catch (error) {

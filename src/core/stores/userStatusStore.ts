@@ -10,6 +10,7 @@ export type UserStatus = 'safe' | 'needs_help' | 'trapped' | 'sos' | 'offline';
 interface Location {
   latitude: number;
   longitude: number;
+  accuracy?: number | null;
 }
 
 interface UserStatusState {
