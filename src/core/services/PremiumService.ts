@@ -146,12 +146,12 @@ class PremiumService {
   }
 
   /**
-   * ELITE: Check if earthquake features are free (always free)
-   * CRITICAL: Earthquake notifications and viewing are ALWAYS FREE
+   * ELITE: Check if earthquake features are free
+   * CRITICAL: Earthquake features require premium after 3-day trial
    */
   isEarthquakeFeatureFree(): boolean {
-    // CRITICAL: Earthquake features are ALWAYS FREE - no premium required
-    return true;
+    // CRITICAL: Earthquake features require premium after trial period
+    return this.hasAccess('earthquake');
   }
 
   /**

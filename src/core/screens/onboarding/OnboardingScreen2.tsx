@@ -118,7 +118,7 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
         <Animated.View entering={FadeInDown.delay(400).duration(600)}>
           <Text style={styles.subtitle}>
             AFAD verileriyle entegre sistem, bölgenizdeki depremleri saniyeler içinde gösterir.{' '}
-            <Text style={styles.subtitleHighlight}>Ücretsiz deprem bildirimleri</Text> ve{' '}
+            <Text style={styles.subtitleHighlight}>Deprem bildirimleri</Text> ve{' '}
             <Text style={styles.subtitleHighlight}>erken uyarı sistemi</Text> ile her zaman haberdar ol.
           </Text>
         </Animated.View>
@@ -191,7 +191,7 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
             >
               <Ionicons name="gift" size={18} color={colors.status.success} />
               <Text style={styles.freeBadgeText}>
-                <Text style={styles.freeBadgeBold}>Ücretsiz:</Text> Deprem bildirimleri ve erken uyarı sistemi
+                <Text style={styles.freeBadgeBold}>İlk 3 gün ücretsiz:</Text> Tüm premium özellikler
               </Text>
             </LinearGradient>
           </View>

@@ -498,6 +498,15 @@ class EarthquakeService {
             continue; // Skip notification - user already got early warning
           }
           
+          // ELITE: Premium check for earthquake notifications
+          const { premiumService } = await import('./PremiumService');
+          if (!premiumService.hasAccess('earthquake')) {
+            if (__DEV__) {
+              logger.debug('⏭️ Deprem bildirimi premium gerektiriyor - atlandı');
+            }
+            continue; // Skip notification - premium required
+          }
+          
           // CRITICAL: INSTANT notification for earthquakes WITHOUT early warning
           // This is life-saving - wrap in try-catch to ensure it always attempts
           const notificationStartTime = Date.now();

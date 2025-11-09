@@ -1077,6 +1077,20 @@ class SeismicSensorService {
   private async triggerEEW(event: SeismicEvent) {
     if (!event.location) return;
 
+    // ELITE: Premium check for seismic sensor notifications
+    try {
+      const { premiumService } = await import('./PremiumService');
+      if (!premiumService.hasAccess('earthquake')) {
+        if (__DEV__) {
+          logger.debug('⏭️ Seismic sensor bildirimi premium gerektiriyor - atlandı');
+        }
+        return; // Skip notification - premium required
+      }
+    } catch (error) {
+      logger.error('Premium check failed:', error);
+      // Continue with notification if premium check fails (better safe than sorry)
+    }
+
     // ELITE: MULTI-SOURCE VERIFICATION - 6 Kaynak Doğrulama
     // Hayat kurtarmak için en doğru bilgiyi kullanıcılara veriyoruz
     let verificationResult: any = null;

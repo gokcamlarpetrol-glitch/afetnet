@@ -123,7 +123,12 @@ const PREMIUM_FEATURES = [
     description: 'BLE mesh ile şebeke olmadan iletişim',
     color: '#8b5cf6',
   },
-  // ELITE: Deprem bildirimleri artık ücretsiz - bu özellik kaldırıldı
+  { 
+    icon: 'pulse', 
+    title: 'Deprem Bildirimleri', 
+    description: 'Gerçek zamanlı deprem bildirimleri ve erken uyarı sistemi',
+    color: '#ef4444',
+  },
   { 
     icon: 'heart', 
     title: 'Sağlık Profili', 
@@ -161,8 +166,6 @@ const PREMIUM_FEATURES = [
     description: 'Enkaz altı otomatik SOS ve konum paylaşımı',
     color: '#dc2626',
   },
-  // ELITE: Deprem bildirimleri ve erken uyarı sistemi artık ücretsiz - bu özellikler kaldırıldı
-  // CRITICAL: Earthquake notifications and early warning are ALWAYS FREE
   { 
     icon: 'document', 
     title: 'ICE Bilgileri', 
@@ -639,7 +642,7 @@ export default function PaywallScreen({ navigation }: any) {
               </View>
             </View>
             <Text style={styles.featuresSectionSubtitle}>
-              Deprem bildirimleri ücretsiz! Premium ile AI destekli analiz, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
+              İlk 3 gün ücretsiz! Premium ile deprem bildirimleri, erken uyarı sistemi, AI destekli analiz, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
             </Text>
             
             {/* Features Grid - Premium Design */}

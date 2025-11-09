@@ -666,6 +666,20 @@ class EEWService {
    * CRITICAL: Speed is everything - send notification FIRST
    */
   private async sendImmediateAlert(event: EEWEvent, magnitude: number, epicenter: { latitude: number; longitude: number }) {
+    // ELITE: Premium check for EEW notifications
+    try {
+      const { premiumService } = await import('./PremiumService');
+      if (!premiumService.hasAccess('earthquake')) {
+        if (__DEV__) {
+          logger.debug('⏭️ EEW bildirimi premium gerektiriyor - atlandı');
+        }
+        return; // Skip notification - premium required
+      }
+    } catch (error) {
+      logger.error('Premium check failed:', error);
+      // Continue with notification if premium check fails (better safe than sorry)
+    }
+    
     const eewConfig = this.getEEWAlertConfig(magnitude);
     const basicTitle = eewConfig.title;
     const basicBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`;
@@ -738,6 +752,20 @@ class EEWService {
       alertTitle = eewConfig.title;
       const etaText = event.etaSec ? `Tahmini süre: ${Math.round(event.etaSec)} saniye` : '';
       alertBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim();
+    }
+    
+    // ELITE: Premium check for enhanced EEW notifications
+    try {
+      const { premiumService } = await import('./PremiumService');
+      if (!premiumService.hasAccess('earthquake')) {
+        if (__DEV__) {
+          logger.debug('⏭️ EEW gelişmiş bildirimi premium gerektiriyor - atlandı');
+        }
+        return; // Skip enhanced notification - premium required
+      }
+    } catch (error) {
+      logger.error('Premium check failed:', error);
+      // Continue with notification if premium check fails (better safe than sorry)
     }
     
     // ELITE: Determine priority based on alert level, magnitude, and certainty
