@@ -5,9 +5,9 @@
  * ELITE: Type-safe rate limiting with proper Express type augmentation
  */
 
-// CRITICAL: Import type augmentation BEFORE express types
+// CRITICAL: Type augmentation references (compile-time only, not runtime imports)
 /// <reference types="../types/express-rate-limit" />
-import '../types/shims';
+/// <reference path="../types/shims.d.ts" />
 
 import rateLimit from 'express-rate-limit';
 import { Request, Response } from 'express';

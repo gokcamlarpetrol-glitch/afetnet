@@ -1,9 +1,9 @@
 // SERVER CONFIGURATION WITH DATABASE
 // Express server setup for IAP verification with PostgreSQL
 
-// CRITICAL: Import type augmentation FIRST before any Express imports
+// CRITICAL: Type augmentation references (compile-time only, not runtime imports)
 /// <reference types="./types/express-rate-limit" />
-import './types/shims';
+/// <reference path="./types/shims.d.ts" />
 
 import express from 'express';
 import cors from 'cors';
