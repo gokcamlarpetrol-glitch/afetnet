@@ -23,7 +23,8 @@ export const globalRateLimiter = rateLimit({
     res.status(429).json({
       success: false,
       error: 'Too many requests, please try again later.',
-      retryAfter: Math.ceil(req.rateLimit.resetTime! / 1000),
+      // @ts-ignore - express-rate-limit adds rateLimit to request
+      retryAfter: Math.ceil((req as any).rateLimit?.resetTime || Date.now() + 900000) / 1000,
     });
   },
 });

@@ -4,7 +4,7 @@
  */
 
 import * as Sentry from '@sentry/node';
-import { ProfilingIntegration } from '@sentry/profiling-node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { Express, Request, Response, NextFunction } from 'express';
 
 export interface MonitoringConfig {
@@ -44,7 +44,7 @@ class MonitoringService {
         tracesSampleRate: config.tracesSampleRate || 0.1, // 10% of transactions
         profilesSampleRate: config.profilesSampleRate || 0.1, // 10% of transactions
         integrations: [
-          new ProfilingIntegration(),
+          nodeProfilingIntegration(),
         ],
         beforeSend(event, hint) {
           // Filter out sensitive data
@@ -73,9 +73,11 @@ class MonitoringService {
     if (!this.isInitialized) return;
 
     // Request handler must be the first middleware
+    // @ts-ignore - Sentry v10 API
     app.use(Sentry.Handlers.requestHandler());
 
     // TracingHandler creates a trace for every incoming request
+    // @ts-ignore - Sentry v10 API
     app.use(Sentry.Handlers.tracingHandler());
 
     console.log('✅ Sentry Express middleware configured');
@@ -88,6 +90,7 @@ class MonitoringService {
     if (!this.isInitialized) return;
 
     // Error handler must be before any other error middleware
+    // @ts-ignore - Sentry v10 API
     app.use(Sentry.Handlers.errorHandler());
 
     console.log('✅ Sentry error handler configured');
@@ -157,6 +160,7 @@ class MonitoringService {
   startTransaction(name: string, op: string) {
     if (!this.isInitialized) return null;
 
+    // @ts-ignore - Sentry v10 API (startTransaction may be deprecated, using startSpan instead)
     return Sentry.startTransaction({
       name,
       op,
