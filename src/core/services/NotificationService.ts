@@ -212,6 +212,25 @@ class NotificationService {
       logger.error('Network notification error:', error);
     }
   }
+
+  async showFamilyLocationUpdateNotification(memberName: string, location: { latitude: number; longitude: number }) {
+    try {
+      const Notifications = getNotifications();
+      if (!Notifications) return;
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `📍 ${memberName} Konum Güncellendi`,
+          body: `Yeni konum: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`,
+          sound: 'default',
+          data: { type: 'family_location', memberName, location },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      logger.error('Family location notification error:', error);
+    }
+  }
 }
 
 export const notificationService = new NotificationService();

@@ -185,6 +185,10 @@ class RescueBeaconService {
         type: 'sos',
         content: JSON.stringify(payload),
         ttl: 10,
+        priority: 'critical',
+        ackRequired: false,
+        sequence: 0,
+        attempts: 0,
       });
 
       logger.info('SOS beacon broadcasted', {

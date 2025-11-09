@@ -508,6 +508,67 @@ class FirebaseDataService {
       return null;
     }
   }
+
+  /**
+   * Load health profile from Firestore
+   */
+  async loadHealthProfile(userDeviceId: string): Promise<any | null> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, cannot load health profile');
+      return null;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return null;
+      }
+
+      const profileRef = doc(db, 'devices', userDeviceId, 'healthProfile', 'current');
+      const snapshot = await getDoc(profileRef);
+      
+      if (!snapshot.exists()) {
+        return null;
+      }
+
+      return snapshot.data();
+    } catch (error) {
+      logger.error('Failed to load health profile:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Save status update to Firestore
+   */
+  async saveStatusUpdate(userDeviceId: string, statusData: any): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveStatusUpdate');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      await setDoc(doc(db, 'devices', userDeviceId, 'status', 'current'), {
+        ...statusData,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info('Status update saved to Firestore');
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save status update:', error);
+      return false;
+    }
+  }
 }
 
 export const firebaseDataService = new FirebaseDataService();
