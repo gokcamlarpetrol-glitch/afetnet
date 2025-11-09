@@ -388,11 +388,12 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
           {renderSettingRow(
             'warning',
             'Erken Uyarı',
-            'Deprem erken uyarı bildirimleri',
+            hasAccess ? 'Deprem erken uyarı bildirimleri' : 'Premium gerekiyor',
             <Switch
               value={eewEnabled}
               onValueChange={handleEewToggle}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
+              disabled={!hasAccess}
             />
           )}
 
@@ -697,8 +698,9 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         <View style={styles.infoCard}>
           <Ionicons name="information-circle" size={24} color={colors.status.info} />
           <Text style={styles.infoText}>
-            Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar. 
-            Minimum büyüklük ve mesafe filtreleri ile sadece ilgilendiğiniz depremler için bildirim alabilirsiniz.
+            {hasAccess 
+              ? 'Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar. Minimum büyüklük ve mesafe filtreleri ile sadece ilgilendiğiniz depremler için bildirim alabilirsiniz.'
+              : 'Deprem bildirimleri premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.'}
           </Text>
         </View>
       </ScrollView>
