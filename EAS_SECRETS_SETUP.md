@@ -1,129 +1,129 @@
-# 🔐 EAS Secrets Setup Guide
+# 🔐 EAS SECRETS KURULUM REHBERİ
 
-Bu dokümantasyon, AfetNet uygulaması için EAS Build'de kullanılacak environment variable'ların (secrets) nasıl ayarlanacağını açıklar.
+## 📋 GEREKLİ SECRETS LİSTESİ
 
-## 📋 Gerekli Secrets Listesi
+Projede kullanılan ve **EAS Secrets** olarak oluşturulması gereken environment variable'lar:
 
-Production build'ler için aşağıdaki secret'ların EAS Secrets olarak ayarlanması gerekmektedir:
+### ✅ ZORUNLU SECRETS (6 adet)
 
-### 1. Backend Worker Secret
-```bash
-eas secret:create --scope project --name ORG_SECRET --value "your-org-secret-value"
-```
-**Açıklama:** Backend push worker için shared secret header. Backend ile eşleşmeli.
+1. **EXPO_PUBLIC_OPENAI_API_KEY**
+   - Kullanım: OpenAI GPT-4 API için
+   - Dosya: `src/core/ai/services/OpenAIService.ts`
+   - Nasıl Bulunur: OpenAI Dashboard → API Keys
 
-### 2. Firebase Configuration
-```bash
-eas secret:create --scope project --name FIREBASE_API_KEY --value "your-firebase-api-key"
-eas secret:create --scope project --name FIREBASE_PROJECT_ID --value "your-firebase-project-id"
-```
-**Açıklama:** Firebase servisleri için API key ve Project ID.
+2. **RC_IOS_KEY**
+   - Kullanım: RevenueCat iOS API Key
+   - Dosya: `src/lib/revenuecat.ts`, `src/core/services/PremiumService.ts`
+   - Nasıl Bulunur: RevenueCat Dashboard → API Keys → iOS
 
-### 3. OpenAI API Key
-```bash
-eas secret:create --scope project --name EXPO_PUBLIC_OPENAI_API_KEY --value "your-openai-api-key"
-```
-**Açıklama:** AI özellikleri için OpenAI API key. `EXPO_PUBLIC_` prefix'i client-side erişim için gereklidir.
+3. **RC_ANDROID_KEY**
+   - Kullanım: RevenueCat Android API Key
+   - Dosya: `src/lib/revenuecat.ts`, `src/core/services/PremiumService.ts`
+   - Nasıl Bulunur: RevenueCat Dashboard → API Keys → Android
 
-### 4. RevenueCat API Keys
-```bash
-eas secret:create --scope project --name RC_IOS_KEY --value "your-revenuecat-ios-key"
-eas secret:create --scope project --name RC_ANDROID_KEY --value "your-revenuecat-android-key"
-```
-**Açıklama:** Premium özellikler ve IAP için RevenueCat API key'leri.
+4. **FIREBASE_API_KEY**
+   - Kullanım: Firebase Web API Key
+   - Dosya: `src/core/config/firebase.ts`
+   - Nasıl Bulunur: Firebase Console → Project Settings → General → Web API Key
 
-## 🚀 Setup Adımları
+5. **FIREBASE_PROJECT_ID**
+   - Kullanım: Firebase Project ID
+   - Dosya: `src/core/config/firebase.ts`
+   - Nasıl Bulunur: Firebase Console → Project Settings → General → Project ID
 
-### 1. EAS CLI Kurulumu
-```bash
-npm install -g eas-cli
-eas login
-```
+6. **ORG_SECRET**
+   - Kullanım: Backend API HMAC Secret
+   - Dosya: `src/lib/http.ts`, `src/core/api/client.ts`
+   - Nasıl Bulunur: Backend yöneticisinden alınmalı
 
-### 2. Project'e Bağlanma
-```bash
-cd /path/to/AfetNet1
-eas build:configure
-```
+---
 
-### 3. Secrets Oluşturma
-Yukarıdaki listedeki tüm secret'ları oluşturun:
+## 🚀 SECRETS OLUŞTURMA KOMUTLARI
+
+Aşağıdaki komutları sırayla çalıştırın. Her komutta `YOUR_VALUE` yerine gerçek değeri yazın:
 
 ```bash
-# Backend Worker Secret
-eas secret:create --scope project --name ORG_SECRET
+# 1. OpenAI API Key
+eas secret:create --scope project --name EXPO_PUBLIC_OPENAI_API_KEY --value YOUR_VALUE
 
-# Firebase
-eas secret:create --scope project --name FIREBASE_API_KEY
-eas secret:create --scope project --name FIREBASE_PROJECT_ID
+# 2. RevenueCat iOS Key
+eas secret:create --scope project --name RC_IOS_KEY --value YOUR_VALUE
 
-# OpenAI
-eas secret:create --scope project --name EXPO_PUBLIC_OPENAI_API_KEY
+# 3. RevenueCat Android Key
+eas secret:create --scope project --name RC_ANDROID_KEY --value YOUR_VALUE
 
-# RevenueCat
-eas secret:create --scope project --name RC_IOS_KEY
-eas secret:create --scope project --name RC_ANDROID_KEY
+# 4. Firebase API Key
+eas secret:create --scope project --name FIREBASE_API_KEY --value YOUR_VALUE
+
+# 5. Firebase Project ID
+eas secret:create --scope project --name FIREBASE_PROJECT_ID --value YOUR_VALUE
+
+# 6. Backend Secret
+eas secret:create --scope project --name ORG_SECRET --value YOUR_VALUE
 ```
 
-**Not:** `--value` parametresi ile birlikte kullanırsanız, secret değeri komut satırından girilir. Güvenlik için `--value` olmadan kullanmanız önerilir (interactive mode).
+---
 
-### 4. Secrets Kontrolü
-Oluşturulan secret'ları kontrol edin:
+## 📝 OPSİYONEL SECRETS (Default değerleri var, gerekirse değiştirilebilir)
+
+7. **API_BASE_URL** (default: `https://afetnet-backend.onrender.com`)
+   - Kullanım: Backend API base URL
+   - Dosya: `src/core/config/env.ts`
+
+8. **EEW_ENABLED** (default: `false`)
+   - Kullanım: Early Earthquake Warning özelliği
+   - Dosya: `src/core/config/env.ts`
+
+9. **EEW_NATIVE_ALARM** (default: `false`)
+   - Kullanım: Native alarm özelliği
+   - Dosya: `src/core/config/env.ts`
+
+---
+
+## ✅ SECRETS KONTROLÜ
+
+Secrets'ları kontrol etmek için:
 
 ```bash
-eas secret:list
+eas env:list --scope project
 ```
 
-### 5. Build Profilleri
-`eas.json` dosyasında environment variable'lar zaten tanımlı. EAS Secrets otomatik olarak bu variable'lara inject edilir.
+---
 
-## 🔍 Secret Kullanımı
+## 🔍 PROJEDE KULLANIM YERLERİ
 
-### app.config.ts
-Environment variable'lar `app.config.ts` dosyasında `extra` bölümünde tanımlı:
+### EXPO_PUBLIC_OPENAI_API_KEY
+- `src/core/ai/services/OpenAIService.ts` - OpenAI API çağrıları
+- `src/core/config/env.ts` - Environment config
 
-```typescript
-extra: {
-  ORG_SECRET: process.env.ORG_SECRET || '',
-  FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
-  // vb.
-}
-```
+### RC_IOS_KEY / RC_ANDROID_KEY
+- `src/lib/revenuecat.ts` - RevenueCat initialization
+- `src/core/services/PremiumService.ts` - Premium service
+- `src/core/config/env.ts` - Environment config
 
-### Runtime Kullanımı
-Uygulama içinde `src/core/config/env.ts` üzerinden erişilir:
+### FIREBASE_API_KEY / FIREBASE_PROJECT_ID
+- `src/core/config/firebase.ts` - Firebase configuration
+- `src/core/services/FirebaseService.ts` - Firebase service
+- `src/core/config/env.ts` - Environment config
 
-```typescript
-import { ENV } from '@/core/config/env';
+### ORG_SECRET
+- `src/lib/http.ts` - HMAC signature generation
+- `src/core/api/client.ts` - API client
+- `src/core/config/env.ts` - Environment config
 
-const secret = ENV.ORG_SECRET;
-```
+---
 
-## ⚠️ Önemli Notlar
+## ⚠️ ÖNEMLİ NOTLAR
 
-1. **Güvenlik:** Secret değerlerini asla git'e commit etmeyin!
-2. **Scope:** `--scope project` kullanın (tüm build profilleri için geçerli)
-3. **Environment:** Secret'lar tüm build profilleri (development, preview, production) için geçerlidir
-4. **Override:** Profile-specific secret'lar için `--scope build` kullanabilirsiniz
+1. **Güvenlik**: Secrets'lar asla kod deposuna commit edilmemeli
+2. **Build**: Secrets'lar build sırasında otomatik olarak inject edilir
+3. **Environment**: Her environment (development, preview, production) için ayrı secrets oluşturulabilir
+4. **Scope**: `--scope project` kullanarak proje seviyesinde secrets oluşturulur
 
-## 🐛 Sorun Giderme
+---
 
-### Secret Bulunamadı Hatası
-```bash
-# Secret'ların listesini kontrol edin
-eas secret:list
+## 🎯 SONRAKI ADIMLAR
 
-# Secret'ı yeniden oluşturun
-eas secret:create --scope project --name SECRET_NAME
-```
-
-### Build'de Secret Kullanılmıyor
-- `eas.json` dosyasında `env` bölümünü kontrol edin
-- Secret adının doğru olduğundan emin olun
-- Build log'larını kontrol edin
-
-## 📚 Daha Fazla Bilgi
-
-- [EAS Secrets Documentation](https://docs.expo.dev/build-reference/variables/)
-- [Environment Variables Guide](https://docs.expo.dev/guides/environment-variables/)
-
+1. Yukarıdaki 6 zorunlu secret'ı oluşturun
+2. `eas build --platform ios --profile production` komutu ile build yapın
+3. Build başarılı olmalı! ✅

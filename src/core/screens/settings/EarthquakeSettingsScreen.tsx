@@ -6,7 +6,7 @@
  * Tüm ayarlar gerçek ve aktif
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
   Alert,
   TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, typography } from '../../theme';
@@ -78,13 +78,38 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     setPriorityLow,
   } = useSettingsStore();
 
-  // Local state for text inputs
+  // Local state for text inputs - ELITE: Sync with store changes
   const [magnitudeInput, setMagnitudeInput] = useState(minMagnitudeForNotification.toFixed(1));
   const [distanceInput, setDistanceInput] = useState(maxDistanceForNotification === 0 ? '' : maxDistanceForNotification.toString());
   const [criticalMagnitudeInput, setCriticalMagnitudeInput] = useState(criticalMagnitudeThreshold.toFixed(1));
   const [criticalDistanceInput, setCriticalDistanceInput] = useState(criticalDistanceThreshold.toString());
   const [eewMagnitudeInput, setEewMagnitudeInput] = useState(eewMinMagnitude.toFixed(1));
   const [eewTimeInput, setEewTimeInput] = useState(eewWarningTime.toString());
+
+  // ELITE: Sync local state with store changes (for external updates)
+  useEffect(() => {
+    setMagnitudeInput(minMagnitudeForNotification.toFixed(1));
+  }, [minMagnitudeForNotification]);
+
+  useEffect(() => {
+    setDistanceInput(maxDistanceForNotification === 0 ? '' : maxDistanceForNotification.toString());
+  }, [maxDistanceForNotification]);
+
+  useEffect(() => {
+    setCriticalMagnitudeInput(criticalMagnitudeThreshold.toFixed(1));
+  }, [criticalMagnitudeThreshold]);
+
+  useEffect(() => {
+    setCriticalDistanceInput(criticalDistanceThreshold.toString());
+  }, [criticalDistanceThreshold]);
+
+  useEffect(() => {
+    setEewMagnitudeInput(eewMinMagnitude.toFixed(1));
+  }, [eewMinMagnitude]);
+
+  useEffect(() => {
+    setEewTimeInput(eewWarningTime.toString());
+  }, [eewWarningTime]);
 
   const handleMagnitudeChange = (value: string) => {
     setMagnitudeInput(value);
@@ -149,9 +174,21 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     }
   };
 
-  const handleSensorToggle = (enabled: boolean) => {
+  const handleSensorToggle = async (enabled: boolean) => {
     haptics.impactLight();
     setSeismicSensor(enabled);
+    
+    // ELITE: Start/stop SeismicSensorService
+    try {
+      const { seismicSensorService } = await import('../../services/SeismicSensorService');
+      if (enabled) {
+        await seismicSensorService.start();
+      } else {
+        seismicSensorService.stop();
+      }
+    } catch (error) {
+      console.error('Failed to toggle seismic sensor service:', error);
+    }
   };
 
   const handlePriorityChange = (
@@ -261,9 +298,10 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16, backgroundColor: colors.background.primary }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
@@ -641,7 +679,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
           </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -656,6 +694,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: colors.background.primary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.light,
   },

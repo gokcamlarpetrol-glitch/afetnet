@@ -489,12 +489,12 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         <TouchableOpacity
           style={[styles.tab, activeTab === 'original' && styles.tabActive]}
           onPress={() => {
-            switchTab('original');
-            // Orijinal haber tab'ına tıklayınca direkt modal aç
-            if (hasValidUrl && !browserVisible) {
-              setTimeout(() => {
-                openAfetNetBrowser();
-              }, 100);
+            haptics.impactLight();
+            setActiveTab('original');
+            // ELITE: Orijinal haber tab'ına tıklayınca direkt modal aç
+            if (hasValidUrl) {
+              // Hemen aç, setTimeout gerekmez
+              openAfetNetBrowser();
             }
           }}
         >

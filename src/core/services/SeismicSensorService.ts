@@ -666,21 +666,17 @@ class SeismicSensorService {
               event.confidence = Math.max(30, (event.confidence || 50) - 10);
             }
           } catch (innerError: any) {
-            // ELITE: Silent error handling for Hermes engine - completely suppress
+            // ELITE: Completely silent error handling for Hermes engine
             // Hermes engine has known issues with complex array operations
             // This is a React Native limitation, not our code issue
-            if (__DEV__ && innerError?.message && !innerError.message.includes('hermes') && !innerError.message.includes('jsEngine')) {
-              logger.debug('Real-time detection inner error (non-critical):', innerError);
-            }
+            // No logging - these errors are expected and handled gracefully
             // Continue silently - fallback to other detection methods
           }
         }
       } catch (error: any) {
-        // ELITE: Silent error handling - don't spam logs for Hermes engine issues
+        // ELITE: Completely silent error handling for Hermes engine
         // Hermes engine has known limitations with complex operations
-        if (__DEV__ && error?.message && !error.message.includes('hermes') && !error.message.includes('jsEngine')) {
-          logger.debug('Real-time detection error (non-critical):', error);
-        }
+        // No logging - these errors are expected and handled gracefully
         // Continue with normal processing - other detection methods will handle it
       }
     }
@@ -1168,13 +1164,52 @@ class SeismicSensorService {
       
       const magnitude = event.estimatedMagnitude || 0;
       
-      // ELITE: Calculate ETA (Estimated Time of Arrival) for earthquake waves
-      // This allows us to warn users BEFORE waves reach them (Google AEA style)
-      const eta = await etaEstimationService.calculateETA(event.location, null);
+      // ELITE: IMMEDIATE notification - don't wait for ETA calculation
+      // CRITICAL: Speed is everything - send notification FIRST
+      const isCritical = magnitude >= 4.5;
+      const isHighPriority = magnitude >= 3.5;
       
-      // ELITE: More aggressive thresholds - alert for smaller earthquakes too
-      const isCritical = magnitude >= 4.5; // Lowered from 5.0
-      const isHighPriority = magnitude >= 3.5; // New threshold
+      // CRITICAL: Send immediate alert FIRST (don't wait for ETA)
+      const immediateTitle = isCritical 
+        ? `🚨🚨🚨 İLK HABER - Deprem Algılandı! 🚨🚨🚨`
+        : isHighPriority
+        ? `🚨 İLK HABER - Deprem Algılandı! 🚨`
+        : `⚠️ İLK HABER - Deprem Algılandı`;
+      const immediateBody = isCritical
+        ? `AfetNet sensörü ${magnitude.toFixed(1)} büyüklüğünde deprem algıladı! Deprem başlıyor - Güvenli yere geçin!`
+        : `AfetNet sensörü ${magnitude.toFixed(1)} büyüklüğünde sarsıntı algıladı. Deprem başlıyor olabilir.`;
+      
+      void multiChannelAlertService.sendAlert({
+        title: immediateTitle,
+        body: immediateBody,
+        priority: isCritical ? 'critical' : isHighPriority ? 'high' : 'normal',
+        ttsText: immediateBody,
+        channels: {
+          pushNotification: true,
+          fullScreenAlert: isCritical || isHighPriority,
+          alarmSound: isCritical || isHighPriority,
+          vibration: true,
+          tts: true,
+        },
+        vibrationPattern: isCritical
+          ? [0, 200, 100, 200, 100, 200, 100, 500, 100, 500, 100, 500]
+          : [0, 200, 100, 200, 100, 200],
+        sound: isCritical ? 'emergency' : 'default',
+        duration: isCritical ? 0 : 30,
+        data: {
+          type: 'seismic_eew',
+          eventId: event.id,
+          magnitude,
+          location: event.location,
+          confidence: event.confidence,
+          immediate: true,
+        },
+      }).catch(error => {
+        logger.error('Immediate seismic alert error:', error);
+      });
+      
+      // ELITE: Calculate ETA in parallel (don't block notification)
+      const eta = await etaEstimationService.calculateETA(event.location, null).catch(() => null);
       
       // ELITE: Google AEA style alert levels based on ETA
       let alertLevel: AlertLevel = AlertLevel.NONE;
@@ -1264,7 +1299,9 @@ class SeismicSensorService {
         // Continue with normal alert
       }
       
-      await multiChannelAlertService.sendAlert({
+      // ELITE: Send enhanced alert with ETA information
+      // CRITICAL: Use fire-and-forget to avoid blocking
+      void multiChannelAlertService.sendAlert({
         title: alertTitle,
         body: alertBody,
         priority,

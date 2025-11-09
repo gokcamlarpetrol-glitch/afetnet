@@ -51,17 +51,27 @@ class EEWService {
     PROXY: 'wss://afetnet-backend.onrender.com/eew',
   };
 
-  // Elite: Get AFAD poll URL - Last 1 hour for ultra-fast early warning
+  // ELITE: Get AFAD poll URL - Last 5 minutes for ULTRA-FAST early warning
+  // CRITICAL: Shorter time window = faster API response = earlier detection
   private getAfadPollUrl(): string {
-    const oneHourAgo = new Date();
-    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
-    const startDate = oneHourAgo.toISOString().split('T')[0];
-    const startTime = oneHourAgo.toISOString();
+    const fiveMinutesAgo = new Date();
+    fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5); // Last 5 minutes only
+    const startDate = fiveMinutesAgo.toISOString().split('T')[0];
+    const startTime = fiveMinutesAgo.toISOString().split('T')[1]?.split('.')[0] || '00:00:00';
     const endDate = new Date().toISOString().split('T')[0];
-    const endTime = new Date().toISOString();
+    const endTime = new Date().toISOString().split('T')[1]?.split('.')[0] || '23:59:59';
     
-    // Try with time precision for faster response
-    return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+    // ELITE: Use user's magnitude threshold setting (same as EarthquakeService)
+    // This ensures consistency and reduces unnecessary data transfer
+    try {
+      const { useSettingsStore } = require('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      const minMag = Math.max(1, Math.floor(settings.minMagnitudeForNotification)); // AFAD API requires integer, minimum 1
+      return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=${minMag}`;
+    } catch {
+      // Fallback if settings not available
+      return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+    }
   }
 
   async start() {
@@ -338,9 +348,10 @@ class EEWService {
           // Use AFAD API (only real data source for Turkey)
           const url = this.getAfadPollUrl();
           
-          // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
+          // ELITE: Shorter timeout for faster failure detection and retry
+          // CRITICAL: Faster timeout = faster retry = earlier detection
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout (reduced from 15s for faster retry)
           try {
             const response = await fetch(url, {
               headers: {
@@ -448,17 +459,17 @@ class EEWService {
         }
       }
 
-      // Elite: ULTRA-FAST polling for REAL early warning (1 second for critical, 2 seconds normal)
-      // This catches earthquakes AS THEY HAPPEN, not after
-      // Dynamic interval based on recent activity
+      // ELITE: ULTRA-FAST polling for REAL early warning
+      // CRITICAL: We MUST be first - faster polling = earlier detection = MORE LIVES SAVED
+      // Dynamic interval based on recent activity and battery state
       const recentCriticalActivity = Array.from(this.seenEvents.values()).some((id) => {
         // Check if we've seen critical events recently
-        return true; // Simplified - always use fast polling
+        return true; // Simplified - always use fast polling for maximum safety
       });
-      // ELITE: ULTRA-FAST polling for FIRST-TO-ALERT
-      // CRITICAL: We MUST be first - faster polling = earlier detection
-      // ELITE: Battery-aware polling interval
-      let pollInterval = recentCriticalActivity ? 500 : 1000; // 0.5s critical, 1s normal (was 1s/2s)
+      
+      // ELITE: ULTRA-AGGRESSIVE polling intervals for FIRST-TO-ALERT
+      // CRITICAL: These intervals are optimized for maximum speed while maintaining battery efficiency
+      let pollInterval = recentCriticalActivity ? 200 : 300; // 200ms critical, 300ms normal (ULTRA-FAST)
       
       // Apply battery multiplier (lazy import to avoid circular dependency)
       try {
@@ -467,8 +478,8 @@ class EEWService {
           const multiplier = batteryModule.batteryMonitoringService.getPollingIntervalMultiplier();
           pollInterval = Math.round(pollInterval * multiplier);
           
-          // CRITICAL: Never go below 500ms even when charging (safety limit)
-          pollInterval = Math.max(pollInterval, 500);
+          // CRITICAL: Never go below 200ms even when charging (safety limit for ultra-fast detection)
+          pollInterval = Math.max(pollInterval, 200);
         }
       } catch {
         // BatteryMonitoringService not available - use base interval
@@ -650,13 +661,50 @@ class EEWService {
     return events;
   }
 
+  /**
+   * ELITE: Send immediate alert without waiting for ETA calculation
+   * CRITICAL: Speed is everything - send notification FIRST
+   */
+  private async sendImmediateAlert(event: EEWEvent, magnitude: number, epicenter: { latitude: number; longitude: number }) {
+    const eewConfig = this.getEEWAlertConfig(magnitude);
+    const basicTitle = eewConfig.title;
+    const basicBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`;
+    
+    // CRITICAL: Send immediate alert with basic info - DON'T WAIT
+    void multiChannelAlertService.sendAlert({
+      title: basicTitle,
+      body: basicBody,
+      priority: eewConfig.priority,
+      ttsText: `ERKEN UYARI! ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${event.region || 'Bilinmeyen bölge'}.`,
+      channels: eewConfig.channels,
+      vibrationPattern: eewConfig.vibrationPattern,
+      sound: eewConfig.sound,
+      duration: eewConfig.duration,
+      data: {
+        type: 'eew',
+        eventId: event.id,
+        magnitude,
+        location: { lat: event.latitude, lng: event.longitude },
+        certainty: event.certainty,
+        immediate: true, // Flag to indicate this is immediate alert
+      },
+    }).catch(error => {
+      logger.error('Immediate alert error:', error);
+    });
+  }
+
   private async notifyCallbacks(event: EEWEvent) {
     const magnitude = event.magnitude || 0;
     
-    // ELITE: Calculate ETA (Estimated Time of Arrival) for earthquake waves
-    // This allows us to warn users BEFORE waves reach them (Google AEA style)
+    // ELITE: IMMEDIATE notification - don't wait for ETA calculation
+    // CRITICAL: Speed is everything - send notification FIRST, then enhance with ETA
     const epicenter = { latitude: event.latitude, longitude: event.longitude };
-    const eta = await etaEstimationService.calculateETA(epicenter, null);
+    
+    // CRITICAL: Send immediate notification FIRST (don't wait for ETA)
+    await this.sendImmediateAlert(event, magnitude, epicenter);
+    
+    // ELITE: Calculate ETA in parallel (don't block notification)
+    const eta = await etaEstimationService.calculateETA(epicenter, null).catch(() => null);
     
     // ELITE: Google AEA style alert levels based on ETA
     let alertLevel: AlertLevel = AlertLevel.NONE;
@@ -709,7 +757,9 @@ class EEWService {
       ? `${alertTitle.replace(/🚨|⚠️/g, '').trim()}. ${recommendedAction} ${Math.round(eta.sWaveETA)} saniye içinde ulaşabilir.`
       : `ERKEN UYARI! ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${event.region || 'Bilinmeyen bölge'}.`;
     
-    multiChannelAlertService.sendAlert({
+    // ELITE: Send enhanced alert with ETA information
+    // CRITICAL: Use fire-and-forget to avoid blocking
+    void multiChannelAlertService.sendAlert({
       title: alertTitle,
       body: alertBody,
       priority,

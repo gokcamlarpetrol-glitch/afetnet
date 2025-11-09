@@ -210,7 +210,7 @@ export async function startAdvertisingStub() {
   
   if (isAdvertising) {
     logger.warn('BLE advertising already running');
-    return;
+    return Promise.resolve();
   }
   
   try {
@@ -605,7 +605,15 @@ export class BLEMeshNetwork {
       txPowerLevel: 0,
     };
 
-    return await startAdvertisingStub(); // For now, use existing implementation
+    // ELITE: Use existing implementation and ensure return type matches
+    const stopFunction = await startAdvertisingStub();
+    if (typeof stopFunction === 'function') {
+      return stopFunction;
+    }
+    // Fallback: return a no-op function if startAdvertisingStub doesn't return a function
+    return () => {
+      logger.debug('Enhanced advertising stopped (fallback)');
+    };
   }
 
   private startNetworkHealthMonitoring(): void {

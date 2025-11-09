@@ -91,9 +91,33 @@ export async function initializeApp() {
   isInitializing = true;
 
   try {
+    // Step 0: ELITE I18n Service with Location-Based Auto-Detection (CRITICAL: Must be first)
+    await initWithTimeout(async () => {
+      const { i18nService } = await import('./services/I18nService');
+      const { useSettingsStore } = await import('./stores/settingsStore');
+      
+      // Initialize i18n with auto-detection
+      await i18nService.initialize();
+      
+      // Apply saved language preference from settings
+      const savedLanguage = useSettingsStore.getState().language;
+      if (savedLanguage && savedLanguage !== i18nService.getLocale()) {
+        i18nService.setLocale(savedLanguage as any);
+        logger.info('✅ Language preference applied:', savedLanguage);
+      }
+      
+      logger.info('✅ I18n Service initialized with language:', i18nService.getLocale());
+    }, 'I18nService', 10000);
+
     // Step 1: Notification Service & Multi-Channel Alert Service
     await initWithTimeout(() => notificationService.initialize(), 'NotificationService');
     await initWithTimeout(() => multiChannelAlertService.initialize(), 'MultiChannelAlertService');
+    
+    // ELITE: Initialize background notification service (CRITICAL: Works when app is closed)
+    await initWithTimeout(async () => {
+      const { backgroundNotificationService } = await import('./services/BackgroundNotificationService');
+      await backgroundNotificationService.initialize();
+    }, 'BackgroundNotificationService', 10000);
 
            // Step 2: Firebase Services (initialize Firebase app first, then all services)
            // Elite: Increased timeout to 15 seconds for Firebase initialization (first launch can be slow)
@@ -101,6 +125,11 @@ export async function initializeApp() {
              const getFirebaseApp = (await import('../lib/firebase')).default;
              const firebaseApp = getFirebaseApp();
              if (!firebaseApp) throw new Error('Firebase app null');
+             
+             // ELITE: Initialize Firebase Authentication FIRST (required for Firestore)
+             const { firebaseAuthService } = await import('./services/FirebaseAuthService');
+             await firebaseAuthService.initialize();
+             
              await firebaseService.initialize();
              await firebaseDataService.initialize();
              
@@ -240,6 +269,14 @@ export async function initializeApp() {
     await initWithTimeout(() => flashlightService.initialize(), 'FlashlightService');
     await initWithTimeout(() => voiceCommandService.initialize(), 'VoiceCommandService');
     await initWithTimeout(() => offlineMapService.initialize(), 'OfflineMapService');
+    
+    // ELITE: Map Download Service with Location-Based Auto-Download (CRITICAL)
+    await initWithTimeout(async () => {
+      const { mapDownloadService } = await import('./services/MapDownloadService');
+      await mapDownloadService.initialize();
+      logger.info('✅ MapDownloadService initialized with location-based auto-download');
+    }, 'MapDownloadService', 10000);
+    
     await initWithTimeout(() => useHealthProfileStore.getState().loadProfile(), 'HealthProfile');
 
     // Step 16.5: Storage Management Service (Critical)

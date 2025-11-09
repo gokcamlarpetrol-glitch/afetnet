@@ -13,7 +13,7 @@ import {
   Switch,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
@@ -97,9 +97,10 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
   ];
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16, backgroundColor: colors.background.primary }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
@@ -220,7 +221,7 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
           <Text style={styles.infoText}>Build 2025.11.05</Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -235,6 +236,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: colors.background.primary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.light,
   },

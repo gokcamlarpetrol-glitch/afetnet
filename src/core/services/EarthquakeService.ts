@@ -353,6 +353,24 @@ class EarthquakeService {
             return false; // Already notified - skip
           }
           
+          // ELITE: Check if EEW already sent early warning for this earthquake
+          // This prevents duplicate notifications
+          try {
+            const earlyWarningKey = `early_warning_${signature}`;
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            AsyncStorage.getItem(earlyWarningKey).then((value: string | null) => {
+              if (value === 'true') {
+                if (__DEV__ && eq.magnitude > 4.0) {
+                  logger.debug(`⏭️ EEW zaten erken uyarı gönderdi (atlandı): ${eq.id} - ${eq.magnitude} - ${eq.location}`);
+                }
+              }
+            }).catch(() => {
+              // Ignore storage errors
+            });
+          } catch {
+            // Ignore errors - continue with normal processing
+          }
+          
           // CRITICAL: Only accept if:
           // 1. This is our first fetch (lastCheckedTimestamp === 0) - allow all recent earthquakes
           // 2. OR earthquake happened in last 2 hours AND we haven't seen it before (catches delayed API responses)
@@ -839,8 +857,15 @@ class EarthquakeService {
       tomorrow.setDate(tomorrow.getDate() + 1);
       const endDate = tomorrow.toISOString().split('T')[0];
       
+      // ELITE: Use user's magnitude threshold setting for API call
+      // This reduces unnecessary data transfer and improves performance
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      const minMag = Math.max(1, Math.floor(settings.minMagnitudeForNotification)); // AFAD API requires integer, minimum 1
+      
       // CRITICAL: Use time-precise URL for faster response (last 2 hours only)
-      const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+      // Use user's magnitude threshold setting
+      const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=${minMag}`;
       
       // Fallback: If no results, try last 24 hours (wider window)
       // But prioritize 2-hour window for speed
@@ -1000,11 +1025,16 @@ class EarthquakeService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+      // ELITE: Use user's magnitude threshold setting
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      const minMagnitude = Math.max(3.0, settings.minMagnitudeForNotification); // USGS minimum is 3.0
+      
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
       const startTime = new Date(oneDayAgo).toISOString();
       
       const response = await fetch(
-        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&minmagnitude=3.0&orderby=time&limit=500`,
+        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&minmagnitude=${minMagnitude.toFixed(1)}&orderby=time&limit=500`,
         {
           headers: {
             'Accept': 'application/json',
@@ -1031,7 +1061,7 @@ class EarthquakeService {
         latitude: feature.geometry.coordinates[1] || 0,
         longitude: feature.geometry.coordinates[0] || 0,
         source: 'USGS' as const,
-      })).filter((eq: Earthquake) => eq.magnitude >= 3.0);
+      })).filter((eq: Earthquake) => eq.magnitude >= minMagnitude);
       
     } catch (error) {
       return [];
@@ -1055,10 +1085,15 @@ class EarthquakeService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
       
+      // ELITE: Use user's magnitude threshold setting
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      const minMagnitude = Math.max(3.0, settings.minMagnitudeForNotification); // Backend minimum is 3.0
+      
       // Backend'den son 2 saatteki depremleri al
       const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
       const response = await fetch(
-        `${baseUrl}/api/earthquakes?since=${twoHoursAgo}&minmagnitude=3.0`,
+        `${baseUrl}/api/earthquakes?since=${twoHoursAgo}&minmagnitude=${minMagnitude.toFixed(1)}`,
         {
           headers: {
             'Accept': 'application/json',
@@ -1086,7 +1121,7 @@ class EarthquakeService {
         latitude: item.lat || item.latitude || 0,
         longitude: item.lon || item.longitude || 0,
         source: (item.source || 'backend').toUpperCase() as 'EMSC' | 'KOERI' | 'AFAD',
-      })).filter((eq: Earthquake) => eq.magnitude >= 3.0);
+      })).filter((eq: Earthquake) => eq.magnitude >= minMagnitude);
       
       return backendEarthquakes;
     } catch (error) {

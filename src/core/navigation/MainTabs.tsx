@@ -28,10 +28,14 @@ export default function MainTabs() {
           height: 70,
           paddingBottom: 10,
           paddingTop: 10,
+          paddingHorizontal: 8, // ELITE: Sağ tarafa padding ekle - içerik ekranın dışına taşmasın
         },
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
+        },
+        tabBarItemStyle: {
+          paddingHorizontal: 0, // ELITE: Tab item'lar arası boşluğu minimize et - Harita'ya daha yakın
         },
       }}
     >

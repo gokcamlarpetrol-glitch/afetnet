@@ -192,6 +192,170 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     };
   }, [userId]);
 
+  // ELITE: Send broadcast message to all nearby devices (multi-hop)
+  const sendBroadcastMessage = useCallback(async () => {
+    try {
+      if (!inputText.trim() || !myDeviceId) {
+        return;
+      }
+
+      const { sanitizeString } = await import('../../utils/validation');
+      const trimmedInput = inputText.trim();
+      if (trimmedInput.length > 5000) {
+        Alert.alert('Hata', 'Mesaj çok uzun. Maksimum 5000 karakter.');
+        return;
+      }
+      
+      const sanitizedInput = sanitizeString(trimmedInput, 5000);
+      if (!sanitizedInput || sanitizedInput.length === 0) {
+        Alert.alert('Hata', 'Mesaj içeriği geçersiz.');
+        return;
+      }
+      
+      setInputText('');
+      haptics.impactMedium();
+
+      const timestamp = Date.now();
+      const messageId = `broadcast-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const newMessage: Message = {
+        id: messageId,
+        from: 'me',
+        to: 'broadcast',
+        content: `[Yayın] ${sanitizedInput}`,
+        timestamp,
+        delivered: false,
+        read: false,
+      };
+
+      useMessageStore.getState().addMessage(newMessage);
+      setMessages(prev => [...prev, newMessage]);
+      
+      try {
+        const messagePayload = JSON.stringify({
+          type: 'broadcast',
+          from: myDeviceId,
+          content: sanitizedInput,
+          timestamp,
+          priority: 'normal',
+        });
+
+        // ELITE: Broadcast via mesh - multi-hop forwarding enabled
+        await bleMeshService.broadcastMessage({
+          content: messagePayload,
+          type: 'broadcast',
+          priority: 'normal',
+          ttl: 5, // Multi-hop: 5 hops max
+        });
+
+        setTimeout(() => {
+          useMessageStore.getState().markAsDelivered(newMessage.id);
+          setMessages(prev => prev.map(m => 
+            m.id === newMessage.id ? { ...m, delivered: true } : m
+          ));
+        }, 1000);
+
+        haptics.notificationSuccess();
+        Alert.alert('Başarılı', 'Mesaj yakındaki tüm cihazlara yayınlandı (multi-hop).');
+        logger.info('Broadcast message sent:', messageId);
+      } catch (error) {
+        logger.error('Failed to send broadcast message:', error);
+        haptics.notificationError();
+        Alert.alert('Hata', 'Yayın mesajı gönderilemedi. Lütfen tekrar deneyin.');
+      }
+
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error) {
+      logger.error('Error in sendBroadcastMessage:', error);
+      Alert.alert('Hata', 'Yayın mesajı gönderilirken bir hata oluştu.');
+    }
+  }, [inputText, myDeviceId, setMessages]);
+
+  // ELITE: Send message to trapped users (enkaz altındakiler)
+  const sendRescueMessage = useCallback(async () => {
+    try {
+      if (!inputText.trim() || !myDeviceId) {
+        return;
+      }
+
+      const { sanitizeString } = await import('../../utils/validation');
+      const trimmedInput = inputText.trim();
+      if (trimmedInput.length > 5000) {
+        Alert.alert('Hata', 'Mesaj çok uzun. Maksimum 5000 karakter.');
+        return;
+      }
+      
+      const sanitizedInput = sanitizeString(trimmedInput, 5000);
+      if (!sanitizedInput || sanitizedInput.length === 0) {
+        Alert.alert('Hata', 'Mesaj içeriği geçersiz.');
+        return;
+      }
+      
+      setInputText('');
+      haptics.impactMedium();
+
+      const timestamp = Date.now();
+      const messageId = `rescue-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const newMessage: Message = {
+        id: messageId,
+        from: 'me',
+        to: 'rescue',
+        content: `[Enkaz] ${sanitizedInput}`,
+        timestamp,
+        delivered: false,
+        read: false,
+      };
+
+      useMessageStore.getState().addMessage(newMessage);
+      setMessages(prev => [...prev, newMessage]);
+      
+      try {
+        // ELITE: Send as SOS_BEACON type for rescue teams and trapped users
+        const messagePayload = JSON.stringify({
+          type: 'SOS_BEACON',
+          from: myDeviceId,
+          content: sanitizedInput,
+          timestamp,
+          priority: 'critical',
+          target: 'trapped', // Target trapped users
+        });
+
+        // ELITE: Broadcast with critical priority - multi-hop forwarding
+        await bleMeshService.broadcastMessage({
+          content: messagePayload,
+          type: 'SOS_BEACON',
+          priority: 'critical',
+          ttl: 8, // More hops for rescue messages
+        });
+
+        setTimeout(() => {
+          useMessageStore.getState().markAsDelivered(newMessage.id);
+          setMessages(prev => prev.map(m => 
+            m.id === newMessage.id ? { ...m, delivered: true } : m
+          ));
+        }, 1000);
+
+        haptics.notificationSuccess();
+        Alert.alert('Başarılı', 'Mesaj yakındaki enkaz altındaki kişilere gönderildi (multi-hop).');
+        logger.info('Rescue message sent:', messageId);
+      } catch (error) {
+        logger.error('Failed to send rescue message:', error);
+        haptics.notificationError();
+        Alert.alert('Hata', 'Kurtarma mesajı gönderilemedi. Lütfen tekrar deneyin.');
+      }
+
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error) {
+      logger.error('Error in sendRescueMessage:', error);
+      Alert.alert('Hata', 'Kurtarma mesajı gönderilirken bir hata oluştu.');
+    }
+  }, [inputText, myDeviceId, setMessages]);
+
   const sendMessage = useCallback(async () => {
     try {
       // ELITE: Validate input
@@ -384,7 +548,25 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           <Text style={styles.headerTitle}>
             {conversation?.userName || `Cihaz ${userId.slice(0, 8)}...`}
           </Text>
-          <Text style={styles.headerSubtitle}>Offline mesajlaşma</Text>
+          <View style={styles.headerSubtitleRow}>
+            <Text style={styles.headerSubtitle}>Offline mesajlaşma</Text>
+            {/* ELITE: Multi-hop indicator */}
+            {isMeshConnected && networkHealth.avgHopCount > 0 && (
+              <View style={styles.hopBadge}>
+                <Ionicons name="git-network" size={12} color={colors.brand.primary} />
+                <Text style={styles.hopText}>
+                  {networkHealth.avgHopCount.toFixed(1)} hop
+                </Text>
+              </View>
+            )}
+            {/* ELITE: Mesh status indicator */}
+            <View style={[styles.meshIndicator, { backgroundColor: isMeshConnected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(248, 113, 113, 0.2)' }]}>
+              <View style={[styles.meshDot, { backgroundColor: isMeshConnected ? '#10b981' : '#f87171' }]} />
+              <Text style={[styles.meshText, { color: isMeshConnected ? '#10b981' : '#f87171' }]}>
+                {isMeshConnected ? 'Mesh Aktif' : 'Mesh Pasif'}
+              </Text>
+            </View>
+          </View>
         </View>
         <View style={{ width: 40 }} />
       </LinearGradient>
@@ -418,6 +600,71 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
       {/* Input Bar */}
       <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
+        {/* ELITE: Broadcast and Rescue Message Options */}
+        <View style={styles.messageOptionsRow}>
+          <Pressable
+            style={styles.optionButton}
+            onPress={() => {
+              Alert.alert(
+                'Çevredekilere Mesaj Gönder',
+                'Bu mesaj yakındaki tüm cihazlara yayınlanacak (şebekesiz). Devam etmek istiyor musunuz?',
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  {
+                    text: 'Gönder',
+                    onPress: async () => {
+                      if (inputText.trim()) {
+                        await sendBroadcastMessage();
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            disabled={!inputText.trim()}
+          >
+            <Ionicons 
+              name="radio" 
+              size={16} 
+              color={inputText.trim() ? colors.brand.primary : colors.text.tertiary} 
+            />
+            <Text style={[styles.optionText, !inputText.trim() && styles.optionTextDisabled]}>
+              Yayınla
+            </Text>
+          </Pressable>
+          
+          <Pressable
+            style={styles.optionButton}
+            onPress={() => {
+              Alert.alert(
+                'Enkaz Altındakilere Mesaj Gönder',
+                'Bu mesaj yakındaki enkaz altındaki kişilere gönderilecek (şebekesiz). Devam etmek istiyor musunuz?',
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  {
+                    text: 'Gönder',
+                    onPress: async () => {
+                      if (inputText.trim()) {
+                        await sendRescueMessage();
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            disabled={!inputText.trim()}
+          >
+            <Ionicons 
+              name="alert-circle" 
+              size={16} 
+              color={inputText.trim() ? '#dc2626' : colors.text.tertiary} 
+            />
+            <Text style={[styles.optionText, !inputText.trim() && styles.optionTextDisabled]}>
+              Enkaz
+            </Text>
+          </Pressable>
+        </View>
+        
         <View style={styles.inputWrapper}>
           <TextInput
             style={styles.input}
@@ -472,10 +719,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  headerSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
   headerSubtitle: {
     fontSize: 12,
     color: colors.text.secondary,
-    marginTop: 2,
+  },
+  hopBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  hopText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.brand.primary,
+  },
+  meshIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  meshDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  meshText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
   messagesList: {
     padding: 16,
@@ -532,6 +818,31 @@ const styles = StyleSheet.create({
     borderTopColor: '#334155',
     paddingHorizontal: 16,
     paddingTop: 12,
+  },
+  messageOptionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  optionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.brand.primary,
+  },
+  optionTextDisabled: {
+    color: colors.text.tertiary,
   },
   inputWrapper: {
     flexDirection: 'row',

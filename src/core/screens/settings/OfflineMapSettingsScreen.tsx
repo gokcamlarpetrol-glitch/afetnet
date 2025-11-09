@@ -13,7 +13,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -118,9 +118,10 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
   const getDownloadProgress = (regionId: string) => downloads.find((d) => d.regionId === regionId);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16, backgroundColor: colors.background.primary }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
@@ -154,7 +155,17 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
             <ActivityIndicator size="large" color={colors.brand.primary} />
           </View>
         ) : (
-          AVAILABLE_REGIONS.map((region) => {
+          AVAILABLE_REGIONS
+            .sort((a, b) => {
+              // Sort: downloaded first, then by name
+              const aDownloaded = downloadedRegions.includes(a.id);
+              const bDownloaded = downloadedRegions.includes(b.id);
+              if (aDownloaded !== bDownloaded) {
+                return aDownloaded ? -1 : 1;
+              }
+              return a.name.localeCompare(b.name, 'tr');
+            })
+            .map((region) => {
             const downloaded = isDownloaded(region.id);
             const progress = getDownloadProgress(region.id);
 
@@ -256,7 +267,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
           })
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -271,6 +282,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: colors.background.primary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.light,
   },

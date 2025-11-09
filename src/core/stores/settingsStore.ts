@@ -26,8 +26,8 @@ interface SettingsState {
   voiceCommandEnabled: boolean;
   // Battery Saver
   batterySaverEnabled: boolean;
-  // Language
-  language: 'tr' | 'ku' | 'ar' | 'en';
+  // Language - ELITE: Comprehensive language support
+  language: 'en' | 'tr' | 'ar' | 'de' | 'fr' | 'es' | 'ru' | 'zh' | 'ja' | 'ko';
   // News
   newsEnabled: boolean;
   
@@ -79,7 +79,7 @@ interface SettingsActions {
   setVibration: (enabled: boolean) => void;
   setVoiceCommand: (enabled: boolean) => void;
   setBatterySaver: (enabled: boolean) => void;
-  setLanguage: (lang: 'tr' | 'ku' | 'ar' | 'en') => void;
+  setLanguage: (lang: 'en' | 'tr' | 'ar' | 'de' | 'fr' | 'es' | 'ru' | 'zh' | 'ja' | 'ko') => void;
   setNews: (enabled: boolean) => void;
   
   // ELITE: Comprehensive Earthquake Settings Actions
@@ -119,7 +119,7 @@ const defaultSettings: SettingsState = {
   vibrationEnabled: true,
   voiceCommandEnabled: false,
   batterySaverEnabled: false,
-  language: 'tr',
+  language: 'en', // ELITE: Default to English (most widely spoken)
   newsEnabled: true,
   
   // ELITE: Comprehensive Earthquake Settings Defaults

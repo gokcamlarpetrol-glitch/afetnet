@@ -58,6 +58,34 @@ class FirebaseDataService {
     return this._isInitialized;
   }
 
+  /**
+   * ELITE: Helper method to ensure authentication before Firestore operations
+   */
+  private async ensureAuth(timeout: number = 3000): Promise<boolean> {
+    try {
+      const { firebaseAuthService } = await import('./FirebaseAuthService');
+      return await firebaseAuthService.waitForAuth(timeout);
+    } catch (error) {
+      logger.error('Failed to check authentication:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ELITE: Helper method to handle permission denied errors
+   */
+  private async handlePermissionDenied(error: any): Promise<void> {
+    if (error?.code === 'permission-denied') {
+      logger.warn('Permission denied - attempting re-authentication');
+      try {
+        const { firebaseAuthService } = await import('./FirebaseAuthService');
+        await firebaseAuthService.initialize();
+      } catch (authError) {
+        logger.error('Re-authentication failed:', authError);
+      }
+    }
+  }
+
   async initialize() {
     if (this._isInitialized) return;
 
@@ -69,6 +97,15 @@ class FirebaseDataService {
         return;
       }
 
+      // ELITE: Wait for authentication (required for Firestore operations)
+      const { firebaseAuthService } = await import('./FirebaseAuthService');
+      const isAuthenticated = await firebaseAuthService.waitForAuth(5000); // Wait up to 5 seconds
+      
+      if (!isAuthenticated) {
+        logger.warn('Firebase Auth not available - Firestore operations may fail');
+        // Continue anyway - some operations may work without auth (public read)
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available - using AsyncStorage fallback');
@@ -76,7 +113,9 @@ class FirebaseDataService {
       }
 
       this._isInitialized = true;
-      logger.info('FirebaseDataService initialized successfully');
+      logger.info('FirebaseDataService initialized successfully', {
+        authenticated: isAuthenticated,
+      });
     } catch (error) {
       logger.error('FirebaseDataService init error:', error);
     }
@@ -92,6 +131,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save device ID to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -108,7 +153,8 @@ class FirebaseDataService {
         logger.info(`Device ID saved to Firestore: ${deviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save device ID:', error);
       return false;
     }
@@ -124,6 +170,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save family member to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -140,7 +192,8 @@ class FirebaseDataService {
         logger.info(`Family member ${member.id} saved to Firestore`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save family member:', error);
       return false;
     }
@@ -156,6 +209,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before read operations (required by Firestore rules)
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot load family members from Firestore');
+        return [];
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -175,7 +234,8 @@ class FirebaseDataService {
         logger.info(`Loaded ${members.length} family members from Firestore`);
       }
       return members;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to load family members:', error);
       return [];
     }
@@ -191,6 +251,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot delete family member from Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -204,7 +270,8 @@ class FirebaseDataService {
         logger.info(`Family member ${memberId} deleted from Firestore`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to delete family member:', error);
       return false;
     }
@@ -253,6 +320,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save message to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -269,7 +342,8 @@ class FirebaseDataService {
         logger.info(`Message ${message.id} saved to Firestore`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save message:', error);
       return false;
     }
@@ -324,6 +398,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save health profile to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -340,7 +420,8 @@ class FirebaseDataService {
         logger.info(`Health profile saved to Firestore for ${userDeviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save health profile:', error);
       return false;
     }
@@ -356,6 +437,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before read operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot load health profile from Firestore');
+        return null;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -369,7 +456,8 @@ class FirebaseDataService {
         return snapshot.data();
       }
       return null;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to load health profile:', error);
       return null;
     }
@@ -385,6 +473,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save ICE to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -401,7 +495,8 @@ class FirebaseDataService {
         logger.info(`ICE information saved to Firestore for ${userDeviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save ICE:', error);
       return false;
     }
@@ -417,6 +512,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before read operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot load ICE from Firestore');
+        return null;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -430,7 +531,8 @@ class FirebaseDataService {
         return snapshot.data();
       }
       return null;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to load ICE:', error);
       return null;
     }
@@ -451,6 +553,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save location update to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -481,7 +589,8 @@ class FirebaseDataService {
         logger.info(`Location update saved to Firestore for ${userDeviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save location update:', error);
       return false;
     }
@@ -501,6 +610,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save status update to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -527,7 +642,8 @@ class FirebaseDataService {
         logger.info(`Status update saved to Firestore for ${userDeviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save status update:', error);
       return false;
     }
@@ -589,6 +705,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save earthquake alert to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -606,7 +728,8 @@ class FirebaseDataService {
         logger.info(`Earthquake alert saved for ${userDeviceId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save earthquake alert:', error);
       return false;
     }
@@ -634,6 +757,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save earthquake analysis to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -651,7 +780,8 @@ class FirebaseDataService {
         logger.info(`Earthquake analysis saved to Firestore: ${earthquakeId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save earthquake analysis:', error);
       return false;
     }
@@ -732,6 +862,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save news summary to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -775,7 +911,8 @@ class FirebaseDataService {
         logger.info(`News summary saved to Firestore: ${articleId}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save news summary:', error);
       return false;
     }
@@ -926,6 +1063,12 @@ class FirebaseDataService {
    * ELITE: Save directly to Firebase (internal method)
    */
   private async saveDirectly(collection: string, documentId: string, data: any): Promise<boolean> {
+    // ELITE: Ensure authentication before write operations
+    if (!(await this.ensureAuth())) {
+      logger.warn('Not authenticated - cannot save directly to Firestore');
+      return false;
+    }
+
     const db = getFirestoreInstance();
     if (!db) return false;
 
@@ -936,7 +1079,8 @@ class FirebaseDataService {
         updatedAt: new Date().toISOString(),
       }, { merge: true });
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Direct save failed:', error);
       return false;
     }
@@ -961,6 +1105,12 @@ class FirebaseDataService {
     }
 
     try {
+      // ELITE: Ensure authentication before write operations
+      if (!(await this.ensureAuth())) {
+        logger.warn('Not authenticated - cannot save felt earthquake report to Firestore');
+        return false;
+      }
+
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
@@ -979,7 +1129,8 @@ class FirebaseDataService {
         logger.info(`Felt earthquake report saved: ${report.earthquakeId} - ${report.intensity}`);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      await this.handlePermissionDenied(error);
       logger.error('Failed to save felt earthquake report:', error);
       return false;
     }

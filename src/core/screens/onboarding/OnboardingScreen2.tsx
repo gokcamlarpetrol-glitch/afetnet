@@ -117,7 +117,9 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
         {/* Subtitle */}
         <Animated.View entering={FadeInDown.delay(400).duration(600)}>
           <Text style={styles.subtitle}>
-            AFAD verileriyle entegre sistem, bölgenizdeki depremleri saniyeler içinde gösterir.
+            AFAD verileriyle entegre sistem, bölgenizdeki depremleri saniyeler içinde gösterir.{' '}
+            <Text style={styles.subtitleHighlight}>Ücretsiz deprem bildirimleri</Text> ve{' '}
+            <Text style={styles.subtitleHighlight}>erken uyarı sistemi</Text> ile her zaman haberdar ol.
           </Text>
         </Animated.View>
 
@@ -176,6 +178,21 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
                   <Text style={styles.cardTime}>15 dakika önce</Text>
                 </View>
               </View>
+            </LinearGradient>
+          </View>
+        </Animated.View>
+
+        {/* Free Features Badge */}
+        <Animated.View entering={FadeInDown.delay(750).duration(600)} style={styles.freeBadgeContainer}>
+          <View style={styles.freeBadge}>
+            <LinearGradient
+              colors={['rgba(16, 185, 129, 0.2)', 'rgba(16, 185, 129, 0.1)', 'transparent']}
+              style={styles.freeBadgeGradient}
+            >
+              <Ionicons name="gift" size={18} color={colors.status.success} />
+              <Text style={styles.freeBadgeText}>
+                <Text style={styles.freeBadgeBold}>Ücretsiz:</Text> Deprem bildirimleri ve erken uyarı sistemi
+              </Text>
             </LinearGradient>
           </View>
         </Animated.View>
@@ -282,6 +299,10 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     lineHeight: 24,
   },
+  subtitleHighlight: {
+    fontWeight: '700',
+    color: colors.accent.primary,
+  },
   sourceBadgeContainer: {
     marginBottom: spacing[6],
     width: '100%',
@@ -308,6 +329,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sourceBadgeNumber: {
+    ...typography.bodyMedium,
+    fontSize: 14,
+    color: colors.status.success,
+    fontWeight: '700',
+  },
+  freeBadgeContainer: {
+    marginBottom: spacing[4],
+    width: '100%',
+    maxWidth: 320,
+  },
+  freeBadge: {
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  freeBadgeGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[4],
+  },
+  freeBadgeText: {
+    ...typography.bodySmall,
+    fontSize: 13,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  freeBadgeBold: {
     ...typography.bodyMedium,
     fontSize: 14,
     color: colors.status.success,

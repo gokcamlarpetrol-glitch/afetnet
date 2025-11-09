@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Location from 'expo-location';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { usePremiumStore } from '../../stores/premiumStore';
+import { premiumService } from '../../services/PremiumService';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { seismicSensorService } from '../../services/SeismicSensorService';
 import PremiumGate from '../../components/PremiumGate';
@@ -47,8 +47,9 @@ const INTENSITY_DESCRIPTIONS = [
 
 export default function UserReportsScreen({ navigation }: any) {
   // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
-  const isPremium = usePremiumStore((state) => state.isPremium);
+  // ELITE: Check premium access (includes 3-day trial)
+  // CRITICAL: First 3 days free, then premium required
+  const hasAccess = premiumService.hasPremiumAccess();
   const [selectedIntensity, setSelectedIntensity] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -81,11 +82,54 @@ export default function UserReportsScreen({ navigation }: any) {
   };
 
   const handlePickPhoto = async () => {
-    Alert.alert('Yakında', 'Fotoğraf özelliği yakında eklenecek');
+    try {
+      // Use expo-document-picker for photo selection (expo-image-picker not in dependencies)
+      const DocumentPicker = await import('expo-document-picker');
+      
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'image/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.type === 'success') {
+        setPhotoUri(result.uri);
+        haptics.notificationSuccess();
+      }
+    } catch (error) {
+      logger.error('Photo picker error:', error);
+      Alert.alert('Hata', 'Fotoğraf seçilemedi. Lütfen tekrar deneyin.');
+    }
   };
 
   const handleTakePhoto = async () => {
-    Alert.alert('Yakında', 'Fotoğraf özelliği yakında eklenecek');
+    try {
+      // Use expo-camera for taking photos
+      // Request camera permissions first
+      const { useCameraPermissions } = await import('expo-camera');
+      const [permission, requestPermission] = useCameraPermissions();
+      
+      if (!permission) {
+        // Permission not requested yet
+        const result = await requestPermission();
+        if (!result.granted) {
+          Alert.alert('Kamera İzni', 'Fotoğraf çekmek için kamera izni gereklidir.');
+          return;
+        }
+      } else if (!permission.granted) {
+        const result = await requestPermission();
+        if (!result.granted) {
+          Alert.alert('Kamera İzni', 'Fotoğraf çekmek için kamera izni gereklidir.');
+          return;
+        }
+      }
+
+      // Use document picker as camera fallback (expo-image-picker not available)
+      // Camera functionality is available but requires full screen implementation
+      handlePickPhoto();
+    } catch (error) {
+      logger.error('Camera error:', error);
+      Alert.alert('Hata', 'Fotoğraf çekilemedi. Lütfen tekrar deneyin.');
+    }
   };
 
   const handleSubmitReport = async () => {
@@ -149,7 +193,7 @@ export default function UserReportsScreen({ navigation }: any) {
     }
   };
 
-  if (!isPremium) {
+  if (!hasAccess) {
     return (
       <PremiumGate
         featureName="Kullanıcı Raporları"
@@ -250,11 +294,11 @@ export default function UserReportsScreen({ navigation }: any) {
           <View style={styles.photoContainer}>
             {photoUri ? (
               <View style={styles.photoPreview}>
-                {/* In production, use Image component */}
-                <View style={styles.photoPlaceholder}>
-                  <Ionicons name="image" size={48} color={colors.text.tertiary} />
-                  <Text style={styles.photoPlaceholderText}>Fotoğraf seçildi</Text>
-                </View>
+                <Image 
+                  source={{ uri: photoUri }} 
+                  style={styles.photoImage}
+                  resizeMode="cover"
+                />
                 <Pressable
                   style={styles.removePhotoButton}
                   onPress={() => setPhotoUri(null)}
@@ -443,20 +487,15 @@ const styles = StyleSheet.create({
   },
   photoPreview: {
     position: 'relative',
-  },
-  photoPlaceholder: {
-    height: 200,
-    backgroundColor: colors.background.secondary,
     borderRadius: 12,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  photoPlaceholderText: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    marginTop: 8,
+  photoImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
   },
   removePhotoButton: {
     position: 'absolute',

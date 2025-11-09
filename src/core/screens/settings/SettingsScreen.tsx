@@ -110,14 +110,43 @@ export default function SettingsScreen({ navigation }: any) {
 
   const handleLanguageChange = () => {
     haptics.impactMedium();
+    
+    // ELITE: Professional language selection with all supported languages
+    // CRITICAL: Explicitly use only the 10 supported languages (NO Kurdish)
+    // ELITE: Hardcode the list to ensure Kurdish never appears
+    const supportedLanguages: string[] = ['en', 'tr', 'ar', 'de', 'fr', 'es', 'ru', 'zh', 'ja', 'ko'];
+    
+    const languageOptions = supportedLanguages
+      .map((lang) => {
+        const displayName = i18nService.getLocaleDisplayName(lang);
+        // ELITE: Skip if display name is empty (should not happen with explicit list)
+        if (!displayName) return null;
+        
+        return {
+          text: displayName,
+          onPress: () => {
+            i18nService.setLocale(lang as any);
+            setLanguage(lang as any);
+            haptics.notificationSuccess();
+            // Force app reload to apply language changes
+            setTimeout(() => {
+              Alert.alert(
+                i18nService.t('common.success'),
+                i18nService.t('settings.language') + ' ' + i18nService.t('common.success'),
+                [{ text: i18nService.t('common.ok') }]
+              );
+            }, 100);
+          },
+        };
+      })
+      .filter((option) => option !== null) as Array<{ text: string; onPress: () => void }>; // Remove null entries
+
     Alert.alert(
-      'Dil Seç',
-      'Kullanmak istediğiniz dili seçin',
+      i18nService.t('settings.language'),
+      i18nService.t('settings.autoDetect') || 'Select your preferred language',
       [
-        { text: 'Türkçe', onPress: () => { i18nService.setLocale('tr'); setLanguage('tr'); } },
-        { text: 'Kurdî', onPress: () => { i18nService.setLocale('ku'); setLanguage('ku'); } },
-        { text: 'العربية', onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
-        { text: 'İptal', style: 'cancel' },
+        ...languageOptions,
+        { text: i18nService.t('common.cancel'), style: 'cancel' },
       ]
     );
   };
@@ -156,6 +185,16 @@ export default function SettingsScreen({ navigation }: any) {
       subtitle: 'Önceki satın alımlarınızı geri yükleyin',
       type: 'arrow',
       onPress: handleRestorePurchases,
+    },
+    {
+      icon: 'settings',
+      title: 'Abonelik Yönetimi',
+      subtitle: 'Aboneliklerinizi yönetin',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        navigation.navigate('SubscriptionManagement');
+      },
     },
   ];
 
@@ -353,36 +392,6 @@ export default function SettingsScreen({ navigation }: any) {
       onPress: () => navigation.navigate('Family'),
     },
     {
-      icon: 'navigate',
-      title: 'PDR Konum Takibi',
-      subtitle: 'GPS olmadan adım sayarak konum belirleme',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'PDR Konum Takibi',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
-    },
-    {
-      icon: 'location',
-      title: 'Yakınlık Uyarıları',
-      subtitle: 'Yakındaki acil durumlar için otomatik bildirim',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'Yakınlık Uyarıları',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
-    },
-    {
       icon: 'battery-charging',
       title: 'Pil Tasarrufu',
       subtitle: 'Enkaz modunda otomatik aktif (ekran parlaklığı %10)',
@@ -445,21 +454,6 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'switch',
       value: seismicSensorEnabled,
       onPress: () => setSeismicSensorEnabled(!seismicSensorEnabled),
-    },
-    {
-      icon: 'alert-circle',
-      title: 'Tehlike Çıkarımı',
-      subtitle: 'AI ile otomatik tehlike bölgesi tespiti',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'Tehlike Çıkarımı',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
     },
     {
       icon: 'settings',
@@ -703,6 +697,33 @@ export default function SettingsScreen({ navigation }: any) {
       },
     },
     {
+      icon: 'document',
+      title: 'Kullanım Koşulları',
+      subtitle: 'Koşulları görüntüle',
+      type: 'arrow',
+      onPress: async () => {
+        haptics.impactLight();
+        try {
+          const url = ENV.TERMS_OF_SERVICE_URL;
+          if (!url) {
+            throw new Error('URL tanımlı değil');
+          }
+          const canOpen = await Linking.canOpenURL(url);
+          if (!canOpen) {
+            throw new Error('URL açılamıyor');
+          }
+          await Linking.openURL(url);
+        } catch (error) {
+          logger.error('Kullanım koşulları açma hatası:', error);
+          Alert.alert(
+            'Kullanım Koşulları',
+            'Kullanım koşulları şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html adresini ziyaret edin.',
+            [{ text: 'Tamam' }]
+          );
+        }
+      },
+    },
+    {
       icon: 'shield-checkmark',
       title: 'Güvenlik',
       subtitle: 'Güvenlik ve şifreleme',
@@ -733,7 +754,7 @@ export default function SettingsScreen({ navigation }: any) {
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 16, backgroundColor: colors.background.primary }]}>
         <Text style={styles.headerTitle}>Ayarlar</Text>
       </View>
 

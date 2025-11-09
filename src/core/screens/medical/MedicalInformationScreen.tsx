@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -174,7 +174,8 @@ export default function MedicalInformationScreen({ navigation }: any) {
   if (selectedTopic) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <View style={[styles.header, { paddingTop: 16, backgroundColor: colors.background.primary }]}>
           <Pressable onPress={() => setSelectedTopic(null)}>
             <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
           </Pressable>
@@ -235,7 +236,8 @@ export default function MedicalInformationScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <View style={[styles.header, { paddingTop: 16, backgroundColor: colors.background.primary }]}>
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
@@ -284,8 +286,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    paddingTop: 60,
-    backgroundColor: colors.background.secondary,
+    backgroundColor: colors.background.primary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.primary,
   },

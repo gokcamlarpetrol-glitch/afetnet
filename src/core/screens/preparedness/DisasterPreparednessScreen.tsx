@@ -336,21 +336,6 @@ export default function DisasterPreparednessScreen({ navigation }: any) {
               ))}
             </Animated.View>
           )}
-
-          {/* Video Placeholder */}
-          {selectedPhase === 'during' && (
-            <Animated.View entering={FadeInDown.delay(300)} style={styles.videoCard}>
-              <View style={styles.videoPlaceholder}>
-                <Ionicons name="play-circle" size={64} color={colors.text.tertiary} />
-                <Text style={styles.videoPlaceholderText}>Eğitim Videosu</Text>
-                <Text style={styles.videoPlaceholderSubtext}>
-                  {selectedModule.type === 'earthquake' 
-                    ? 'Drop-Cover-Hold animasyonu yakında eklenecek'
-                    : 'İlgili eğitim videoları yakında eklenecek'}
-                </Text>
-              </View>
-            </Animated.View>
-          )}
         </ScrollView>
       </View>
     );
@@ -550,28 +535,6 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     flex: 1,
-  },
-  videoCard: {
-    backgroundColor: colors.background.secondary,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border.primary,
-  },
-  videoPlaceholder: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  videoPlaceholderText: {
-    ...typography.h4,
-    color: colors.text.secondary,
-    marginTop: 12,
-  },
-  videoPlaceholderSubtext: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    marginTop: 4,
-    textAlign: 'center',
   },
 });
 

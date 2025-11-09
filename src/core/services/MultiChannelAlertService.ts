@@ -186,40 +186,83 @@ class MultiChannelAlertService {
     optimizedOptions.duration = effectiveDuration;
 
     try {
-      // 1. Push Notification (check settings)
+      // ELITE: PARALLEL ALERT DELIVERY for MAXIMUM SPEED
+      // CRITICAL: All channels fire simultaneously - no blocking
+      // This ensures users get alerts INSTANTLY through all channels
+      
+      const alertPromises: Promise<any>[] = [];
+      
+      // 1. Push Notification (check settings) - HIGHEST PRIORITY, FIRE FIRST
       if (channels.pushNotification && notificationsEnabled) {
-        await this.sendPushNotification(optimizedOptions);
+        // CRITICAL: Fire-and-forget for immediate delivery (don't await)
+        alertPromises.push(
+          this.sendPushNotification(optimizedOptions).catch(error => {
+            logger.error('Push notification error:', error);
+          })
+        );
       }
 
-      // 2. Full Screen Alert (critical priority)
+      // 2. Full Screen Alert (critical priority) - PARALLEL
       if (channels.fullScreenAlert && (optimizedOptions.priority === 'critical' || optimizedOptions.priority === 'high')) {
-        await this.showFullScreenAlert(optimizedOptions);
+        alertPromises.push(
+          this.showFullScreenAlert(optimizedOptions).catch(error => {
+            logger.error('Full screen alert error:', error);
+          })
+        );
       }
 
-      // 3. Alarm Sound (check settings)
+      // 3. Alarm Sound (check settings) - PARALLEL
       if (channels.alarmSound && alarmSoundEnabled) {
-        await this.playAlarmSound(optimizedOptions.sound);
+        alertPromises.push(
+          this.playAlarmSound(optimizedOptions.sound).catch(error => {
+            logger.error('Alarm sound error:', error);
+          })
+        );
       }
 
-      // 4. Vibration (check settings)
+      // 4. Vibration (check settings) - PARALLEL
       if (channels.vibration && vibrationEnabled) {
-        await this.startVibration(optimizedOptions.vibrationPattern, optimizedOptions.duration);
+        alertPromises.push(
+          this.startVibration(optimizedOptions.vibrationPattern, optimizedOptions.duration).catch(error => {
+            logger.error('Vibration error:', error);
+          })
+        );
       }
 
-      // 5. LED Flash
+      // 5. LED Flash - PARALLEL
       if (channels.led && Platform.OS === 'android') {
-        await this.startLEDFlash();
+        alertPromises.push(
+          this.startLEDFlash().catch(error => {
+            logger.error('LED flash error:', error);
+          })
+        );
       }
 
-      // 6. Text-to-Speech (AI-optimized)
+      // 6. Text-to-Speech (AI-optimized) - PARALLEL
       if (channels.tts) {
-        await this.speakText(optimizedOptions.ttsText || optimizedOptions.body);
+        alertPromises.push(
+          this.speakText(optimizedOptions.ttsText || optimizedOptions.body).catch(error => {
+            logger.error('TTS error:', error);
+          })
+        );
       }
 
-      // 7. Bluetooth Broadcast (if enabled)
+      // 7. Bluetooth Broadcast (if enabled) - PARALLEL
       if (channels.bluetooth) {
-        await this.broadcastViaBluetooth(optimizedOptions);
+        alertPromises.push(
+          this.broadcastViaBluetooth(optimizedOptions).catch(error => {
+            logger.error('Bluetooth broadcast error:', error);
+          })
+        );
       }
+      
+      // ELITE: Fire all alerts in parallel - don't wait for completion
+      // CRITICAL: Speed is everything - alerts must be INSTANT
+      void Promise.allSettled(alertPromises).then(() => {
+        if (__DEV__) {
+          logger.info(`✅ All ${alertPromises.length} alert channels fired`);
+        }
+      });
 
       // Auto-dismiss after duration (if set) - STORE TIMEOUT TO PREVENT MEMORY LEAK
       if (optimizedOptions.duration && optimizedOptions.duration > 0) {
@@ -463,6 +506,8 @@ class MultiChannelAlertService {
       channelId = 'high-priority';
     }
 
+    // ELITE: IMMEDIATE notification delivery - no delays
+    // CRITICAL: Use highest priority for instant delivery
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
         title: options.title,
@@ -474,9 +519,13 @@ class MultiChannelAlertService {
         data: options.data || {},
         categoryIdentifier: 'alert',
         sticky: options.priority === 'critical', // Critical alerts stay until dismissed
+        // ELITE: Additional flags for immediate delivery
+        badge: options.priority === 'critical' ? 1 : undefined,
+        // iOS: Critical alerts bypass Do Not Disturb
+        interruptionLevel: options.priority === 'critical' ? 'critical' : 'active',
       },
-      trigger: null, // Immediate
-      identifier: `alert-${Date.now()}`,
+      trigger: null, // Immediate - no delay
+      identifier: `alert-${Date.now()}-${Math.random()}`, // Unique ID to prevent deduplication
     });
 
     // For Android, set full-screen intent

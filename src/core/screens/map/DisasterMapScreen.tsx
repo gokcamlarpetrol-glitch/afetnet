@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
-import { usePremiumStore } from '../../stores/premiumStore';
+import { premiumService } from '../../services/PremiumService';
 import PremiumGate from '../../components/PremiumGate';
 import { getMagnitudeColor, getMagnitudeSize, calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
@@ -46,9 +46,9 @@ const TURKEY_CENTER = {
 };
 
 export default function DisasterMapScreen({ navigation }: any) {
-  // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
-  const isPremium = usePremiumStore((state) => state.isPremium);
+  // ELITE: Check premium access (includes 3-day trial)
+  // CRITICAL: First 3 days free, then premium required
+  const hasAccess = premiumService.hasPremiumAccess();
   const [earthquakes, setEarthquakes] = useState<any[]>([]);
   const [disasterEvents, setDisasterEvents] = useState<DisasterEvent[]>([]);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -244,13 +244,13 @@ export default function DisasterMapScreen({ navigation }: any) {
         </Pressable>
       </ScrollView>
 
-      {/* Map Placeholder */}
+      {/* Map Area - List View Active */}
       <View style={styles.map}>
         <View style={styles.mapPlaceholder}>
-          <Ionicons name="map" size={64} color={colors.text.tertiary} />
-          <Text style={styles.mapPlaceholderText}>Aktif Afet Haritası</Text>
+          <Ionicons name="list" size={64} color={colors.brand.primary} />
+          <Text style={styles.mapPlaceholderText}>Aktif Afet Listesi</Text>
           <Text style={styles.mapPlaceholderSubtext}>
-            Offline harita desteği yakında aktif olacak
+            Tüm aktif afetler aşağıda listelenmektedir
           </Text>
         </View>
 
@@ -424,7 +424,7 @@ export default function DisasterMapScreen({ navigation }: any) {
           <Pressable 
             style={styles.reportButton}
             onPress={() => {
-              // Navigate to user reports screen (ReportDisaster screen not implemented yet)
+              // Navigate to user reports screen
               navigation.navigate('UserReports');
             }}
           >
@@ -458,7 +458,7 @@ export default function DisasterMapScreen({ navigation }: any) {
       </View>
 
       {/* Premium Gate */}
-      {!isPremium && (
+      {!hasAccess && (
         <PremiumGate
           featureName="Aktif Afet Haritası"
           onUpgradePress={() => navigation?.navigate?.('Paywall')}

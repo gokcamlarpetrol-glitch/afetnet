@@ -4,17 +4,19 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { usePremiumStore } from '../../stores/premiumStore';
+import { premiumService } from '../../services/PremiumService';
 import PremiumGate from '../../components/PremiumGate';
 import { calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
+import * as haptics from '../../utils/haptics';
 
 const logger = createLogger('AssemblyPointsScreen');
 
@@ -91,9 +93,10 @@ const ASSEMBLY_POINTS: AssemblyPoint[] = [
 ];
 
 export default function AssemblyPointsScreen({ navigation }: any) {
-  // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
-  const isPremium = usePremiumStore((state) => state.isPremium);
+  // ELITE: Check premium access (includes 3-day trial)
+  // CRITICAL: First 3 days free, then premium required
+  const insets = useSafeAreaInsets();
+  const hasAccess = premiumService.hasPremiumAccess();
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [points, setPoints] = useState<AssemblyPoint[]>([]);
   const [selectedPoint, setSelectedPoint] = useState<AssemblyPoint | null>(null);
@@ -303,7 +306,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     }
   };
 
-  if (!isPremium) {
+  if (!hasAccess) {
     return (
       <PremiumGate
         featureName="Toplanma Noktaları Haritası"
@@ -314,66 +317,128 @@ export default function AssemblyPointsScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable 
-          onPress={() => {
-            // CRITICAL: Navigation with error handling
-            try {
-              if (navigation && typeof navigation.goBack === 'function') {
-                navigation.goBack();
-              } else {
-                logger.warn('Navigation goBack not available');
-              }
-            } catch (error) {
-              logger.error('Navigation error:', error);
-            }
-          }}
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
+      {/* Background Gradient */}
+      <LinearGradient
+        colors={[colors.background.primary, colors.background.secondary]}
+        style={StyleSheet.absoluteFill}
+      />
+      
+      {/* Compact Header - No white card, transparent overlay */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
+        <LinearGradient
+          colors={['rgba(0, 0, 0, 0.4)', 'rgba(0, 0, 0, 0.2)', 'transparent']}
+          style={styles.headerGradient}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
-        </Pressable>
-        <View>
-          <Text style={styles.headerTitle}>Toplanma Noktaları</Text>
-          <Text style={styles.headerSubtitle}>
-            {points.filter(p => p.isActive).length} aktif nokta
-          </Text>
-        </View>
-        <Pressable style={styles.locateButton} onPress={getUserLocation}>
-          <Ionicons name="locate" size={20} color={colors.brand.primary} />
-        </Pressable>
+          <View style={styles.header}>
+            <Pressable 
+              style={styles.backButton}
+              onPress={() => {
+                haptics.impactLight();
+                // CRITICAL: Navigation with error handling
+                try {
+                  if (navigation && typeof navigation.goBack === 'function') {
+                    navigation.goBack();
+                  } else {
+                    logger.warn('Navigation goBack not available');
+                  }
+                } catch (error) {
+                  logger.error('Navigation error:', error);
+                }
+              }}
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </Pressable>
+            
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Toplanma Noktaları</Text>
+              <Text style={styles.headerSubtitle}>
+                {points.filter(p => p.isActive).length} aktif nokta
+              </Text>
+            </View>
+            
+            <Pressable 
+              style={styles.locateButton} 
+              onPress={() => {
+                haptics.impactLight();
+                getUserLocation();
+              }}
+            >
+              <Ionicons name="locate" size={20} color="#fff" />
+            </Pressable>
+          </View>
+        </LinearGradient>
       </View>
 
-      {/* Sort Tabs */}
-      <View style={styles.tabContainer}>
+      {/* Sort Tabs - Professional Design */}
+      <View style={[styles.tabContainer, { marginTop: insets.top + 60 }]}>
         <Pressable
           style={[styles.tab, sortBy === 'distance' && styles.tabActive]}
-          onPress={() => setSortBy('distance')}
+          onPress={() => {
+            haptics.impactLight();
+            setSortBy('distance');
+          }}
         >
-          <Ionicons name="navigate" size={16} color={sortBy === 'distance' ? colors.brand.primary : colors.text.secondary} />
-          <Text style={[styles.tabText, sortBy === 'distance' && styles.tabTextActive]}>
-            Mesafeye Göre
-          </Text>
+          <LinearGradient
+            colors={sortBy === 'distance' 
+              ? [colors.brand.primary + '20', colors.brand.primary + '10']
+              : ['transparent', 'transparent']
+            }
+            style={styles.tabGradient}
+          >
+            <Ionicons 
+              name="navigate" 
+              size={18} 
+              color={sortBy === 'distance' ? colors.brand.primary : colors.text.secondary} 
+            />
+            <Text style={[styles.tabText, sortBy === 'distance' && styles.tabTextActive]}>
+              Mesafeye Göre
+            </Text>
+          </LinearGradient>
         </Pressable>
         <Pressable
           style={[styles.tab, sortBy === 'capacity' && styles.tabActive]}
-          onPress={() => setSortBy('capacity')}
+          onPress={() => {
+            haptics.impactLight();
+            setSortBy('capacity');
+          }}
         >
-          <Ionicons name="people" size={16} color={sortBy === 'capacity' ? colors.brand.primary : colors.text.secondary} />
-          <Text style={[styles.tabText, sortBy === 'capacity' && styles.tabTextActive]}>
-            Kapasiteye Göre
-          </Text>
+          <LinearGradient
+            colors={sortBy === 'capacity' 
+              ? [colors.brand.primary + '20', colors.brand.primary + '10']
+              : ['transparent', 'transparent']
+            }
+            style={styles.tabGradient}
+          >
+            <Ionicons 
+              name="people" 
+              size={18} 
+              color={sortBy === 'capacity' ? colors.brand.primary : colors.text.secondary} 
+            />
+            <Text style={[styles.tabText, sortBy === 'capacity' && styles.tabTextActive]}>
+              Kapasiteye Göre
+            </Text>
+          </LinearGradient>
         </Pressable>
       </View>
 
-      {/* Map Placeholder */}
+      {/* Map Placeholder - Professional Design */}
       <View style={styles.map}>
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="map" size={64} color={colors.text.tertiary} />
-          <Text style={styles.mapPlaceholderText}>Toplanma Noktaları Haritası</Text>
-          <Text style={styles.mapPlaceholderSubtext}>
-            Offline harita desteği yakında aktif olacak
-          </Text>
-        </View>
+        <LinearGradient
+          colors={[colors.background.tertiary, colors.background.secondary]}
+          style={styles.mapGradient}
+        >
+          <View style={styles.mapPlaceholder}>
+            <View style={styles.mapIconContainer}>
+              <Ionicons name="map" size={48} color={colors.brand.primary} />
+            </View>
+            <Text style={styles.mapPlaceholderText}>Toplanma Noktaları Listesi</Text>
+            <Text style={styles.mapPlaceholderSubtext}>
+              Tüm toplanma noktaları aşağıda listelenmektedir
+            </Text>
+          </View>
+        </LinearGradient>
       </View>
 
       {/* Points List */}
@@ -386,7 +451,10 @@ export default function AssemblyPointsScreen({ navigation }: any) {
             >
               <Pressable
                 style={styles.pointCard}
-                onPress={() => setSelectedPoint(selectedPoint?.id === point.id ? null : point)}
+                onPress={() => {
+                  haptics.impactLight();
+                  setSelectedPoint(selectedPoint?.id === point.id ? null : point);
+                }}
               >
                 <View style={styles.pointHeader}>
                   <View style={[styles.pointIcon, { backgroundColor: getTypeColor(point.type) + '20' }]}>
@@ -446,7 +514,10 @@ export default function AssemblyPointsScreen({ navigation }: any) {
 
                     <Pressable
                       style={styles.directionsButton}
-                      onPress={() => handleGetDirections(point)}
+                      onPress={() => {
+                        haptics.impactMedium();
+                        handleGetDirections(point);
+                      }}
                     >
                       <LinearGradient
                         colors={[colors.brand.primary, colors.brand.secondary]}
@@ -480,57 +551,107 @@ export default function AssemblyPointsScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+  },
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  headerGradient: {
+    paddingBottom: 12,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 60,
-    backgroundColor: colors.background.secondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.primary,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
-  headerTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
-  locateButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background.tertiary,
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 12,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 2,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  locateButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: colors.background.secondary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tab: {
     flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginHorizontal: 4,
+  },
+  tabGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 6,
     paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingHorizontal: 16,
+    borderRadius: 12,
   },
   tabActive: {
-    borderBottomColor: colors.brand.primary,
+    // Handled by gradient
   },
   tabText: {
-    ...typography.body,
+    fontSize: 14,
     color: colors.text.secondary,
     fontWeight: '600',
   },
@@ -539,25 +660,39 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   map: {
-    height: 250,
-    backgroundColor: colors.background.tertiary,
+    height: 220,
+    overflow: 'hidden',
+  },
+  mapGradient: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   mapPlaceholder: {
     alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  mapIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.brand.primary + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   mapPlaceholderText: {
-    ...typography.h4,
-    color: colors.text.secondary,
-    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: 8,
   },
   mapPlaceholderSubtext: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    marginTop: 4,
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 6,
     textAlign: 'center',
-    paddingHorizontal: 20,
+    lineHeight: 18,
   },
   listContainer: {
     flex: 1,
@@ -573,7 +708,12 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border.primary,
-    marginBottom: 8,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   pointHeader: {
     flexDirection: 'row',
@@ -581,11 +721,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   pointIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   pointInfo: {
     flex: 1,
@@ -667,17 +812,19 @@ const styles = StyleSheet.create({
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
-    padding: 12,
-    backgroundColor: colors.brand.primary + '20',
+    gap: 10,
+    padding: 16,
+    paddingBottom: Math.max(16, 16),
+    backgroundColor: colors.brand.primary + '15',
     borderTopWidth: 1,
     borderTopColor: colors.border.primary,
   },
   infoText: {
-    ...typography.small,
+    fontSize: 12,
     color: colors.text.secondary,
     flex: 1,
     lineHeight: 18,
+    fontWeight: '500',
   },
 });
 

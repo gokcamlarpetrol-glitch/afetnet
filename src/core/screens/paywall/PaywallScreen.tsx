@@ -32,11 +32,16 @@ import * as Clipboard from 'expo-clipboard';
 const logger = createLogger('PaywallScreen');
 
 // Elite: Safe WebBrowser import with fallback
+// CRITICAL: Silent fallback - don't log warnings in production
 let WebBrowser: any = null;
 try {
   WebBrowser = require('expo-web-browser');
 } catch (error) {
-  logger.warn('expo-web-browser not available, using Linking fallback');
+  // Silent fallback - Linking will be used instead
+  // Only log in development to avoid console spam
+  if (__DEV__) {
+    logger.debug('expo-web-browser not available, using Linking fallback');
+  }
 }
 
 /**
@@ -103,7 +108,7 @@ const PREMIUM_FEATURES = [
   { 
     icon: 'map', 
     title: 'Gelişmiş Harita', 
-    description: 'Offline haritalar ve detaylı deprem verileri',
+    description: 'Offline haritalar ve gelişmiş harita özellikleri',
     color: '#3b82f6',
   },
   { 
@@ -118,12 +123,7 @@ const PREMIUM_FEATURES = [
     description: 'BLE mesh ile şebeke olmadan iletişim',
     color: '#8b5cf6',
   },
-  { 
-    icon: 'shield-checkmark', 
-    title: 'Öncelikli Uyarılar', 
-    description: 'Deprem anında ilk siz haberdar olun',
-    color: '#ef4444',
-  },
+  // ELITE: Deprem bildirimleri artık ücretsiz - bu özellik kaldırıldı
   { 
     icon: 'heart', 
     title: 'Sağlık Profili', 
@@ -161,36 +161,8 @@ const PREMIUM_FEATURES = [
     description: 'Enkaz altı otomatik SOS ve konum paylaşımı',
     color: '#dc2626',
   },
-  { 
-    icon: 'notifications', 
-    title: 'Erken Uyarı Sistemi', 
-    description: 'Deprem öncesi bildirim ve geri sayım',
-    color: '#f59e0b',
-  },
-  { 
-    icon: 'stats-chart', 
-    title: 'Seismic Sensor', 
-    description: 'Telefon sensörleri ile deprem algılama',
-    color: '#8b5cf6',
-  },
-  { 
-    icon: 'navigate', 
-    title: 'PDR Konum Takibi', 
-    description: 'GPS olmadan adım sayarak konum belirleme',
-    color: '#6366f1',
-  },
-  { 
-    icon: 'location', 
-    title: 'Yakınlık Uyarıları', 
-    description: 'Yakındaki acil durumlar için otomatik bildirim',
-    color: '#10b981',
-  },
-  { 
-    icon: 'alert-circle', 
-    title: 'Tehlike Çıkarımı', 
-    description: 'AI ile otomatik tehlike bölgesi tespiti',
-    color: '#ef4444',
-  },
+  // ELITE: Deprem bildirimleri ve erken uyarı sistemi artık ücretsiz - bu özellikler kaldırıldı
+  // CRITICAL: Earthquake notifications and early warning are ALWAYS FREE
   { 
     icon: 'document', 
     title: 'ICE Bilgileri', 
@@ -667,7 +639,7 @@ export default function PaywallScreen({ navigation }: any) {
               </View>
             </View>
             <Text style={styles.featuresSectionSubtitle}>
-              Deprem, sel, yangın ve diğer acil durumlarda hayat kurtaran teknolojiler. AI destekli erken uyarı sistemi, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
+              Deprem bildirimleri ücretsiz! Premium ile AI destekli analiz, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
             </Text>
             
             {/* Features Grid - Premium Design */}

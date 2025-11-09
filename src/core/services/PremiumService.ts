@@ -145,6 +145,46 @@ class PremiumService {
     usePremiumStore.getState().setPremium(isTrialActive);
   }
 
+  /**
+   * ELITE: Check if earthquake features are free (always free)
+   * CRITICAL: Earthquake notifications and viewing are ALWAYS FREE
+   */
+  isEarthquakeFeatureFree(): boolean {
+    // CRITICAL: Earthquake features are ALWAYS FREE - no premium required
+    return true;
+  }
+
+  /**
+   * ELITE: Check if user has access to a feature
+   * CRITICAL: Earthquake features are always free, other features require trial/premium
+   */
+  hasAccess(featureType: 'earthquake' | 'other'): boolean {
+    if (featureType === 'earthquake') {
+      // CRITICAL: Earthquake features are ALWAYS FREE
+      return true;
+    }
+    
+    // Other features: Check trial or premium
+    const premiumState = usePremiumStore.getState();
+    const isPremium = premiumState.isPremium;
+    
+    // ELITE: Check trial status for other features
+    if (!isPremium) {
+      const isTrialActive = useTrialStore.getState().checkTrialStatus();
+      return isTrialActive; // First 3 days free, then premium required
+    }
+    
+    return isPremium;
+  }
+
+  /**
+   * ELITE: Check if user has premium access (paid subscription or trial)
+   * Used for non-earthquake features
+   */
+  hasPremiumAccess(): boolean {
+    return this.hasAccess('other');
+  }
+
   async checkPremiumStatus(): Promise<boolean> {
     // ELITE: Prevent concurrent status checks
     if (checkStatusPromise) {

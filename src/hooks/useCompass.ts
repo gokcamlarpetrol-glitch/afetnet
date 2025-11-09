@@ -46,6 +46,7 @@ export function useCompass() {
           subscription.remove();
         };
       }
+      return undefined;
     };
 
     const cleanup = checkAvailability();

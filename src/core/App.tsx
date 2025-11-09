@@ -45,6 +45,7 @@ import FamilyGroupChatScreen from './screens/family/FamilyGroupChatScreen';
 import AdvancedSettingsScreen from './screens/settings/AdvancedSettingsScreen';
 import OfflineMapSettingsScreen from './screens/settings/OfflineMapSettingsScreen';
 import EarthquakeSettingsScreen from './screens/settings/EarthquakeSettingsScreen';
+import SubscriptionManagementScreen from './screens/settings/SubscriptionManagementScreen';
 
 // AI Screens
 import RiskScoreScreen from './screens/ai/RiskScoreScreen';
@@ -120,13 +121,10 @@ export default function CoreApp() {
     // MUST await to catch initialization errors
     void initializeApp().catch(async (error) => {
       // CRITICAL: Log initialization failure but don't crash app
-      if (__DEV__) {
-        console.error('❌ CRITICAL: App initialization failed:', error);
-      }
-      // Use production logger for production builds
+      // Use production logger (already imported at top)
       const { createLogger } = require('./utils/logger');
       const logger = createLogger('App');
-      logger.error('CRITICAL: App initialization failed:', error);
+      logger.error('❌ CRITICAL: App initialization failed:', error);
       
       // Report to crashlytics (use dynamic import to prevent circular dependencies)
       try {
@@ -149,9 +147,9 @@ export default function CoreApp() {
         // App came to foreground - check premium status
         void premiumService.checkPremiumStatus().catch((error) => {
           // Silently fail - premium check is not critical for app functionality
-          if (__DEV__) {
-            console.warn('Premium status check failed:', error);
-          }
+          const { createLogger } = require('./utils/logger');
+          const logger = createLogger('App');
+          logger.warn('Premium status check failed:', error);
         });
         
         // Also check expiration
@@ -222,8 +220,18 @@ export default function CoreApp() {
                 <Stack.Navigator
                   initialRouteName="MainTabs"
                   screenOptions={{
+                    headerShown: false,
                     headerBackTitleVisible: false,
                     headerBackTitle: ' ',
+                    cardStyle: { backgroundColor: colors.background.primary },
+                    headerTransparent: true,
+                    header: () => null,
+                    cardStyleInterpolator: ({ current }: any) => ({
+                      cardStyle: {
+                        opacity: current.progress,
+                        backgroundColor: colors.background.primary,
+                      },
+                    }),
                   }}
                 >
               <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
@@ -264,6 +272,44 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="FlashlightWhistle" 
                 component={FlashlightWhistleScreen}
+                options={({ route }: any) => ({ 
+                  headerShown: false,
+                  header: () => <View style={{ height: 0, backgroundColor: colors.background.primary, marginTop: 0, paddingTop: 0 }} />,
+                  headerTransparent: true,
+                  headerStyle: {
+                    backgroundColor: colors.background.primary,
+                    elevation: 0,
+                    shadowOpacity: 0,
+                    height: 0,
+                    borderBottomWidth: 0,
+                    borderTopWidth: 0,
+                    marginTop: 0,
+                    paddingTop: 0,
+                    display: 'none',
+                  },
+                  headerTitle: '',
+                  headerTitleStyle: {
+                    display: 'none',
+                    opacity: 0,
+                    height: 0,
+                    fontSize: 0,
+                  },
+                  title: '',
+                  presentation: 'card',
+                  animationEnabled: false,
+                  cardStyle: {
+                    backgroundColor: colors.background.primary,
+                    marginTop: 0,
+                    paddingTop: 0,
+                  },
+                  cardStyleInterpolator: () => ({
+                    cardStyle: {
+                      backgroundColor: colors.background.primary,
+                      marginTop: 0,
+                      paddingTop: 0,
+                    },
+                  }),
+                })}
               />
               <Stack.Screen 
                 name="MedicalInformation" 
@@ -300,6 +346,7 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="HealthProfile" 
                 component={HealthProfileScreen}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="NewMessage" 
@@ -369,6 +416,13 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="EarthquakeSettings" 
                 component={EarthquakeSettingsScreen}
+                options={{ 
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen 
+                name="SubscriptionManagement" 
+                component={SubscriptionManagementScreen}
                 options={{ 
                   headerShown: false,
                 }}
