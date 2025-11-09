@@ -29,9 +29,10 @@ const UPDATE_INTERVAL_MS = 1000 / SAMPLING_RATE; // 10ms
 // ELITE: ULTRA-AGGRESSIVE thresholds for FIRST-TO-ALERT detection
 // CRITICAL: We MUST be first - lower thresholds = earlier detection = MORE LIVES SAVED
 // These thresholds are optimized to detect earthquakes BEFORE they fully happen (P-wave detection)
-const P_WAVE_THRESHOLD = 0.20; // m/s² (20cm/s²) - ULTRA-LOW for earliest P-wave detection
-const S_WAVE_THRESHOLD = 0.35; // m/s² (35cm/s²) - LOWERED for earlier S-wave detection
-const EARTHQUAKE_DURATION_MIN = 1500; // Minimum 1.5 seconds (reduced for FASTER detection)
+// Based on research: MyShake uses ~0.15 m/s², Google uses similar thresholds
+const P_WAVE_THRESHOLD = 0.15; // m/s² (15cm/s²) - ULTRA-LOW for earliest P-wave detection (reduced from 0.20)
+const S_WAVE_THRESHOLD = 0.30; // m/s² (30cm/s²) - LOWERED for earlier S-wave detection (reduced from 0.35)
+const EARTHQUAKE_DURATION_MIN = 1000; // Minimum 1 second (reduced from 1.5s for FASTER detection)
 
 // False positive filters
 const CAR_THRESHOLD = 0.3; // m/s² - consistent acceleration (car movement)

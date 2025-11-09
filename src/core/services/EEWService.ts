@@ -469,7 +469,8 @@ class EEWService {
       
       // ELITE: ULTRA-AGGRESSIVE polling intervals for FIRST-TO-ALERT
       // CRITICAL: These intervals are optimized for maximum speed while maintaining battery efficiency
-      let pollInterval = recentCriticalActivity ? 200 : 300; // 200ms critical, 300ms normal (ULTRA-FAST)
+      // Reduced from 200/300ms to 150/200ms for even FASTER detection
+      let pollInterval = recentCriticalActivity ? 150 : 200; // 150ms critical, 200ms normal (ULTRA-FAST)
       
       // Apply battery multiplier (lazy import to avoid circular dependency)
       try {
@@ -478,8 +479,8 @@ class EEWService {
           const multiplier = batteryModule.batteryMonitoringService.getPollingIntervalMultiplier();
           pollInterval = Math.round(pollInterval * multiplier);
           
-          // CRITICAL: Never go below 200ms even when charging (safety limit for ultra-fast detection)
-          pollInterval = Math.max(pollInterval, 200);
+          // CRITICAL: Never go below 150ms even when charging (safety limit for ultra-fast detection)
+          pollInterval = Math.max(pollInterval, 150);
         }
       } catch {
         // BatteryMonitoringService not available - use base interval

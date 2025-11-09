@@ -33,9 +33,10 @@ class EarthquakeDetectionService {
   private readonly KOERI_API = 'http://www.koeri.boun.edu.tr/scripts/lst3.asp';
   private events: Map<number, EarthquakeEvent> = new Map();
   private verificationQueue: EarthquakeEvent[] = [];
-  // Elite: REDUCED verification window for FASTER early warning
-  // Multi-source verification is important but speed is critical for saving lives
-  private readonly VERIFICATION_WINDOW_MS = 5_000; // 5 seconds - FAST verification
+  // ELITE: ULTRA-FAST verification window for MAXIMUM early warning
+  // CRITICAL: Speed is EVERYTHING - even 1 second can save lives
+  // Reduced from 5s to 3s for FASTER early warning (based on research)
+  private readonly VERIFICATION_WINDOW_MS = 3_000; // 3 seconds - ULTRA-FAST verification
   
   // Elite: Circuit breaker pattern for EMSC API failures
   private emscFailureCount = 0;
@@ -46,7 +47,8 @@ class EarthquakeDetectionService {
   
   // Elite: Rate limiting to prevent API abuse
   private emscLastFetchTime = 0;
-  private readonly EMSC_MIN_INTERVAL_MS = 5000; // Minimum 5 seconds between requests
+  // ELITE: Reduced interval for FASTER early warning detection
+  private readonly EMSC_MIN_INTERVAL_MS = 3000; // Minimum 3 seconds between requests (reduced from 5s)
   
   constructor() {
     // Start continuous monitoring
@@ -89,7 +91,7 @@ class EarthquakeDetectionService {
       } catch (error) {
         console.error('❌ KOERI fetch failed:', error);
       }
-    }, 3_000); // Every 3 seconds - MAXIMUM SPEED
+    }, 2_000); // Every 2 seconds - ULTRA-FAST for maximum early warning
   }
 
   /**
@@ -237,13 +239,14 @@ class EarthquakeDetectionService {
   /**
    * Elite: Get adaptive polling interval based on circuit breaker state
    */
+  // ELITE: Ultra-fast polling intervals for MAXIMUM early warning
   private getEMSCPollInterval(): number {
     if (this.emscCircuitOpen) {
       return 30_000; // 30 seconds when circuit is open
     } else if (this.emscFailureCount > 0) {
-      return 10_000; // 10 seconds when there are some failures
+      return 8_000; // 8 seconds when there are some failures (reduced from 10s)
     } else {
-      return 5_000; // 5 seconds when everything is working
+      return 3_000; // 3 seconds when everything is working (reduced from 5s for faster detection)
     }
   }
   

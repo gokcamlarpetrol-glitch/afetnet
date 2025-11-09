@@ -143,6 +143,36 @@ router.post('/send-warning', async (req, res) => {
       await sendFcm(pushToken, title, body);
     }
     
+    // ELITE: Save AI analysis to Firebase for centralized sharing (cost optimization)
+    // This allows all users to access the same AI analysis without per-user AI calls
+    if (payload.aiAnalysis) {
+      try {
+        ensureAdmin(); // Ensure Firebase Admin is initialized
+        if (adminInitialized) {
+          const db = admin.firestore();
+          const earthquakeId = payload.event?.timestamp 
+            ? `earthquake-${payload.event.timestamp}-${payload.event.magnitude?.toFixed(1)}`
+            : `earthquake-${Date.now()}`;
+          
+          await db.collection('earthquake_analyses').doc(earthquakeId).set({
+            riskLevel: payload.aiAnalysis.riskLevel,
+            userMessage: payload.aiAnalysis.userMessage,
+            recommendations: payload.aiAnalysis.recommendations || [],
+            verified: payload.event?.verified || false,
+            sources: payload.event?.source ? [payload.event.source] : [],
+            confidence: payload.aiAnalysis.confidence || 80,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+          
+          console.log(`✅ AI analysis saved to Firebase: ${earthquakeId}`);
+        }
+      } catch (error) {
+        console.error('❌ Failed to save AI analysis to Firebase (non-critical):', error);
+        // Non-critical - continue even if Firebase save fails
+      }
+    }
+    
     res.json({ ok: true, sent: true });
   } catch (error) {
     console.error('❌ Failed to send warning:', error);

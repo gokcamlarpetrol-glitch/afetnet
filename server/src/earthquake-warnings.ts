@@ -27,9 +27,11 @@ export interface EarthquakeWarning {
 }
 
 class EarthquakeWarningService {
-  private readonly WARNING_RADIUS_KM = 500; // Send warnings within 500km radius
-  // Elite: LOWER threshold for EARLIER warnings (save more lives)
-  private readonly MIN_MAGNITUDE = 3.5; // Warn for smaller earthquakes too (earlier warning)
+  // ELITE: Extended warning radius for MAXIMUM early warning coverage
+  private readonly WARNING_RADIUS_KM = 600; // Send warnings within 600km radius (increased from 500km)
+  // ELITE: LOWER threshold for EARLIER warnings (save more lives)
+  // Reduced from 3.5 to 3.0 for earlier detection of smaller earthquakes
+  private readonly MIN_MAGNITUDE = 3.0; // Warn for smaller earthquakes too (earlier warning)
   private lastProcessedEvent?: number;
   
   /**
@@ -51,9 +53,12 @@ class EarthquakeWarningService {
 
   /**
    * Process new verified earthquakes and send warnings
+   * ELITE: This is the CRITICAL early warning system - must be FAST and ACCURATE
    */
   private async processNewEarthquakes() {
-    const verifiedEvents = earthquakeDetectionService.getVerifiedEvents(60);
+    // ELITE: Get verified events from last 2 minutes (reduced from 60 minutes for faster processing)
+    // This ensures we only process RECENT earthquakes for early warning
+    const verifiedEvents = earthquakeDetectionService.getVerifiedEvents(2);
     
     for (const event of verifiedEvents) {
       // Skip if already processed
@@ -69,11 +74,12 @@ class EarthquakeWarningService {
       console.log(`🌍 Processing earthquake: M${event.magnitude.toFixed(1)} at ${event.region}`);
       
       // ELITE: Perform centralized AI analysis (single call for all users)
+      // CRITICAL: This is done ONCE per earthquake, not per user (cost optimization)
       let aiAnalysis: CentralizedAnalysis | null = null;
       try {
         aiAnalysis = await centralizedAIAnalysisService.analyzeEarthquake(event);
         if (aiAnalysis) {
-          console.log(`✅ AI Analysis: ${aiAnalysis.riskLevel} risk, ${aiAnalysis.confidence}% confidence, ${aiAnalysis.aiTokensUsed} tokens used`);
+          console.log(`✅ AI Analysis: ${aiAnalysis.riskLevel} risk, ${aiAnalysis.confidence}% confidence, ${aiAnalysis.aiTokensUsed} tokens used (SHARED ACROSS ALL USERS)`);
         }
       } catch (error) {
         console.error('❌ AI analysis failed (continuing without AI):', error);
@@ -96,9 +102,10 @@ class EarthquakeWarningService {
           user.longitude
         );
         
-        // Elite: Send warning IMMEDIATELY if ANY time remaining (even 1 second can save lives)
-        // Extended range to 300 seconds (5 minutes) for maximum early warning
-        if (eta.secondsRemaining > 0 && eta.secondsRemaining <= 300) {
+        // ELITE: Send warning IMMEDIATELY if ANY time remaining (even 1 second can save lives)
+        // Extended range to 600 seconds (10 minutes) for MAXIMUM early warning
+        // This allows warnings for distant earthquakes BEFORE waves reach users
+        if (eta.secondsRemaining > 0 && eta.secondsRemaining <= 600) {
           const warning: EarthquakeWarning = {
             event,
             eta,
