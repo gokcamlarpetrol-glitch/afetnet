@@ -170,6 +170,20 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
 
   const handleEewToggle = async (enabled: boolean) => {
     haptics.impactLight();
+    
+    // ELITE: Premium check
+    if (enabled && !hasAccess) {
+      Alert.alert(
+        'Premium Gerekli',
+        'Erken uyarı sistemi premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
+        ]
+      );
+      return;
+    }
+    
     setEew(enabled);
     
     // Start/stop EEW service
