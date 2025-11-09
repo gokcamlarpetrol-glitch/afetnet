@@ -49,11 +49,13 @@ services:
         sync: false
         # Not: Deploy sonrası Render URL'i buraya ekleyin: https://afetnet-backend.onrender.com
         
-      # Monitoring (OPSİYONEL)
+      # Monitoring (ZORUNLU - Production'da aktif)
       - key: SENTRY_DSN
         sync: false
+        # Not: Sentry DSN'i buraya ekleyin: https://sentry.io/settings/afetnet/projects/afetnet-backend/keys/
       - key: SENTRY_ENABLED
-        value: "false"
+        value: "true"
+        # Not: Production'da Sentry monitoring aktif olmalı
         
       # Early Earthquake Warning (OPSİYONEL - Default API URL'leri eklendi)
       - key: EEW_PROVIDER_MODE
