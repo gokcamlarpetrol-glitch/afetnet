@@ -34,7 +34,9 @@ interface SettingsState {
   // ELITE: Comprehensive Earthquake Settings
   // Notification Thresholds
   minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 3.0)
+  maxMagnitudeForNotification: number; // Maximum magnitude filter (0 = unlimited, default: 0)
   maxDistanceForNotification: number; // Maximum distance in km (0 = unlimited, default: 0)
+  selectedRegions: string[]; // Selected regions for filtering (empty = all regions, default: [])
   
   // Critical Earthquake Settings
   criticalMagnitudeThreshold: number; // Magnitude threshold for critical alerts (default: 6.0)
@@ -84,7 +86,9 @@ interface SettingsActions {
   
   // ELITE: Comprehensive Earthquake Settings Actions
   setMinMagnitudeForNotification: (magnitude: number) => void;
+  setMaxMagnitudeForNotification: (magnitude: number) => void;
   setMaxDistanceForNotification: (distance: number) => void;
+  setSelectedRegions: (regions: string[]) => void;
   setCriticalMagnitudeThreshold: (magnitude: number) => void;
   setCriticalDistanceThreshold: (distance: number) => void;
   setEewMinMagnitude: (magnitude: number) => void;
@@ -124,7 +128,9 @@ const defaultSettings: SettingsState = {
   
   // ELITE: Comprehensive Earthquake Settings Defaults
   minMagnitudeForNotification: 3.0,
+  maxMagnitudeForNotification: 0, // 0 = unlimited
   maxDistanceForNotification: 0, // 0 = unlimited
+  selectedRegions: [], // Empty = all regions
   criticalMagnitudeThreshold: 6.0,
   criticalDistanceThreshold: 100,
   eewMinMagnitude: 3.5,
@@ -166,7 +172,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       
       // ELITE: Comprehensive Earthquake Settings Actions
       setMinMagnitudeForNotification: (magnitude) => set({ minMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)) }),
+      setMaxMagnitudeForNotification: (magnitude) => set({ maxMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)) }),
       setMaxDistanceForNotification: (distance) => set({ maxDistanceForNotification: Math.max(0, distance) }),
+      setSelectedRegions: (regions) => set({ selectedRegions: regions }),
       setCriticalMagnitudeThreshold: (magnitude) => set({ criticalMagnitudeThreshold: Math.max(0, Math.min(10, magnitude)) }),
       setCriticalDistanceThreshold: (distance) => set({ criticalDistanceThreshold: Math.max(0, distance) }),
       setEewMinMagnitude: (magnitude) => set({ eewMinMagnitude: Math.max(0, Math.min(10, magnitude)) }),

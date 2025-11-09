@@ -194,6 +194,54 @@ class EarthquakeService {
     }
   }
 
+  /**
+   * ELITE: Detect region from location string or coordinates
+   * Returns region name for filtering
+   */
+  private detectRegionFromLocation(location: string, latitude?: number, longitude?: number): string {
+    const locationLower = location.toLowerCase();
+    
+    // Türkiye bölgeleri
+    const regions: { [key: string]: string[] } = {
+      'Marmara': ['marmara', 'istanbul', 'bursa', 'kocaeli', 'sakarya', 'tekirdağ', 'edirne', 'kırklareli', 'yalova', 'çanakkale', 'balıkesir'],
+      'Ege': ['ege', 'izmir', 'aydın', 'muğla', 'denizli', 'manisa', 'uşak', 'afyon', 'kütahya'],
+      'Akdeniz': ['akdeniz', 'antalya', 'adana', 'mersin', 'hatay', 'osmaniye', 'ısparta', 'burdur', 'karaman'],
+      'Karadeniz': ['karadeniz', 'trabzon', 'samsun', 'rize', 'ordu', 'giresun', 'artvin', 'gümüşhane', 'bayburt', 'kastamonu', 'sinop', 'zonguldak', 'bartın', 'karabük', 'düzce', 'bolu', 'amasya', 'tokat', 'sivas', 'çorum'],
+      'İç Anadolu': ['iç anadolu', 'ankara', 'konya', 'kayseri', 'eskişehir', 'nevşehir', 'niğde', 'aksaray', 'kırıkkale', 'kırşehir', 'yozgat', 'çankırı'],
+      'Doğu Anadolu': ['doğu anadolu', 'erzurum', 'erzincan', 'van', 'malatya', 'elazığ', 'bingöl', 'muş', 'bitlis', 'ağrı', 'kars', 'ardahan', 'ığdır', 'tunceli'],
+      'Güneydoğu Anadolu': ['güneydoğu anadolu', 'gaziantep', 'şanlıurfa', 'diyarbakır', 'mardin', 'batman', 'siirt', 'şırnak', 'hakkari', 'adıyaman', 'kilis'],
+    };
+    
+    // Check location string
+    for (const [regionName, keywords] of Object.entries(regions)) {
+      if (keywords.some(keyword => locationLower.includes(keyword))) {
+        return regionName;
+      }
+    }
+    
+    // If coordinates are available, use them to determine region
+    if (latitude !== undefined && longitude !== undefined) {
+      // Rough region boundaries (simplified)
+      if (latitude >= 40.5 && latitude <= 42.0 && longitude >= 26.0 && longitude <= 30.0) {
+        return 'Marmara';
+      } else if (latitude >= 37.0 && latitude <= 40.0 && longitude >= 26.0 && longitude <= 30.0) {
+        return 'Ege';
+      } else if (latitude >= 35.0 && latitude <= 37.5 && longitude >= 30.0 && longitude <= 36.0) {
+        return 'Akdeniz';
+      } else if (latitude >= 40.0 && latitude <= 42.0 && longitude >= 36.0 && longitude <= 42.0) {
+        return 'Karadeniz';
+      } else if (latitude >= 38.0 && latitude <= 40.5 && longitude >= 30.0 && longitude <= 36.0) {
+        return 'İç Anadolu';
+      } else if (latitude >= 38.0 && latitude <= 42.0 && longitude >= 38.0 && longitude <= 44.0) {
+        return 'Doğu Anadolu';
+      } else if (latitude >= 36.0 && latitude <= 38.0 && longitude >= 36.0 && longitude <= 42.0) {
+        return 'Güneydoğu Anadolu';
+      }
+    }
+    
+    return 'Bilinmeyen';
+  }
+
   stop() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
@@ -403,12 +451,20 @@ class EarthquakeService {
           const { useSettingsStore } = await import('../stores/settingsStore');
           const settings = useSettingsStore.getState();
           
-          // Check magnitude threshold
+          // ELITE: Check magnitude range (min and max)
           if (eq.magnitude < settings.minMagnitudeForNotification) {
             if (__DEV__) {
               logger.debug(`⏭️ Deprem minimum büyüklük eşiğinin altında (${eq.magnitude.toFixed(1)} < ${settings.minMagnitudeForNotification.toFixed(1)}): ${eq.location}`);
             }
             continue; // Skip notification - below user's minimum threshold
+          }
+          
+          // Check maximum magnitude threshold (if set)
+          if (settings.maxMagnitudeForNotification > 0 && eq.magnitude > settings.maxMagnitudeForNotification) {
+            if (__DEV__) {
+              logger.debug(`⏭️ Deprem maksimum büyüklük eşiğinin üstünde (${eq.magnitude.toFixed(1)} > ${settings.maxMagnitudeForNotification.toFixed(1)}): ${eq.location}`);
+            }
+            continue; // Skip notification - above user's maximum threshold
           }
           
           // Check distance threshold (if user location is available)
@@ -439,7 +495,7 @@ class EarthquakeService {
             }
           }
           
-          // Check source selection
+          // ELITE: Check source selection
           const sourceEnabled = 
             (eq.source === 'AFAD' && settings.sourceAFAD) ||
             (eq.source === 'USGS' && settings.sourceUSGS) ||
@@ -452,6 +508,22 @@ class EarthquakeService {
               logger.debug(`⏭️ Deprem kaynağı kullanıcı tarafından devre dışı bırakılmış (${eq.source}): ${eq.location}`);
             }
             continue; // Skip notification - source disabled by user
+          }
+          
+          // ELITE: Check region filter (if regions are selected)
+          if (settings.selectedRegions && settings.selectedRegions.length > 0) {
+            const earthquakeRegion = this.detectRegionFromLocation(eq.location, eq.latitude, eq.longitude);
+            const isInSelectedRegion = settings.selectedRegions.some(selectedRegion => 
+              earthquakeRegion.toLowerCase().includes(selectedRegion.toLowerCase()) ||
+              selectedRegion.toLowerCase().includes(earthquakeRegion.toLowerCase())
+            );
+            
+            if (!isInSelectedRegion) {
+              if (__DEV__) {
+                logger.debug(`⏭️ Deprem seçili bölgenin dışında (${earthquakeRegion}): ${eq.location}`);
+              }
+              continue; // Skip notification - not in selected regions
+            }
           }
           
           const detectionDelay = Math.round((Date.now() - eq.time) / 1000);

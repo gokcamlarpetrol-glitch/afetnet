@@ -35,9 +35,11 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
   // Get all earthquake settings from store
   const {
     minMagnitudeForNotification,
+    maxMagnitudeForNotification,
     maxDistanceForNotification,
     criticalMagnitudeThreshold,
     criticalDistanceThreshold,
+    selectedRegions,
     eewEnabled,
     eewMinMagnitude,
     eewWarningTime,
@@ -60,8 +62,10 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     priorityLow,
     // Actions
     setMinMagnitudeForNotification,
+    setMaxMagnitudeForNotification,
     setMaxDistanceForNotification,
     setCriticalMagnitudeThreshold,
+    setSelectedRegions,
     setCriticalDistanceThreshold,
     setEew,
     setEewMinMagnitude,
@@ -87,6 +91,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
 
   // Local state for text inputs - ELITE: Sync with store changes
   const [magnitudeInput, setMagnitudeInput] = useState(minMagnitudeForNotification.toFixed(1));
+  const [maxMagnitudeInput, setMaxMagnitudeInput] = useState(maxMagnitudeForNotification === 0 ? '' : maxMagnitudeForNotification.toFixed(1));
   const [distanceInput, setDistanceInput] = useState(maxDistanceForNotification === 0 ? '' : maxDistanceForNotification.toString());
   const [criticalMagnitudeInput, setCriticalMagnitudeInput] = useState(criticalMagnitudeThreshold.toFixed(1));
   const [criticalDistanceInput, setCriticalDistanceInput] = useState(criticalDistanceThreshold.toString());
@@ -97,6 +102,10 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
   useEffect(() => {
     setMagnitudeInput(minMagnitudeForNotification.toFixed(1));
   }, [minMagnitudeForNotification]);
+
+  useEffect(() => {
+    setMaxMagnitudeInput(maxMagnitudeForNotification === 0 ? '' : maxMagnitudeForNotification.toFixed(1));
+  }, [maxMagnitudeForNotification]);
 
   useEffect(() => {
     setDistanceInput(maxDistanceForNotification === 0 ? '' : maxDistanceForNotification.toString());
@@ -123,7 +132,21 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     const num = parseFloat(value);
     if (!isNaN(num) && num >= 0 && num <= 10) {
       setMinMagnitudeForNotification(num);
+      // ELITE: Apply immediately - no delay
+      haptics.impactLight();
     }
+  };
+
+  const handleMaxMagnitudeChange = (value: string) => {
+    setMaxMagnitudeInput(value);
+    const num = parseFloat(value);
+    if (value === '' || value === '0') {
+      setMaxMagnitudeForNotification(0);
+    } else if (!isNaN(num) && num >= 0 && num <= 10) {
+      setMaxMagnitudeForNotification(num);
+    }
+    // ELITE: Apply immediately - no delay
+    haptics.impactLight();
   };
 
   const handleDistanceChange = (value: string) => {
@@ -134,6 +157,8 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     } else if (!isNaN(num) && num > 0) {
       setMaxDistanceForNotification(num);
     }
+    // ELITE: Apply immediately - no delay
+    haptics.impactLight();
   };
 
   const handleCriticalMagnitudeChange = (value: string) => {
@@ -362,6 +387,17 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
           )}
 
           {renderInputRow(
+            'notifications-outline',
+            'Maksimum Büyüklük',
+            'Bu büyüklüğün üstündeki depremler için bildirim gönderilmez (0 = sınırsız)',
+            maxMagnitudeInput,
+            handleMaxMagnitudeChange,
+            '0',
+            'numeric',
+            'M'
+          )}
+
+          {renderInputRow(
             'location',
             'Maksimum Mesafe',
             'Bu mesafenin dışındaki depremler için bildirim gönderilmez (0 = sınırsız)',
@@ -521,6 +557,54 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
           )}
         </View>
 
+        {/* Bölge Filtresi */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Bölge Filtresi</Text>
+          
+          <View style={styles.settingRow}>
+            <View style={styles.settingIcon}>
+              <Ionicons name="map" size={24} color={colors.brand.primary} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingTitle}>Bölge Seçimi</Text>
+              <Text style={styles.settingSubtitle}>
+                {selectedRegions.length === 0 
+                  ? 'Tüm bölgeler için bildirim alınır' 
+                  : `${selectedRegions.length} bölge seçili: ${selectedRegions.join(', ')}`}
+              </Text>
+            </View>
+            <Pressable
+              style={styles.regionButton}
+              onPress={() => {
+                haptics.impactLight();
+                const regions = ['Marmara', 'Ege', 'Akdeniz', 'Karadeniz', 'İç Anadolu', 'Doğu Anadolu', 'Güneydoğu Anadolu'];
+                const currentSelections = [...selectedRegions];
+                
+                Alert.alert(
+                  'Bölge Seçimi',
+                  'Bildirim almak istediğiniz bölgeleri seçin (boş = tüm bölgeler)',
+                  [
+                    ...regions.map(region => ({
+                      text: `${currentSelections.includes(region) ? '✓ ' : ''}${region}`,
+                      onPress: () => {
+                        const newSelections = currentSelections.includes(region)
+                          ? currentSelections.filter(r => r !== region)
+                          : [...currentSelections, region];
+                        setSelectedRegions(newSelections);
+                        haptics.notificationSuccess();
+                      },
+                    })),
+                    { text: 'Temizle', onPress: () => { setSelectedRegions([]); haptics.impactMedium(); } },
+                    { text: 'Tamam', style: 'cancel' },
+                  ]
+                );
+              }}
+            >
+              <Text style={styles.regionButtonText}>Seç</Text>
+            </Pressable>
+          </View>
+        </View>
+
         {/* Kaynak Seçimi */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Veri Kaynakları</Text>
@@ -534,6 +618,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
               onValueChange={(value) => {
                 haptics.impactLight();
                 setSourceAFAD(value);
+                // ELITE: Apply immediately - no delay
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
             />
@@ -896,6 +981,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text.secondary,
     lineHeight: 20,
+  },
+  regionButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: colors.brand.primary + '20',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.brand.primary,
+  },
+  regionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.brand.primary,
   },
 });
 
