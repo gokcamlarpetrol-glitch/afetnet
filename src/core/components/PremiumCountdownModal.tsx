@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, interpolate, Easing } from 'react-native-reanimated';
 import { createLogger } from '../utils/logger';
@@ -322,9 +323,10 @@ const PremiumCountdownModal = React.forwardRef<any, PremiumCountdownModalProps>(
     <Modal
       visible={visible}
       transparent
-      animationType="none"
+      animationType="fade"
       statusBarTranslucent
       onRequestClose={onDismiss}
+      presentationStyle="overFullScreen" // ELITE: Full screen even when app is closed
     >
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       
@@ -341,6 +343,15 @@ const PremiumCountdownModal = React.forwardRef<any, PremiumCountdownModalProps>(
       <ReanimatedView style={[styles.container, slideStyle]}>
         {/* ELITE: Premium header */}
         <View style={styles.header}>
+          <View style={styles.headerBadge}>
+            <LinearGradient
+              colors={['rgba(59, 130, 246, 0.3)', 'rgba(59, 130, 246, 0.1)']}
+              style={styles.headerBadgeGradient}
+            >
+              <Ionicons name="sparkles" size={14} color="#60a5fa" />
+              <Text style={styles.headerBadgeText}>AI ONAYLI</Text>
+            </LinearGradient>
+          </View>
           <Text style={styles.headerTitle}>ERKEN UYARI SİSTEMİ</Text>
           <Text style={styles.headerSubtitle}>AfetNet Premium</Text>
         </View>
@@ -453,6 +464,31 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  headerBadge: {
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  headerBadgeGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  headerBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: '#93c5fd',
   },
   headerTitle: {
     fontSize: 14,

@@ -788,6 +788,7 @@ class EEWService {
     
     // ELITE: Send enhanced alert with ETA information
     // CRITICAL: Use fire-and-forget to avoid blocking
+    // ELITE: Always show premium countdown modal for early warnings (even if screen is off)
     void multiChannelAlertService.sendAlert({
       title: alertTitle,
       body: alertBody,
@@ -795,7 +796,7 @@ class EEWService {
       ttsText,
       channels: {
         ...eewConfig.channels,
-        fullScreenAlert: alertLevel === AlertLevel.IMMINENT || alertLevel === AlertLevel.ACTION || priority === 'critical',
+        fullScreenAlert: true, // ELITE: Always show countdown modal for early warnings
         alarmSound: alertLevel === AlertLevel.IMMINENT || alertLevel === AlertLevel.ACTION || priority === 'critical',
       },
       vibrationPattern: alertLevel === AlertLevel.IMMINENT || priority === 'critical'

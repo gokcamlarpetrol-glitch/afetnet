@@ -202,8 +202,10 @@ class MultiChannelAlertService {
         );
       }
 
-      // 2. Full Screen Alert (critical priority) - PARALLEL
-      if (channels.fullScreenAlert && (optimizedOptions.priority === 'critical' || optimizedOptions.priority === 'high')) {
+      // 2. Full Screen Alert with Premium Countdown Modal - PARALLEL
+      // ELITE: Always show countdown modal for early warnings (even if screen is off)
+      // CRITICAL: This works even when app is closed (background notification triggers modal)
+      if (channels.fullScreenAlert) {
         alertPromises.push(
           this.showFullScreenAlert(optimizedOptions).catch(error => {
             logger.error('Full screen alert error:', error);
@@ -587,22 +589,41 @@ class MultiChannelAlertService {
         recommendedAction = aiAnalysis.recommendations[0];
       }
       
+      // ELITE: Extract data from multiple possible sources
+      const magnitude = earthquake?.magnitude || options.data?.magnitude || 0;
+      const location = earthquake?.location || options.data?.location || options.data?.region || 'Bilinmeyen';
+      const region = earthquake?.region || options.data?.region || location;
+      const source = earthquake?.source || options.data?.source || 'AfetNet';
+      
+      // ELITE: Get seconds remaining from multiple sources
+      let finalSecondsRemaining = secondsRemaining;
+      if (!finalSecondsRemaining && options.data?.warning?.secondsRemaining) {
+        finalSecondsRemaining = Math.max(0, Math.floor(options.data.warning.secondsRemaining));
+      }
+      if (!finalSecondsRemaining && options.data?.etaSec) {
+        finalSecondsRemaining = Math.max(0, Math.floor(options.data.etaSec));
+      }
+      if (!finalSecondsRemaining && options.data?.secondsRemaining) {
+        finalSecondsRemaining = Math.max(0, Math.floor(options.data.secondsRemaining));
+      }
+      
       // Create premium countdown data
       const countdownData: any = {
-        eventId: earthquake?.id || `alert-${Date.now()}`,
-        magnitude: earthquake?.magnitude || 0,
-        location: earthquake?.location || 'Bilinmeyen',
-        region: earthquake?.region || earthquake?.location,
-        source: earthquake?.source || 'AfetNet',
-        secondsRemaining: secondsRemaining || 30, // Default 30 seconds if not provided
-        pWaveETA,
-        sWaveETA,
-        distance,
-        alertLevel,
-        recommendedAction: recommendedAction || 'Güvenli bir yere geçin ve çök-kapan-tutun pozisyonu alın.',
+        eventId: earthquake?.id || options.data?.eventId || `alert-${Date.now()}`,
+        magnitude,
+        location,
+        region,
+        source,
+        secondsRemaining: finalSecondsRemaining || 30, // Default 30 seconds if not provided
+        pWaveETA: pWaveETA || options.data?.warning?.eta?.pWaveETA || options.data?.eta?.pWaveETA,
+        sWaveETA: sWaveETA || options.data?.warning?.eta?.sWaveETA || options.data?.eta?.sWaveETA,
+        distance: distance || options.data?.warning?.eta?.distance || options.data?.eta?.distance,
+        alertLevel: alertLevel || options.data?.warning?.eta?.alertLevel || options.data?.alertLevel,
+        recommendedAction: recommendedAction || options.data?.recommendedAction || options.data?.warning?.eta?.recommendedAction || 'Güvenli bir yere geçin ve çök-kapan-tutun pozisyonu alın.',
       };
       
-      // Show premium countdown modal
+      // ELITE: Show premium countdown modal (works even when screen is off)
+      // CRITICAL: This modal will appear even if app is closed (triggered by push notification)
       premiumAlertManager.showCountdown(countdownData);
       
       logger.info(`✅ Premium full-screen alert shown: ${countdownData.magnitude.toFixed(1)} magnitude, ${countdownData.secondsRemaining}s countdown`);

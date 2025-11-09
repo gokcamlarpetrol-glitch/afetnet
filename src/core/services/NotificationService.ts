@@ -424,6 +424,7 @@ class NotificationService {
         
         // ELITE: IMMEDIATE multi-channel alert for backend early warning
         // CRITICAL: This is FIRST-TO-ALERT - send immediately
+        // ELITE: Always show full-screen countdown for early warnings (even if screen is off)
         await multiChannelAlertService.sendAlert({
           title: secondsRemaining > 0 
             ? `🚨🚨🚨 İLK HABER - ${secondsRemaining}s KALDI 🚨🚨🚨`
@@ -434,7 +435,7 @@ class NotificationService {
           priority: priority as any,
           channels: {
             pushNotification: true,
-            fullScreenAlert: magnitude >= 5.0,
+            fullScreenAlert: true, // ELITE: Always show countdown modal for early warnings
             alarmSound: magnitude >= 5.0,
             vibration: true,
             tts: true,
@@ -449,6 +450,19 @@ class NotificationService {
           duration: magnitude >= 6.0 ? 0 : magnitude >= 5.0 ? 45 : 30,
           data: {
             type: 'backend_early_warning',
+            warning: {
+              secondsRemaining: secondsRemaining || 30,
+              eta: data.warning?.eta || data.eta,
+            },
+            event: {
+              magnitude,
+              region,
+              timestamp: data.event?.timestamp || Date.now(),
+            },
+            magnitude,
+            region,
+            latitude,
+            longitude,
             ...data,
           },
         });
