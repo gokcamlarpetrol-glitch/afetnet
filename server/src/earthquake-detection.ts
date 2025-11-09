@@ -141,11 +141,19 @@ class EarthquakeDetectionService {
       
       // Elite: Check response status
       if (!response.ok) {
-        // Only handle failure for non-404 errors (404 might be temporary API issue)
-        if (response.status !== 404) {
-          this.handleEMSCFailure(`HTTP ${response.status}`);
+        // Silent handling for all HTTP errors - don't log to avoid spam
+        // Circuit breaker will handle repeated failures
+        this.emscFailureCount++;
+        this.emscLastFailureTime = Date.now();
+        // Only log if circuit is about to open
+        if (this.emscFailureCount >= this.EMSC_MAX_FAILURES - 1) {
+          console.log(`ℹ️ EMSC API temporarily unavailable (HTTP ${response.status}). Circuit breaker will auto-reset in 5 minutes.`);
         }
-        // For 404, silently skip (API endpoint might be temporarily unavailable)
+        // Check if circuit should open
+        if (this.emscFailureCount >= this.EMSC_MAX_FAILURES) {
+          this.emscCircuitOpen = true;
+          console.warn(`🔴 EMSC circuit breaker OPEN (${this.emscFailureCount} failures) - pausing requests for ${this.EMSC_CIRCUIT_RESET_MS / 1000}s`);
+        }
         return;
       }
       
@@ -157,8 +165,16 @@ class EarthquakeDetectionService {
       const isJSONContentType = contentType.includes('application/json') || contentType.includes('text/json');
       
       // Elite: Check if response is HTML (error page)
+      // This is normal - EMSC API sometimes returns HTML instead of JSON
       if (!isJSONContentType || responseText.trim().startsWith('<') || responseText.trim().startsWith('<!DOCTYPE')) {
-        this.handleEMSCFailure('HTML response instead of JSON');
+        // Silent handling - this is expected behavior, circuit breaker will handle it
+        // Only increment failure count but don't log (to avoid log spam)
+        this.emscFailureCount++;
+        this.emscLastFailureTime = Date.now();
+        // Only log if circuit is about to open
+        if (this.emscFailureCount >= this.EMSC_MAX_FAILURES - 1) {
+          console.log('ℹ️ This is normal - EMSC API sometimes returns HTML instead of JSON. Circuit breaker will auto-reset in 5 minutes.');
+        }
         return;
       }
       
@@ -267,14 +283,11 @@ class EarthquakeDetectionService {
     // Open circuit breaker after max failures
     if (this.emscFailureCount >= this.EMSC_MAX_FAILURES) {
       this.emscCircuitOpen = true;
+      // Only log when circuit opens - this is expected behavior for external API issues
       console.warn(`🔴 EMSC circuit breaker OPEN (${this.emscFailureCount} failures) - pausing requests for ${this.EMSC_CIRCUIT_RESET_MS / 1000}s`);
-    } else {
-      // Silent failure - only log first few failures to reduce log spam
-      if (this.emscFailureCount <= 2) {
-        console.warn(`⚠️ EMSC API issue (${this.emscFailureCount}/${this.EMSC_MAX_FAILURES}): ${reason} - skipping this fetch`);
-      }
-      // After 2 failures, fail silently to reduce log noise
+      console.log('ℹ️ This is normal - EMSC API sometimes returns HTML instead of JSON. Circuit breaker will auto-reset in 5 minutes.');
     }
+    // Silent handling for all other failures - don't log to avoid spam
   }
 
   /**
