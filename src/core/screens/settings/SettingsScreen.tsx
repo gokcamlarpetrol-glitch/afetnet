@@ -429,11 +429,22 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'warning',
       title: 'Erken Uyarı Sistemi',
-      subtitle: 'Deprem erken uyarı bildirimleri',
+      subtitle: isPremium || useTrialStore.getState().checkTrialStatus() ? 'Deprem erken uyarı bildirimleri' : 'Premium gerekiyor',
       type: 'switch',
       value: eewEnabled,
       onPress: async () => {
         haptics.impactLight();
+        if (!isPremium && !useTrialStore.getState().checkTrialStatus()) {
+          Alert.alert(
+            'Premium Gerekli',
+            'Erken uyarı sistemi premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.',
+            [
+              { text: 'İptal', style: 'cancel' },
+              { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
+            ]
+          );
+          return;
+        }
         const newValue = !eewEnabled;
         setEewEnabled(newValue);
         
@@ -451,10 +462,24 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'phone-portrait',
       title: 'Sensör Tabanlı Algılama',
-      subtitle: 'Telefon sensörleri ile deprem algılama',
+      subtitle: isPremium || useTrialStore.getState().checkTrialStatus() ? 'Telefon sensörleri ile deprem algılama' : 'Premium gerekiyor',
       type: 'switch',
       value: seismicSensorEnabled,
-      onPress: () => setSeismicSensorEnabled(!seismicSensorEnabled),
+      onPress: () => {
+        haptics.impactLight();
+        if (!isPremium && !useTrialStore.getState().checkTrialStatus()) {
+          Alert.alert(
+            'Premium Gerekli',
+            'Sensör algılama premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.',
+            [
+              { text: 'İptal', style: 'cancel' },
+              { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
+            ]
+          );
+          return;
+        }
+        setSeismicSensorEnabled(!seismicSensorEnabled);
+      },
     },
     {
       icon: 'settings',
