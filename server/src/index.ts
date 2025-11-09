@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import iapRoutes from './iap-routes';
 import pushRoutes from './push-routes';
 import { pool, pingDb } from './database';
+import { runMigrations, verifyTables } from './database-init';
 import eewRoutes from './routes/eew';
 import earthquakesRoutes from './routes/earthquakes';
 import { startEEW } from './eew';
@@ -152,6 +153,16 @@ app.listen(PORT, async () => {
     monitoringService.captureMessage('Database connection failed on startup', 'error');
   } else {
     console.log('✅ Database connection successful');
+    
+    // Run migrations
+    await runMigrations();
+    
+    // Verify tables exist
+    const tablesOk = await verifyTables();
+    if (!tablesOk) {
+      console.warn('⚠️ Some database tables are missing - features may not work properly');
+      monitoringService.captureMessage('Database tables verification failed', 'warning');
+    }
   }
   
   // Start earthquake detection and warning services
