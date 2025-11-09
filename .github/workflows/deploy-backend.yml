@@ -44,10 +44,13 @@ jobs:
         continue-on-error: true
       
       - name: Deploy to Render
-        uses: johnbeynon/render-deploy@v1.1.0
-        with:
-          service-id: ${{ secrets.RENDER_SERVICE_ID }}
-          api-key: ${{ secrets.RENDER_API_KEY }}
+        # Note: Render.com automatically deploys on git push
+        # This step is kept for future manual deployment if needed
+        # For now, Render.com auto-deploys from GitHub, so this step is skipped
+        run: |
+          echo "Render.com automatically deploys on git push"
+          echo "No manual deployment needed"
+          echo "Service URL: https://afetnet-backend.onrender.com"
         continue-on-error: true
       
       - name: Health Check
