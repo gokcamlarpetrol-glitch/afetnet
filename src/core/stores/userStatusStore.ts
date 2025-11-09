@@ -25,6 +25,7 @@ interface UserStatusActions {
   setLocation: (location: Location) => Promise<void>;
   setSosTriggered: (triggered: boolean) => void;
   setBatteryLevel: (level: number) => void;
+  updateStatus: (status: UserStatus, location: Location | null) => Promise<void>;
   reset: () => void;
 }
 
