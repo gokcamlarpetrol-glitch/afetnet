@@ -583,6 +583,54 @@ class NotificationService {
     }
     return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
   }
+  
+  /**
+   * ELITE: Detect region from location string or coordinates
+   * Returns region name for filtering
+   */
+  private detectRegionFromLocation(location: string, latitude?: number, longitude?: number): string {
+    const locationLower = location.toLowerCase();
+    
+    // Türkiye bölgeleri
+    const regions: { [key: string]: string[] } = {
+      'Marmara': ['marmara', 'istanbul', 'bursa', 'kocaeli', 'sakarya', 'tekirdağ', 'edirne', 'kırklareli', 'yalova', 'çanakkale', 'balıkesir'],
+      'Ege': ['ege', 'izmir', 'aydın', 'muğla', 'denizli', 'manisa', 'uşak', 'afyon', 'kütahya'],
+      'Akdeniz': ['akdeniz', 'antalya', 'adana', 'mersin', 'hatay', 'osmaniye', 'ısparta', 'burdur', 'karaman'],
+      'Karadeniz': ['karadeniz', 'trabzon', 'samsun', 'rize', 'ordu', 'giresun', 'artvin', 'gümüşhane', 'bayburt', 'kastamonu', 'sinop', 'zonguldak', 'bartın', 'karabük', 'düzce', 'bolu', 'amasya', 'tokat', 'sivas', 'çorum'],
+      'İç Anadolu': ['iç anadolu', 'ankara', 'konya', 'kayseri', 'eskişehir', 'nevşehir', 'niğde', 'aksaray', 'kırıkkale', 'kırşehir', 'yozgat', 'çankırı'],
+      'Doğu Anadolu': ['doğu anadolu', 'erzurum', 'erzincan', 'van', 'malatya', 'elazığ', 'bingöl', 'muş', 'bitlis', 'ağrı', 'kars', 'ardahan', 'ığdır', 'tunceli'],
+      'Güneydoğu Anadolu': ['güneydoğu anadolu', 'gaziantep', 'şanlıurfa', 'diyarbakır', 'mardin', 'batman', 'siirt', 'şırnak', 'hakkari', 'adıyaman', 'kilis'],
+    };
+    
+    // Check location string
+    for (const [regionName, keywords] of Object.entries(regions)) {
+      if (keywords.some(keyword => locationLower.includes(keyword))) {
+        return regionName;
+      }
+    }
+    
+    // If coordinates are available, use them to determine region
+    if (latitude !== undefined && longitude !== undefined) {
+      // Rough region boundaries (simplified)
+      if (latitude >= 40.5 && latitude <= 42.0 && longitude >= 26.0 && longitude <= 30.0) {
+        return 'Marmara';
+      } else if (latitude >= 37.0 && latitude <= 40.0 && longitude >= 26.0 && longitude <= 30.0) {
+        return 'Ege';
+      } else if (latitude >= 35.0 && latitude <= 37.5 && longitude >= 30.0 && longitude <= 36.0) {
+        return 'Akdeniz';
+      } else if (latitude >= 40.0 && latitude <= 42.0 && longitude >= 36.0 && longitude <= 42.0) {
+        return 'Karadeniz';
+      } else if (latitude >= 38.0 && latitude <= 40.5 && longitude >= 30.0 && longitude <= 36.0) {
+        return 'İç Anadolu';
+      } else if (latitude >= 38.0 && latitude <= 42.0 && longitude >= 38.0 && longitude <= 44.0) {
+        return 'Doğu Anadolu';
+      } else if (latitude >= 36.0 && latitude <= 38.0 && longitude >= 36.0 && longitude <= 42.0) {
+        return 'Güneydoğu Anadolu';
+      }
+    }
+    
+    return 'Bilinmeyen';
+  }
 }
 
 export const notificationService = new NotificationService();
