@@ -2,7 +2,7 @@
 // Express server setup for IAP verification with PostgreSQL
 
 // CRITICAL: Import type augmentation FIRST before any Express imports
-/// <reference path="./types/shims.d.ts" />
+/// <reference types="./types/express-rate-limit" />
 import './types/shims';
 
 import express from 'express';

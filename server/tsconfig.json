@@ -17,6 +17,7 @@
     "src/types/**/*.d.ts"
   ],
   "files": [
-    "src/types/shims.d.ts"
+    "src/types/shims.d.ts",
+    "src/types/express-rate-limit.d.ts"
   ]
 }
