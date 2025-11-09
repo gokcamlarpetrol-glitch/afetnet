@@ -1145,6 +1145,84 @@ class SeismicSensorService {
       // Continue without verification - sensor detection is still valid
     }
 
+    // ELITE: Check user settings for seismic sensor filters
+    try {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      
+      const magnitude = event.estimatedMagnitude || 0;
+      
+      // Check EEW minimum magnitude threshold
+      if (magnitude < settings.eewMinMagnitude) {
+        if (__DEV__) {
+          logger.debug(`⏭️ Sensör algılaması EEW minimum büyüklük eşiğinin altında (${magnitude.toFixed(1)} < ${settings.eewMinMagnitude.toFixed(1)})`);
+        }
+        return; // Skip notification - below EEW minimum threshold
+      }
+      
+      // Check general magnitude filters (if set)
+      if (magnitude < settings.minMagnitudeForNotification) {
+        if (__DEV__) {
+          logger.debug(`⏭️ Sensör algılaması genel minimum büyüklük eşiğinin altında (${magnitude.toFixed(1)} < ${settings.minMagnitudeForNotification.toFixed(1)})`);
+        }
+        return; // Skip notification - below general minimum threshold
+      }
+      
+      if (settings.maxMagnitudeForNotification > 0 && magnitude > settings.maxMagnitudeForNotification) {
+        if (__DEV__) {
+          logger.debug(`⏭️ Sensör algılaması maksimum büyüklük eşiğinin üstünde (${magnitude.toFixed(1)} > ${settings.maxMagnitudeForNotification.toFixed(1)})`);
+        }
+        return; // Skip notification - above maximum threshold
+      }
+      
+      // Check distance threshold (if user location is available and event location is known)
+      if (settings.maxDistanceForNotification > 0 && event.location) {
+        try {
+          const { calculateDistance } = await import('../utils/mapUtils');
+          const { useUserStatusStore } = await import('../stores/userStatusStore');
+          const userStatus = useUserStatusStore.getState();
+          
+          if (userStatus.location) {
+            const distance = calculateDistance(
+              userStatus.location.latitude,
+              userStatus.location.longitude,
+              event.location.latitude,
+              event.location.longitude
+            );
+            
+            if (distance > settings.maxDistanceForNotification) {
+              if (__DEV__) {
+                logger.debug(`⏭️ Sensör algılaması maksimum mesafe eşiğinin dışında (${distance.toFixed(0)}km > ${settings.maxDistanceForNotification}km)`);
+              }
+              return; // Skip notification - outside distance threshold
+            }
+          }
+        } catch (error) {
+          // If distance calculation fails, continue with notification (better safe than sorry for EEW)
+          logger.warn('Sensor distance calculation failed, continuing with notification:', error);
+        }
+      }
+      
+      // Check region filter (if regions are selected and event location is known)
+      if (settings.selectedRegions && settings.selectedRegions.length > 0 && event.location) {
+        const earthquakeRegion = this.detectRegionFromLocation('Sensör Algılaması', event.location.latitude, event.location.longitude);
+        const isInSelectedRegion = settings.selectedRegions.some(selectedRegion => 
+          earthquakeRegion.toLowerCase().includes(selectedRegion.toLowerCase()) ||
+          selectedRegion.toLowerCase().includes(earthquakeRegion.toLowerCase())
+        );
+        
+        if (!isInSelectedRegion) {
+          if (__DEV__) {
+            logger.debug(`⏭️ Sensör algılaması seçili bölgenin dışında (${earthquakeRegion})`);
+          }
+          return; // Skip notification - not in selected regions
+        }
+      }
+    } catch (error) {
+      logger.error('Settings check failed for sensor, continuing with notification (better safe than sorry):', error);
+      // Continue with notification if settings check fails (better safe than sorry for EEW)
+    }
+    
     // ELITE: REAL EARLY WARNING - Send notification IMMEDIATELY
     // CRITICAL: This triggers alerts BEFORE earthquake fully happens (P-waves detected)
     // This is the ONLY way to warn BEFORE earthquake happens (not after)

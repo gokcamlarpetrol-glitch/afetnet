@@ -681,6 +681,82 @@ class EEWService {
       // Continue with notification if premium check fails (better safe than sorry)
     }
     
+    // ELITE: Check user settings for EEW filters
+    try {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const settings = useSettingsStore.getState();
+      
+      // Check EEW minimum magnitude threshold
+      if (magnitude < settings.eewMinMagnitude) {
+        if (__DEV__) {
+          logger.debug(`⏭️ EEW minimum büyüklük eşiğinin altında (${magnitude.toFixed(1)} < ${settings.eewMinMagnitude.toFixed(1)}): ${event.region}`);
+        }
+        return; // Skip notification - below EEW minimum threshold
+      }
+      
+      // Check general magnitude filters (if set)
+      if (magnitude < settings.minMagnitudeForNotification) {
+        if (__DEV__) {
+          logger.debug(`⏭️ Genel minimum büyüklük eşiğinin altında (${magnitude.toFixed(1)} < ${settings.minMagnitudeForNotification.toFixed(1)}): ${event.region}`);
+        }
+        return; // Skip notification - below general minimum threshold
+      }
+      
+      if (settings.maxMagnitudeForNotification > 0 && magnitude > settings.maxMagnitudeForNotification) {
+        if (__DEV__) {
+          logger.debug(`⏭️ Maksimum büyüklük eşiğinin üstünde (${magnitude.toFixed(1)} > ${settings.maxMagnitudeForNotification.toFixed(1)}): ${event.region}`);
+        }
+        return; // Skip notification - above maximum threshold
+      }
+      
+      // Check distance threshold (if user location is available)
+      if (settings.maxDistanceForNotification > 0) {
+        try {
+          const { calculateDistance } = await import('../utils/mapUtils');
+          const { useUserStatusStore } = await import('../stores/userStatusStore');
+          const userStatus = useUserStatusStore.getState();
+          
+          if (userStatus.location) {
+            const distance = calculateDistance(
+              userStatus.location.latitude,
+              userStatus.location.longitude,
+              epicenter.latitude,
+              epicenter.longitude
+            );
+            
+            if (distance > settings.maxDistanceForNotification) {
+              if (__DEV__) {
+                logger.debug(`⏭️ EEW maksimum mesafe eşiğinin dışında (${distance.toFixed(0)}km > ${settings.maxDistanceForNotification}km): ${event.region}`);
+              }
+              return; // Skip notification - outside distance threshold
+            }
+          }
+        } catch (error) {
+          // If distance calculation fails, continue with notification (better safe than sorry for EEW)
+          logger.warn('EEW distance calculation failed, continuing with notification:', error);
+        }
+      }
+      
+      // Check region filter (if regions are selected)
+      if (settings.selectedRegions && settings.selectedRegions.length > 0) {
+        const earthquakeRegion = this.detectRegionFromLocation(event.region || 'Bilinmeyen', epicenter.latitude, epicenter.longitude);
+        const isInSelectedRegion = settings.selectedRegions.some(selectedRegion => 
+          earthquakeRegion.toLowerCase().includes(selectedRegion.toLowerCase()) ||
+          selectedRegion.toLowerCase().includes(earthquakeRegion.toLowerCase())
+        );
+        
+        if (!isInSelectedRegion) {
+          if (__DEV__) {
+            logger.debug(`⏭️ EEW seçili bölgenin dışında (${earthquakeRegion}): ${event.region}`);
+          }
+          return; // Skip notification - not in selected regions
+        }
+      }
+    } catch (error) {
+      logger.error('Settings check failed for EEW, continuing with notification (better safe than sorry):', error);
+      // Continue with notification if settings check fails (better safe than sorry for EEW)
+    }
+    
     const eewConfig = this.getEEWAlertConfig(magnitude);
     const basicTitle = eewConfig.title;
     const basicBody = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi.`;
