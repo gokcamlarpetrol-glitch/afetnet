@@ -6,16 +6,21 @@ declare module 'firebase-admin';
 /**
  * ELITE: Express Rate Limit Type Augmentation
  * Extends Express Request type to include rateLimit property from express-rate-limit
+ * This must be declared before express module is imported
  */
-declare namespace Express {
-  interface Request {
-    rateLimit?: {
-      limit: number;
-      current: number;
-      remaining: number;
-      resetTime: Date;
-      totalHits: number;
-    };
+import 'express';
+
+declare global {
+  namespace Express {
+    interface Request {
+      rateLimit?: {
+        limit: number;
+        current: number;
+        remaining: number;
+        resetTime: Date;
+        totalHits: number;
+      };
+    }
   }
 }
 
