@@ -156,25 +156,20 @@ class PremiumService {
 
   /**
    * ELITE: Check if user has access to a feature
-   * CRITICAL: Earthquake features are always free, other features require trial/premium
+   * CRITICAL: All features require premium after 3-day trial period
    */
   hasAccess(featureType: 'earthquake' | 'other'): boolean {
-    if (featureType === 'earthquake') {
-      // CRITICAL: Earthquake features are ALWAYS FREE
-      return true;
-    }
-    
-    // Other features: Check trial or premium
+    // ELITE: All features follow same premium logic - 3 days free trial, then premium required
     const premiumState = usePremiumStore.getState();
     const isPremium = premiumState.isPremium;
     
-    // ELITE: Check trial status for other features
+    // ELITE: Check trial status for all features
     if (!isPremium) {
       const isTrialActive = useTrialStore.getState().checkTrialStatus();
       return isTrialActive; // First 3 days free, then premium required
     }
     
-    return isPremium;
+    return true; // Premium users have access
   }
 
   /**

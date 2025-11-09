@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { usePremiumStore } from '../../stores/premiumStore';
+import { useTrialStore } from '../../stores/trialStore';
 import { useMeshStore } from '../../stores/meshStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { premiumService } from '../../services/PremiumService';

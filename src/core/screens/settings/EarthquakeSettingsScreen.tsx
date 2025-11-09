@@ -23,8 +23,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { usePremiumStore } from '../../stores/premiumStore';
+import { useTrialStore } from '../../stores/trialStore';
 
 export default function EarthquakeSettingsScreen({ navigation }: any) {
+  // ELITE: Premium check for earthquake settings
+  const isPremium = usePremiumStore((state) => state.isPremium);
+  const isTrialActive = useTrialStore((state) => state.checkTrialStatus());
+  const hasAccess = isPremium || isTrialActive;
+  
   // Get all earthquake settings from store
   const {
     minMagnitudeForNotification,
@@ -176,6 +183,21 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
 
   const handleSensorToggle = async (enabled: boolean) => {
     haptics.impactLight();
+    
+    // ELITE: Premium check
+    if (enabled && !hasAccess) {
+      const { Alert } = await import('react-native');
+      Alert.alert(
+        'Premium Gerekli',
+        'Sensör algılama premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
+        ]
+      );
+      return;
+    }
+    
     setSeismicSensor(enabled);
     
     // ELITE: Start/stop SeismicSensorService
@@ -408,11 +430,12 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
           {renderSettingRow(
             'phone-portrait',
             'Sensör Algılama',
-            'Telefon sensörleri ile deprem algılama',
+            hasAccess ? 'Telefon sensörleri ile deprem algılama' : 'Premium gerekiyor',
             <Switch
               value={seismicSensorEnabled}
               onValueChange={handleSensorToggle}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
+              disabled={!hasAccess}
             />
           )}
 
