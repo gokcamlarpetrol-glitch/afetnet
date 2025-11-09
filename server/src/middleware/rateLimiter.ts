@@ -20,10 +20,10 @@ export const globalRateLimiter = rateLimit({
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   handler: (req: Request, res: Response) => {
     console.warn(`⚠️ Rate limit exceeded: ${req.ip} - ${req.url}`);
-    // ELITE: Type-safe rate limit access
-    const rateLimitInfo = (req as any).rateLimit;
+    // ELITE: Type-safe rate limit access with proper type checking
+    const rateLimitInfo = req.rateLimit;
     const retryAfter = rateLimitInfo?.resetTime 
-      ? Math.ceil(rateLimitInfo.resetTime / 1000)
+      ? Math.ceil(rateLimitInfo.resetTime.getTime() / 1000)
       : 60; // Default 60 seconds
     res.status(429).json({
       success: false,
