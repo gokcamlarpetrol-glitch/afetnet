@@ -120,8 +120,8 @@ export default function SettingsScreen({ navigation }: any) {
     const languageOptions = supportedLanguages
       .map((lang) => {
         const displayName = i18nService.getLocaleDisplayName(lang);
-        // ELITE: Skip if display name is empty (should not happen with explicit list)
-        if (!displayName) return null;
+        // ELITE: Skip if display name is empty or null (filters out Kurdish and invalid languages)
+        if (!displayName || displayName.trim() === '') return null;
         
         return {
           text: displayName,
@@ -140,7 +140,7 @@ export default function SettingsScreen({ navigation }: any) {
           },
         };
       })
-      .filter((option) => option !== null) as Array<{ text: string; onPress: () => void }>; // Remove null entries
+      .filter((option) => option !== null && option.text && option.text.trim() !== '') as Array<{ text: string; onPress: () => void }>; // Remove null entries and empty strings
 
     Alert.alert(
       i18nService.t('settings.language'),

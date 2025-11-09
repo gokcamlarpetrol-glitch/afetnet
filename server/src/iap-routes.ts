@@ -2,9 +2,8 @@
 // Full implementation will be restored after database connection is working
 
 import express from 'express';
-// Load shared products via CommonJS wrapper to avoid ESM issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { IAP_PRODUCTS, PRODUCT_CONFIG } = require('../../shared/iap/products.cjs');
+// Use local products.ts file (copied from shared/iap/products.ts for Render.com compatibility)
+import { IAP_PRODUCTS, PRODUCT_CONFIG } from './products';
 
 /**
  * Validate receipt with Apple's VerifyReceipt API
