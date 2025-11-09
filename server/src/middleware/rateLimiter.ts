@@ -6,6 +6,7 @@
  */
 
 // CRITICAL: Import type augmentation BEFORE express types
+/// <reference path="../types/shims.d.ts" />
 import '../types/shims';
 
 import rateLimit from 'express-rate-limit';
