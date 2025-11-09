@@ -426,39 +426,44 @@ export default function SettingsScreen({ navigation }: any) {
         );
       },
     },
-    {
-      icon: 'warning',
-      title: 'Erken Uyarı Sistemi',
-      subtitle: isPremium || useTrialStore.getState().checkTrialStatus() ? 'Deprem erken uyarı bildirimleri' : 'Premium gerekiyor',
-      type: 'switch',
-      value: eewEnabled,
-      onPress: async () => {
-        haptics.impactLight();
-        if (!isPremium && !useTrialStore.getState().checkTrialStatus()) {
-          Alert.alert(
-            'Premium Gerekli',
-            'Erken uyarı sistemi premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.',
-            [
-              { text: 'İptal', style: 'cancel' },
-              { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
-            ]
-          );
-          return;
-        }
-        const newValue = !eewEnabled;
-        setEewEnabled(newValue);
-        
-        // Start/stop EEW service based on setting
-        const { eewService } = await import('../../services/EEWService');
-        if (newValue) {
-          await eewService.start();
-          Alert.alert('Erken Uyarı', 'Erken uyarı sistemi aktif edildi.');
-        } else {
-          eewService.stop();
-          Alert.alert('Erken Uyarı', 'Erken uyarı sistemi kapatıldı.');
-        }
-      },
-    },
+        {
+          icon: 'warning',
+          title: 'AI Destekli Erken Uyarı',
+          subtitle: isPremium || useTrialStore.getState().checkTrialStatus() 
+            ? '6 kaynak doğrulama + AI onayı ile deprem olmadan önce uyarı' 
+            : 'Premium gerekiyor',
+          type: 'switch',
+          value: eewEnabled,
+          onPress: async () => {
+            haptics.impactLight();
+            if (!isPremium && !useTrialStore.getState().checkTrialStatus()) {
+              Alert.alert(
+                'Premium Gerekli',
+                'AI destekli erken uyarı sistemi premium özelliğidir. 6 farklı kaynaktan gelen veriler yapay zeka ile analiz edilir ve deprem olmadan önce size bildirim gönderilir. İlk 3 gün ücretsiz deneyebilirsiniz.',
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  { text: 'Premium\'a Geç', onPress: () => navigation.navigate('Paywall') },
+                ]
+              );
+              return;
+            }
+            const newValue = !eewEnabled;
+            setEewEnabled(newValue);
+            
+            // Start/stop EEW service based on setting
+            const { eewService } = await import('../../services/EEWService');
+            if (newValue) {
+              await eewService.start();
+              Alert.alert(
+                'AI Destekli Erken Uyarı Aktif', 
+                'Erken uyarı sistemi aktif edildi. Deprem olmadan önce AI destekli analiz ile bildirim alacaksınız. Sistem 6 farklı kaynaktan gelen verileri yapay zeka ile onaylayarak size en doğru bilgiyi sunar.'
+              );
+            } else {
+              eewService.stop();
+              Alert.alert('Erken Uyarı', 'Erken uyarı sistemi kapatıldı.');
+            }
+          },
+        },
     {
       icon: 'phone-portrait',
       title: 'Sensör Tabanlı Algılama',

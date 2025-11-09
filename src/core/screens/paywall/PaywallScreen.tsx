@@ -125,8 +125,8 @@ const PREMIUM_FEATURES = [
   },
   { 
     icon: 'pulse', 
-    title: 'Deprem Bildirimleri', 
-    description: 'Gerçek zamanlı deprem bildirimleri ve erken uyarı sistemi',
+    title: 'AI Destekli Erken Uyarı', 
+    description: 'Yapay zeka ile onaylanmış erken uyarı sistemi - deprem olmadan önce bildirim alın',
     color: '#ef4444',
   },
   { 
@@ -642,7 +642,7 @@ export default function PaywallScreen({ navigation }: any) {
               </View>
             </View>
             <Text style={styles.featuresSectionSubtitle}>
-              İlk 3 gün ücretsiz! Premium ile deprem bildirimleri, erken uyarı sistemi, AI destekli analiz, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
+              İlk 3 gün ücretsiz! Premium ile AI destekli erken uyarı sistemi (6 kaynak doğrulama + yapay zeka onayı), gerçek zamanlı deprem bildirimleri, offline iletişim ağı ve profesyonel hazırlık araçları ile kendinizi ve ailenizi koruyun.
             </Text>
             
             {/* Features Grid - Premium Design */}

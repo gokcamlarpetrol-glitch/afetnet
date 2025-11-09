@@ -119,7 +119,7 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
           <Text style={styles.subtitle}>
             AFAD verileriyle entegre sistem, bölgenizdeki depremleri saniyeler içinde gösterir.{' '}
             <Text style={styles.subtitleHighlight}>Deprem bildirimleri</Text> ve{' '}
-            <Text style={styles.subtitleHighlight}>erken uyarı sistemi</Text> ile her zaman haberdar ol.
+            <Text style={styles.subtitleHighlight}>AI destekli erken uyarı sistemi</Text> ile deprem olmadan önce uyarı alın.
           </Text>
         </Animated.View>
 
@@ -134,6 +134,22 @@ export default function OnboardingScreen2({ navigation }: OnboardingScreen2Props
               <Text style={styles.sourceBadgeText}>
                 <Text style={styles.sourceBadgeNumber}>+6 kaynak</Text>
                 {' '}ile doğrulanmış bilgi
+              </Text>
+            </LinearGradient>
+          </View>
+        </Animated.View>
+
+        {/* AI Verification Badge */}
+        <Animated.View entering={FadeInDown.delay(550).duration(600)} style={styles.sourceBadgeContainer}>
+          <View style={styles.sourceBadge}>
+            <LinearGradient
+              colors={['rgba(59, 130, 246, 0.2)', 'rgba(59, 130, 246, 0.1)', 'transparent']}
+              style={styles.sourceBadgeGradient}
+            >
+              <Ionicons name="sparkles" size={20} color={colors.accent.primary} />
+              <Text style={styles.sourceBadgeText}>
+                <Text style={styles.sourceBadgeNumber}>AI ile onaylanmış</Text>
+                {' '}erken uyarı sistemi
               </Text>
             </LinearGradient>
           </View>

@@ -397,12 +397,24 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
 
         {/* Erken Uyarı Ayarları */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Erken Uyarı Sistemi</Text>
+          <Text style={styles.sectionTitle}>AI Destekli Erken Uyarı Sistemi</Text>
+          
+          {/* AI Verification Info Badge */}
+          {hasAccess && eewEnabled && (
+            <View style={styles.infoBadge}>
+              <Ionicons name="sparkles" size={18} color={colors.accent.primary} />
+              <Text style={styles.infoBadgeText}>
+                <Text style={styles.infoBadgeBold}>AI Onaylı:</Text> 6 kaynak doğrulama + yapay zeka analizi ile deprem olmadan önce uyarı
+              </Text>
+            </View>
+          )}
           
           {renderSettingRow(
             'warning',
-            'Erken Uyarı',
-            hasAccess ? 'Deprem erken uyarı bildirimleri' : 'Premium gerekiyor',
+            'AI Destekli Erken Uyarı',
+            hasAccess 
+              ? '6 kaynak + AI ile deprem olmadan önce uyarı' 
+              : 'Premium gerekiyor',
             <Switch
               value={eewEnabled}
               onValueChange={handleEewToggle}
@@ -711,11 +723,11 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         {/* Bilgi Kartı */}
         <View style={styles.infoCard}>
           <Ionicons name="information-circle" size={24} color={colors.status.info} />
-          <Text style={styles.infoText}>
-            {hasAccess 
-              ? 'Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar. Minimum büyüklük ve mesafe filtreleri ile sadece ilgilendiğiniz depremler için bildirim alabilirsiniz.'
-              : 'Deprem bildirimleri premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.'}
-          </Text>
+            <Text style={styles.infoText}>
+                {hasAccess 
+                  ? 'Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar. AI destekli erken uyarı sistemi 6 farklı kaynaktan gelen verileri yapay zeka ile analiz ederek deprem olmadan önce size bildirim gönderir. Minimum büyüklük ve mesafe filtreleri ile sadece ilgilendiğiniz depremler için bildirim alabilirsiniz.'
+                  : 'Deprem bildirimleri ve AI destekli erken uyarı sistemi premium özelliğidir. İlk 3 gün ücretsiz deneyebilirsiniz.'}
+              </Text>
         </View>
       </ScrollView>
     </View>
@@ -846,6 +858,27 @@ const styles = StyleSheet.create({
   },
   priorityChipTextActive: {
     color: colors.brand.primary,
+  },
+  infoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: colors.accent.primary + '15',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.accent.primary + '30',
+    marginBottom: 12,
+    gap: 8,
+  },
+  infoBadgeText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
+  infoBadgeBold: {
+    fontWeight: '700',
+    color: colors.accent.primary,
   },
   infoCard: {
     flexDirection: 'row',
