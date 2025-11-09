@@ -5,7 +5,7 @@
  * ELITE LEVEL: Uses expo-camera torch API (most reliable method)
  */
 
-import { Camera, requestCameraPermissionsAsync } from 'expo-camera';
+import * as Camera from 'expo-camera';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FlashlightService');
@@ -16,7 +16,7 @@ class FlashlightService {
   private hasPermission: boolean = false;
   private patternLoopPromise: Promise<void> | null = null;
   private hasWarnedAboutTorch: boolean = false;
-  private cameraRef: Camera | null = null; // ELITE: Camera ref for torch control
+  private cameraRef: any = null; // ELITE: Camera ref for torch control
   private torchModule: any = null; // ELITE: Cache expo-torch module if available
 
   /**
@@ -24,16 +24,18 @@ class FlashlightService {
    */
   async initialize() {
     try {
-      // ELITE: Request camera permissions with Hermes-safe import
+      // ELITE: Request camera permissions with expo-camera v17 API
       let permissionResult;
       try {
-        permissionResult = await requestCameraPermissionsAsync();
+        // expo-camera v17 uses requestCameraPermissionsAsync()
+        // @ts-ignore - expo-camera types may not export this correctly
+        permissionResult = await Camera.requestCameraPermissionsAsync();
       } catch (permissionError: any) {
         // ELITE: Fallback for Hermes engine compatibility
         logger.debug('Direct requestCameraPermissionsAsync failed, trying dynamic import:', permissionError?.message);
         try {
           const cameraModule = await import('expo-camera');
-          const requestFn = cameraModule.requestCameraPermissionsAsync || cameraModule.default?.requestCameraPermissionsAsync;
+          const requestFn = (cameraModule as any).requestCameraPermissionsAsync || (cameraModule as any).default?.requestCameraPermissionsAsync;
           if (requestFn && typeof requestFn === 'function') {
             permissionResult = await requestFn();
           } else {
@@ -77,7 +79,7 @@ class FlashlightService {
    * ELITE: Set camera ref for torch control
    * This allows us to use Camera's torch API
    */
-  setCameraRef(ref: CameraView | null) {
+  setCameraRef(ref: any | null) {
     this.cameraRef = ref;
     if (ref) {
       logger.info('✅ Camera ref set for torch control');

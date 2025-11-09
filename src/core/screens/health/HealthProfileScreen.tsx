@@ -459,8 +459,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                           colors={[category.color, `${category.color}CC`]}
                           start={{ x: 0, y: 0 }}
                           end={{ x: 1, y: 0 }}
-                          style={StyleSheet.absoluteFill}
-                          borderRadius={borderRadius.lg}
+                          style={[StyleSheet.absoluteFill, { borderRadius: borderRadius.lg }]}
                         />
                       )}
                       <Text
@@ -541,8 +540,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                           colors={[category.color, `${category.color}CC`]}
                           start={{ x: 0, y: 0 }}
                           end={{ x: 1, y: 1 }}
-                          style={StyleSheet.absoluteFill}
-                          borderRadius={borderRadius.lg}
+                          style={[StyleSheet.absoluteFill, { borderRadius: borderRadius.lg }]}
                         />
                       )}
                 <Text
@@ -737,8 +735,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                           colors={[category.color, `${category.color}CC`]}
                           start={{ x: 0, y: 0 }}
                           end={{ x: 1, y: 0 }}
-                          style={StyleSheet.absoluteFill}
-                          borderRadius={borderRadius.lg}
+                          style={[StyleSheet.absoluteFill, { borderRadius: borderRadius.lg }]}
                         />
                       )}
                       <Text
@@ -842,8 +839,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                                 colors={[category.color, `${category.color}CC`]}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 0 }}
-                                style={StyleSheet.absoluteFill}
-                                borderRadius={borderRadius.lg}
+                                style={[StyleSheet.absoluteFill, { borderRadius: borderRadius.lg }]}
                               />
                             )}
                             <Text
