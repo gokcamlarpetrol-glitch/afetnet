@@ -1,6 +1,6 @@
 /**
  * I18N SERVICE
- * Multi-language support - Turkish, Kurdish, Arabic
+ * Multi-language support - Turkish, English, Arabic
  */
 
 import * as Localization from 'expo-localization';
@@ -75,69 +75,69 @@ const translations = {
       location: 'Konum',
     },
   },
-  ku: {
+  en: {
     app: {
       name: 'AfetNet',
-      subtitle: 'Teknolojiya Jiyanxweş',
+      subtitle: 'Life-Saving Technology',
     },
     common: {
-      ok: 'Erê',
-      cancel: 'Betal',
-      save: 'Tomar Bike',
-      delete: 'Jêbirin',
-      edit: 'Guhertin',
-      back: 'Paş',
-      next: 'Pêş',
-      close: 'Bigre',
-      loading: 'Tê barkirin...',
-      error: 'Çewtî',
-      success: 'Serkeftin',
+      ok: 'OK',
+      cancel: 'Cancel',
+      save: 'Save',
+      delete: 'Delete',
+      edit: 'Edit',
+      back: 'Back',
+      next: 'Next',
+      close: 'Close',
+      loading: 'Loading...',
+      error: 'Error',
+      success: 'Success',
     },
     home: {
-      title: 'Rûpelê Sereke',
-      offline: 'Bê Înternet',
-      online: 'Bi Înternet',
-      lastEarthquake: 'Erdheja Dawî',
-      activeDisasters: 'Afetên Çalak',
-      familyStatus: 'Rewşa Malbatê',
+      title: 'Home',
+      offline: 'Offline',
+      online: 'Online',
+      lastEarthquake: 'Last Earthquake',
+      activeDisasters: 'Active Disasters',
+      familyStatus: 'Family Status',
     },
     earthquake: {
-      title: 'Erdhej',
-      magnitude: 'Mezinahî',
-      depth: 'Kûrî',
-      location: 'Cih',
-      time: 'Dem',
-      distance: 'Dûrî',
+      title: 'Earthquakes',
+      magnitude: 'Magnitude',
+      depth: 'Depth',
+      location: 'Location',
+      time: 'Time',
+      distance: 'Distance',
     },
     family: {
-      title: 'Malbat',
-      safe: 'Emin',
-      needHelp: 'Alîkarî Divê',
-      unknown: 'Nenas',
-      addMember: 'Endam Zêde Bike',
+      title: 'Family',
+      safe: 'Safe',
+      needHelp: 'Need Help',
+      unknown: 'Unknown',
+      addMember: 'Add Member',
     },
     sos: {
       title: 'SOS',
-      send: 'SOS Bişîne',
-      sent: 'SOS Hate Şandin',
-      location: 'Cih Parve Bike',
+      send: 'Send SOS',
+      sent: 'SOS Sent',
+      location: 'Share Location',
     },
     alerts: {
-      earthquake: 'Hişyariya Erdhejê',
-      critical: 'Girîng',
-      high: 'Bilind',
+      earthquake: 'Earthquake Alert',
+      critical: 'Critical',
+      high: 'High',
       normal: 'Normal',
     },
     preparedness: {
-      title: 'Amadebûn',
-      quiz: 'Nirxandina Amadebûnê',
-      score: 'Pûana Amadebûnê',
+      title: 'Preparedness',
+      quiz: 'Preparedness Assessment',
+      score: 'Preparedness Score',
     },
     settings: {
-      title: 'Mîheng',
-      language: 'Ziman',
-      notifications: 'Agahdariyên',
-      location: 'Cih',
+      title: 'Settings',
+      language: 'Language',
+      notifications: 'Notifications',
+      location: 'Location',
     },
   },
   ar: {
@@ -223,7 +223,7 @@ class I18nService {
         const deviceLocale = locales[0].languageCode || 'tr';
         // Map device locale to supported languages
         if (deviceLocale === 'tr') return 'tr';
-        if (deviceLocale === 'ku') return 'ku';
+        if (deviceLocale === 'en') return 'en';
         if (deviceLocale === 'ar') return 'ar';
         return 'tr'; // Default
       }
@@ -237,7 +237,7 @@ class I18nService {
   /**
    * Set current locale
    */
-  setLocale(locale: 'tr' | 'ku' | 'ar' | 'en') {
+  setLocale(locale: 'tr' | 'en' | 'ar') {
     this.currentLocale = locale;
     
     if (__DEV__) {
@@ -298,7 +298,7 @@ class I18nService {
   getLocaleDisplayName(locale: string): string {
     const names: Record<string, string> = {
       tr: 'Türkçe',
-      ku: 'Kurdî',
+      en: 'English',
       ar: 'العربية',
     };
     return names[locale] || locale;

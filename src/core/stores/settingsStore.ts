@@ -27,7 +27,7 @@ interface SettingsState {
   // Battery Saver
   batterySaverEnabled: boolean;
   // Language
-  language: 'tr' | 'ku' | 'ar' | 'en';
+  language: 'tr' | 'en' | 'ar';
   // News
   newsEnabled: boolean;
   
@@ -79,7 +79,7 @@ interface SettingsActions {
   setVibration: (enabled: boolean) => void;
   setVoiceCommand: (enabled: boolean) => void;
   setBatterySaver: (enabled: boolean) => void;
-  setLanguage: (lang: 'tr' | 'ku' | 'ar' | 'en') => void;
+  setLanguage: (lang: 'tr' | 'en' | 'ar') => void;
   setNews: (enabled: boolean) => void;
   
   // ELITE: Comprehensive Earthquake Settings Actions
