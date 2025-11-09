@@ -89,7 +89,6 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Gelişmiş Özellikler</Text>
         <Text style={styles.headerSubtitle}>
           Profesyonel afet müdahale araçları
         </Text>

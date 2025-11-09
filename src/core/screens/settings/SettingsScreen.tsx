@@ -115,7 +115,7 @@ export default function SettingsScreen({ navigation }: any) {
       'Kullanmak istediğiniz dili seçin',
       [
         { text: 'Türkçe', onPress: () => { i18nService.setLocale('tr'); setLanguage('tr'); } },
-        { text: 'Kurdî', onPress: () => { i18nService.setLocale('ku'); setLanguage('ku'); } },
+        { text: 'English', onPress: () => { i18nService.setLocale('en'); setLanguage('en'); } },
         { text: 'العربية', onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
         { text: 'İptal', style: 'cancel' },
       ]
@@ -770,9 +770,7 @@ export default function SettingsScreen({ navigation }: any) {
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <Text style={styles.headerTitle}>Ayarlar</Text>
-      </View>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]} />
 
       <ScrollView 
         contentContainerStyle={styles.content}

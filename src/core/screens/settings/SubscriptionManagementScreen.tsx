@@ -162,7 +162,6 @@ export default function SubscriptionManagementScreen({ navigation }: any) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Abonelik Yönetimi</Text>
         <View style={styles.placeholder} />
       </View>
 

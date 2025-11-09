@@ -313,30 +313,21 @@ export default function CoreApp() {
                 name="RiskScore" 
                 component={RiskScoreScreen}
                 options={{ 
-                  headerShown: true,
-                  headerTitle: 'Risk Skoru',
-                  headerStyle: { backgroundColor: colors.background.primary },
-                  headerTintColor: colors.text.primary,
+                  headerShown: false,
                 }}
               />
               <Stack.Screen 
                 name="PreparednessPlan" 
                 component={PreparednessPlanScreen}
                 options={{ 
-                  headerShown: true,
-                  headerTitle: 'Hazırlık Planı',
-                  headerStyle: { backgroundColor: colors.background.primary },
-                  headerTintColor: colors.text.primary,
+                  headerShown: false,
                 }}
               />
               <Stack.Screen 
                 name="PanicAssistant" 
                 component={PanicAssistantScreen}
                 options={{ 
-                  headerShown: true,
-                  headerTitle: 'Afet Rehberi',
-                  headerStyle: { backgroundColor: colors.background.primary },
-                  headerTintColor: colors.text.primary,
+                  headerShown: false,
                 }}
               />
               <Stack.Screen 

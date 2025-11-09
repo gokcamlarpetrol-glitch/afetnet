@@ -262,7 +262,6 @@ export default function DisasterPreparednessScreen({ navigation }: any) {
           <Pressable onPress={() => setSelectedType(null)}>
             <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
           </Pressable>
-          <Text style={styles.headerTitle}>{selectedModule.title}</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -363,7 +362,6 @@ export default function DisasterPreparednessScreen({ navigation }: any) {
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Afet Hazırlık Rehberi</Text>
         <View style={{ width: 24 }} />
       </View>
 

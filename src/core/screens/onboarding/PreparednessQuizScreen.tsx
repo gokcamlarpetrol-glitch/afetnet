@@ -289,7 +289,6 @@ export default function PreparednessQuizScreen({ navigation, onComplete }: any) 
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Hazırlık Değerlendirmesi</Text>
         <View style={{ width: 24 }} />
       </View>
 

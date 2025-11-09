@@ -144,7 +144,6 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Yeni Üye Ekle</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>

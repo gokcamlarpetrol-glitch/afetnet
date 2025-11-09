@@ -212,7 +212,6 @@ export default function DrillModeScreen({ navigation }: any) {
           <Pressable onPress={handleStopDrill}>
             <Ionicons name="close" size={24} color={colors.text.primary} />
           </Pressable>
-          <Text style={styles.headerTitle}>Tatbikat: {activeDrill.title}</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -303,7 +302,6 @@ export default function DrillModeScreen({ navigation }: any) {
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Tatbikat Modu</Text>
         <View style={{ width: 24 }} />
       </View>
 

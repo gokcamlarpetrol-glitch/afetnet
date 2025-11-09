@@ -381,9 +381,6 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>
-            {conversation?.userName || `Cihaz ${userId.slice(0, 8)}...`}
-          </Text>
           <Text style={styles.headerSubtitle}>Offline mesajlaşma</Text>
         </View>
         <View style={{ width: 40 }} />

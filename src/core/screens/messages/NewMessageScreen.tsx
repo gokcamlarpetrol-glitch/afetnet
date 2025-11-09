@@ -638,7 +638,6 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
             <Ionicons name="chevron-back" size={22} color="#fff" />
           </Pressable>
           <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>Yeni Mesaj</Text>
             <Text style={styles.headerSubtitle}>Çevrimdışı mesh ağında güvenli bağlantı kur</Text>
           </View>
           <Pressable style={styles.infoButton} onPress={handleHelp}>

@@ -186,7 +186,6 @@ export default function AllEarthquakesScreen({ navigation }: any) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Tüm Depremler</Text>
         <TouchableOpacity
           style={styles.filterButton}
           onPress={() => {

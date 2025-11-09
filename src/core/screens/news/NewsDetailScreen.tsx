@@ -437,9 +437,6 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            Haber Detayı
-          </Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>
             {article.source}
           </Text>

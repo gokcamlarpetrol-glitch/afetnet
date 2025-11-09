@@ -333,7 +333,6 @@ export default function AssemblyPointsScreen({ navigation }: any) {
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <View>
-          <Text style={styles.headerTitle}>Toplanma Noktaları</Text>
           <Text style={styles.headerSubtitle}>
             {points.filter(p => p.isActive).length} aktif nokta
           </Text>

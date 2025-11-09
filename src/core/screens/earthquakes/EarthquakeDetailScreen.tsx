@@ -45,7 +45,6 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
           <TouchableOpacity style={styles.backButton} onPress={() => navigation?.goBack?.()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Deprem Detayı</Text>
           <View style={styles.refreshButton} />
         </LinearGradient>
         <View style={styles.fallbackBody}>

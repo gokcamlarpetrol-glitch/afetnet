@@ -178,7 +178,6 @@ export default function MedicalInformationScreen({ navigation }: any) {
           <Pressable onPress={() => setSelectedTopic(null)}>
             <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
           </Pressable>
-          <Text style={styles.headerTitle}>{selectedTopic.title}</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -239,7 +238,6 @@ export default function MedicalInformationScreen({ navigation }: any) {
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Tıbbi Bilgiler</Text>
         <View style={{ width: 24 }} />
       </View>
 

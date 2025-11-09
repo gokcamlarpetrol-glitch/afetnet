@@ -805,7 +805,6 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Aile Güvenlik Zinciri</Text>
           <Text style={styles.headerSubtitle}>
             {members.length} üye • {safeCount} güvende
           </Text>

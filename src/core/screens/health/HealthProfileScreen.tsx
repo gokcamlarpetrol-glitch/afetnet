@@ -925,7 +925,6 @@ export default function HealthProfileScreen({ navigation }: any) {
         </Pressable>
         
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Sağlık Profili</Text>
           <Text style={styles.headerSubtitle}>Acil durumlar için kritik bilgiler</Text>
         </View>
         

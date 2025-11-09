@@ -439,7 +439,7 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a', padding: 24 }]}>
           <Ionicons name="map-outline" size={64} color={colors.text.secondary} />
-          <Text style={[styles.headerTitle, { marginTop: 16, textAlign: 'center' }]}>Harita Modülü Yüklenemedi</Text>
+          <Text style={[styles.headerSubtitle, { marginTop: 16, textAlign: 'center' }]}>Harita Modülü Yüklenemedi</Text>
           <Text style={[styles.headerSubtitle, { textAlign: 'center', marginTop: 8 }]}>
             Development build gereklidir{'\n'}
             Expo Go'da harita çalışmaz{'\n'}
@@ -640,7 +640,6 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         <BlurView intensity={50} tint="dark" style={styles.floatingHeaderBlur}>
           <View style={styles.headerRow}>
             <View style={styles.headerTextContainer}>
-              <Text style={styles.headerTitle}>Harita</Text>
               <Text style={styles.headerSubtitle}>
                 {layers.earthquakes ? earthquakes.length : 0} deprem • {layers.family ? familyMembers.length : 0} aile • {layers.pois ? offlineLocations.length : 0} nokta
                 {layers.trappedUsers && trappedUsers.length > 0 && ` • ${trappedUsers.length} enkaz`}

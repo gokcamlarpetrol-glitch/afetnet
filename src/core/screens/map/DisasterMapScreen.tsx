@@ -178,7 +178,6 @@ export default function DisasterMapScreen({ navigation }: any) {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Aktif Afet Haritası</Text>
           <Text style={styles.headerSubtitle}>
             {disasterEvents.length} aktif olay • {earthquakes.length} deprem
           </Text>

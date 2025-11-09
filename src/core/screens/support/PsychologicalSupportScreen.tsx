@@ -135,7 +135,6 @@ export default function PsychologicalSupportScreen({ navigation }: any) {
           <Pressable onPress={() => setSelectedStrategy(null)}>
             <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
           </Pressable>
-          <Text style={styles.headerTitle}>{selectedStrategy.title}</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -182,7 +181,6 @@ export default function PsychologicalSupportScreen({ navigation }: any) {
         <Pressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Psikolojik Destek</Text>
         <View style={{ width: 24 }} />
       </View>
 
