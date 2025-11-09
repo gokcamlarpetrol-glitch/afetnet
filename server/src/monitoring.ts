@@ -28,12 +28,12 @@ class MonitoringService {
     }
 
     if (!config.enabled) {
-      console.log('ℹ️ Monitoring disabled');
+      // Silent - don't log if monitoring is intentionally disabled
       return;
     }
 
     if (!config.dsn) {
-      console.warn('⚠️ Sentry DSN not provided - monitoring disabled');
+      // Silent - don't log warning if DSN is not provided (might be intentional for dev)
       return;
     }
 
@@ -228,8 +228,8 @@ export function performanceMonitoringMiddleware(
   res.on('finish', () => {
     const duration = Date.now() - start;
 
-    // Log slow requests (>1s)
-    if (duration > 1000) {
+    // Log slow requests (>1s) - but only for non-health endpoints to reduce noise
+    if (duration > 1000 && !req.url.includes('/health')) {
       console.warn(`⚠️ Slow request: ${req.method} ${req.url} - ${duration}ms`);
       monitoringService.captureMessage(
         `Slow request: ${req.method} ${req.url}`,

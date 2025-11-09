@@ -141,7 +141,11 @@ class EarthquakeDetectionService {
       
       // Elite: Check response status
       if (!response.ok) {
-        this.handleEMSCFailure(`HTTP ${response.status}`);
+        // Only handle failure for non-404 errors (404 might be temporary API issue)
+        if (response.status !== 404) {
+          this.handleEMSCFailure(`HTTP ${response.status}`);
+        }
+        // For 404, silently skip (API endpoint might be temporarily unavailable)
         return;
       }
       
@@ -253,6 +257,12 @@ class EarthquakeDetectionService {
   private handleEMSCFailure(reason: string) {
     this.emscFailureCount++;
     this.emscLastFailureTime = Date.now();
+    
+    // Only log warning if circuit is not already open (avoid spam)
+    if (!this.emscCircuitOpen && this.emscFailureCount < this.EMSC_MAX_FAILURES) {
+      // Silent handling for transient errors - only log when circuit opens
+      return;
+    }
     
     // Open circuit breaker after max failures
     if (this.emscFailureCount >= this.EMSC_MAX_FAILURES) {
