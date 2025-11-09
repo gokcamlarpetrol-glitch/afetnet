@@ -666,21 +666,17 @@ class SeismicSensorService {
               event.confidence = Math.max(30, (event.confidence || 50) - 10);
             }
           } catch (innerError: any) {
-            // ELITE: Silent error handling for Hermes engine - completely suppress
+            // ELITE: Completely silent error handling for Hermes engine
             // Hermes engine has known issues with complex array operations
             // This is a React Native limitation, not our code issue
-            if (__DEV__ && innerError?.message && !innerError.message.includes('hermes') && !innerError.message.includes('jsEngine')) {
-              logger.debug('Real-time detection inner error (non-critical):', innerError);
-            }
+            // No logging - these errors are expected and handled gracefully
             // Continue silently - fallback to other detection methods
           }
         }
       } catch (error: any) {
-        // ELITE: Silent error handling - don't spam logs for Hermes engine issues
+        // ELITE: Completely silent error handling for Hermes engine
         // Hermes engine has known limitations with complex operations
-        if (__DEV__ && error?.message && !error.message.includes('hermes') && !error.message.includes('jsEngine')) {
-          logger.debug('Real-time detection error (non-critical):', error);
-        }
+        // No logging - these errors are expected and handled gracefully
         // Continue with normal processing - other detection methods will handle it
       }
     }

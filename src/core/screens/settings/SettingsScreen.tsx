@@ -157,6 +157,16 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: handleRestorePurchases,
     },
+    {
+      icon: 'settings',
+      title: 'Abonelik Yönetimi',
+      subtitle: 'Aboneliklerinizi yönetin',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        navigation.navigate('SubscriptionManagement');
+      },
+    },
   ];
 
   const notificationSettings: SettingOption[] = [
@@ -697,6 +707,33 @@ export default function SettingsScreen({ navigation }: any) {
           Alert.alert(
             'Gizlilik Politikası',
             'Gizlilik politikası şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html adresini ziyaret edin.',
+            [{ text: 'Tamam' }]
+          );
+        }
+      },
+    },
+    {
+      icon: 'document',
+      title: 'Kullanım Koşulları',
+      subtitle: 'Koşulları görüntüle',
+      type: 'arrow',
+      onPress: async () => {
+        haptics.impactLight();
+        try {
+          const url = ENV.TERMS_OF_SERVICE_URL;
+          if (!url) {
+            throw new Error('URL tanımlı değil');
+          }
+          const canOpen = await Linking.canOpenURL(url);
+          if (!canOpen) {
+            throw new Error('URL açılamıyor');
+          }
+          await Linking.openURL(url);
+        } catch (error) {
+          logger.error('Kullanım koşulları açma hatası:', error);
+          Alert.alert(
+            'Kullanım Koşulları',
+            'Kullanım koşulları şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html adresini ziyaret edin.',
             [{ text: 'Tamam' }]
           );
         }

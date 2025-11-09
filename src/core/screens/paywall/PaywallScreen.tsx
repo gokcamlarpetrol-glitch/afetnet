@@ -32,11 +32,16 @@ import * as Clipboard from 'expo-clipboard';
 const logger = createLogger('PaywallScreen');
 
 // Elite: Safe WebBrowser import with fallback
+// CRITICAL: Silent fallback - don't log warnings in production
 let WebBrowser: any = null;
 try {
   WebBrowser = require('expo-web-browser');
 } catch (error) {
-  logger.warn('expo-web-browser not available, using Linking fallback');
+  // Silent fallback - Linking will be used instead
+  // Only log in development to avoid console spam
+  if (__DEV__) {
+    logger.debug('expo-web-browser not available, using Linking fallback');
+  }
 }
 
 /**

@@ -45,6 +45,7 @@ import FamilyGroupChatScreen from './screens/family/FamilyGroupChatScreen';
 import AdvancedSettingsScreen from './screens/settings/AdvancedSettingsScreen';
 import OfflineMapSettingsScreen from './screens/settings/OfflineMapSettingsScreen';
 import EarthquakeSettingsScreen from './screens/settings/EarthquakeSettingsScreen';
+import SubscriptionManagementScreen from './screens/settings/SubscriptionManagementScreen';
 
 // AI Screens
 import RiskScoreScreen from './screens/ai/RiskScoreScreen';
@@ -120,13 +121,10 @@ export default function CoreApp() {
     // MUST await to catch initialization errors
     void initializeApp().catch(async (error) => {
       // CRITICAL: Log initialization failure but don't crash app
-      if (__DEV__) {
-        console.error('❌ CRITICAL: App initialization failed:', error);
-      }
-      // Use production logger for production builds
+      // Use production logger (already imported at top)
       const { createLogger } = require('./utils/logger');
       const logger = createLogger('App');
-      logger.error('CRITICAL: App initialization failed:', error);
+      logger.error('❌ CRITICAL: App initialization failed:', error);
       
       // Report to crashlytics (use dynamic import to prevent circular dependencies)
       try {
@@ -149,9 +147,9 @@ export default function CoreApp() {
         // App came to foreground - check premium status
         void premiumService.checkPremiumStatus().catch((error) => {
           // Silently fail - premium check is not critical for app functionality
-          if (__DEV__) {
-            console.warn('Premium status check failed:', error);
-          }
+          const { createLogger } = require('./utils/logger');
+          const logger = createLogger('App');
+          logger.warn('Premium status check failed:', error);
         });
         
         // Also check expiration
@@ -300,6 +298,7 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="HealthProfile" 
                 component={HealthProfileScreen}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="NewMessage" 
@@ -369,6 +368,13 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="EarthquakeSettings" 
                 component={EarthquakeSettingsScreen}
+                options={{ 
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen 
+                name="SubscriptionManagement" 
+                component={SubscriptionManagementScreen}
                 options={{ 
                   headerShown: false,
                 }}

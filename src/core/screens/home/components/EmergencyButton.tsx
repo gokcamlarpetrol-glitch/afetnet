@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Linking, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as haptics from '../../../utils/haptics';
 import { colors, typography } from '../../../theme';
 import { useUserStatusStore } from '../../../stores/userStatusStore';
@@ -18,10 +19,10 @@ import { createLogger } from '../../../utils/logger';
 
 const logger = createLogger('EmergencyButton');
 
-const logDebug = (...args: any[]) => {
+const logDebug = (message: string, ...args: any[]) => {
   if (__DEV__) {
-    // eslint-disable-next-line no-console
-    console.log(...args);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    logger.debug(message, ...args);
   }
 };
 
@@ -39,6 +40,8 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
+  const cameraRef = useRef<CameraView | null>(null); // ELITE: Camera ref for torch control
+  const [cameraPermission] = useCameraPermissions();
 
   useEffect(() => {
     // Idle pulse animation
@@ -64,6 +67,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       try {
         await whistleService.initialize();
         await flashlightService.initialize();
+        // ELITE: Set camera ref for torch control
+        if (cameraRef.current) {
+          flashlightService.setCameraRef(cameraRef.current);
+        }
         logger.info('Emergency services initialized');
       } catch (error) {
         logger.error('Service initialization failed:', error);
@@ -123,7 +130,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     setIsPressed(true);
     haptics.impactMedium();
     
-    logDebug('🆘 SOS butonu basıldı - 3 saniye bekleniyor...');
+    logDebug('🆘 SOS butonu basıldı - 3 saniye bekleniyor...', {});
 
     // Scale animation
     Animated.spring(scaleAnim, {
@@ -140,7 +147,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
     // Set timer for 3 seconds
     pressTimer.current = setTimeout(() => {
-      logDebug('✅ SOS butonu 3 saniye tutuldu - SOS gönderiliyor!');
+      logDebug('✅ SOS butonu 3 saniye tutuldu - SOS gönderiliyor!', {});
       haptics.impactHeavy();
       haptics.notificationSuccess();
       onPress(); // Trigger SOS modal
@@ -152,7 +159,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const handlePressOut = () => {
     // Cancel timer if released before 3 seconds
     if (pressTimer.current) {
-      logDebug('⚠️ SOS butonu erken bırakıldı');
+      logDebug('⚠️ SOS butonu erken bırakıldı', {});
       clearTimeout(pressTimer.current);
       pressTimer.current = null;
     }
@@ -177,7 +184,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   const handleWhistle = useCallback(async () => {
     haptics.impactMedium();
-    logDebug('Düdük butonu tıklandı, mevcut durum:', whistleActive);
+    logDebug('Düdük butonu tıklandı, mevcut durum:', { whistleActive });
     
     try {
       // ELITE: Ensure service is initialized
@@ -195,7 +202,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           // ELITE: Wait a bit for cleanup to complete
           await new Promise(resolve => setTimeout(resolve, 100));
           setWhistleActive(false);
-          logDebug('✅ Düdük durduruldu');
+          logDebug('✅ Düdük durduruldu', {});
         } catch (stopError) {
           logger.error('❌ Whistle stop failed:', stopError);
           // Still update UI state
@@ -217,7 +224,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           
           await whistleService.playSOSWhistle('morse');
           setWhistleActive(true);
-          logDebug('✅ Düdük başlatıldı (SOS Morse)');
+          logDebug('✅ Düdük başlatıldı (SOS Morse)', {});
         } catch (playError) {
           logger.error('❌ Whistle play failed:', playError);
           setWhistleActive(false);
@@ -245,7 +252,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   const handleFlashlight = useCallback(async () => {
     haptics.impactMedium();
-    logDebug('Fener butonu tıklandı, mevcut durum:', flashActive);
+    logDebug('Fener butonu tıklandı, mevcut durum:', { flashActive });
     
     try {
       // ELITE: Ensure service is initialized
@@ -269,7 +276,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           // ELITE: Wait a bit for cleanup to complete
           await new Promise(resolve => setTimeout(resolve, 100));
           setFlashActive(false);
-          logDebug('✅ Fener kapatıldı');
+          logDebug('✅ Fener kapatıldı', {});
         } catch (stopError) {
           logger.error('❌ Flashlight stop failed:', stopError);
           // Still update UI state
@@ -288,7 +295,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
           // Note: flashSOSMorse() will work with haptic feedback if torch unavailable
           await flashlightService.flashSOSMorse();
           setFlashActive(true);
-          logDebug('✅ Fener başlatıldı (SOS Morse)');
+          logDebug('✅ Fener başlatıldı (SOS Morse)', {});
         } catch (flashError) {
           logger.error('❌ Flashlight play failed:', flashError);
           setFlashActive(false);
@@ -316,7 +323,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   const handle112Call = useCallback(async () => {
     haptics.impactHeavy();
-    logDebug('112 arama butonu tıklandı');
+    logDebug('112 arama butonu tıklandı', {});
     
     // ELITE: Input validation - ensure phone number is safe
     const emergencyNumber = '112';
@@ -349,7 +356,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       );
       
       await Promise.race([openPromise, timeoutPromise]);
-      logDebug('✅ 112 arama başlatıldı');
+      logDebug('✅ 112 arama başlatıldı', {});
       
       // ELITE: Log analytics event
       try {
@@ -404,6 +411,20 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   return (
     <View style={styles.container}>
+      {/* ELITE: Hidden Camera for torch control */}
+      {cameraPermission?.granted && (
+        <CameraView
+          ref={(ref) => {
+            cameraRef.current = ref;
+            if (ref) {
+              flashlightService.setCameraRef(ref);
+            }
+          }}
+          style={{ width: 1, height: 1, position: 'absolute', opacity: 0 }}
+          facing="back"
+        />
+      )}
+      
       {/* Main SOS Button */}
       <Animated.View
         style={[

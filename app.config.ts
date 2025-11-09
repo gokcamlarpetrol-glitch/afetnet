@@ -31,6 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-font",
     "expo-localization",
+    // "expo-torch", // NOTE: expo-torch doesn't have a config plugin, but works as native module
     // "expo-maps", // Disabled - react-native-maps kullanılıyor (development build gerekli)
     [
       "expo-build-properties",

@@ -16,13 +16,32 @@ export interface EmergencyContact {
 }
 
 export interface HealthProfile {
+  // Personal Information
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string; // YYYY-MM-DD format
+  gender?: string; // Erkek, Kadın, Diğer, Belirtmek istemiyorum
+  height?: string; // cm
+  weight?: string; // kg
+  
+  // Medical Information
   bloodType: string; // A+, A-, B+, B-, AB+, AB-, O+, O-
   allergies: string[]; // e.g., ['Penisilin', 'Fıstık']
   chronicConditions: string[]; // e.g., ['Diyabet', 'Hipertansiyon']
   chronicDiseases?: string[]; // Alias for chronicConditions
   medications: string[]; // e.g., ['İnsülin', 'Aspirin']
   emergencyMedications?: string[]; // Alias for medications
+  medicalHistory?: string; // Surgeries, accidents, etc.
+  
+  // Insurance Information
+  insuranceProvider?: string;
+  insuranceNumber?: string;
+  organDonorStatus?: string; // Evet, Hayır, Belirtmek istemiyorum
+  
+  // Emergency Contacts
   emergencyContacts: EmergencyContact[];
+  
+  // Additional Notes
   notes: string; // Additional medical notes
   lastUpdated: number;
 }
@@ -50,10 +69,20 @@ interface HealthProfileState {
 }
 
 const DEFAULT_PROFILE: HealthProfile = {
+  firstName: '',
+  lastName: '',
+  dateOfBirth: '',
+  gender: '',
+  height: '',
+  weight: '',
   bloodType: '',
   allergies: [],
   chronicConditions: [],
   medications: [],
+  medicalHistory: '',
+  insuranceProvider: '',
+  insuranceNumber: '',
+  organDonorStatus: '',
   emergencyContacts: [],
   notes: '',
   lastUpdated: Date.now(),
