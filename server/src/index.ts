@@ -1,6 +1,9 @@
 // SERVER CONFIGURATION WITH DATABASE
 // Express server setup for IAP verification with PostgreSQL
 
+// CRITICAL: Import type augmentation FIRST before any Express imports
+import './types/shims';
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
