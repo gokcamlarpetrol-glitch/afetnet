@@ -29,14 +29,10 @@ class EnkazDetectionService {
   private gyroscopeSubscription: any = null;
   private statusCheckInterval: NodeJS.Timeout | null = null;
 
-  // ELITE: Increased thresholds to reduce false positives
-  // Normal activities (walking, running, car movement) should not trigger fall detection
-  private readonly FALL_THRESHOLD = 4.0; // G-force threshold for fall detection (increased from 2.5 to reduce false positives)
-  private readonly IMMOBILE_DURATION_WARNING = 3 * 60 * 1000; // 3 minutes (increased from 2 minutes)
-  private readonly IMMOBILE_DURATION_TRAPPED = 8 * 60 * 1000; // 8 minutes (increased from 5 minutes)
-  private readonly MOTION_THRESHOLD = 0.15; // Minimum motion to consider "moving" (increased from 0.1)
-  private fallDetectionCount = 0; // Track consecutive fall detections to reduce false positives
-  private readonly FALL_CONFIRMATION_COUNT = 3; // Require 3 consecutive detections
+  private readonly FALL_THRESHOLD = 2.5; // G-force threshold for fall detection
+  private readonly IMMOBILE_DURATION_WARNING = 2 * 60 * 1000; // 2 minutes
+  private readonly IMMOBILE_DURATION_TRAPPED = 5 * 60 * 1000; // 5 minutes
+  private readonly MOTION_THRESHOLD = 0.1; // Minimum motion to consider "moving"
 
   async start() {
     if (this.isRunning) return;
@@ -105,30 +101,18 @@ class EnkazDetectionService {
   private processAccelerometerData(data: MotionData) {
     const magnitude = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
 
-    // ELITE: Detect sudden fall (high G-force) with confirmation to reduce false positives
-    // Require multiple consecutive detections to filter out noise and normal activities
+    // Detect sudden fall (high G-force)
     if (magnitude > this.FALL_THRESHOLD) {
-      this.fallDetectionCount++;
-      
-      // Only trigger fall detection after multiple consecutive detections
-      if (this.fallDetectionCount >= this.FALL_CONFIRMATION_COUNT) {
-        this.suspectedFall = true;
-        this.immobileStartTime = Date.now();
-        if (__DEV__) {
-          logger.warn('Fall detected! Monitoring for immobility...');
-        }
-      }
-    } else {
-      // Reset fall detection count if magnitude drops below threshold
-      this.fallDetectionCount = Math.max(0, this.fallDetectionCount - 1);
+      this.suspectedFall = true;
+      this.immobileStartTime = Date.now();
+      logger.warn('Fall detected! Monitoring for immobility...');
     }
 
-    // Detect motion (reset fall detection if user is moving)
+    // Detect motion
     if (magnitude > this.MOTION_THRESHOLD) {
       this.lastMotionTime = Date.now();
       this.immobileStartTime = null;
       this.suspectedFall = false;
-      this.fallDetectionCount = 0; // Reset fall detection count on motion
     }
   }
 
@@ -217,13 +201,7 @@ class EnkazDetectionService {
         priority: 'high',
         sound: 'default',
         vibrationPattern: [0, 500, 200, 500], // Warning pattern
-        duration: 12,
-        channels: {
-          fullScreenAlert: false,
-          alarmSound: false,
-          tts: false,
-          bluetooth: false,
-        },
+        ttsText: 'Durum kontrolü. Hareketsiz görünüyorsunuz. İyi misiniz?',
       });
       
       logger.info('Warning notification sent');

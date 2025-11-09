@@ -20,7 +20,7 @@ export default function CountdownModal() {
   }, []); // CRITICAL: Empty deps to prevent infinite loop
 
   useEffect(() => {
-    if (!active) { return undefined; }
+    if (!active) { return; }
     setLeft(Math.max(0, Math.floor(Number(active.etaSec) || 0)));
     const id = setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
     return () => clearInterval(id);

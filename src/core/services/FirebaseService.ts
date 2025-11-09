@@ -72,16 +72,6 @@ class FirebaseService {
 
           this.pushToken = token.data;
           if (__DEV__) logger.info('Push token:', this.pushToken);
-          
-          // Elite: Register push token with backend for REAL EARLY WARNING
-          // Backend sends warnings BEFORE earthquake happens
-          try {
-            const { backendPushService } = await import('./BackendPushService');
-            await backendPushService.initialize(this.pushToken);
-          } catch (error) {
-            logger.warn('Failed to register with backend push service:', error);
-            // Continue without backend registration - app will still work
-          }
         } catch (tokenError) {
           if (__DEV__) logger.warn('Failed to get push token, continuing without it:', tokenError);
           // Continue without push token - app will still work

@@ -93,7 +93,6 @@ class MultiChannelAlertService {
   private soundInstance: any = null; // Audio.Sound | null
   private ledInterval: NodeJS.Timeout | null = null;
   private vibrationInterval: NodeJS.Timeout | null = null;
-  private vibrationStopTimeout: NodeJS.Timeout | null = null;
   private dismissTimeout: NodeJS.Timeout | null = null;
   private currentAlert: AlertOptions | null = null;
   private isAlerting = false;
@@ -120,10 +119,9 @@ class MultiChannelAlertService {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
+            shouldShowAlert: true,
             shouldPlaySound: true,
             shouldSetBadge: true,
-            shouldShowBanner: true,
-            shouldShowList: true,
           }),
         });
       } catch (error) {
@@ -148,62 +146,30 @@ class MultiChannelAlertService {
       await this.cancelAlert();
     }
 
-    // Check settings store for user preferences
-    let alarmSoundEnabled = true;
-    let vibrationEnabled = true;
-    let notificationsEnabled = true;
-    
-    try {
-      const { useSettingsStore } = await import('../stores/settingsStore');
-      const settings = useSettingsStore.getState();
-      alarmSoundEnabled = settings.alarmSoundEnabled;
-      vibrationEnabled = settings.vibrationEnabled;
-      notificationsEnabled = settings.notificationsEnabled;
-    } catch (error) {
-      // Settings store not available, use defaults
-      logger.warn('Settings store not available, using defaults');
-    }
-
-    // AI mesaj optimizasyonu
-    const optimizedOptions = this.optimizeAlertForChannels(options);
-    this.currentAlert = optimizedOptions;
+    this.currentAlert = options;
     this.isAlerting = true;
 
-    const channels = { ...DEFAULT_CHANNELS, ...optimizedOptions.channels };
-    
-    // Apply user settings
-    if (!alarmSoundEnabled) {
-      channels.alarmSound = false;
-    }
-    if (!vibrationEnabled) {
-      channels.vibration = false;
-    }
-    if (!notificationsEnabled) {
-      channels.pushNotification = false;
-    }
-    
-    const effectiveDuration = optimizedOptions.duration ?? this.getDefaultDuration(optimizedOptions.priority);
-    optimizedOptions.duration = effectiveDuration;
+    const channels = { ...DEFAULT_CHANNELS, ...options.channels };
 
     try {
-      // 1. Push Notification (check settings)
-      if (channels.pushNotification && notificationsEnabled) {
-        await this.sendPushNotification(optimizedOptions);
+      // 1. Push Notification (always on)
+      if (channels.pushNotification) {
+        await this.sendPushNotification(options);
       }
 
       // 2. Full Screen Alert (critical priority)
-      if (channels.fullScreenAlert && (optimizedOptions.priority === 'critical' || optimizedOptions.priority === 'high')) {
-        await this.showFullScreenAlert(optimizedOptions);
+      if (channels.fullScreenAlert && (options.priority === 'critical' || options.priority === 'high')) {
+        await this.showFullScreenAlert(options);
       }
 
-      // 3. Alarm Sound (check settings)
-      if (channels.alarmSound && alarmSoundEnabled) {
-        await this.playAlarmSound(optimizedOptions.sound);
+      // 3. Alarm Sound
+      if (channels.alarmSound) {
+        await this.playAlarmSound(options.sound);
       }
 
-      // 4. Vibration (check settings)
-      if (channels.vibration && vibrationEnabled) {
-        await this.startVibration(optimizedOptions.vibrationPattern, optimizedOptions.duration);
+      // 4. Vibration
+      if (channels.vibration) {
+        await this.startVibration(options.vibrationPattern);
       }
 
       // 5. LED Flash
@@ -211,21 +177,21 @@ class MultiChannelAlertService {
         await this.startLEDFlash();
       }
 
-      // 6. Text-to-Speech (AI-optimized)
+      // 6. Text-to-Speech
       if (channels.tts) {
-        await this.speakText(optimizedOptions.ttsText || optimizedOptions.body);
+        await this.speakText(options.ttsText || options.body);
       }
 
       // 7. Bluetooth Broadcast (if enabled)
       if (channels.bluetooth) {
-        await this.broadcastViaBluetooth(optimizedOptions);
+        await this.broadcastViaBluetooth(options);
       }
 
       // Auto-dismiss after duration (if set) - STORE TIMEOUT TO PREVENT MEMORY LEAK
-      if (optimizedOptions.duration && optimizedOptions.duration > 0) {
+      if (options.duration && options.duration > 0) {
         this.dismissTimeout = setTimeout(() => {
           this.cancelAlert();
-        }, optimizedOptions.duration * 1000);
+        }, options.duration * 1000);
       }
 
     } catch (error) {
@@ -233,121 +199,6 @@ class MultiChannelAlertService {
       this.isAlerting = false;
       this.currentAlert = null;
     }
-  }
-
-  /**
-   * AI mesajlarını kanallar için optimize et
-   */
-  private optimizeAlertForChannels(options: AlertOptions): AlertOptions {
-    const optimized = { ...options };
-
-    // TTS için özel metin oluştur (daha kısa ve net)
-    if (!options.ttsText) {
-      optimized.ttsText = this.generateTTSText(options);
-    }
-
-    // Elite: Enhanced magnitude-based optimization
-    const magnitude = options.data?.earthquake?.magnitude || options.data?.magnitude || 0;
-    
-    if (magnitude >= 7.0) {
-      // MEGA EARTHQUAKE - Maximum everything
-      optimized.priority = 'critical';
-      optimized.channels = {
-        ...optimized.channels,
-        pushNotification: true,
-        fullScreenAlert: true,
-        alarmSound: true,
-        vibration: true,
-        tts: true,
-        bluetooth: true,
-      };
-      optimized.duration = 0; // Stay until dismissed
-      logger.info('🚨🚨🚨 MEGA DEPREM (7.0+) - MAXIMUM ALERT');
-    } else if (magnitude >= 6.0) {
-      // MAJOR EARTHQUAKE - Critical alert
-      optimized.priority = 'critical';
-      optimized.channels = {
-        ...optimized.channels,
-        pushNotification: true,
-        fullScreenAlert: true,
-        alarmSound: true,
-        vibration: true,
-        tts: true,
-        bluetooth: true,
-      };
-      optimized.duration = 0;
-      logger.info('🚨 Büyük deprem (6.0+) - Kritik uyarı');
-    } else if (magnitude >= 5.0) {
-      // SIGNIFICANT EARTHQUAKE - High alert
-      optimized.priority = 'critical';
-      optimized.channels = {
-        ...optimized.channels,
-        pushNotification: true,
-        fullScreenAlert: true,
-        alarmSound: true,
-        vibration: true,
-        tts: true,
-      };
-      logger.info('🚨 Önemli deprem (5.0+) - Tüm kanallar aktif');
-    } else if (magnitude >= 4.5) {
-      // MODERATE EARTHQUAKE - High priority
-      optimized.priority = 'high';
-      optimized.channels = {
-        ...optimized.channels,
-        pushNotification: true,
-        fullScreenAlert: false,
-        alarmSound: true,
-        vibration: true,
-        tts: true,
-      };
-      logger.info('⚠️ Orta deprem (4.5+) - Yüksek öncelik');
-    } else if (magnitude >= 4.0) {
-      // NOTABLE EARTHQUAKE - Normal-high priority
-      optimized.priority = 'high';
-      optimized.channels = {
-        ...optimized.channels,
-        pushNotification: true,
-        fullScreenAlert: false,
-        alarmSound: false,
-        vibration: true,
-        tts: true,
-      };
-      logger.info('📢 Fark edilir deprem (4.0+) - Normal yüksek öncelik');
-    }
-
-    // Doğrulanmış depremler için özel işaretleme
-    if (options.data?.verified) {
-      logger.info('✅ Doğrulanmış deprem bilgisi');
-    }
-
-    return optimized;
-  }
-
-  /**
-   * TTS için optimize edilmiş metin oluştur
-   */
-  private generateTTSText(options: AlertOptions): string {
-    // AI mesajından TTS için uygun metin çıkar
-    let ttsText = options.body;
-
-    // Çok uzunsa kısalt (TTS için ideal: 100-150 karakter)
-    if (ttsText.length > 150) {
-      // İlk cümleyi al
-      const firstSentence = ttsText.split('.')[0];
-      if (firstSentence.length > 0 && firstSentence.length <= 150) {
-        ttsText = firstSentence + '.';
-      } else {
-        ttsText = ttsText.substring(0, 147) + '...';
-      }
-    }
-
-    // Özel karakterleri temizle
-    ttsText = ttsText
-      .replace(/[✓✅⚠️🚨]/g, '') // Emoji'leri kaldır
-      .replace(/\s+/g, ' ') // Çoklu boşlukları tek boşluğa indir
-      .trim();
-
-    return ttsText;
   }
 
   async cancelAlert() {
@@ -380,10 +231,6 @@ class MultiChannelAlertService {
       if (this.vibrationInterval) {
         clearInterval(this.vibrationInterval);
         this.vibrationInterval = null;
-      }
-      if (this.vibrationStopTimeout) {
-        clearTimeout(this.vibrationStopTimeout);
-        this.vibrationStopTimeout = null;
       }
 
       // Cancel TTS
@@ -449,12 +296,6 @@ class MultiChannelAlertService {
   }
 
   private async sendPushNotification(options: AlertOptions) {
-    const Notifications = getNotifications();
-    if (!Notifications) {
-      logger.warn('Notifications module not available; skipping push notification');
-      return null;
-    }
-
     let channelId = 'normal-priority';
     
     if (options.priority === 'critical') {
@@ -488,92 +329,23 @@ class MultiChannelAlertService {
     return notificationId;
   }
 
-  /**
-   * ELITE: Show premium full-screen alert with countdown
-   * Modern, lüks ve zarif tasarımla premium bildirim
-   */
   private async showFullScreenAlert(options: AlertOptions) {
-    try {
-      // ELITE: Premium countdown modal göster
-      const { premiumAlertManager } = await import('./PremiumAlertManager');
-      
-      // Extract earthquake data
-      const earthquake = options.data?.earthquake || options.data;
-      const warning = options.data?.warning || options.data;
-      const aiAnalysis = options.data?.aiAnalysis;
-      
-      // Calculate ETA if available
-      let secondsRemaining = 0;
-      let pWaveETA: number | undefined;
-      let sWaveETA: number | undefined;
-      let distance: number | undefined;
-      let alertLevel: 'caution' | 'action' | 'imminent' | undefined;
-      let recommendedAction: string | undefined;
-      
-      if (warning?.secondsRemaining) {
-        secondsRemaining = Math.max(0, Math.floor(warning.secondsRemaining));
-      }
-      
-      if (warning?.eta) {
-        pWaveETA = warning.eta.pWaveETA;
-        sWaveETA = warning.eta.sWaveETA;
-        distance = warning.eta.distance;
-        alertLevel = warning.eta.alertLevel as any;
-        recommendedAction = warning.eta.recommendedAction;
-      }
-      
-      // Determine alert level from magnitude if not provided
-      if (!alertLevel && earthquake?.magnitude) {
-        if (secondsRemaining < 10) {
-          alertLevel = 'imminent';
-        } else if (secondsRemaining < 30) {
-          alertLevel = 'action';
-        } else if (secondsRemaining < 60) {
-          alertLevel = 'caution';
-        }
-      }
-      
-      // Get recommended action from AI analysis if available
-      if (!recommendedAction && aiAnalysis?.recommendations?.length > 0) {
-        recommendedAction = aiAnalysis.recommendations[0];
-      }
-      
-      // Create premium countdown data
-      const countdownData: any = {
-        eventId: earthquake?.id || `alert-${Date.now()}`,
-        magnitude: earthquake?.magnitude || 0,
-        location: earthquake?.location || 'Bilinmeyen',
-        region: earthquake?.region || earthquake?.location,
-        source: earthquake?.source || 'AfetNet',
-        secondsRemaining: secondsRemaining || 30, // Default 30 seconds if not provided
-        pWaveETA,
-        sWaveETA,
-        distance,
-        alertLevel,
-        recommendedAction: recommendedAction || 'Güvenli bir yere geçin ve çök-kapan-tutun pozisyonu alın.',
-      };
-      
-      // Show premium countdown modal
-      premiumAlertManager.showCountdown(countdownData);
-      
-      logger.info(`✅ Premium full-screen alert shown: ${countdownData.magnitude.toFixed(1)} magnitude, ${countdownData.secondsRemaining}s countdown`);
-    } catch (error) {
-      logger.error('Failed to show premium full-screen alert:', error);
-      
-      // Fallback: Use standard notification
-      const Notifications = getNotifications();
-      if (Notifications) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: options.title,
-            body: options.body,
-            sound: 'default',
-            priority: Notifications.AndroidNotificationPriority.MAX,
-            data: { ...options.data, fullScreen: true },
-          },
-          trigger: null,
-        });
-      }
+    // This will be handled by a React component overlay
+    // For now, we'll use a high-priority notification that shows on lock screen
+    // The actual full-screen modal will be shown by the AlertModal component
+    
+    // Schedule a critical notification that shows on lock screen
+    if (Platform.OS === 'ios') {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: options.title,
+          body: options.body,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.MAX,
+          data: { ...options.data, fullScreen: true },
+        },
+        trigger: null,
+      });
     }
   }
 
@@ -585,16 +357,9 @@ class MultiChannelAlertService {
         await this.soundInstance.unloadAsync();
       }
 
-      const AudioModule = getAudio();
-      const Notifications = getNotifications();
-
       if (soundFile) {
         // Load custom sound
-        if (!AudioModule) {
-          logger.warn('Audio module not available; cannot play custom alarm sound');
-          return;
-        }
-        const { sound } = await AudioModule.Sound.createAsync(
+        const { sound } = await Audio.Sound.createAsync(
           { uri: soundFile },
           { shouldPlay: true, isLooping: true, volume: 1.0 }
         );
@@ -605,39 +370,20 @@ class MultiChannelAlertService {
         
         // For now, use system notification sound
         // Custom audio file would be better but requires asset bundling
-        if (Notifications) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              sound: 'default',
-            },
-            trigger: null,
-          });
-        } else {
-          logger.warn('Notifications module not available; skipping default alarm sound notification');
-        }
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            sound: 'default',
+          },
+          trigger: null,
+        });
       }
     } catch (error) {
       logger.error('Sound error:', error);
     }
   }
 
-  private async startVibration(pattern?: number[], durationSeconds?: number) {
+  private async startVibration(pattern?: number[]) {
     try {
-      const HapticsModule = getHaptics();
-      if (!HapticsModule) {
-        logger.warn('Haptics module not available; skipping vibration');
-        return;
-      }
-
-      if (this.vibrationInterval) {
-        clearInterval(this.vibrationInterval);
-        this.vibrationInterval = null;
-      }
-      if (this.vibrationStopTimeout) {
-        clearTimeout(this.vibrationStopTimeout);
-        this.vibrationStopTimeout = null;
-      }
-
       if (Platform.OS === 'ios') {
         // iOS supports haptic feedback
         const sosPattern = pattern || [0, 200, 100, 200, 100, 200, 100, 500, 100, 500, 100, 500, 100, 200, 100, 200, 100, 200];
@@ -649,7 +395,7 @@ class MultiChannelAlertService {
             const pause = sosPattern[i + 1] || 0;
             
             if (duration > 0) {
-              await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
             }
             
             if (pause > 0) {
@@ -668,23 +414,14 @@ class MultiChannelAlertService {
       } else {
         // Android vibration is handled by notification channel
         // But we can also trigger additional vibrations
-        await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
         
         if (pattern) {
           // Custom pattern vibration
           this.vibrationInterval = setInterval(async () => {
-            await HapticsModule.impactAsync(HapticsModule.ImpactFeedbackStyle.Heavy);
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
           }, 1000);
         }
-      }
-
-      if (durationSeconds && durationSeconds > 0 && this.vibrationInterval) {
-        this.vibrationStopTimeout = setTimeout(() => {
-          if (this.vibrationInterval) {
-            clearInterval(this.vibrationInterval);
-            this.vibrationInterval = null;
-          }
-        }, durationSeconds * 1000);
       }
     } catch (error) {
       logger.error('Vibration error:', error);
@@ -700,12 +437,6 @@ class MultiChannelAlertService {
 
   private async speakText(text: string) {
     try {
-      const SpeechModule = getSpeech();
-      if (!SpeechModule) {
-        logger.warn('Speech module not available; skipping TTS');
-        return;
-      }
-
       const options = {
         language: 'tr-TR', // Turkish
         pitch: 1.2, // Slightly higher pitch for urgency
@@ -713,20 +444,9 @@ class MultiChannelAlertService {
         volume: 1.0,
       };
 
-      await SpeechModule.speak(text, options);
+      await Speech.speak(text, options);
     } catch (error) {
       logger.error('TTS error:', error);
-    }
-  }
-
-  private getDefaultDuration(priority: AlertOptions['priority']): number {
-    switch (priority) {
-      case 'critical':
-        return 45;
-      case 'high':
-        return 30;
-      default:
-        return 15;
     }
   }
 

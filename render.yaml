@@ -7,11 +7,15 @@ services:
     buildCommand: cd server && npm install && npm run build
     startCommand: cd server && npm start
     envVars:
+<<<<<<< HEAD
       # Core Configuration
+=======
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3001
+<<<<<<< HEAD
       
       # Database (ZORUNLU)
       - key: DATABASE_URL
@@ -28,12 +32,19 @@ services:
         sync: false
         
       # Firebase Cloud Messaging (Android için ZORUNLU - iOS için opsiyonel)
+=======
+      - key: DATABASE_URL
+        sync: false
+      - key: APNS_BUNDLE_ID
+        value: com.gokhancamci.afetnetapp
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
+<<<<<<< HEAD
         
       # Apple IAP Verification (Premium özellikler için ZORUNLU)
       - key: APPLE_SHARED_SECRET
@@ -72,4 +83,6 @@ services:
       - key: OFFICIAL_WSS_TOKEN
         sync: false
         # Not: WebSocket authentication token varsa buraya ekleyin
+=======
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
     healthCheckPath: /health

@@ -19,7 +19,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.2</string>
+    <string>1.0.1</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -60,13 +60,13 @@
     <key>NSCameraUsageDescription</key>
     <string>AfetNet, QR kodları okumak için kameraya erişir.</string>
     <key>NSContactsUsageDescription</key>
-    <string>AfetNet, acil durum kişilerinize hızlı erişim için kişilerinize erişir.</string>
+    <string>Allow $(PRODUCT_NAME) to access your contacts</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>AfetNet, uygulama güvenliği için Face ID kullanır.</string>
+    <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.</string>
+    <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.</string>
     <key>NSMicrophoneUsageDescription</key>
@@ -74,9 +74,9 @@
     <key>NSMotionUsageDescription</key>
     <string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>AfetNet, acil durum fotoğraflarını kaydetmek için fotoğraf kütüphanenize erişir.</string>
+    <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>AfetNet, acil durum fotoğraflarını görüntülemek için fotoğraf kütüphanenize erişir.</string>
+    <string>Allow $(PRODUCT_NAME) to access your photos</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UIBackgroundModes</key>

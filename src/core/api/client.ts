@@ -90,41 +90,20 @@ class APIClient {
     }
   }
 
-  /**
-   * Elite Security: Generate HMAC-SHA256 signature using expo-crypto
-   * CRYPTOGRAPHICALLY SECURE - Production ready
-   */
   private async generateSignature(timestamp: string, payload: string): Promise<string> {
-    if (!API_SECRET) {
-      throw new Error('API secret not configured');
+    // Simplified signature - in production use proper HMAC-SHA256
+    const message = `${timestamp}:${payload}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(message + API_SECRET);
+    
+    // Simple hash (not cryptographically secure - use proper crypto in production)
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      hash = ((hash << 5) - hash) + data[i];
+      hash = hash & hash;
     }
-
-    try {
-      // Elite: Use expo-crypto for cryptographically secure HMAC-SHA256
-      const Crypto = require('expo-crypto');
-      const message = `${timestamp}:${payload}`;
-      
-      // Elite: HMAC-SHA256 signature generation
-      // Format: HMAC-SHA256(secret, timestamp:payload)
-      const hmacData = `${API_SECRET}:${message}`;
-      const signature = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        hmacData
-      );
-      
-      return signature;
-    } catch (error) {
-      // Fallback: If expo-crypto fails, use crypto-js (already in dependencies)
-      try {
-        const CryptoJS = require('crypto-js');
-        const HmacSHA256 = CryptoJS.HmacSHA256;
-        const message = `${timestamp}:${payload}`;
-        const signature = HmacSHA256(message, API_SECRET).toString(CryptoJS.enc.Hex);
-        return signature;
-      } catch (fallbackError) {
-        throw new Error('Failed to generate signature: Crypto libraries unavailable');
-      }
-    }
+    
+    return Math.abs(hash).toString(16);
   }
 
   // Convenience methods

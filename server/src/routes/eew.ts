@@ -4,7 +4,7 @@ import { healthEEW } from '../eew';
 
 const r = Router();
 
-r.get('/health', async (_req, res) => {
+r.get('/eew/health', async (_req, res) => {
   try { res.json({ ok: await healthEEW() }); } catch { res.json({ ok: false }); }
 });
 

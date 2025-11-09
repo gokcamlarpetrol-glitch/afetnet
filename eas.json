@@ -10,33 +10,18 @@
       "ios": {
         "simulator": true
       },
-      "node": "20.11.1",
-      "env": {
-        "API_BASE_URL": "https://afetnet-backend.onrender.com",
-        "EEW_ENABLED": "false",
-        "EEW_NATIVE_ALARM": "false"
-      }
+      "node": "20.11.1"
     },
     "preview": {
       "distribution": "internal",
-      "node": "20.11.1",
-      "env": {
-        "API_BASE_URL": "https://afetnet-backend.onrender.com",
-        "EEW_ENABLED": "false",
-        "EEW_NATIVE_ALARM": "false"
-      }
+      "node": "20.11.1"
     },
     "production": {
       "autoIncrement": true,
       "ios": {
         "simulator": false
       },
-      "node": "20.11.1",
-      "env": {
-        "API_BASE_URL": "https://afetnet-backend.onrender.com",
-        "EEW_ENABLED": "false",
-        "EEW_NATIVE_ALARM": "false"
-      }
+      "node": "20.11.1"
     }
   },
   "submit": {

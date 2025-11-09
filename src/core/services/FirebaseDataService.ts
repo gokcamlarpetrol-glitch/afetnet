@@ -11,23 +11,6 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FirebaseDataService');
 
-const DEFAULT_NEWS_SUMMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 saat
-
-export interface NewsSummaryRecord {
-  articleId: string;
-  summary: string;
-  source?: string | null;
-  title?: string | null;
-  url?: string | null;
-  publishedAt?: number | null;
-  createdAt?: string;
-  updatedAt?: string;
-  expiresAt?: string;
-  ttlMs?: number;
-  version?: number;
-  createdByDeviceId?: string | null;
-}
-
 // Import Firebase app getter function
 import getFirebaseApp from '../../lib/firebase';
 
@@ -49,6 +32,19 @@ function getFirestoreInstance() {
     }
   }
   return firestore;
+}
+
+export interface NewsSummaryRecord {
+  id: string;
+  articleId: string;
+  title: string;
+  summary: string;
+  source: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
+  ttlMs?: number;
 }
 
 class FirebaseDataService {
@@ -236,19 +232,11 @@ class FirebaseDataService {
   }
 
   /**
-   * Save message to Firestore (BLE mesh backup)
+   * Save news summary to Firestore
    */
-  async saveMessage(message: {
-    id: string;
-    from: string;
-    to?: string;
-    content: string;
-    type: 'text' | 'sos' | 'status' | 'location';
-    timestamp: number;
-    priority?: 'low' | 'normal' | 'high' | 'critical';
-  }): Promise<boolean> {
+  async saveNewsSummary(summary: NewsSummaryRecord): Promise<boolean> {
     if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveMessage');
+      logger.warn('FirebaseDataService not initialized, skipping saveNewsSummary');
       return false;
     }
 
@@ -259,58 +247,48 @@ class FirebaseDataService {
         return false;
       }
 
-      const messageRef = doc(db, 'messages', message.id);
-      await setDoc(messageRef, {
-        ...message,
-        createdAt: new Date().toISOString(),
+      await setDoc(doc(db, 'newsSummaries', summary.id), {
+        ...summary,
+        updatedAt: new Date().toISOString(),
       }, { merge: true });
 
       if (__DEV__) {
-        logger.info(`Message ${message.id} saved to Firestore`);
+        logger.info(`News summary saved to Firestore: ${summary.id}`);
       }
       return true;
     } catch (error) {
-      logger.error('Failed to save message:', error);
+      logger.error('Failed to save news summary:', error);
       return false;
     }
   }
 
   /**
-   * Save SOS signal to Firestore
+   * Get news summary from Firestore
    */
-  async saveSOS(sos: {
-    id: string;
-    deviceId: string;
-    timestamp: number;
-    location?: { latitude: number; longitude: number; accuracy: number } | null;
-    message: string;
-    status?: 'active' | 'resolved';
-  }): Promise<boolean> {
+  async getNewsSummary(articleId: string): Promise<NewsSummaryRecord | null> {
     if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveSOS');
-      return false;
+      logger.warn('FirebaseDataService not initialized, cannot get news summary');
+      return null;
     }
 
     try {
       const db = getFirestoreInstance();
       if (!db) {
         logger.warn('Firestore not available');
-        return false;
+        return null;
       }
 
-      const sosRef = doc(db, 'sos', sos.id);
-      await setDoc(sosRef, {
-        ...sos,
-        createdAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`SOS ${sos.id} saved to Firestore`);
+      const q = query(collection(db, 'newsSummaries'), where('articleId', '==', articleId));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        return null;
       }
-      return true;
+
+      return snapshot.docs[0].data() as NewsSummaryRecord;
     } catch (error) {
-      logger.error('Failed to save SOS:', error);
-      return false;
+      logger.error('Failed to get news summary:', error);
+      return null;
     }
   }
 
@@ -330,14 +308,13 @@ class FirebaseDataService {
         return false;
       }
 
-      const profileRef = doc(db, 'devices', userDeviceId, 'healthProfile', 'main');
-      await setDoc(profileRef, {
+      await setDoc(doc(db, 'devices', userDeviceId, 'healthProfile', 'current'), {
         ...profile,
         updatedAt: new Date().toISOString(),
       }, { merge: true });
 
       if (__DEV__) {
-        logger.info(`Health profile saved to Firestore for ${userDeviceId}`);
+        logger.info('Health profile saved to Firestore');
       }
       return true;
     } catch (error) {
@@ -347,11 +324,75 @@ class FirebaseDataService {
   }
 
   /**
-   * Load health profile from Firestore
+   * Save earthquake to Firestore
    */
-  async loadHealthProfile(userDeviceId: string): Promise<any | null> {
+  async saveEarthquake(earthquake: any): Promise<boolean> {
     if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot load health profile');
+      logger.warn('FirebaseDataService not initialized, skipping saveEarthquake');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      const earthquakeId = earthquake.id || `${earthquake.timestamp}_${earthquake.magnitude}`;
+      await setDoc(doc(db, 'earthquakes', earthquakeId), {
+        ...earthquake,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info('Earthquake saved to Firestore:', earthquakeId);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save earthquake:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Save felt earthquake report to Firestore
+   */
+  async saveFeltEarthquakeReport(report: any): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveFeltEarthquakeReport');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      const reportId = report.id || `${report.earthquakeId}_${Date.now()}`;
+      await setDoc(doc(db, 'feltEarthquakes', reportId), {
+        ...report,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info('Felt earthquake report saved to Firestore:', reportId);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save felt earthquake report:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get intensity data from Firestore
+   */
+  async getIntensityData(earthquakeId: string): Promise<any | null> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, cannot get intensity data');
       return null;
     }
 
@@ -362,23 +403,55 @@ class FirebaseDataService {
         return null;
       }
 
-      const profileRef = doc(db, 'devices', userDeviceId, 'healthProfile', 'main');
-      const snapshot = await getDoc(profileRef);
+      const q = query(collection(db, 'feltEarthquakes'), where('earthquakeId', '==', earthquakeId));
+      const snapshot = await getDocs(q);
       
-      if (snapshot.exists()) {
-        return snapshot.data();
+      if (snapshot.empty) {
+        return null;
       }
-      return null;
+
+      return snapshot.docs.map(doc => doc.data());
     } catch (error) {
-      logger.error('Failed to load health profile:', error);
+      logger.error('Failed to get intensity data:', error);
       return null;
     }
   }
 
   /**
-   * Save ICE (In Case of Emergency) information to Firestore
+   * Save location update to Firestore
    */
-  async saveICE(userDeviceId: string, ice: any): Promise<boolean> {
+  async saveLocationUpdate(userDeviceId: string, location: any): Promise<boolean> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseDataService not initialized, skipping saveLocationUpdate');
+      return false;
+    }
+
+    try {
+      const db = getFirestoreInstance();
+      if (!db) {
+        logger.warn('Firestore not available');
+        return false;
+      }
+
+      await setDoc(doc(db, 'devices', userDeviceId, 'locations', Date.now().toString()), {
+        ...location,
+        timestamp: new Date().toISOString(),
+      }, { merge: true });
+
+      if (__DEV__) {
+        logger.info('Location update saved to Firestore');
+      }
+      return true;
+    } catch (error) {
+      logger.error('Failed to save location update:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Save ICE (In Case of Emergency) data to Firestore
+   */
+  async saveICE(userDeviceId: string, iceData: any): Promise<boolean> {
     if (!this._isInitialized) {
       logger.warn('FirebaseDataService not initialized, skipping saveICE');
       return false;
@@ -391,24 +464,23 @@ class FirebaseDataService {
         return false;
       }
 
-      const iceRef = doc(db, 'devices', userDeviceId, 'ice', 'main');
-      await setDoc(iceRef, {
-        ...ice,
+      await setDoc(doc(db, 'devices', userDeviceId, 'ice', 'current'), {
+        ...iceData,
         updatedAt: new Date().toISOString(),
       }, { merge: true });
 
       if (__DEV__) {
-        logger.info(`ICE information saved to Firestore for ${userDeviceId}`);
+        logger.info('ICE data saved to Firestore');
       }
       return true;
     } catch (error) {
-      logger.error('Failed to save ICE:', error);
+      logger.error('Failed to save ICE data:', error);
       return false;
     }
   }
 
   /**
-   * Load ICE information from Firestore
+   * Load ICE (In Case of Emergency) data from Firestore
    */
   async loadICE(userDeviceId: string): Promise<any | null> {
     if (!this._isInitialized) {
@@ -423,624 +495,16 @@ class FirebaseDataService {
         return null;
       }
 
-      const iceRef = doc(db, 'devices', userDeviceId, 'ice', 'main');
+      const iceRef = doc(db, 'devices', userDeviceId, 'ice', 'current');
       const snapshot = await getDoc(iceRef);
       
-      if (snapshot.exists()) {
-        return snapshot.data();
-      }
-      return null;
-    } catch (error) {
-      logger.error('Failed to load ICE:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save location update to Firestore
-   */
-  async saveLocationUpdate(userDeviceId: string, location: {
-    latitude: number;
-    longitude: number;
-    accuracy: number | null;
-    timestamp: number;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveLocationUpdate');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      // Save to locationUpdates subcollection
-      const locationRef = doc(db, 'devices', userDeviceId, 'locationUpdates', `loc_${location.timestamp}`);
-      await setDoc(locationRef, {
-        ...location,
-        deviceId: userDeviceId,
-        createdAt: new Date().toISOString(),
-      }, { merge: true });
-
-      // Also update device's last known location
-      const deviceRef = doc(db, 'devices', userDeviceId);
-      await setDoc(deviceRef, {
-        lastLocation: {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          accuracy: location.accuracy,
-          timestamp: location.timestamp,
-        },
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Location update saved to Firestore for ${userDeviceId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save location update:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save status update to Firestore
-   */
-  async saveStatusUpdate(userDeviceId: string, status: {
-    status: string;
-    location?: { latitude: number; longitude: number } | null;
-    timestamp: number;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveStatusUpdate');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      // Save to statusUpdates subcollection
-      const statusRef = doc(db, 'devices', userDeviceId, 'statusUpdates', `status_${status.timestamp}`);
-      await setDoc(statusRef, {
-        ...status,
-        deviceId: userDeviceId,
-        createdAt: new Date().toISOString(),
-      }, { merge: true });
-
-      // Also update device's current status
-      const deviceRef = doc(db, 'devices', userDeviceId);
-      await setDoc(deviceRef, {
-        currentStatus: status.status,
-        lastStatusUpdate: status.timestamp,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Status update saved to Firestore for ${userDeviceId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save status update:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save earthquake data to Firestore (for critical earthquakes >= 4.0)
-   */
-  async saveEarthquake(earthquake: {
-    id: string;
-    location: string;
-    magnitude: number;
-    depth: number;
-    time: number;
-    latitude: number;
-    longitude: number;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveEarthquake');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const earthquakeRef = doc(db, 'earthquakes', earthquake.id);
-      await setDoc(earthquakeRef, {
-        ...earthquake,
-        createdAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Earthquake ${earthquake.id} saved to Firestore`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save earthquake:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save earthquake alert for user (notification tracking)
-   */
-  async saveEarthquakeAlert(userDeviceId: string, earthquakeId: string, alert: {
-    earthquakeId: string;
-    magnitude: number;
-    location: string;
-    timestamp: number;
-    notified: boolean;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveEarthquakeAlert');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const alertRef = doc(db, 'devices', userDeviceId, 'earthquakeAlerts', alert.earthquakeId);
-      await setDoc(alertRef, {
-        ...alert,
-        deviceId: userDeviceId,
-        createdAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Earthquake alert saved for ${userDeviceId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save earthquake alert:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save earthquake analysis to Firestore (shared across all users)
-   * This ensures analysis is done once and shared with all users
-   */
-  async saveEarthquakeAnalysis(earthquakeId: string, analysis: {
-    riskLevel: 'low' | 'medium' | 'high' | 'critical';
-    userMessage: string;
-    recommendations: string[];
-    verified: boolean;
-    sources: string[];
-    confidence: number;
-    earthquakeId: string;
-    magnitude: number;
-    location: string;
-    timestamp: number;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveEarthquakeAnalysis');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const analysisRef = doc(db, 'earthquake_analyses', earthquakeId);
-      await setDoc(analysisRef, {
-        ...analysis,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Earthquake analysis saved to Firestore: ${earthquakeId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save earthquake analysis:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get earthquake analysis from Firestore (shared analysis)
-   * Returns null if analysis doesn't exist or is expired
-   */
-  async getEarthquakeAnalysis(earthquakeId: string): Promise<{
-    riskLevel: 'low' | 'medium' | 'high' | 'critical';
-    userMessage: string;
-    recommendations: string[];
-    verified: boolean;
-    sources: string[];
-    confidence: number;
-    createdAt: string;
-  } | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot get earthquake analysis');
-      return null;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
-
-      const analysisRef = doc(db, 'earthquake_analyses', earthquakeId);
-      const snapshot = await getDoc(analysisRef);
-      
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        // Analysis is valid for 24 hours
-        const createdAt = new Date(data.createdAt).getTime();
-        const now = Date.now();
-        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-        
-        if (now - createdAt > maxAge) {
-          logger.info(`Earthquake analysis expired for ${earthquakeId}`);
-          return null;
-        }
-        
-        return {
-          riskLevel: data.riskLevel,
-          userMessage: data.userMessage,
-          recommendations: data.recommendations || [],
-          verified: data.verified,
-          sources: data.sources || [],
-          confidence: data.confidence,
-          createdAt: data.createdAt,
-        };
-      }
-      return null;
-    } catch (error) {
-      logger.error('Failed to get earthquake analysis:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save AI generated news summary so it can be reused by other clients
-   */
-  async saveNewsSummary(articleId: string, payload: {
-    summary: string;
-    source?: string;
-    title?: string;
-    url?: string;
-    publishedAt?: number;
-    createdByDeviceId: string;
-    ttlMs?: number;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveNewsSummary');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const summaryRef = doc(db, 'news_summaries', articleId);
-      const ttlMs = payload.ttlMs ?? DEFAULT_NEWS_SUMMARY_TTL_MS;
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + ttlMs);
-
-      let createdAtIso = now.toISOString();
-      try {
-        const existing = await getDoc(summaryRef);
-        if (existing.exists()) {
-          const data = existing.data() as NewsSummaryRecord;
-          if (data?.createdAt) {
-            createdAtIso = data.createdAt;
-          }
-        }
-      } catch (error) {
-        logger.warn('Failed to read existing news summary metadata:', error);
-      }
-
-      await setDoc(summaryRef, {
-        articleId,
-        summary: payload.summary,
-        source: payload.source ?? null,
-        title: payload.title ?? null,
-        url: payload.url ?? null,
-        publishedAt: payload.publishedAt ?? null,
-        ttlMs,
-        createdByDeviceId: payload.createdByDeviceId,
-        updatedAt: now.toISOString(),
-        expiresAt: expiresAt.toISOString(),
-        createdAt: createdAtIso,
-        version: 1,
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`News summary saved to Firestore: ${articleId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save news summary:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Load cached news summary from Firestore
-   */
-  async getNewsSummary(articleId: string): Promise<NewsSummaryRecord | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot get news summary');
-      return null;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
-
-      const summaryRef = doc(db, 'news_summaries', articleId);
-      const snapshot = await getDoc(summaryRef);
       if (!snapshot.exists()) {
         return null;
       }
 
-      const data = snapshot.data() as NewsSummaryRecord;
-      if (!data?.summary) {
-        return null;
-      }
-
-      if (data.expiresAt) {
-        const expiresMs = new Date(data.expiresAt).getTime();
-        if (!Number.isNaN(expiresMs) && expiresMs < Date.now()) {
-          logger.info(`News summary expired in Firestore: ${articleId}`);
-          return null;
-        }
-      }
-
-      return {
-        articleId,
-        summary: data.summary,
-        source: data.source ?? null,
-        title: data.title ?? null,
-        url: data.url ?? null,
-        publishedAt: data.publishedAt ?? null,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-        expiresAt: data.expiresAt,
-        ttlMs: data.ttlMs ?? DEFAULT_NEWS_SUMMARY_TTL_MS,
-        version: data.version ?? 1,
-        createdByDeviceId: data.createdByDeviceId ?? null,
-      };
+      return snapshot.data();
     } catch (error) {
-      logger.error('Failed to load news summary:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Subscribe to location updates for a family member (real-time sync)
-   */
-  subscribeToLocationUpdates(userDeviceId: string, callback: (location: any) => void): () => void {
-    try {
-      const db = getFirestoreInstance();
-      if (!db) return () => {};
-
-      const locationsRef = collection(db, 'devices', userDeviceId, 'locationUpdates');
-      const q = query(locationsRef, where('timestamp', '>', Date.now() - 3600000)); // Last hour
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        snapshot.forEach((doc) => {
-          callback(doc.data());
-        });
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      logger.error('Failed to subscribe to location updates:', error);
-      return () => {};
-    }
-  }
-
-  /**
-   * Subscribe to status updates for a family member (real-time sync)
-   */
-  subscribeToStatusUpdates(userDeviceId: string, callback: (status: any) => void): () => void {
-    try {
-      const db = getFirestoreInstance();
-      if (!db) return () => {};
-
-      const statusesRef = collection(db, 'devices', userDeviceId, 'statusUpdates');
-      const q = query(statusesRef, where('timestamp', '>', Date.now() - 3600000)); // Last hour
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        snapshot.forEach((doc) => {
-          callback(doc.data());
-        });
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      logger.error('Failed to subscribe to status updates:', error);
-      return () => {};
-    }
-  }
-
-  /**
-   * ELITE: Save with offline sync queue (conflict resolution)
-   */
-  async saveWithSync(
-    collection: string,
-    documentId: string,
-    data: any,
-    priority: 'low' | 'normal' | 'high' | 'critical' = 'normal'
-  ): Promise<boolean> {
-    // Try to save immediately if online
-    if (this._isInitialized) {
-      try {
-        const success = await this.saveDirectly(collection, documentId, data);
-        if (success) {
-          return true;
-        }
-      } catch (error) {
-        logger.warn('Direct save failed, queuing for sync:', error);
-      }
-    }
-
-    // Queue for offline sync
-    try {
-      const { offlineSyncService } = await import('./OfflineSyncService');
-      await offlineSyncService.queueOperation({
-        type: 'save',
-        collection,
-        documentId,
-        data,
-        priority,
-      });
-      return true; // Queued successfully
-    } catch (error) {
-      logger.error('Failed to queue operation:', error);
-      return false;
-    }
-  }
-
-  /**
-   * ELITE: Save directly to Firebase (internal method)
-   */
-  private async saveDirectly(collection: string, documentId: string, data: any): Promise<boolean> {
-    const db = getFirestoreInstance();
-    if (!db) return false;
-
-    try {
-      const docRef = doc(db, collection, documentId);
-      await setDoc(docRef, {
-        ...data,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-      return true;
-    } catch (error) {
-      logger.error('Direct save failed:', error);
-      return false;
-    }
-  }
-
-  /**
-   * ELITE: Save felt earthquake report (LastQuake "I felt it" feature)
-   */
-  async saveFeltEarthquakeReport(report: {
-    earthquakeId: string;
-    deviceId: string;
-    timestamp: number;
-    location: { latitude: number; longitude: number };
-    intensity: string;
-    feltDuration: number;
-    effects: string[];
-    comments?: string;
-  }): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveFeltEarthquakeReport');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      // Save report under earthquake ID
-      const reportId = `${report.deviceId}_${report.timestamp}`;
-      const reportRef = doc(db, 'earthquakes', report.earthquakeId, 'felt_reports', reportId);
-      await setDoc(reportRef, {
-        ...report,
-        createdAt: new Date().toISOString(),
-      });
-
-      if (__DEV__) {
-        logger.info(`Felt earthquake report saved: ${report.earthquakeId} - ${report.intensity}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save felt earthquake report:', error);
-      return false;
-    }
-  }
-
-  /**
-   * ELITE: Get intensity data for an earthquake (community-based)
-   */
-  async getIntensityData(earthquakeId: string): Promise<{
-    earthquakeId: string;
-    reports: any[];
-    averageIntensity: number;
-    reportCount: number;
-    lastUpdated: number;
-  } | null> {
-    if (!this._isInitialized) {
-      return null;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        return null;
-      }
-
-      const reportsRef = collection(db, 'earthquakes', earthquakeId, 'felt_reports');
-      const snapshot = await getDocs(reportsRef);
-
-      const reports: any[] = [];
-      snapshot.forEach((doc) => {
-        reports.push(doc.data());
-      });
-
-      if (reports.length === 0) {
-        return null;
-      }
-
-      // Calculate average intensity (convert to number)
-      const intensityMap: Record<string, number> = {
-        weak: 1,
-        moderate: 2,
-        strong: 3,
-        very_strong: 4,
-        severe: 5,
-      };
-
-      const totalIntensity = reports.reduce((sum, report) => {
-        return sum + (intensityMap[report.intensity] || 0);
-      }, 0);
-
-      const averageIntensity = totalIntensity / reports.length;
-
-      return {
-        earthquakeId,
-        reports,
-        averageIntensity: Math.round(averageIntensity * 10) / 10,
-        reportCount: reports.length,
-        lastUpdated: Date.now(),
-      };
-    } catch (error) {
-      logger.error('Failed to get intensity data:', error);
+      logger.error('Failed to load ICE data:', error);
       return null;
     }
   }

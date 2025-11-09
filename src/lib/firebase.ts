@@ -3,27 +3,6 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { FIREBASE_CONFIG } from '../core/config/firebase';
 import { Platform } from 'react-native';
 
-const logDev = {
-  info: (...args: any[]) => {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.log(...args);
-    }
-  },
-  warn: (...args: any[]) => {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.warn(...args);
-    }
-  },
-  error: (...args: any[]) => {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.error(...args);
-    }
-  },
-};
-
 // Firebase configuration - use real config from firebase.ts
 const firebaseConfig = (() => {
   const config = Platform.OS === 'ios' ? FIREBASE_CONFIG.ios : FIREBASE_CONFIG.android;
@@ -51,25 +30,27 @@ function initializeFirebase() {
   try {
     app = initializeApp(firebaseConfig);
     // Use console.log instead of logger to avoid circular dependency
-    logDev.info('[Firebase] App initialized successfully', { projectId: firebaseConfig.projectId });
+    if (__DEV__) {
+      console.log('[Firebase] App initialized successfully', { projectId: firebaseConfig.projectId });
+    }
     
-    // Firebase messaging is web-only - skip for React Native
-    // React Native uses expo-notifications instead
-    if (Platform.OS === 'web') {
-      try {
-        messaging = getMessaging(app);
-        logDev.info('[Firebase] Messaging initialized (web only)');
-      } catch (msgError) {
-        logDev.warn('[Firebase] Messaging initialization failed:', msgError);
+    // Try to initialize messaging (may fail in non-device environments)
+    try {
+      messaging = getMessaging(app);
+      if (__DEV__) {
+        console.log('[Firebase] Messaging initialized');
       }
-    } else {
-      logDev.info('[Firebase] Skipping messaging (React Native - using expo-notifications)');
-      messaging = null;
+    } catch (msgError) {
+      if (__DEV__) {
+        console.warn('[Firebase] Messaging initialization failed (this is OK in simulator):', msgError);
+      }
     }
     
     return app;
   } catch (error) {
-    logDev.warn('[Firebase] Initialization failed, using fallback mode:', error);
+    if (__DEV__) {
+      console.warn('[Firebase] Initialization failed, using fallback mode:', error);
+    }
     // Return null if initialization fails
     return null;
   }
@@ -94,7 +75,9 @@ export const getFCMToken = async (): Promise<string | null> => {
   }
   
   if (!messaging) {
-    logDev.warn('[Firebase] Messaging not available, returning null token');
+    if (__DEV__) {
+      console.warn('[Firebase] Messaging not available, returning null token');
+    }
     return null;
   }
   
@@ -104,7 +87,9 @@ export const getFCMToken = async (): Promise<string | null> => {
     });
     return token;
   } catch (error) {
-    logDev.error('[Firebase] Error getting FCM token:', error);
+    if (__DEV__) {
+      console.error('[Firebase] Error getting FCM token:', error);
+    }
     return null;
   }
 };
@@ -117,14 +102,18 @@ export const onForegroundMessage = (callback: (payload: any) => void) => {
   }
   
   if (!messaging) {
-    logDev.warn('[Firebase] Messaging not available, cannot handle foreground messages');
+    if (__DEV__) {
+      console.warn('[Firebase] Messaging not available, cannot handle foreground messages');
+    }
     return () => {}; // Return empty unsubscribe function
   }
   
   try {
     return onMessage(messaging, callback);
   } catch (error) {
-    logDev.error('[Firebase] Error setting up foreground message handler:', error);
+    if (__DEV__) {
+      console.error('[Firebase] Error setting up foreground message handler:', error);
+    }
     return () => {};
   }
 };

@@ -181,7 +181,11 @@ class RescueBeaconService {
       };
 
       // Broadcast via BLE Mesh
-      await bleMeshService.broadcastMessage(JSON.stringify(payload));
+      await bleMeshService.broadcastMessage({
+        type: 'sos',
+        content: JSON.stringify(payload),
+        ttl: 10,
+      });
 
       logger.info('SOS beacon broadcasted', {
         battery,

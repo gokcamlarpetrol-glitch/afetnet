@@ -30,6 +30,8 @@ Pods/
 # Note: *.xcworkspace/* is already ignored above, but we need ios/AfetNet.xcworkspace
 # Allow the main workspace file
 !ios/AfetNet.xcworkspace
+*.xcworkspace
+!default.xcworkspace
 
 # Expo
 .expo/
@@ -79,4 +81,3 @@ credentials.json
 # OS Files
 .DS_Store
 Thumbs.db
-

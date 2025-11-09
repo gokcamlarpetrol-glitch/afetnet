@@ -48,6 +48,7 @@ export const colors = {
     mesh: '#3b82f6',       // Blue
     alert: '#f59e0b',      // Amber
     success: '#10b981',
+    safe: '#10b981',       // Alias for success
     info: '#3b82f6',
     danger: '#ef4444',     // Red
     warning: '#f59e0b',    // Amber

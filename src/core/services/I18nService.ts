@@ -75,69 +75,69 @@ const translations = {
       location: 'Konum',
     },
   },
-  en: {
+  ku: {
     app: {
       name: 'AfetNet',
-      subtitle: 'Life-Saving Technology',
+      subtitle: 'Teknolojiya Jiyanxweş',
     },
     common: {
-      ok: 'OK',
-      cancel: 'Cancel',
-      save: 'Save',
-      delete: 'Delete',
-      edit: 'Edit',
-      back: 'Back',
-      next: 'Next',
-      close: 'Close',
-      loading: 'Loading...',
-      error: 'Error',
-      success: 'Success',
+      ok: 'Erê',
+      cancel: 'Betal',
+      save: 'Tomar Bike',
+      delete: 'Jêbirin',
+      edit: 'Guhertin',
+      back: 'Paş',
+      next: 'Pêş',
+      close: 'Bigre',
+      loading: 'Tê barkirin...',
+      error: 'Çewtî',
+      success: 'Serkeftin',
     },
     home: {
-      title: 'Home',
-      offline: 'Offline',
-      online: 'Online',
-      lastEarthquake: 'Last Earthquake',
-      activeDisasters: 'Active Disasters',
-      familyStatus: 'Family Status',
+      title: 'Rûpelê Sereke',
+      offline: 'Bê Înternet',
+      online: 'Bi Înternet',
+      lastEarthquake: 'Erdheja Dawî',
+      activeDisasters: 'Afetên Çalak',
+      familyStatus: 'Rewşa Malbatê',
     },
     earthquake: {
-      title: 'Earthquakes',
-      magnitude: 'Magnitude',
-      depth: 'Depth',
-      location: 'Location',
-      time: 'Time',
-      distance: 'Distance',
+      title: 'Erdhej',
+      magnitude: 'Mezinahî',
+      depth: 'Kûrî',
+      location: 'Cih',
+      time: 'Dem',
+      distance: 'Dûrî',
     },
     family: {
-      title: 'Family',
-      safe: 'Safe',
-      needHelp: 'Need Help',
-      unknown: 'Unknown',
-      addMember: 'Add Member',
+      title: 'Malbat',
+      safe: 'Emin',
+      needHelp: 'Alîkarî Divê',
+      unknown: 'Nenas',
+      addMember: 'Endam Zêde Bike',
     },
     sos: {
       title: 'SOS',
-      send: 'Send SOS',
-      sent: 'SOS Sent',
-      location: 'Share Location',
+      send: 'SOS Bişîne',
+      sent: 'SOS Hate Şandin',
+      location: 'Cih Parve Bike',
     },
     alerts: {
-      earthquake: 'Earthquake Alert',
-      critical: 'Critical',
-      high: 'High',
+      earthquake: 'Hişyariya Erdhejê',
+      critical: 'Girîng',
+      high: 'Bilind',
       normal: 'Normal',
     },
     preparedness: {
-      title: 'Preparedness',
-      quiz: 'Preparedness Assessment',
-      score: 'Preparedness Score',
+      title: 'Amadebûn',
+      quiz: 'Nirxandina Amadebûnê',
+      score: 'Pûana Amadebûnê',
     },
     settings: {
-      title: 'Settings',
-      language: 'Language',
-      notifications: 'Notifications',
-      location: 'Location',
+      title: 'Mîheng',
+      language: 'Ziman',
+      notifications: 'Agahdariyên',
+      location: 'Cih',
     },
   },
   ar: {
@@ -223,7 +223,7 @@ class I18nService {
         const deviceLocale = locales[0].languageCode || 'tr';
         // Map device locale to supported languages
         if (deviceLocale === 'tr') return 'tr';
-        if (deviceLocale === 'en') return 'en';
+        if (deviceLocale === 'ku') return 'ku';
         if (deviceLocale === 'ar') return 'ar';
         return 'tr'; // Default
       }
@@ -237,7 +237,7 @@ class I18nService {
   /**
    * Set current locale
    */
-  setLocale(locale: 'tr' | 'en' | 'ar') {
+  setLocale(locale: 'tr' | 'ku' | 'ar') {
     this.currentLocale = locale;
     
     if (__DEV__) {
@@ -298,7 +298,7 @@ class I18nService {
   getLocaleDisplayName(locale: string): string {
     const names: Record<string, string> = {
       tr: 'Türkçe',
-      en: 'English',
+      ku: 'Kurdî',
       ar: 'العربية',
     };
     return names[locale] || locale;

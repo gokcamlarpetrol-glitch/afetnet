@@ -10,6 +10,7 @@ import { payloadSchemas } from './types';
 class OffMeshRouter {
   private isRunning = false;
   private topic = '';
+  private startTime: number | null = null;
   private config: MeshConfig;
   private messageHandlers = new Set<(envelope: Envelope) => void>();
   private peerHandlers = new Set<(peers: PeerInfo[]) => void>();
@@ -64,6 +65,7 @@ class OffMeshRouter {
 
     this.topic = topic;
     this.isRunning = true;
+    this.startTime = Date.now();
 
     // Start enabled transports
     for (const [name, transport] of this.transports.entries()) {
@@ -99,6 +101,7 @@ class OffMeshRouter {
     }
 
     this.isRunning = false;
+    this.startTime = null;
 
     // Stop all transports
     for (const [name, transport] of this.transports.entries()) {
@@ -200,7 +203,7 @@ class OffMeshRouter {
       queued: queueStats.count,
       dedup: dedupStats.count,
       lastHop: this.getLastHopTime(),
-      uptime: this.isRunning ? Date.now() - (this as any).startTime : 0,
+      uptime: this.isRunning && this.startTime ? Date.now() - this.startTime : 0,
     };
   }
 

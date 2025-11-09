@@ -419,14 +419,15 @@ class NewsAggregatorService {
         return;
       }
 
-      await firebaseDataService.saveNewsSummary(article.id, {
+      await firebaseDataService.saveNewsSummary({
+        id: article.id,
+        articleId: article.id,
+        title: article.title,
         summary,
         source: article.source,
-        title: article.title,
-        url: article.url,
-        publishedAt: article.publishedAt,
-        createdByDeviceId: deviceId,
-        ttlMs,
+        url: article.url || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       });
     } catch (error) {
       logger.warn('Failed to persist news summary to Firestore:', error);

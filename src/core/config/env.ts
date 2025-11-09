@@ -12,7 +12,7 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
   if (fromExtra) return String(fromExtra);
   
   // Try process.env
-  const fromProcess = (process.env as Record<string, string | undefined>)[key];
+  const fromProcess = (process.env as any)[key];
   if (fromProcess) return String(fromProcess);
   
   // Return default
@@ -20,16 +20,13 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
 }
 
 export const ENV = {
-  // OpenAI (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
-  OPENAI_API_KEY: getEnvVar('EXPO_PUBLIC_OPENAI_API_KEY', ''),
+  // RevenueCat
+  RC_IOS_KEY: getEnvVar('RC_IOS_KEY', 'appl_vsaRFDWlxPWReNAOydDuZCGEPUS'),
+  RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', 'appl_vsaRFDWlxPWReNAOydDuZCGEPUS'),
   
-  // RevenueCat (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
-  RC_IOS_KEY: getEnvVar('RC_IOS_KEY', ''),
-  RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', ''),
-  
-  // Firebase (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
-  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', ''),
-  FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', ''),
+  // Firebase
+  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', 'AIzaSyBD23B2SEcxs7b3W0iyEISWhquRSbXtotQ'),
+  FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', 'afetnet-4a6b6'),
   
   // EAS
   EAS_PROJECT_ID: getEnvVar('EAS_PROJECT_ID', '072f1217-172a-40ce-af23-3fc0ad3f7f09'),
@@ -50,9 +47,6 @@ export const ENV = {
   
   // Backend API
   API_BASE_URL: getEnvVar('API_BASE_URL', 'https://afetnet-backend.onrender.com'),
-  
-  // Backend Worker Secret (GÜVENLIK: Asla default değer verme, sadece .env'den oku)
-  ORG_SECRET: getEnvVar('ORG_SECRET', ''),
   
   // EEW WebSocket URLs
   EEW_WS_TR_PRIMARY: getEnvVar('EEW_WS_TR_PRIMARY', 'wss://eew.afad.gov.tr/ws'),

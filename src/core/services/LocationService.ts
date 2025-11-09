@@ -19,28 +19,6 @@ class LocationService {
   private isInitialized = false;
   private hasPermission = false;
   private currentLocation: LocationCoords | null = null;
-  
-  // ELITE: Public getter for permission status (for PermissionGuard integration)
-  get permissionGranted(): boolean {
-    return this.hasPermission;
-  }
-
-  /**
-   * ELITE: Recheck permission status (useful after PermissionGuard grants permission)
-   */
-  async recheckPermission(): Promise<boolean> {
-    try {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      this.hasPermission = status === 'granted';
-      if (__DEV__ && this.hasPermission) {
-        logger.info('Location permission rechecked - granted');
-      }
-      return this.hasPermission;
-    } catch (error) {
-      logger.error('Permission recheck failed:', error);
-      return false;
-    }
-  }
 
   async initialize() {
     if (this.isInitialized) return;
@@ -48,24 +26,15 @@ class LocationService {
     if (__DEV__) logger.info('[LocationService] Initializing...');
 
     try {
-      // Check existing permission first (may have been granted by PermissionGuard)
-      const { status: existingStatus } = await Location.getForegroundPermissionsAsync();
+      // Request foreground permission
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
       
-      if (existingStatus === 'granted') {
-        this.hasPermission = true;
-        if (__DEV__) logger.info('Location permission already granted');
-      } else {
-        // Request foreground permission (only if not already granted)
-        const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-        
-        if (foregroundStatus !== 'granted') {
-          if (__DEV__) logger.warn('Foreground permission not granted - will retry later');
-          // Don't return - continue initialization, permission may be granted later
-          return;
-        }
-
-        this.hasPermission = true;
+      if (foregroundStatus !== 'granted') {
+        if (__DEV__) logger.warn('Foreground permission not granted');
+        return;
       }
+
+      this.hasPermission = true;
 
       // Request background permission (optional)
       if (Platform.OS === 'ios') {
@@ -75,19 +44,8 @@ class LocationService {
         }
       }
 
-      // Get initial location (non-blocking - don't wait for GPS if it takes too long)
-      // Elite: Use Promise.race to prevent blocking initialization if GPS is slow
-      // CRITICAL: Only try to update location if we have permission
-      if (this.hasPermission) {
-        Promise.race([
-          this.updateLocation(),
-          new Promise((resolve) => setTimeout(resolve, 10000)), // 10 second timeout for GPS
-        ]).catch((error) => {
-          logger.warn('Initial location update timeout or failed, continuing initialization:', error);
-        });
-      } else {
-        if (__DEV__) logger.info('Skipping initial location update - permission not granted yet');
-      }
+      // Get initial location
+      await this.updateLocation();
 
       this.isInitialized = true;
       if (__DEV__) logger.info('Initialized successfully');
@@ -98,13 +56,9 @@ class LocationService {
   }
 
   async updateLocation(): Promise<LocationCoords | null> {
-    // CRITICAL: Recheck permission if not granted (PermissionGuard may have granted it)
     if (!this.hasPermission) {
-      const hasPermission = await this.recheckPermission();
-      if (!hasPermission) {
-        // Silent return - permission may be granted later
-        return null;
-      }
+      if (__DEV__) logger.warn('No permission');
+      return null;
     }
 
     try {
@@ -119,30 +73,6 @@ class LocationService {
         timestamp: location.timestamp,
       };
 
-      // Save to Firebase (for critical location updates) - non-blocking
-      // Elite: Don't block location update if Firebase save fails or is slow
-      Promise.resolve().then(async () => {
-        try {
-          const { getDeviceId } = await import('../../lib/device');
-          const deviceId = await getDeviceId();
-          if (deviceId) {
-            const { firebaseDataService } = await import('./FirebaseDataService');
-            if (firebaseDataService.isInitialized) {
-              await firebaseDataService.saveLocationUpdate(deviceId, {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                accuracy: location.coords.accuracy,
-                timestamp: location.timestamp,
-              });
-            }
-          }
-        } catch (error) {
-          logger.error('Failed to save location to Firebase:', error);
-        }
-      }).catch((error) => {
-        logger.warn('Firebase location save error (non-critical):', error);
-      });
-
       if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;
 
@@ -156,15 +86,14 @@ class LocationService {
     return this.currentLocation;
   }
 
+  async getCurrentPosition(): Promise<LocationCoords | null> {
+    return await this.updateLocation();
+  }
+
   async startWatchingLocation(callback: (location: LocationCoords) => void) {
-    // CRITICAL: Recheck permission if not granted (PermissionGuard may have granted it)
     if (!this.hasPermission) {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        // Silent return - permission may be granted later
-        return null;
-      }
-      this.hasPermission = true;
+      if (__DEV__) logger.warn('No permission');
+      return null;
     }
 
     try {
