@@ -1,7 +1,12 @@
 /**
  * RATE LIMITING MIDDLEWARE
  * Protects API endpoints from abuse and DDoS attacks
+ * 
+ * ELITE: Type-safe rate limiting with proper Express type augmentation
  */
+
+// CRITICAL: Import type augmentation BEFORE express types
+import '../types/shims';
 
 import rateLimit from 'express-rate-limit';
 import { Request, Response } from 'express';

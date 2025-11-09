@@ -212,27 +212,33 @@ class EarthquakeDetectionService {
         return;
       }
       
-      // Check for JSON parsing errors (this is the main issue we're fixing)
+      // ELITE: Check for JSON parsing errors (this is the main issue we're fixing)
+      // EMSC API sometimes returns HTML error pages instead of JSON
       const isJSONError = 
         errorType === 'invalid-json' ||
         errorMessage.includes('invalid json') ||
         errorMessage.includes('unexpected token') ||
         errorMessage.includes('<html>') ||
+        errorMessage.includes('not valid json') ||
         errorStack.includes('invalid json') ||
         errorStack.includes('json.parse');
       
       if (isJSONError) {
-        // This is expected when EMSC returns HTML - handle silently
-        this.handleEMSCFailure('Invalid JSON response');
+        // ELITE: This is expected when EMSC returns HTML - handle silently
+        // Don't log to reduce log spam - circuit breaker will handle it
+        this.handleEMSCFailure('Invalid JSON response (HTML returned)');
         return;
       }
       
-      // Only log truly unexpected errors
-      console.error('❌ EMSC unexpected error:', {
-        type: errorType,
-        message: error.message || String(error),
-      });
-      this.handleEMSCFailure('Network error');
+      // ELITE: Only log truly unexpected errors (not JSON parsing errors)
+      // Network errors, timeouts, etc. are logged but JSON errors are silent
+      if (!isJSONError) {
+        console.error('❌ EMSC unexpected error:', {
+          type: errorType,
+          message: error.message || String(error),
+        });
+        this.handleEMSCFailure('Network error');
+      }
     }
   }
   
@@ -251,22 +257,25 @@ class EarthquakeDetectionService {
   }
   
   /**
-   * Elite: Handle EMSC API failures with circuit breaker pattern
+   * ELITE: Handle EMSC API failures with circuit breaker pattern
+   * Silent failure handling to reduce log spam
    */
   private handleEMSCFailure(reason: string) {
     this.emscFailureCount++;
     this.emscLastFailureTime = Date.now();
     
-    // Open circuit breaker after max failures
+    // ELITE: Open circuit breaker after max failures
     if (this.emscFailureCount >= this.EMSC_MAX_FAILURES) {
       this.emscCircuitOpen = true;
       console.warn(`🔴 EMSC circuit breaker OPEN (${this.emscFailureCount} failures) - pausing requests for ${this.EMSC_CIRCUIT_RESET_MS / 1000}s`);
     } else {
-      // Silent failure - only log first few failures to reduce log spam
-      if (this.emscFailureCount <= 2) {
-        console.warn(`⚠️ EMSC API issue (${this.emscFailureCount}/${this.EMSC_MAX_FAILURES}): ${reason} - skipping this fetch`);
+      // ELITE: Silent failure - only log first failure to reduce log spam
+      // JSON parsing errors are common when EMSC returns HTML - don't spam logs
+      if (this.emscFailureCount === 1 && !reason.includes('HTML') && !reason.includes('JSON')) {
+        console.warn(`⚠️ EMSC API issue (${this.emscFailureCount}/${this.EMSC_MAX_FAILURES}): ${reason} - circuit breaker active`);
       }
-      // After 2 failures, fail silently to reduce log noise
+      // After first failure, fail silently to reduce log noise
+      // Circuit breaker will handle retries automatically
     }
   }
 
