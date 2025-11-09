@@ -79,10 +79,18 @@ app.use('/api', apiRateLimiter); // Moderate for other API endpoints
 app.get('/health', publicRateLimiter, async (req, res) => {
   try {
     const dbConnected = await pingDb();
+    const { getPoolStats } = await import('./database');
+    const poolStats = await getPoolStats();
+    
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
       database: dbConnected ? 'connected' : 'disconnected',
+      pool: {
+        total: poolStats.total,
+        idle: poolStats.idle,
+        waiting: poolStats.waiting,
+      },
       monitoring: monitoringService ? 'active' : 'disabled',
     });
   } catch (error) {

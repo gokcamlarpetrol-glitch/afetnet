@@ -44,9 +44,10 @@ export async function runMigrations(): Promise<void> {
       // Read migration SQL
       const sql = fs.readFileSync(migrationPath, 'utf-8');
       
-      // Execute migration
+      // Execute migration with retry logic
       try {
-        await pool.query(sql);
+        const { queryWithRetry } = await import('./database');
+        await queryWithRetry(sql, [], 2, 60000); // 2 retries, 60 second timeout for migrations
         console.log(`✅ Migration completed: ${migrationFile}`);
       } catch (error: any) {
         // Ignore "already exists" errors (migration already run)
@@ -80,13 +81,14 @@ export async function verifyTables(): Promise<boolean> {
       'earthquake_analyses',
     ];
     
-    const result = await pool.query(`
+    const { queryWithRetry } = await import('./database');
+    const result = await queryWithRetry<{ table_name: string }>(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public'
-    `);
+    `, [], 2, 10000); // 2 retries, 10 second timeout
     
-    const existingTables = result.rows.map((row) => row.table_name);
+    const existingTables = result.map((row) => row.table_name);
     const missingTables = requiredTables.filter(
       (table) => !existingTables.includes(table)
     );

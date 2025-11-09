@@ -299,9 +299,8 @@ JSON formatında döndür:
    */
   private async saveAnalysisToDatabase(analysis: CentralizedAnalysis): Promise<void> {
     try {
-      if (!pool) return;
-      
-      await pool.query(`
+      const { queryWithRetry } = await import('../database');
+      await queryWithRetry(`
         INSERT INTO earthquake_analyses (
           earthquake_id,
           risk_level,
@@ -333,7 +332,7 @@ JSON formatında döndür:
         analysis.confidence,
         new Date(analysis.analyzedAt),
         analysis.aiTokensUsed,
-      ]);
+      ], 2, 15000); // 2 retries, 15 second timeout
     } catch (error) {
       console.error('❌ Failed to save analysis to database:', error);
       // Don't throw - analysis is still valid

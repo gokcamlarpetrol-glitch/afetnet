@@ -53,26 +53,24 @@ router.post('/register', async (req, res) => {
   
   // Elite: Also save to database for EARLY WARNING system
   try {
-    const { pool } = await import('./database');
-    if (pool) {
-      await pool.query(`
-        INSERT INTO user_locations (user_id, push_token, last_latitude, last_longitude, device_type, updated_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
-        ON CONFLICT (user_id) 
-        DO UPDATE SET 
-          push_token = EXCLUDED.push_token,
-          last_latitude = EXCLUDED.last_latitude,
-          last_longitude = EXCLUDED.last_longitude,
-          device_type = EXCLUDED.device_type,
-          updated_at = NOW()
-      `, [
-        userId || pushToken, // Use userId if provided, otherwise use pushToken as userId
-        pushToken,
-        latitude || null,
-        longitude || null,
-        deviceType,
-      ]);
-    }
+    const { queryWithRetry } = await import('./database');
+    await queryWithRetry(`
+      INSERT INTO user_locations (user_id, push_token, last_latitude, last_longitude, device_type, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (user_id) 
+      DO UPDATE SET 
+        push_token = EXCLUDED.push_token,
+        last_latitude = EXCLUDED.last_latitude,
+        last_longitude = EXCLUDED.last_longitude,
+        device_type = EXCLUDED.device_type,
+        updated_at = NOW()
+    `, [
+      userId || pushToken, // Use userId if provided, otherwise use pushToken as userId
+      pushToken,
+      latitude || null,
+      longitude || null,
+      deviceType,
+    ], 2, 10000); // 2 retries, 10 second timeout
   } catch (error) {
     console.error('Failed to save to database:', error);
     // Continue even if database save fails

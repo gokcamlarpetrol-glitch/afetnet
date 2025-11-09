@@ -161,7 +161,14 @@ class EarthquakeWarningService {
    */
   private async getRegisteredUsers(): Promise<WarningTarget[]> {
     try {
-      const result = await pool.query(`
+      const { queryWithRetry } = await import('./database');
+      const result = await queryWithRetry<{
+        user_id: string;
+        push_token: string;
+        last_latitude: number;
+        last_longitude: number;
+        device_type: string;
+      }>(`
         SELECT 
           user_id,
           push_token,
@@ -173,14 +180,16 @@ class EarthquakeWarningService {
           AND last_latitude IS NOT NULL
           AND last_longitude IS NOT NULL
           AND updated_at > NOW() - INTERVAL '1 hour'
-      `);
+      `, [], 2, 10000); // 2 retries, 10 second timeout
       
-      return result.rows.map((row) => ({
+      return result.map((row) => ({
         userId: row.user_id,
         pushToken: row.push_token,
         latitude: row.last_latitude,
         longitude: row.last_longitude,
-        deviceType: row.device_type || 'ios',
+        deviceType: (row.device_type === 'ios' || row.device_type === 'android') 
+          ? row.device_type 
+          : 'ios' as 'ios' | 'android',
       }));
     } catch (error) {
       console.error('❌ Failed to get registered users:', error);
