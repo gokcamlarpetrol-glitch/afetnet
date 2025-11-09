@@ -317,8 +317,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { notificationService } = await import('../services/NotificationService');
         await notificationService.showFamilyLocationUpdateNotification(
           updatedMember.name,
-          latitude,
-          longitude
+          { latitude, longitude }
         );
       } catch (error) {
         console.error('Failed to send location update notification:', error);

@@ -55,6 +55,21 @@ class LocationService {
     }
   }
 
+  get permissionGranted(): boolean {
+    return this.hasPermission;
+  }
+
+  async recheckPermission(): Promise<boolean> {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      this.hasPermission = status === 'granted';
+      return this.hasPermission;
+    } catch (error) {
+      logger.error('Permission recheck error:', error);
+      return false;
+    }
+  }
+
   async updateLocation(): Promise<LocationCoords | null> {
     if (!this.hasPermission) {
       if (__DEV__) logger.warn('No permission');

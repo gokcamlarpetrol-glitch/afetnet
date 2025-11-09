@@ -196,6 +196,10 @@ class BLEMeshService {
       ttl: 5,
       hops: 0,
       delivered: false,
+      priority: 'normal',
+      sequence: 0,
+      ackRequired: false,
+      attempts: 0,
     };
 
     // Add to queue
@@ -246,6 +250,10 @@ class BLEMeshService {
       ttl: 10, // Higher TTL for SOS
       hops: 0,
       delivered: false,
+      priority: 'critical',
+      sequence: 0,
+      ackRequired: false,
+      attempts: 0,
     };
 
     this.messageQueue.push(message);
@@ -267,6 +275,10 @@ class BLEMeshService {
       ttl: 10,
       hops: 0,
       delivered: false,
+      priority: 'critical',
+      sequence: 0,
+      ackRequired: false,
+      attempts: 0,
     };
 
     this.messageQueue.push(message);

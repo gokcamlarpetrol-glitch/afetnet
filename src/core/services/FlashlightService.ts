@@ -11,6 +11,7 @@ class FlashlightService {
   private isFlashing: boolean = false;
   private intervalId: NodeJS.Timeout | null = null;
   private hasPermission: boolean = false;
+  private cameraRef: any = null;
 
   /**
    * Initialize camera permissions
@@ -28,6 +29,13 @@ class FlashlightService {
     } catch (error) {
       logger.error('FlashlightService init failed:', error);
     }
+  }
+
+  /**
+   * Set camera ref for flashlight control
+   */
+  setCameraRef(ref: any) {
+    this.cameraRef = ref;
   }
 
   /**

@@ -89,6 +89,28 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
   
   setBatteryLevel: (level) => set({ batteryLevel: level }),
   
+  updateStatus: async (status, location) => {
+    set({ status, location: location || null, lastUpdate: Date.now() });
+    
+    // Save to Firebase
+    try {
+      const { getDeviceId } = await import('../../lib/device');
+      const deviceId = await getDeviceId();
+      if (deviceId) {
+        const { firebaseDataService } = await import('../services/FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          await firebaseDataService.saveStatusUpdate(deviceId, {
+            status,
+            location: location || null,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save status to Firebase:', error);
+    }
+  },
+  
   reset: () => set(initialState),
 }));
 

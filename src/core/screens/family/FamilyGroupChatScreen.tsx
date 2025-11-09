@@ -149,7 +149,11 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
         await bleMeshService.broadcastMessage({
           type: 'family_group',
           content: JSON.stringify(newMessage),
-          timestamp,
+          ttl: 5,
+          priority: 'normal',
+          ackRequired: false,
+          sequence: 0,
+          attempts: 0,
         });
 
         // ELITE: Update status with delay

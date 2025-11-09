@@ -140,6 +140,10 @@ export default function MessageTemplates() {
           content: messageContent,
           priority: template.priority as 'critical' | 'high' | 'normal',
           type: 'broadcast',
+          ttl: 5,
+          ackRequired: false,
+          sequence: 0,
+          attempts: 0,
         });
 
         const timestamp = Date.now();

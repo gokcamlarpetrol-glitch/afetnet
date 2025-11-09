@@ -237,7 +237,7 @@ class I18nService {
   /**
    * Set current locale
    */
-  setLocale(locale: 'tr' | 'ku' | 'ar') {
+  setLocale(locale: 'tr' | 'ku' | 'ar' | 'en') {
     this.currentLocale = locale;
     
     if (__DEV__) {
