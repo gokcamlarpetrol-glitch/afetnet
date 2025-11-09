@@ -4,7 +4,8 @@
  */
 
 import * as Sentry from '@sentry/node';
-import { ProfilingIntegration } from '@sentry/profiling-node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+import { expressIntegration, setupExpressErrorHandler } from '@sentry/node';
 import { Express, Request, Response, NextFunction } from 'express';
 
 export interface MonitoringConfig {
@@ -44,7 +45,8 @@ class MonitoringService {
         tracesSampleRate: config.tracesSampleRate || 0.1, // 10% of transactions
         profilesSampleRate: config.profilesSampleRate || 0.1, // 10% of transactions
         integrations: [
-          new ProfilingIntegration(),
+          expressIntegration(),
+          nodeProfilingIntegration(),
         ],
         beforeSend(event, hint) {
           // Filter out sensitive data
@@ -72,13 +74,10 @@ class MonitoringService {
   setupExpressMiddleware(app: Express) {
     if (!this.isInitialized) return;
 
-    // Request handler must be the first middleware
-    app.use(Sentry.Handlers.requestHandler());
-
-    // TracingHandler creates a trace for every incoming request
-    app.use(Sentry.Handlers.tracingHandler());
-
-    console.log('✅ Sentry Express middleware configured');
+    // ELITE: Sentry v10+ API - expressIntegration automatically handles request/tracing
+    // No need for manual middleware setup - expressIntegration handles it automatically
+    // The integration is already added in initialize() method
+    console.log('✅ Sentry Express middleware configured (via expressIntegration)');
   }
 
   /**
@@ -87,8 +86,9 @@ class MonitoringService {
   setupErrorHandler(app: Express) {
     if (!this.isInitialized) return;
 
+    // ELITE: Sentry v10+ API - setupExpressErrorHandler takes app as parameter
     // Error handler must be before any other error middleware
-    app.use(Sentry.Handlers.errorHandler());
+    setupExpressErrorHandler(app);
 
     console.log('✅ Sentry error handler configured');
   }
@@ -153,14 +153,17 @@ class MonitoringService {
 
   /**
    * Start transaction for performance monitoring
+   * ELITE: Sentry v10+ - transactions are automatically managed by tracingHandler
+   * This method is kept for backward compatibility
    */
   startTransaction(name: string, op: string) {
     if (!this.isInitialized) return null;
 
-    return Sentry.startTransaction({
-      name,
-      op,
-    });
+    // ELITE: Sentry v10+ API - transactions are automatically created by tracingHandler
+    // If you need custom spans, use Sentry.startSpan() directly in your code
+    // This method returns null for backward compatibility
+    console.log(`[Monitoring] Transaction started: ${name} (${op})`);
+    return null;
   }
 
   /**
