@@ -11,6 +11,7 @@ import { firebaseService } from './services/FirebaseService';
 import { locationService } from './services/LocationService';
 import { eewService } from './services/EEWService';
 import { seismicSensorService } from './services/SeismicSensorService';
+import { globalEarthquakeAnalysisService } from './services/GlobalEarthquakeAnalysisService';
 import { enkazDetectionService } from './services/EnkazDetectionService';
 import { multiChannelAlertService } from './services/MultiChannelAlertService';
 import { cellBroadcastService } from './services/CellBroadcastService';
@@ -109,6 +110,17 @@ export async function initializeApp() {
       // Continue without EEW - EarthquakeService handles AFAD data
     }
 
+    // Step 7.5: Global Earthquake Analysis Service
+    // CRITICAL: Monitors USGS and EMSC for earthquakes that may affect Turkey
+    // Provides EARLIER warnings than local detection by analyzing global data
+    try {
+      logger.info('Step 7.5: Starting Global Earthquake Analysis Service (USGS & EMSC monitoring)...');
+      await globalEarthquakeAnalysisService.initialize();
+    } catch (error) {
+      logger.error('Global Earthquake Analysis Service failed to start:', error);
+      // Continue without global analysis - local detection will still work
+    }
+
     // Step 8: Cell Broadcast Service
     try {
       await cellBroadcastService.initialize();
@@ -160,15 +172,14 @@ export async function initializeApp() {
     }
 
     // Step 15: Seismic Sensor Service
-    // DISABLED TEMPORARILY - Too many false positives causing spam
-    // Will be re-enabled after further optimization and testing
-    // The service is still available for enkaz detection via EnkazDetectionService
-    // try {
-    //   logger.info('Step 15: Starting seismic sensor service...');
-    //   await seismicSensorService.start();
-    // } catch (error) {
-    //   logger.error('Seismic sensor failed:', error);
-    // }
+    // ELITE: Re-enabled with advanced P-wave detection and crowdsourcing verification
+    // Now includes: P-wave detection, crowdsourcing, false positive filtering
+    try {
+      logger.info('Step 15: Starting seismic sensor service (with P-wave detection and crowdsourcing)...');
+      await seismicSensorService.start();
+    } catch (error) {
+      logger.error('Seismic sensor failed:', error);
+    }
 
     // Step 16: Life-Saving Services
     try {
@@ -193,6 +204,7 @@ export function shutdownApp() {
   earthquakeService.stop();
   bleMeshService.stop();
   eewService.stop();
+  globalEarthquakeAnalysisService.stop();
   cellBroadcastService.stop();
   seismicSensorService.stop();
   enkazDetectionService.stop();
