@@ -1,0 +1,238 @@
+{
+  "common": {
+    "loading": "Yükleniyor...",
+    "error": "Hata",
+    "retry": "Tekrar Dene",
+    "cancel": "İptal",
+    "save": "Kaydet",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "share": "Paylaş",
+    "close": "Kapat",
+    "ok": "Tamam",
+    "yes": "Evet",
+    "no": "Hayır",
+    "next": "İleri",
+    "previous": "Geri",
+    "finish": "Bitir",
+    "continue": "Devam"
+  },
+  "navigation": {
+    "home": "Ana Sayfa",
+    "map": "Harita",
+    "offlineMap": "Offline Harita",
+    "messages": "Mesajlar",
+    "family": "Aile",
+    "settings": "Ayarlar",
+    "diagnostics": "Tanılamalar",
+    "premium": "Premium"
+  },
+  "emergency": {
+    "sos": "SOS",
+    "help": "Yardım",
+    "emergency": "Acil Durum",
+    "callEmergency": "Acil Servis Ara",
+    "sendLocation": "Konum Gönder",
+    "activateEmergencyMode": "Acil Durum Modu Aktif Et",
+    "deactivateEmergencyMode": "Acil Durum Modu Kapat",
+    "emergencyActive": "Acil Durum Aktif",
+    "emergencyResolved": "Acil Durum Çözüldü"
+  },
+  "premium": {
+    "title": "Premium",
+    "subtitle": "200+ premium özellik",
+    "description": "AfetNet'in tüm özelliklerine erişim için premium üyeliğe geçin.",
+    "worldClassBadge": "Dünya Sınıfı",
+    "premiumActive": "Premium Aktif",
+    "subscriptionEnd": "Abonelik Bitişi",
+    "unlimited": "Sınırsız",
+    "features": {
+      "title": "Premium Özellikler",
+      "subtitle": "200+ gelişmiş özellik",
+      "categories": {
+        "emergency": {
+          "title": "🚨 Acil Durum & Kurtarma",
+          "features": [
+            "SOS Sistemi - Anında yardım çağrısı",
+            "Kritik Alarm - Sessiz modu aşan alarmlar",
+            "Kurtarma Koordinasyonu - SAR ve triaj",
+            "Medikal Bilgi - ICE verileri",
+            "Enkaz Modu - Hareketsizlik algılama",
+            "Ses Ping - Enkaz altı iletişim"
+          ]
+        },
+        "family": {
+          "title": "👨‍👩‍👧‍👦 Aile & Sosyal",
+          "features": [
+            "Sınırsız Aile Takibi - Gerçek zamanlı konum",
+            "Aile Mesajlaşması - Şifreli iletişim",
+            "Yakınlık Algılama - Aile uyarıları",
+            "Aile Haritası - Tüm üyelerin haritası",
+            "Grup Yönetimi - Takım koordinasyonu",
+            "Sosyal Güvenlik - Topluluk desteği"
+          ]
+        },
+        "maps": {
+          "title": "🗺️ Harita & Navigasyon",
+          "features": [
+            "Offline Haritalar - İnternet olmadan",
+            "Topografik Haritalar - Yüksek çözünürlük",
+            "Rota Planlama - Gelişmiş optimizasyon",
+            "PDR İz Takibi - Adım bazlı konum",
+            "GPS Fusion - Çoklu sensör birleşimi",
+            "Konum Paylaşımı - Gerçek zamanlı"
+          ]
+        },
+        "mesh": {
+          "title": "📡 Mesh Ağ & İletişim",
+          "features": [
+            "BLE Mesh Ağı - Bluetooth mesh",
+            "WiFi Direct - Doğrudan bağlantı",
+            "P2P Mesajlaşma - Şebekesiz iletişim",
+            "Mesaj Rölesi - Otomatik iletim",
+            "Çevrimdışı Senkronizasyon - Veri senkronu",
+            "Kritik Mesajlar - Öncelikli iletim"
+          ]
+        },
+        "ai": {
+          "title": "🤖 AI & Akıllı Sistemler",
+          "features": [
+            "AI Karar Desteği - Akıllı analiz",
+            "Durum Analizi - Risk değerlendirmesi",
+            "Akıllı Öneriler - Kişiselleştirilmiş",
+            "Otomatik Kararlar - AI destekli",
+            "Makine Öğrenmesi - Adaptif sistem",
+            "Öngörücü Analiz - Gelecek tahmini"
+          ]
+        },
+        "security": {
+          "title": "🔒 Güvenlik & Şifreleme",
+          "features": [
+            "End-to-End Şifreleme - Tam güvenlik",
+            "Biyometrik Güvenlik - Parmak izi/yüz",
+            "Güvenli Depolama - Şifreli veri",
+            "AFN-ID Sistemi - Güvenli kimlik",
+            "Çok Faktörlü Doğrulama - 2FA",
+            "Güvenli İletişim - Şifreli mesajlar"
+          ]
+        }
+      }
+    },
+    "stats": {
+      "title": "Premium Avantajları",
+      "features": "200+ Premium Özellik",
+      "support": "24/7 Öncelikli Destek",
+      "usage": "Sınırsız Kullanım",
+      "security": "100% Güvenli & Şifreli"
+    },
+    "plans": {
+      "monthly": {
+        "title": "Aylık Premium",
+        "description": "Aylık abonelik - Tüm premium özelliklere erişim",
+        "price": "29"
+      },
+      "yearly": {
+        "title": "Yıllık Premium",
+        "description": "Yıllık abonelik - %50 tasarruf",
+        "price": "299"
+      },
+      "lifetime": {
+        "title": "Ömür Boyu Premium",
+        "description": "Tek seferlik ödeme - Sonsuza kadar premium",
+        "price": "999"
+      }
+    },
+    "actions": {
+      "upgrade": "Premium'a Geç",
+      "restore": "Satın Alımları Geri Yükle",
+      "manage": "Aboneliği Yönet",
+      "cancel": "Aboneliği İptal Et"
+    }
+  },
+  "permissions": {
+    "location": {
+      "title": "Konum Erişimi",
+      "message": "AfetNet, afet anlarında konumunuzu güvenle paylaşmak için konuma ihtiyaç duyar.",
+      "always": "Acil durumlarda arka planda güvenli iletişim için konum erişimi gereklidir.",
+      "whenInUse": "Acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır."
+    },
+    "bluetooth": {
+      "title": "Bluetooth Erişimi",
+      "message": "Yakındaki cihazlarla ağ kurmak için Bluetooth kullanırız.",
+      "always": "Afet durumlarında Bluetooth Mesh ile internet olmadan iletişim için Bluetooth'a ihtiyaç duyar."
+    },
+    "motion": {
+      "title": "Hareket Sensörleri",
+      "message": "GPS kapalıyken bile konum tahmini için hareket verilerine ihtiyaç var.",
+      "description": "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır."
+    },
+    "camera": {
+      "title": "Kamera Erişimi",
+      "message": "Aile üyeleri eklemek için kamera kullanır."
+    },
+    "microphone": {
+      "title": "Mikrofon Erişimi",
+      "message": "Acil durum sesli yönlendirme vermek için mikrofon kullanır."
+    },
+    "notifications": {
+      "title": "Bildirim Erişimi",
+      "message": "Acil durum uyarıları ve önemli bildirimler için gereklidir."
+    },
+    "contacts": {
+      "title": "Rehber Erişimi",
+      "message": "Acil durum kişileri eklemek için rehberinize erişim gerektirir."
+    }
+  },
+  "errors": {
+    "network": "Bağlantı hatası",
+    "location": "Konum alınamadı",
+    "permission": "İzin gerekli",
+    "timeout": "Zaman aşımı",
+    "unknown": "Bilinmeyen hata",
+    "retry": "Tekrar deneyin",
+    "contactSupport": "Destek ekibiyle iletişime geçin"
+  },
+  "success": {
+    "messageSent": "Mesaj gönderildi",
+    "locationShared": "Konum paylaşıldı",
+    "emergencyActivated": "Acil durum modu aktif",
+    "premiumActivated": "Premium üyelik aktif edildi",
+    "settingsSaved": "Ayarlar kaydedildi"
+  },
+  "diagnostics": {
+    "title": "Ultra-Elite Diagnostics",
+    "subtitle": "Real-time system monitoring",
+    "lastUpdate": "Son güncelleme",
+    "refresh": "Yenile",
+    "export": "Dışa Aktar",
+    "emergencyMode": "Acil Durum Modu",
+    "systemHealth": "Sistem Sağlığı",
+    "networkHealth": "Ağ Sağlığı",
+    "batteryStatus": "Pil Durumu",
+    "locationAccuracy": "Konum Doğruluğu",
+    "sensorStatus": "Sensör Durumu",
+    "meshNetwork": "Mesh Ağ",
+    "offlineMessaging": "Offline Mesajlaşma",
+    "securityStatus": "Güvenlik Durumu",
+    "performance": "Performans"
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

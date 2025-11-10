@@ -1,0 +1,88 @@
+services:
+  - type: web
+    name: afetnet-backend
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: cd server && npm install && npm run build
+    startCommand: cd server && npm start
+    envVars:
+<<<<<<< HEAD
+      # Core Configuration
+=======
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+<<<<<<< HEAD
+      
+      # Database (ZORUNLU)
+      - key: DATABASE_URL
+        sync: false
+        
+      # Apple Push Notifications (iOS için ZORUNLU)
+      - key: APNS_BUNDLE_ID
+        value: com.gokhancamci.afetnetapp
+      - key: APNS_KEY_ID
+        sync: false
+      - key: APNS_TEAM_ID
+        sync: false
+      - key: APNS_PRIVATE_KEY
+        sync: false
+        
+      # Firebase Cloud Messaging (Android için ZORUNLU - iOS için opsiyonel)
+=======
+      - key: DATABASE_URL
+        sync: false
+      - key: APNS_BUNDLE_ID
+        value: com.gokhancamci.afetnetapp
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+<<<<<<< HEAD
+        
+      # Apple IAP Verification (Premium özellikler için ZORUNLU)
+      - key: APPLE_SHARED_SECRET
+        sync: false
+        
+      # Push Notification Security (ZORUNLU)
+      - key: ORG_SECRET
+        sync: false
+        # Not: Güçlü bir random string oluşturun: openssl rand -base64 32
+        
+      # Server Base URL (ZORUNLU - Render otomatik ayarlar ama manuel de eklenebilir)
+      - key: BASE_URL
+        sync: false
+        # Not: Deploy sonrası Render URL'i buraya ekleyin: https://afetnet-backend.onrender.com
+        
+      # Monitoring (ZORUNLU - Production'da aktif)
+      - key: SENTRY_DSN
+        sync: false
+        # Not: Sentry DSN'i buraya ekleyin: https://sentry.io/settings/afetnet/projects/afetnet-backend/keys/
+      - key: SENTRY_ENABLED
+        value: "true"
+        # Not: Production'da Sentry monitoring aktif olmalı
+        
+      # Early Earthquake Warning (OPSİYONEL - Default API URL'leri eklendi)
+      - key: EEW_PROVIDER_MODE
+        value: "poll"
+      - key: AFAD_KANDILLI_URL
+        value: "https://deprem.afad.gov.tr/apiv2/event/latest?limit=100"
+      - key: USGS_URL
+        value: "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=3.0&orderby=time&limit=100"
+      - key: EMSC_URL
+        value: "https://www.seismicportal.eu/StandingProducts/fdsnws/event/1/query?format=json&minmagnitude=3.0&limit=100"
+      - key: OFFICIAL_WSS_URL
+        sync: false
+        # Not: Resmi WebSocket URL'i varsa buraya ekleyin
+      - key: OFFICIAL_WSS_TOKEN
+        sync: false
+        # Not: WebSocket authentication token varsa buraya ekleyin
+=======
+>>>>>>> origin/cursor/fix-three-code-bugs-2f6e
+    healthCheckPath: /health

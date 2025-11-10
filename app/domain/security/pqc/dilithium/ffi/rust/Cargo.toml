@@ -1,0 +1,42 @@
+[package]
+name = "afetnet-dilithium"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pqcrypto-dilithium = "0.8"
+hex = "0.4"
+anyhow = "1.0"
+
+[lib]
+name = "afetnet_dilithium"
+crate-type = ["cdylib"]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

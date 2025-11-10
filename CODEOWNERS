@@ -1,0 +1,71 @@
+# AfetNet Code Owners Configuration
+# This file defines code ownership for automatic reviewer assignment
+# Used by Bugbot and GitHub to route PRs to appropriate reviewers
+
+# Core Emergency Features
+/src/eew/                    @AfetNetTeam
+/src/emergency/               @AfetNetTeam
+/src/sos/                     @AfetNetTeam
+
+# Security & Encryption (Critical)
+/src/crypto/                  @SecurityTeam @AfetNetTeam
+/src/security/                @SecurityTeam @AfetNetTeam
+/src/services/MilitaryGradeSecurity.ts  @SecurityTeam
+
+# Network & Mesh
+/src/ble/                     @NetworkTeam @AfetNetTeam
+/src/mesh/                    @NetworkTeam @AfetNetTeam
+/src/offmesh/                 @NetworkTeam
+/src/offline/                 @NetworkTeam
+
+# Database & Storage
+/src/db/                      @BackendTeam @AfetNetTeam
+/src/storage/                 @BackendTeam
+
+# Services & Core Logic
+/src/services/                @BackendTeam @AfetNetTeam
+/src/stores/                  @BackendTeam
+/src/domain/                  @BackendTeam
+
+# UI & Mobile
+/src/screens/                 @MobileTeam @AfetNetTeam
+/src/components/              @MobileTeam
+/src/ui/                      @MobileTeam
+/src/navigation/              @MobileTeam
+
+# Testing & Quality
+/src/test/                    @QATeam @AfetNetTeam
+tests/                        @QATeam @AfetNetTeam
+.github/workflows/            @DevOpsTeam @AfetNetTeam
+
+# Configuration & Build
+app.config.ts                 @DevOpsTeam @AfetNetTeam
+eas.json                      @DevOpsTeam
+package.json                  @DevOpsTeam @AfetNetTeam
+tsconfig.json                 @BackendTeam
+
+# iOS Platform
+ios/                          @iOSTeam @MobileTeam @AfetNetTeam
+*.entitlements                @iOSTeam @SecurityTeam
+
+# Android Platform
+android/                      @AndroidTeam @MobileTeam @AfetNetTeam
+AndroidManifest.xml           @AndroidTeam @SecurityTeam
+
+# Documentation
+docs/                         @DocsTeam @AfetNetTeam
+README.md                     @DocsTeam @AfetNetTeam
+.cursor/rules/                @LeadTeam @AfetNetTeam
+
+# Root Level
+/                            @AfetNetTeam
+*.md                          @DocsTeam @AfetNetTeam
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,47 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="backgroundGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#C62828;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#B71C1C;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="512" cy="512" r="512" fill="url(#backgroundGradient)"/>
+  
+  <!-- Heartbeat waveform forming the "A" -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left stroke of A -->
+    <path d="M 320 720 L 420 320 L 460 320"/>
+    
+    <!-- Heartbeat pulse -->
+    <path d="M 460 320 L 480 280 L 500 320 L 520 280 L 540 320 L 560 280"/>
+    
+    <!-- Right stroke of A -->
+    <path d="M 560 320 L 660 320 L 700 720"/>
+    
+    <!-- Crossbar of A -->
+    <path d="M 420 480 L 660 480"/>
+  </g>
+  
+  <!-- Subtle heartbeat rhythm lines -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-opacity="0.3" stroke-linecap="round">
+    <!-- Rhythm indicators -->
+    <path d="M 300 200 L 300 180"/>
+    <path d="M 350 200 L 350 180"/>
+    <path d="M 400 200 L 400 180"/>
+    
+    <path d="M 624 200 L 624 180"/>
+    <path d="M 674 200 L 674 180"/>
+    <path d="M 724 200 L 724 180"/>
+    
+    <!-- Bottom rhythm -->
+    <path d="M 300 824 L 300 804"/>
+    <path d="M 350 824 L 350 804"/>
+    <path d="M 400 824 L 400 804"/>
+    
+    <path d="M 624 824 L 624 804"/>
+    <path d="M 674 824 L 674 804"/>
+    <path d="M 724 824 L 724 804"/>
+  </g>
+</svg>

@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Elite Security Functions
+    function isSystemClient() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidDeviceId(deviceId) {
+      return deviceId != null && 
+             deviceId is string && 
+             deviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
+             deviceId.size() == 12;
+    }
+
+    // Elite Security: User profile images - STRICT access control
+    match /profiles/{userId}/{allPaths=**} {
+      // Elite: Only authenticated users can read profiles
+      allow read: if isAuthenticated() && isValidDeviceId(userId);
+      // Elite: Strict write validation
+      allow write: if isAuthenticated() && 
+                      isValidDeviceId(userId) &&
+                      request.resource.metadata.userId == userId &&
+                      request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+                      request.resource.contentType.matches('image/.*');
+      allow delete: if isSystemClient() || 
+                       (isAuthenticated() && isValidDeviceId(userId));
+    }
+    
+    // Elite Security: Emergency SOS images - Public read for emergency, strict write
+    match /sos/{sosId}/{allPaths=**} {
+      // Elite: Public read for emergency response (life-saving)
+      allow read: if true;
+      // Elite: Strict write validation
+      allow write: if (isAuthenticated() || 
+                       (request.resource.metadata.deviceId != null && 
+                        isValidDeviceId(request.resource.metadata.deviceId))) &&
+                      request.resource.size <= 10 * 1024 * 1024 && // Max 10MB
+                      request.resource.contentType.matches('(image|video|audio)/.*');
+      allow delete: if isSystemClient() || 
+                       (isAuthenticated() && resource.metadata.deviceId != null);
+    }
+    
+    // Elite Security: Family member images - STRICT access control
+    match /family/{deviceId}/{memberId}/{allPaths=**} {
+      // Elite: Only authenticated users or device owner can read
+      allow read: if isAuthenticated() && isValidDeviceId(deviceId);
+      // Elite: Strict write validation
+      allow write: if isAuthenticated() && 
+                      isValidDeviceId(deviceId) &&
+                      request.resource.metadata.deviceId == deviceId &&
+                      request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+                      request.resource.contentType.matches('image/.*');
+      allow delete: if isSystemClient() || 
+                       (isAuthenticated() && isValidDeviceId(deviceId));
+    }
+    
+    // MBTiles offline maps (read-only, uploaded via admin)
+    match /maps/{mapId}/{allPaths=**} {
+      allow read: if true; // Public read for offline maps
+      allow write: if false; // Only admins can upload (via admin SDK)
+      allow delete: if false;
+    }
+    
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

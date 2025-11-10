@@ -1,0 +1,265 @@
+{
+  "Durumunu Belirt": "Durumunu Belirt",
+  "2 Kişiyiz": "2 Kişiyiz",
+  "Yaralı Var": "Yaralı Var",
+  "Kat: -1": "Kat: -1",
+  "Acil Nefes Darlığı": "Acil Nefes Darlığı",
+  "Sesimi Duyuyorsanız": "Sesimi Duyuyorsanız",
+  "Görev": "Görev",
+  "Kapsam ısı haritası": "Kapsam ısı haritası",
+  "Grid tarama": "Grid tarama",
+  "GİDİYORUM": "GİDİYORUM",
+  "Ses var": "Ses var",
+  "Ses yok": "Ses yok",
+  "Dinleme yapıldı": "Dinleme yapıldı",
+  "Güvenli değil": "Güvenli değil",
+  "Şifreli mesaj": "Şifreli mesaj",
+  "Yakın ses ping": "Yakın ses ping",
+  "Gruplarım": "Gruplarım",
+  "Grup Oluştur": "Grup Oluştur",
+  "Gruba Katıl": "Gruba Katıl",
+  "AFN-GID": "AFN-GID",
+  "QR ile Davet": "QR ile Davet",
+  "Doğrulama Cümlesi": "Doğrulama Cümlesi",
+  "Eşleşti": "Eşleşti",
+  "Üyeler": "Üyeler",
+  "Doğrulandı": "Doğrulandı",
+  "Acil Yayın": "Acil Yayın",
+  "Güvenlik PIN'i": "Güvenlik PIN'i",
+  "PIN gerekli": "PIN gerekli",
+  "Yanlış PIN": "Yanlış PIN",
+  "Kritik işlem": "Kritik işlem",
+  "Onboarding'i Tekrar Gör": "Onboarding'i Tekrar Gör",
+  "Gizlilik": "Gizlilik",
+  "Onam/İzin": "Onam/İzin",
+  "Uzak Yapılandırma": "Uzak Yapılandırma",
+  "Sağlık Raporu": "Sağlık Raporu",
+  "Test Paneli (QA)": "Test Paneli (QA)",
+  "Çevrimdışı İletişim": "Çevrimdışı İletişim",
+  "Uydu + Harita": "Uydu + Harita",
+  "SOS ve Aile": "SOS ve Aile",
+  "Pil Güvenliği": "Pil Güvenliği",
+  "İzinleri Ayarla": "İzinleri Ayarla",
+  "Bildirim İzni": "Bildirim İzni",
+  "Konum İzni": "Konum İzni",
+  "Bluetooth İzni": "Bluetooth İzni",
+  "Arka Plan Konum İzni": "Arka Plan Konum İzni",
+  "Gerekli": "Gerekli",
+  "Verildi": "Verildi",
+  "Reddedildi": "Reddedildi",
+  "Bekleniyor": "Bekleniyor",
+  "Kabul Etmiyorum": "Kabul Etmiyorum",
+  "Kabul Ediyorum": "Kabul Ediyorum",
+  "Geçici Olarak Kullanım Durduruldu": "Geçici Olarak Kullanım Durduruldu",
+  "Sınırlı Mod": "Sınırlı Mod",
+  "Tekrar Dene": "Tekrar Dene",
+  "Tanı Raporu Oluştur": "Tanı Raporu Oluştur",
+  "Sorun Bildir": "Sorun Bildir",
+  "Tüm Testleri Çalıştır": "Tüm Testleri Çalıştır",
+  "Mesh Döngü Testi": "Mesh Döngü Testi",
+  "SOS → ACK → Relay": "SOS → ACK → Relay",
+  "Mission Isı Haritası": "Mission Isı Haritası",
+  "Uydu Paket Mevcudiyeti": "Uydu Paket Mevcudiyeti",
+  "Erişilebilirlik Profili": "Erişilebilirlik Profili",
+
+  "premium": {
+    "title": "AfetNet Premium",
+    "subtitle": "200+ Hayat Kurtaran Özellik",
+    "description": "Dünyada eşi benzeri olmayan kapsamlı afet uygulaması. Premium ile tüm gelişmiş özelliklerden yararlanın!",
+    "world_class_badge": "DÜNYANIN EN KAPSAMLI AFET UYGULAMASI",
+    "premium_active": "Premium Aktif",
+    "premium_features": "Premium Özellikler",
+    "premium_active_description": "Tüm premium özellikler aktif",
+    "current_plan": "Mevcut Plan",
+    "subscription_end": "Bitiş",
+    "unlimited": "Süresiz",
+    
+    "plans": {
+      "title": "💎 Premium Planlar",
+      "monthly": {
+        "title": "Aylık Premium",
+        "description": "Tüm premium özellikler 1 ay",
+        "price": "₺49.99",
+        "currency": "TRY"
+      },
+      "yearly": {
+        "title": "Yıllık Premium", 
+        "description": "Tüm premium özellikler 1 yıl (%17 indirim)",
+        "price": "₺499.99",
+        "currency": "TRY"
+      },
+      "lifetime": {
+        "title": "Yaşam Boyu Premium",
+        "description": "Tüm premium özellikler kalıcı (%50 indirim)", 
+        "price": "₺999.99",
+        "currency": "TRY"
+      },
+      "selected": "Seçildi"
+    },
+
+    "features": {
+      "title": "🚀 Premium Özellikler",
+      "subtitle": "Dünyanın en kapsamlı afet uygulaması",
+      "categories": {
+        "emergency": {
+          "title": "🚨 Acil Durum & Kurtarma",
+          "features": [
+            "SOS Sistemi - Anında yardım çağrısı",
+            "Kritik Alarm - Sessiz modu aşan alarmlar",
+            "Kurtarma Koordinasyonu - SAR ve triaj",
+            "Medikal Bilgi - ICE verileri",
+            "Enkaz Modu - Hareketsizlik algılama",
+            "Ses Ping - Enkaz altı iletişim"
+          ]
+        },
+        "family": {
+          "title": "👨‍👩‍👧‍👦 Aile & Sosyal",
+          "features": [
+            "Sınırsız Aile Takibi - Gerçek zamanlı konum",
+            "Aile Mesajlaşması - Şifreli iletişim",
+            "Yakınlık Algılama - Aile uyarıları",
+            "Aile Haritası - Tüm üyelerin haritası",
+            "Grup Yönetimi - Takım koordinasyonu",
+            "Sosyal Güvenlik - Topluluk desteği"
+          ]
+        },
+        "maps": {
+          "title": "🗺️ Harita & Navigasyon",
+          "features": [
+            "Offline Haritalar - İnternet olmadan",
+            "Topografik Haritalar - Yüksek çözünürlük",
+            "Rota Planlama - Gelişmiş optimizasyon",
+            "PDR İz Takibi - Adım bazlı konum",
+            "GPS Fusion - Çoklu sensör birleşimi",
+            "Konum Paylaşımı - Gerçek zamanlı"
+          ]
+        },
+        "mesh": {
+          "title": "📡 Mesh Ağ & İletişim",
+          "features": [
+            "BLE Mesh Ağı - Bluetooth mesh",
+            "WiFi Direct - Doğrudan bağlantı",
+            "P2P Mesajlaşma - Şebekesiz iletişim",
+            "Mesaj Rölesi - Otomatik iletim",
+            "Çevrimdışı Senkronizasyon - Veri senkronu",
+            "Kritik Mesajlar - Öncelikli iletim"
+          ]
+        },
+        "ai": {
+          "title": "🤖 AI & Akıllı Sistemler",
+          "features": [
+            "AI Karar Desteği - Akıllı analiz",
+            "Durum Analizi - Risk değerlendirmesi",
+            "Akıllı Öneriler - Kişiselleştirilmiş",
+            "Otomatik Kararlar - AI destekli",
+            "Makine Öğrenmesi - Adaptif sistem",
+            "Öngörücü Analiz - Gelecek tahmini"
+          ]
+        },
+        "security": {
+          "title": "🔒 Güvenlik & Şifreleme",
+          "features": [
+            "End-to-End Şifreleme - Tam güvenlik",
+            "Biyometrik Güvenlik - Parmak izi/yüz",
+            "Güvenli Depolama - Şifreli veri",
+            "AFN-ID Sistemi - Güvenli kimlik",
+            "Çok Faktörlü Doğrulama - 2FA",
+            "Güvenli İletişim - Şifreli mesajlar"
+          ]
+        },
+        "advanced": {
+          "title": "🎯 Gelişmiş Özellikler",
+          "features": [
+            "Drone Koordinasyonu - Uzaktan kontrol",
+            "Lojistik Yönetimi - Tedarik takibi",
+            "Eğitim Simülasyonları - Hazırlık",
+            "Raporlama & Analitik - Detaylı analiz",
+            "Erişilebilirlik - Özel ihtiyaçlar",
+            "Çok Dilli Destek - 20+ dil"
+          ]
+        }
+      }
+    },
+
+    "stats": {
+      "title": "📊 Premium Avantajları",
+      "features": "Premium Özellik",
+      "support": "Öncelikli Destek", 
+      "usage": "Sınırsız Kullanım",
+      "security": "Güvenli & Şifreli"
+    },
+
+    "actions": {
+      "purchase": "Premium Satın Al",
+      "restore": "Satın Alımları Geri Yükle",
+      "terms": "Satın alma işlemi Apple/Google hesabınızdan ücretlendirilecektir. Abonelik otomatik olarak yenilenir, iptal etmediğiniz sürece."
+    }
+  },
+
+  "navigation": {
+    "home": "Ana Sayfa",
+    "map": "Harita", 
+    "messages": "Mesajlar",
+    "family": "Aile",
+    "settings": "Ayarlar",
+    "earthquake": "Deprem"
+  },
+
+  "settings": {
+    "title": "Ayarlar",
+    "subtitle": "Kapsamlı ve detaylı ayarlar yönetimi",
+    "sections": {
+      "premium": "Premium",
+      "profile": "Profil",
+      "general": "Genel", 
+      "notifications": "Bildirimler",
+      "earthquake": "Deprem",
+      "comprehensive": "Kapsamlı Özellikler",
+      "mesh": "Mesh",
+      "security": "Güvenlik",
+      "data": "Veri"
+    }
+  },
+
+  "home": {
+    "title": "AfetNet",
+    "subtitle": "Hayat Kurtaran Teknoloji",
+    "active": "AKTİF",
+    "premium": "PREMIUM",
+    "free": "ÜCRETSİZ",
+    "premium_required": "Premium Gerekli",
+    "premium_description": "Sadece deprem bildirimleri ücretsizdir. Diğer tüm özellikler için Premium satın alın.",
+    "purchase": "Satın Al",
+    "sos": "ACİL DURUM / SOS",
+    "sos_description": "Anında yardım çağrısı gönder",
+    "sos_premium": "Premium gerekli",
+    "location_auto": "Konumunuz otomatik gönderilir",
+    "location_premium": "Premium ile konum paylaşımı",
+    "quick_access": "Hızlı Erişim",
+    "features_count": "6 Özellik",
+    "offline_map": "Offline Harita",
+    "offline_map_description": "İnternet olmadan navigasyon",
+    "mesh_messaging": "Mesh Mesajlaşma",
+    "mesh_messaging_description": "Bluetooth mesh ağı",
+    "family_tracking": "Aile Takibi",
+    "family_tracking_description": "Ailenizin konumunu takip edin",
+    "premium_required_alert": "Premium Gerekli",
+    "feature_premium_required": "Bu özellik Premium üyelik gerektirir.",
+    "cancel": "İptal",
+    "purchase_premium": "Premium Satın Al"
+  },
+
+  "earthquake": {
+    "title": "Deprem İzleme",
+    "active": "AKTİF",
+    "live": "CANLI",
+    "monitoring_active": "Deprem İzleme Sistemi Aktif",
+    "afad_kandilli": "AFAD ve Kandilli verilerine bağlı",
+    "last_earthquakes": "Son Depremler",
+    "magnitude": "Büyüklük",
+    "location": "Konum",
+    "time": "Zaman",
+    "depth": "Derinlik",
+    "km": "km"
+  }
+}

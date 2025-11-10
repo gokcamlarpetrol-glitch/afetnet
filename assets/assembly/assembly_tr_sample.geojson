@@ -1,0 +1,125 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "İstanbul Büyükşehir Belediyesi",
+        "district": "Fatih",
+        "city": "İstanbul",
+        "capacity": 500,
+        "type": "government",
+        "contact": "0212 455 00 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [28.9784, 41.0082]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Kadıköy Belediyesi",
+        "district": "Kadıköy",
+        "city": "İstanbul",
+        "capacity": 300,
+        "type": "government",
+        "contact": "0216 542 50 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [29.0255, 40.9928]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Ankara Büyükşehir Belediyesi",
+        "district": "Çankaya",
+        "city": "Ankara",
+        "capacity": 800,
+        "type": "government",
+        "contact": "0312 507 10 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [32.8597, 39.9334]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "İzmir Büyükşehir Belediyesi",
+        "district": "Konak",
+        "city": "İzmir",
+        "capacity": 600,
+        "type": "government",
+        "contact": "0232 293 12 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [27.1428, 38.4192]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bursa Büyükşehir Belediyesi",
+        "district": "Osmangazi",
+        "city": "Bursa",
+        "capacity": 400,
+        "type": "government",
+        "contact": "0224 220 00 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [29.0610, 40.1826]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Antalya Büyükşehir Belediyesi",
+        "district": "Muratpaşa",
+        "city": "Antalya",
+        "capacity": 350,
+        "type": "government",
+        "contact": "0242 238 54 44"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [30.7133, 36.8969]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Konya Büyükşehir Belediyesi",
+        "district": "Meram",
+        "city": "Konya",
+        "capacity": 450,
+        "type": "government",
+        "contact": "0332 221 10 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [32.4841, 37.8667]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Adana Büyükşehir Belediyesi",
+        "district": "Seyhan",
+        "city": "Adana",
+        "capacity": 300,
+        "type": "government",
+        "contact": "0322 458 10 00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [35.3213, 37.0000]
+      }
+    }
+  ]
+}
