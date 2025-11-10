@@ -141,10 +141,11 @@ class EarthquakeService {
       // Silent fail for network errors - expected in offline scenarios
       if (__DEV__) {
         logger.debug('Earthquake fetch skipped (network error - expected):', {
-        error: error?.message,
-        name: error?.name,
-        stack: error?.stack
-      });
+          error: error?.message,
+          name: error?.name,
+          stack: error?.stack
+        });
+      }
       
       // ELITE: Try cache on error with detailed error handling
       const cached = await this.loadFromCache();
