@@ -8,6 +8,8 @@
 
 import { EarthquakeEvent, WarningETA, earthquakeDetectionService } from './earthquake-detection';
 import { pool } from './database';
+import { backendAIPredictionService } from './services/BackendAIPredictionService';
+import { centralizedAIAnalysisService } from './services/centralizedAIAnalysisService';
 
 export interface WarningTarget {
   userId: string;
@@ -63,6 +65,13 @@ class EarthquakeWarningService {
       
       console.log(`🌍 Processing earthquake: M${event.magnitude.toFixed(1)} at ${event.region}`);
       
+      // ELITE: Single AI prediction call for all users (cost optimization)
+      const recentEvents = earthquakeDetectionService.getRecentEarthquakes(60);
+      const aiPrediction = await backendAIPredictionService.predictEarthquake(event, recentEvents);
+      
+      // ELITE: Single AI analysis call for all users (cost optimization)
+      const aiAnalysis = await centralizedAIAnalysisService.analyzeEarthquake(event);
+      
       // Get all registered users
       const users = await this.getRegisteredUsers();
       
@@ -71,7 +80,9 @@ class EarthquakeWarningService {
         this.isWithinWarningRadius(event, user.latitude, user.longitude)
       );
       
-      // Send warnings to all target users
+      console.log(`📢 Broadcasting to ${targetUsers.length} users (AI prediction: ${aiPrediction?.confidence || 'N/A'}% confidence)`);
+      
+      // ELITE: Send warnings to all target users with AI prediction data
       for (const user of targetUsers) {
         const eta = earthquakeDetectionService.calculateETA(
           event,
@@ -79,16 +90,23 @@ class EarthquakeWarningService {
           user.longitude
         );
         
+        // Use AI prediction time advance if available
+        const timeAdvance = aiPrediction?.timeAdvance || eta.secondsRemaining;
+        
         // Only send if significant time remaining
-        if (eta.secondsRemaining > 0 && eta.secondsRemaining <= 120) {
+        if (timeAdvance > 0 && timeAdvance <= 120) {
           const warning: EarthquakeWarning = {
             event,
-            eta,
+            eta: {
+              ...eta,
+              secondsRemaining: Math.floor(timeAdvance),
+            },
             target: user,
-            priority: eta.secondsRemaining < 10 ? 'critical' : 'high',
+            priority: timeAdvance < 10 ? 'critical' : 'high',
           };
           
-          await this.sendWarning(warning);
+          // Include AI prediction and analysis data in payload
+          await this.sendWarning(warning, aiPrediction, aiAnalysis);
         }
       }
       
@@ -164,8 +182,13 @@ class EarthquakeWarningService {
 
   /**
    * Send warning via APNs (iOS) or FCM (Android)
+   * ELITE: Includes AI prediction and analysis data
    */
-  private async sendWarning(warning: EarthquakeWarning) {
+  private async sendWarning(
+    warning: EarthquakeWarning,
+    aiPrediction?: any,
+    aiAnalysis?: any
+  ) {
     console.log(
       `📢 Sending ${warning.priority} warning: ${warning.eta.secondsRemaining}s to ${warning.target.userId}`
     );
@@ -175,6 +198,11 @@ class EarthquakeWarningService {
         magnitude: warning.event.magnitude,
         region: warning.event.region,
         timestamp: warning.event.timestamp,
+        latitude: warning.event.latitude,
+        longitude: warning.event.longitude,
+        depth: warning.event.depth,
+        source: warning.event.source,
+        verified: warning.event.verified,
       },
       warning: {
         secondsRemaining: warning.eta.secondsRemaining,
@@ -182,6 +210,23 @@ class EarthquakeWarningService {
         action: warning.eta.recommendedAction,
         priority: warning.priority,
       },
+      // ELITE: Include AI prediction data (single call for all users)
+      aiPrediction: aiPrediction ? {
+        confidence: aiPrediction.confidence,
+        estimatedMagnitude: aiPrediction.estimatedMagnitude,
+        timeAdvance: aiPrediction.timeAdvance,
+        probability: aiPrediction.probability,
+        urgency: aiPrediction.urgency,
+        recommendedAction: aiPrediction.recommendedAction,
+      } : null,
+      // ELITE: Include AI analysis data (single call for all users)
+      aiAnalysis: aiAnalysis ? {
+        riskLevel: aiAnalysis.riskLevel,
+        userMessage: aiAnalysis.userMessage,
+        recommendations: aiAnalysis.recommendations,
+        confidence: aiAnalysis.confidence,
+        sources: aiAnalysis.sources,
+      } : null,
     };
     
     try {

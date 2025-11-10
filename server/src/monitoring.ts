@@ -1,11 +1,22 @@
 /**
  * MONITORING SERVICE - Sentry Integration
  * Error tracking, performance monitoring, and alerting
+ * ELITE: Optional Sentry integration - gracefully handles missing packages
  */
 
-import * as Sentry from '@sentry/node';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { Express, Request, Response, NextFunction } from 'express';
+
+// ELITE: Optional Sentry imports - only load if available
+let Sentry: any = null;
+let nodeProfilingIntegration: any = null;
+
+try {
+  Sentry = require('@sentry/node');
+  nodeProfilingIntegration = require('@sentry/profiling-node').nodeProfilingIntegration;
+} catch (error) {
+  // Sentry packages not installed - monitoring will be disabled
+  console.warn('⚠️ Sentry packages not found - monitoring disabled');
+}
 
 export interface MonitoringConfig {
   dsn: string;
@@ -17,11 +28,17 @@ export interface MonitoringConfig {
 
 class MonitoringService {
   private isInitialized = false;
+  private isAvailable = Sentry !== null;
 
   /**
    * Initialize Sentry monitoring
    */
   initialize(config: MonitoringConfig) {
+    if (!this.isAvailable) {
+      console.warn('⚠️ Sentry not available - monitoring disabled');
+      return;
+    }
+    
     if (this.isInitialized) {
       console.warn('⚠️ Monitoring already initialized');
       return;
@@ -43,9 +60,9 @@ class MonitoringService {
         environment: config.environment || 'production',
         tracesSampleRate: config.tracesSampleRate || 0.1, // 10% of transactions
         profilesSampleRate: config.profilesSampleRate || 0.1, // 10% of transactions
-        integrations: [
+        integrations: nodeProfilingIntegration ? [
           nodeProfilingIntegration(),
-        ],
+        ] : [],
         beforeSend(event, hint) {
           // Filter out sensitive data
           if (event.request) {
@@ -126,7 +143,7 @@ class MonitoringService {
    * Set user context
    */
   setUser(user: { id: string; email?: string; username?: string }) {
-    if (!this.isInitialized) return;
+    if (!this.isAvailable || !this.isInitialized) return;
 
     Sentry.setUser(user);
   }
@@ -135,7 +152,7 @@ class MonitoringService {
    * Clear user context
    */
   clearUser() {
-    if (!this.isInitialized) return;
+    if (!this.isAvailable || !this.isInitialized) return;
 
     Sentry.setUser(null);
   }

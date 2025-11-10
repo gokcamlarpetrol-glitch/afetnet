@@ -34,12 +34,12 @@ class EarthquakeDetectionService {
   private readonly VERIFICATION_WINDOW_MS = 30_000; // 30 seconds for multi-source confirmation
   
   // ELITE: Circuit breaker for EMSC API to prevent rate limiting
+  private readonly FAILURE_THRESHOLD = 3;
+  private readonly RESET_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private emscCircuitBreaker = {
     failures: 0,
     lastFailureTime: 0,
     state: 'CLOSED' as 'CLOSED' | 'OPEN' | 'HALF_OPEN',
-    readonly FAILURE_THRESHOLD = 3,
-    readonly RESET_TIMEOUT_MS = 5 * 60 * 1000, // 5 minutes
   };
   
   constructor() {
@@ -84,7 +84,7 @@ class EarthquakeDetectionService {
     // Check circuit breaker state
     if (this.emscCircuitBreaker.state === 'OPEN') {
       // Check if reset timeout has passed
-      if (now - this.emscCircuitBreaker.lastFailureTime < this.emscCircuitBreaker.RESET_TIMEOUT_MS) {
+      if (now - this.emscCircuitBreaker.lastFailureTime < this.RESET_TIMEOUT_MS) {
         // Still in cooldown period - skip request
         return;
       } else {
@@ -164,12 +164,12 @@ class EarthquakeDetectionService {
       this.emscCircuitBreaker.lastFailureTime = now;
       
       // Check if threshold exceeded
-      if (this.emscCircuitBreaker.failures >= this.emscCircuitBreaker.FAILURE_THRESHOLD) {
+      if (this.emscCircuitBreaker.failures >= this.FAILURE_THRESHOLD) {
         this.emscCircuitBreaker.state = 'OPEN';
-        console.warn(`⚠️ EMSC circuit breaker OPEN (${this.emscCircuitBreaker.failures} failures) - pausing requests for ${this.emscCircuitBreaker.RESET_TIMEOUT_MS / 1000}s`);
+        console.warn(`⚠️ EMSC circuit breaker OPEN (${this.emscCircuitBreaker.failures} failures) - pausing requests for ${this.RESET_TIMEOUT_MS / 1000}s`);
         console.info('💡 This is normal - EMSC API sometimes returns HTML instead of JSON. Circuit breaker will auto-reset in 5 minutes.');
       } else {
-        console.warn(`⚠️ EMSC API issue (${this.emscCircuitBreaker.failures}/${this.emscCircuitBreaker.FAILURE_THRESHOLD}): ${error?.message || error} - circuit breaker active`);
+        console.warn(`⚠️ EMSC API issue (${this.emscCircuitBreaker.failures}/${this.FAILURE_THRESHOLD}): ${error?.message || error} - circuit breaker active`);
       }
     }
   }

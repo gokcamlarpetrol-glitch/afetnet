@@ -199,8 +199,11 @@ JSON formatında döndür (sadece JSON):
       // Parse JSON response
       const parsed = this.parseAIResponse(generatedText);
       
+      // Generate profile key for ID
+      const profileKeyForId = this.getProfileKey(params);
+      
       return {
-        id: `plan_${Date.now()}_${profileKey}`,
+        id: `plan_${Date.now()}_${profileKeyForId}`,
         title: parsed.title || 'Kişisel Afet Hazırlık Planı',
         personaSummary: parsed.personaSummary || '',
         sections: parsed.sections || [],
