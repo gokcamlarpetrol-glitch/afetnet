@@ -31,7 +31,7 @@ import { batterySaverService } from '../../services/BatterySaverService';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('SettingsScreen');
-import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
+// AI Feature Toggle import kaldırıldı - AI Asistan her zaman aktif
 import { ENV } from '../../config/env';
 
 interface SettingOption {
@@ -217,30 +217,7 @@ export default function SettingsScreen({ navigation }: any) {
   ];
 
   const aiSettings: SettingOption[] = [
-    {
-      icon: 'sparkles',
-      title: 'AI Asistan',
-      subtitle: 'Risk skoru, hazırlık planı ve afet anı rehberi',
-      type: 'switch',
-      value: aiFeaturesEnabled,
-      onPress: async () => {
-        haptics.impactLight();
-        const newValue = !aiFeaturesEnabled;
-        setAiFeaturesEnabled(newValue);
-        if (newValue) {
-          await aiFeatureToggle.enable();
-        } else {
-          await aiFeatureToggle.disable();
-        }
-        Alert.alert(
-          'AI Asistan',
-          newValue 
-            ? 'AI Asistan özellikleri aktif edildi. Ana ekranda AI kartları görünecek.'
-            : 'AI Asistan özellikleri kapatıldı.',
-          [{ text: 'Tamam' }]
-        );
-      },
-    },
+    // AI Asistan toggle kaldırıldı - her zaman aktif
     {
       icon: 'newspaper',
       title: 'Son Dakika Haberler',
@@ -267,14 +244,7 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: () => {
         haptics.impactLight();
-        if (!aiFeaturesEnabled) {
-          Alert.alert(
-            'AI Asistan Gerekli',
-            'Risk skoru özelliğini kullanmak için AI Asistan aktif olmalı.',
-            [{ text: 'Tamam' }]
-          );
-          return;
-        }
+        // AI Asistan her zaman aktif - kontrol kaldırıldı
         navigation.navigate('RiskScore');
       },
     },
@@ -285,14 +255,7 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: () => {
         haptics.impactLight();
-        if (!aiFeaturesEnabled) {
-          Alert.alert(
-            'AI Asistan Gerekli',
-            'Hazırlık planı özelliğini kullanmak için AI Asistan aktif olmalı.',
-            [{ text: 'Tamam' }]
-          );
-          return;
-        }
+        // AI Asistan her zaman aktif - kontrol kaldırıldı
         navigation.navigate('PreparednessPlan');
       },
     },
@@ -303,14 +266,7 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'arrow',
       onPress: () => {
         haptics.impactLight();
-        if (!aiFeaturesEnabled) {
-          Alert.alert(
-            'AI Asistan Gerekli',
-            'Afet anı rehberi özelliğini kullanmak için AI Asistan aktif olmalı.',
-            [{ text: 'Tamam' }]
-          );
-          return;
-        }
+        // AI Asistan her zaman aktif - kontrol kaldırıldı
         navigation.navigate('PanicAssistant');
       },
     },
