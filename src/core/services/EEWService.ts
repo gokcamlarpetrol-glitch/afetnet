@@ -80,6 +80,48 @@ class EEWService {
       this.pollLoop();
     }
 
+    // CRITICAL: Listen to SeismicSensorService for REAL early warnings (P-wave detection)
+    // This is the TRUE early warning - detects earthquakes BEFORE they happen
+    // AFAD API only provides data AFTER earthquake occurs (late notification)
+    try {
+      const { seismicSensorService } = await import('./SeismicSensorService');
+      
+      // Listen for P-wave detections (earliest possible warning)
+      seismicSensorService.onDetection((event: any) => {
+        if (event.pWaveDetected && event.confidence >= 40) {
+          // CRITICAL: P-wave detected - this is REAL early warning (before earthquake!)
+          if (__DEV__) {
+            logger.info(`🌊 REAL EARLY WARNING: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence`);
+          }
+          
+          // Create EEW event from P-wave detection
+          const pWaveEvent: EEWEvent = {
+            id: `pwave-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            latitude: event.location?.latitude || 39.0,
+            longitude: event.location?.longitude || 35.0,
+            magnitude: event.estimatedMagnitude || event.maxMagnitude || 4.0,
+            depth: 10,
+            region: 'P-Wave Detection (Gerçek Erken Uyarı)',
+            source: 'P_WAVE_DETECTION',
+            issuedAt: event.startTime || Date.now(),
+            etaSec: event.timeAdvance || 10, // P-wave gives 10-20 seconds advance
+            certainty: event.confidence >= 70 ? 'high' : event.confidence >= 50 ? 'medium' : 'low',
+          };
+          
+          // Process through EEW system
+          this.notifyCallbacks(pWaveEvent).catch(error => {
+            logger.error('Failed to process P-wave detection:', error);
+          });
+        }
+      });
+      
+      if (__DEV__) {
+        logger.info('✅ SeismicSensorService listener registered - REAL early warnings active!');
+      }
+    } catch (error) {
+      logger.warn('Failed to register SeismicSensorService listener:', error);
+    }
+
     if (__DEV__) {
       logger.info('EEWService started in polling-only mode');
     }
