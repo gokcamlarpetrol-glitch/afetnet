@@ -331,11 +331,9 @@ class EarthquakeService {
             if (isNaN(latitude) || isNaN(longitude) || 
                 latitude < 35 || latitude > 43 || 
                 longitude < 25 || longitude > 45) {
+              // Filter out earthquakes outside Turkey bounds (this is expected, not an error)
               if (__DEV__) {
-                // Filter out earthquakes outside Turkey bounds (this is expected, not an error)
-                if (__DEV__) {
-                  logger.debug('Filtered earthquake outside Turkey bounds:', { latitude, longitude, location: item.location });
-                }
+                logger.debug('Filtered earthquake outside Turkey bounds:', { latitude, longitude, location: item.location });
               }
               return null;
             }
