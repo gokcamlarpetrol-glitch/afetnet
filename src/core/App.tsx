@@ -36,6 +36,9 @@ import HealthProfileScreen from './screens/health/HealthProfileScreen';
 import NewMessageScreen from './screens/messages/NewMessageScreen';
 import ConversationScreen from './screens/messages/ConversationScreen';
 import NewsDetailScreen from './screens/news/NewsDetailScreen';
+import RiskScoreScreen from './screens/ai/RiskScoreScreen';
+import PreparednessPlanScreen from './screens/ai/PreparednessPlanScreen';
+import PanicAssistantScreen from './screens/ai/PanicAssistantScreen';
 
 // Navigation
 import MainTabs from './navigation/MainTabs';
@@ -141,6 +144,18 @@ export default function CoreApp() {
                 name="NewsDetail" 
                 component={NewsDetailScreen}
                 options={{ presentation: 'modal' }}
+              />
+              <Stack.Screen 
+                name="RiskScore" 
+                component={RiskScoreScreen}
+              />
+              <Stack.Screen 
+                name="PreparednessPlan" 
+                component={PreparednessPlanScreen}
+              />
+              <Stack.Screen 
+                name="PanicAssistant" 
+                component={PanicAssistantScreen}
               />
             </Stack.Navigator>
           </NavigationContainer>
