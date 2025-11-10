@@ -360,6 +360,10 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       {/* Header - Fixed */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Mesajlar</Text>
+          <Text style={styles.headerSubtitle}>
+            {filteredConversations.length} konuşma • {isMeshConnected ? 'Online' : 'Offline'}
+          </Text>
           <View style={styles.meshRow}>
             <Text
               style={[
