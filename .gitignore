@@ -81,3 +81,9 @@ credentials.json
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Firebase API Keys
+.env
+*.env
+.env.local
+.env.*.local

@@ -685,7 +685,7 @@ export default function OnboardingScreen5({ navigation }: OnboardingScreen5Props
 
       {/* Pagination Indicator */}
       <View style={styles.paginationContainer}>
-        <PaginationIndicator currentStep={5} totalSteps={5} />
+        <PaginationIndicator currentStep={5} totalSteps={6} />
       </View>
     </View>
   );

@@ -229,7 +229,7 @@ export default function OnboardingScreen1({ navigation }: OnboardingScreen1Props
 
       {/* Pagination Indicator */}
       <View style={styles.paginationContainer}>
-        <PaginationIndicator currentStep={1} totalSteps={5} />
+        <PaginationIndicator currentStep={1} totalSteps={6} />
       </View>
     </View>
   );

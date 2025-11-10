@@ -25,7 +25,8 @@ export const ENV = {
   RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', 'appl_vsaRFDWlxPWReNAOydDuZCGEPUS'),
   
   // Firebase
-  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY', 'AIzaSyBD23B2SEcxs7b3W0iyEISWhquRSbXtotQ'),
+  // SECURITY: API key must be set via environment variable (EXPO_PUBLIC_FIREBASE_API_KEY or FIREBASE_API_KEY)
+  FIREBASE_API_KEY: getEnvVar('EXPO_PUBLIC_FIREBASE_API_KEY') || getEnvVar('FIREBASE_API_KEY', ''),
   FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', 'afetnet-4a6b6'),
   
   // EAS

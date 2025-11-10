@@ -196,7 +196,7 @@ export default function OnboardingScreen4({ navigation }: OnboardingScreen4Props
 
       {/* Pagination Indicator */}
       <View style={styles.paginationContainer}>
-        <PaginationIndicator currentStep={4} totalSteps={5} />
+        <PaginationIndicator currentStep={4} totalSteps={6} />
       </View>
     </View>
   );
