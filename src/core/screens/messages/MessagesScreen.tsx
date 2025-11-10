@@ -560,12 +560,14 @@ const styles = StyleSheet.create({
   },
   headerContent: {
     flex: 1,
+    minHeight: 60, // Ensure minimum height for title visibility
   },
   headerTitle: {
     fontSize: 32,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.5,
+    minHeight: 38, // Ensure title always has space
   },
   headerSubtitle: {
     fontSize: 14,
