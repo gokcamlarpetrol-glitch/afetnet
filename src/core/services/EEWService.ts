@@ -437,12 +437,9 @@ class EEWService {
             logger.info(`Polled ${eventsArray.length} events from AFAD`);
           }
         } catch (error) {
-          // Only log errors in dev mode
+          // Silent fail for network errors - expected in offline scenarios
           if (__DEV__) {
-            // Silent fail for network errors - expected in offline scenarios
-            if (__DEV__) {
-              logger.debug('EEW poll error (expected in offline scenarios):', error);
-            }
+            logger.debug('EEW poll error (expected in offline scenarios):', error);
           }
         }
       }
