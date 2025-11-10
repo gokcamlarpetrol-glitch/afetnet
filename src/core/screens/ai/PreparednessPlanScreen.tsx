@@ -4,9 +4,11 @@
  */
 
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import * as haptics from '../../utils/haptics';
@@ -16,6 +18,8 @@ import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator
 const logger = createLogger('PreparednessPlanScreen');
 
 export default function PreparednessPlanScreen() {
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { preparednessPlan, preparednessPlanLoading } = useAIAssistantStore();
 
   useEffect(() => {
@@ -134,7 +138,23 @@ export default function PreparednessPlanScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
+      {/* Header with Back Button */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top + 16 }]}>
+        <Pressable 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+        >
+          <Ionicons name="chevron-back" size={24} color="#fff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Hazırlık Planı</Text>
+        <View style={styles.headerRight} />
+      </View>
+
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
       {/* Header */}
       <LinearGradient colors={['#1a1f2e', '#141824']} style={styles.header}>
         <Text style={styles.title}>{preparednessPlan.title}</Text>
@@ -243,6 +263,7 @@ export default function PreparednessPlanScreen() {
         </Text>
       </View>
     </ScrollView>
+    </View>
   );
 }
 

@@ -4,9 +4,11 @@
  */
 
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import * as haptics from '../../utils/haptics';
@@ -51,6 +53,8 @@ const getPhaseGradient = (phase: 'before' | 'during' | 'after' | 'check'): [stri
 };
 
 export default function PanicAssistantScreen() {
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { panicAssistant, panicAssistantLoading } = useAIAssistantStore();
 
   useEffect(() => {
@@ -116,7 +120,23 @@ export default function PanicAssistantScreen() {
     .filter((group) => group.actions.length > 0);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
+      {/* Header with Back Button */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top + 16 }]}>
+        <Pressable 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+        >
+          <Ionicons name="chevron-back" size={24} color="#fff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Afet Rehberi</Text>
+        <View style={styles.headerRight} />
+      </View>
+
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
       {/* Header */}
       <LinearGradient colors={['#dc2626', '#991b1b']} style={styles.header}>
         <Ionicons name="warning" size={48} color="#fff" />

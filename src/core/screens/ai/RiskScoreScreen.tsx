@@ -4,9 +4,11 @@
  */
 
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import { RiskLevel, RiskTrend } from '../../ai/types/ai.types';
@@ -17,6 +19,8 @@ import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator
 const logger = createLogger('RiskScoreScreen');
 
 export default function RiskScoreScreen() {
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { riskScore, riskScoreLoading } = useAIAssistantStore();
 
   useEffect(() => {
@@ -116,7 +120,23 @@ export default function RiskScoreScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
+      {/* Header with Back Button */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top + 16 }]}>
+        <Pressable 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+        >
+          <Ionicons name="chevron-back" size={24} color="#fff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Risk Skoru</Text>
+        <View style={styles.headerRight} />
+      </View>
+
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
       {/* Risk Skoru */}
       <LinearGradient
         colors={['#1a1f2e', '#141824']}
@@ -292,6 +312,7 @@ export default function RiskScoreScreen() {
         </Text>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
@@ -299,6 +320,38 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    backgroundColor: colors.background.primary,
+    zIndex: 10,
+    elevation: 4,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    marginHorizontal: 16,
+  },
+  headerRight: {
+    width: 40,
+  },
+  scrollView: {
+    flex: 1,
   },
   content: {
     padding: spacing[6],
