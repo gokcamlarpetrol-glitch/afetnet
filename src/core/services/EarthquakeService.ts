@@ -138,7 +138,9 @@ class EarthquakeService {
         }
       }
     } catch (error: any) {
-      logger.error('❌ Failed to fetch earthquakes:', {
+      // Silent fail for network errors - expected in offline scenarios
+      if (__DEV__) {
+        logger.debug('Earthquake fetch skipped (network error - expected):', {
         error: error?.message,
         name: error?.name,
         stack: error?.stack
