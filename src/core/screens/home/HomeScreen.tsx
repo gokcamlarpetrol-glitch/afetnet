@@ -32,7 +32,7 @@ export default function HomeScreen({ navigation }: any) {
   const { earthquakes, loading, error, refresh } = useEarthquakes();
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
-  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true); // Default: true
+  const [aiFeaturesEnabled] = useState(true); // AI Asistan her zaman aktif
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
 
   // Elite-level entrance animations with staggered delays
@@ -53,20 +53,7 @@ export default function HomeScreen({ navigation }: any) {
     // Initial load
     refresh();
     
-    // AI feature flag kontrolü
-    const checkAIFeatures = async () => {
-      try {
-        // Feature toggle'ın initialize olduğundan emin ol
-        await aiFeatureToggle.initialize();
-        setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
-      } catch (error) {
-        logger.error('AI feature check error:', error);
-        // Hata durumunda da aktif göster
-        setAiFeaturesEnabled(true);
-      }
-    };
-    checkAIFeatures();
-    
+    // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
     // Elite entrance animation with staggered cards
     Animated.parallel([
       Animated.timing(fadeAnim, {

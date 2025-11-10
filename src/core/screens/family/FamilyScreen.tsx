@@ -805,7 +805,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       {/* Header - Fixed Position */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle} numberOfLines={1}>Aile Güvenlik Zinciri</Text>
+          <View style={styles.titleContainer}>
+            <Text style={styles.headerTitle}>Aile Güvenlik</Text>
+            <Text style={styles.headerTitle}>Zinciri</Text>
+          </View>
           <Text style={styles.headerSubtitle} numberOfLines={1}>
             {members.length} üye • {safeCount} güvende
           </Text>
@@ -1047,12 +1050,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 60, // Ensure minimum height for title visibility
   },
+  titleContainer: {
+    flexDirection: 'column',
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.5,
-    minHeight: 34, // Ensure title always has space
+    lineHeight: 34,
   },
   headerSubtitle: {
     fontSize: 14,
