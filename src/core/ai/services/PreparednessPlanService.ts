@@ -14,6 +14,7 @@ class PreparednessPlanService {
   private isInitialized = false;
   private cache = new Map<string, { data: PreparednessPlan; timestamp: number }>();
   private readonly CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+  private hasWarnedAboutOpenAI = false; // ELITE: Prevent spam warnings
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -35,7 +36,49 @@ class PreparednessPlanService {
     riskLevel?: 'low' | 'medium' | 'high' | 'critical';
     residenceType?: string;
   }): Promise<PreparednessPlan> {
-    // Cache kontrolü
+    // ELITE: Try centralized backend API first (cost optimization)
+    try {
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://afetnet-backend.onrender.com';
+      logger.info(`[PreparednessPlan] Attempting centralized backend API: ${backendUrl}/api/preparedness/generate`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      try {
+        const response = await fetch(`${backendUrl}/api/preparedness/generate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(params),
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.success && data.plan) {
+            logger.info('✅ [PreparednessPlan] Got centralized plan from backend');
+            // Cache locally
+            const cacheKey = JSON.stringify(params);
+            this.cache.set(cacheKey, { data: data.plan, timestamp: Date.now() });
+            return data.plan;
+          }
+        } else {
+          logger.warn(`Backend API returned error status ${response.status}, falling back to local generation`);
+        }
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (!fetchError.name?.includes('AbortError')) {
+          logger.warn('Backend API request failed, falling back to local generation:', fetchError?.message);
+        }
+      }
+    } catch (error) {
+      logger.warn('Backend API attempt failed, using local generation:', error);
+    }
+
+    // Fallback: Local cache kontrolü
     const cacheKey = JSON.stringify(params);
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
@@ -43,7 +86,7 @@ class PreparednessPlanService {
       return cached.data;
     }
 
-    // OpenAI ile plan oluştur
+    // Fallback: OpenAI ile plan oluştur (local)
     try {
       if (openAIService.isConfigured()) {
         const result = await this.generateWithAI(params);
@@ -53,11 +96,19 @@ class PreparednessPlanService {
         
         return result;
       } else {
-        logger.warn('OpenAI not configured, using rule-based fallback');
+        // ELITE: Only warn once to prevent spam
+        if (!this.hasWarnedAboutOpenAI) {
+          logger.debug('OpenAI not configured, using rule-based fallback (this is OK)');
+          this.hasWarnedAboutOpenAI = true;
+        }
         return this.generateWithRules(params);
       }
-    } catch (error) {
-      logger.error('AI plan generation failed, using fallback:', error);
+    } catch (error: any) {
+      // ELITE: Better error handling - log but don't crash
+      logger.warn('AI plan generation failed, using rule-based fallback:', {
+        error: error?.message || error,
+        errorType: error?.name || typeof error,
+      });
       return this.generateWithRules(params);
     }
   }
@@ -75,38 +126,31 @@ class PreparednessPlanService {
     riskLevel?: 'low' | 'medium' | 'high' | 'critical';
     residenceType?: string;
   }): Promise<PreparednessPlan> {
-    const prompt = `Afet hazırlık planı oluştur. AFAD standartlarına uygun, Türkiye için geçerli:
+    // ELITE: More concise prompt to reduce token usage and prevent truncation
+    const prompt = `Afet hazırlık planı oluştur. AFAD standartlarına uygun.
 
-Aile Profili:
-- Aile Büyüklüğü: ${params.familySize || 'Belirtilmemiş'} kişi
-- Çocuk var mı: ${params.hasChildren ? 'Evet' : 'Hayır'}
-- Yaşlı var mı: ${params.hasElderly ? 'Evet' : 'Hayır'}
-- Evcil hayvan var mı: ${params.hasPets ? 'Evet' : 'Hayır'}
-- Engelli/bakım ihtiyacı olan birey: ${params.hasDisabilities ? 'Evet' : 'Hayır'}
-- Konum: ${params.locationName || 'Belirtilmemiş'}
-- Risk seviyesi: ${params.riskLevel || 'Belirtilmemiş'}
-- Konut tipi: ${params.residenceType || 'Belirtilmemiş'}
+Profil: ${params.familySize || '?'} kişi, ${params.hasChildren ? 'çocuk+' : ''} ${params.hasElderly ? 'yaşlı+' : ''} ${params.hasPets ? 'evcil hayvan+' : ''} ${params.hasDisabilities ? 'engelli+' : ''} ${params.locationName || ''} ${params.riskLevel || ''} ${params.residenceType || ''}
 
-Aşağıdaki JSON formatında döndür (sadece JSON, başka açıklama yok):
+JSON formatında döndür (sadece JSON):
 {
   "title": "Plan başlığı",
-  "personaSummary": "Kısa profil özeti",
+  "personaSummary": "Kısa özet",
   "sections": [
     {
-      "id": "unique_id",
-      "title": "Bölüm başlığı",
-      "priority": "high|medium|low",
-      "phase": "hazirlik|tatbikat|acil_durum|iyilesme",
-      "summary": "Bölüm özeti",
+      "id": "id1",
+      "title": "Bölüm",
+      "priority": "high",
+      "phase": "hazirlik",
+      "summary": "Özet",
       "estimatedDurationMinutes": 60,
       "resources": ["Kaynak"],
       "items": [
         {
-          "id": "item_id",
-          "text": "Yapılacak iş",
+          "id": "item1",
+          "text": "Yapılacak",
           "completed": false,
-          "importance": "critical|high|medium|low",
-          "instructions": "Detaylı talimat",
+          "importance": "high",
+          "instructions": "Talimat",
           "dueInHours": 24
         }
       ]
@@ -114,23 +158,31 @@ Aşağıdaki JSON formatında döndür (sadece JSON, başka açıklama yok):
   ]
 }
 
-En az 5 bölüm ekle ve farklı fazlara dağıt:
-1. Acil Durum Çantası (hazirlik, high priority)
-2. İletişim Planı (hazirlik, high priority)
-3. Tatbikat Programı (tatbikat, medium priority)
-4. Acil Durum Anı (acil_durum, high priority)
-5. İyileşme ve Kontroller (iyilesme, medium priority)
-İlgili ise çocuk/yaşlı/engelli bakımına özel bir bölüm ekle.
-
-Her bölümde 4-6 madde olsun. Maddeler net, uygulanabilir, Türkçe olsun. DueInHours alanını saat olarak doldur.`;
+5 bölüm: Acil Durum Çantası (hazirlik,high), İletişim Planı (hazirlik,high), Tatbikat (tatbikat,medium), Acil Durum Anı (acil_durum,high), İyileşme (iyilesme,medium). Her bölümde 4-5 madde. Kısa ve net.`;
 
     const systemPrompt = `Sen bir AFAD afet hazırlık uzmanısın. Türkiye'deki deprem gerçeklerine göre, aile profiline özel, uygulanabilir hazırlık planları oluşturuyorsun. Planlar AFAD standartlarına uygun, net, anlaşılır ve adım adım olmalı. Sadece JSON formatında yanıt ver.`;
 
+    // ELITE: Increase maxTokens significantly to ensure complete JSON response
+    // Preparedness plan JSON can be large (5+ sections with multiple items each)
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 1000,
+      maxTokens: 3000, // Increased from 2000 to ensure complete JSON for large plans
       temperature: 0.7,
     });
+
+    // ELITE: Validate response before parsing
+    if (!aiResponse || aiResponse.trim().length < 50) {
+      logger.warn('AI response too short or empty, using fallback');
+      throw new Error('AI response incomplete');
+    }
+
+    // ELITE: Check if response looks truncated (ends abruptly)
+    const trimmedResponse = aiResponse.trim();
+    const lastChar = trimmedResponse[trimmedResponse.length - 1];
+    if (lastChar !== '}' && lastChar !== ']' && !trimmedResponse.includes('}')) {
+      logger.warn('AI response appears truncated (does not end with }), using fallback');
+      throw new Error('AI response appears truncated');
+    }
 
     // JSON parse et
     const parsed = this.parseAIResponse(aiResponse);
@@ -151,13 +203,104 @@ Her bölümde 4-6 madde olsun. Maddeler net, uygulanabilir, Türkçe olsun. DueI
    */
   private parseAIResponse(response: string): any {
     try {
-      // JSON'u bul
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      // ELITE: Clean response - remove markdown code blocks if present
+      let cleanedResponse = response.trim();
+      
+      // Remove markdown code blocks (```json ... ```)
+      cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+      cleanedResponse = cleanedResponse.replace(/```\s*/g, '');
+      
+      // ELITE: Find JSON object - try multiple patterns
+      let jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+      
+      // If no match, try to find JSON after "{" or before "}"
       if (!jsonMatch) {
-        throw new Error('JSON bulunamadı');
+        const firstBrace = cleanedResponse.indexOf('{');
+        const lastBrace = cleanedResponse.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonMatch = [cleanedResponse.substring(firstBrace, lastBrace + 1)];
+        }
+      }
+      
+      if (!jsonMatch || jsonMatch[0].length < 10) {
+        logger.error('JSON bulunamadı veya çok kısa:', { responseLength: response.length, cleanedLength: cleanedResponse.length });
+        throw new Error('JSON bulunamadı veya geçersiz');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      // ELITE: Try to fix common JSON issues before parsing
+      let jsonString = jsonMatch[0];
+      
+      // Remove trailing commas before closing braces/brackets
+      jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
+      
+      // ELITE: Check if JSON string is complete (ends with })
+      // If truncated, try to fix it
+      if (!jsonString.trim().endsWith('}')) {
+        logger.warn('JSON string appears incomplete (does not end with }), attempting fix');
+        
+        // Try to close incomplete JSON
+        let fixedJson = jsonString.trim();
+        
+        // Count open/close braces
+        const openBraces = (fixedJson.match(/\{/g) || []).length;
+        const closeBraces = (fixedJson.match(/\}/g) || []).length;
+        const openBrackets = (fixedJson.match(/\[/g) || []).length;
+        const closeBrackets = (fixedJson.match(/\]/g) || []).length;
+        
+        // Close missing brackets first
+        if (openBrackets > closeBrackets) {
+          fixedJson += ']'.repeat(openBrackets - closeBrackets);
+        }
+        
+        // Close missing braces
+        if (openBraces > closeBraces) {
+          fixedJson += '}'.repeat(openBraces - closeBraces);
+        }
+        
+        jsonString = fixedJson;
+      }
+
+      // Try parsing
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch (parseError: any) {
+        // ELITE: If parsing fails, try to extract and fix common issues
+        logger.warn('Initial JSON parse failed, attempting fixes:', parseError?.message || parseError);
+        
+        // Try to find and extract just the sections array if full JSON fails
+        const sectionsMatch = jsonString.match(/"sections"\s*:\s*\[[\s\S]*\]/);
+        if (sectionsMatch) {
+          try {
+            // Try to parse sections array
+            const sectionsStr = sectionsMatch[0].replace(/"sections"\s*:\s*/, '');
+            const sections = JSON.parse(sectionsStr);
+            
+            // Create a minimal valid JSON structure
+            const titleMatch = jsonString.match(/"title"\s*:\s*"([^"]+)"/);
+            const personaMatch = jsonString.match(/"personaSummary"\s*:\s*"([^"]+)"/);
+            
+            parsed = {
+              title: titleMatch ? titleMatch[1] : 'Kişisel Afet Hazırlık Planı',
+              personaSummary: personaMatch ? personaMatch[1] : '',
+              sections: Array.isArray(sections) ? sections : [],
+            };
+            
+            logger.info('✅ Successfully extracted sections from partial JSON');
+          } catch (sectionsParseError) {
+            logger.error('Failed to parse sections array:', sectionsParseError);
+            throw parseError; // Re-throw original error
+          }
+        } else {
+          // No sections found - throw original error
+          logger.error('JSON parse failed and no sections found:', {
+            error: parseError?.message,
+            jsonLength: jsonString.length,
+            jsonPreview: jsonString.substring(0, 200),
+          });
+          throw parseError;
+        }
+      }
 
       // Validate
       if (!parsed.sections || !Array.isArray(parsed.sections)) {

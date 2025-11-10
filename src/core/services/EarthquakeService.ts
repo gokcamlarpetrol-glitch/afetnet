@@ -9,12 +9,13 @@ import { useEarthquakeStore, Earthquake } from '../stores/earthquakeStore';
 import { createLogger } from '../utils/logger';
 import { autoCheckinService } from './AutoCheckinService';
 import { emergencyModeService } from './EmergencyModeService';
+import { formatToTurkishDateTime, getTimeDifferenceTurkish, parseAFADDate } from '../utils/timeUtils';
 
 const logger = createLogger('EarthquakeService');
 
 const CACHE_KEY = 'afetnet_earthquakes_cache';
 const LAST_FETCH_KEY = 'afetnet_earthquakes_last_fetch';
-const POLL_INTERVAL = 30000; // 30 seconds - Real-time AFAD updates
+const POLL_INTERVAL = 10000; // 10 seconds - CRITICAL: Ultra-fast polling for early warnings (was 30s - TOO SLOW!)
 
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
@@ -72,28 +73,60 @@ class EarthquakeService {
         const latestEq = uniqueEarthquakes[0];
         const lastCheckedEq = await AsyncStorage.getItem('last_checked_earthquake');
         
-        console.log('🔝 EN SON DEPREM:', {
-          location: latestEq.location,
-          magnitude: latestEq.magnitude,
-          time: new Date(latestEq.time).toLocaleString('tr-TR'),
-          zamanFarki: Math.round((Date.now() - latestEq.time) / 60000) + ' dakika önce'
-        });
+        if (__DEV__) {
+          logger.info('🔝 EN SON DEPREM:', {
+            location: latestEq.location,
+            magnitude: latestEq.magnitude,
+            time: formatToTurkishDateTime(latestEq.time),
+            zamanFarki: getTimeDifferenceTurkish(latestEq.time)
+          });
+        }
         
-        // Trigger auto check-in for new significant earthquakes (magnitude >= 4.0)
-        if (latestEq.magnitude >= 4.0 && latestEq.id !== lastCheckedEq) {
+        // CRITICAL: Check if this is a new earthquake and send notification
+        if (latestEq.id !== lastCheckedEq) {
           await AsyncStorage.setItem('last_checked_earthquake', latestEq.id);
-          logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
-          autoCheckinService.startCheckIn(latestEq.magnitude);
           
-          // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
-          if (emergencyModeService.shouldTriggerEmergencyMode(latestEq)) {
-            logger.info(`🚨 CRITICAL EARTHQUAKE DETECTED: ${latestEq.magnitude} - Activating emergency mode`);
-            await emergencyModeService.activateEmergencyMode(latestEq);
+          // Get settings to check notification thresholds
+          const { useSettingsStore } = await import('../stores/settingsStore');
+          const settings = useSettingsStore.getState();
+          
+          // Send notification if magnitude meets threshold
+          if (latestEq.magnitude >= settings.minMagnitudeForNotification) {
+            // Check distance filter if set
+            let shouldNotify = true;
+            if (settings.maxDistanceForNotification > 0) {
+              // Distance check would require user location - for now, notify if distance filter is not critical
+              // In production, calculate distance and filter accordingly
+              shouldNotify = true; // Will be enhanced with location-based filtering
+            }
+            
+            if (shouldNotify && settings.notificationPush) {
+              const { notificationService } = await import('./NotificationService');
+              await notificationService.showEarthquakeNotification(
+                latestEq.magnitude,
+                latestEq.location
+              );
+              logger.info(`📢 Notification sent: ${latestEq.magnitude.toFixed(1)}M - ${latestEq.location}`);
+            }
+          }
+          
+          // Trigger auto check-in for new significant earthquakes (magnitude >= 4.0)
+          if (latestEq.magnitude >= 4.0) {
+            logger.info(`Triggering AutoCheckin for magnitude ${latestEq.magnitude} earthquake`);
+            autoCheckinService.startCheckIn(latestEq.magnitude);
+            
+            // 🚨 CRITICAL: Trigger emergency mode for major earthquakes (6.0+)
+            if (emergencyModeService.shouldTriggerEmergencyMode(latestEq)) {
+              logger.info(`🚨 CRITICAL EARTHQUAKE DETECTED: ${latestEq.magnitude} - Activating emergency mode`);
+              await emergencyModeService.activateEmergencyMode(latestEq);
+            }
           }
         }
         
         store.setItems(uniqueEarthquakes);
-        console.log(`✅ Store güncellendi: ${uniqueEarthquakes.length} deprem`);
+        if (__DEV__) {
+          logger.info(`✅ Store güncellendi: ${uniqueEarthquakes.length} deprem`);
+        }
         await this.saveToCache(uniqueEarthquakes);
       } else {
         // Try cache if no new data
@@ -104,13 +137,41 @@ class EarthquakeService {
           store.setError('Deprem verisi alınamadı. İnternet bağlantınızı kontrol edin.');
         }
       }
-    } catch (error) {
-      // Try cache on error
+    } catch (error: any) {
+      logger.error('❌ Failed to fetch earthquakes:', {
+        error: error?.message,
+        name: error?.name,
+        stack: error?.stack
+      });
+      
+      // ELITE: Try cache on error with detailed error handling
       const cached = await this.loadFromCache();
       if (cached && cached.length > 0) {
         store.setItems(cached);
+        // ELITE: Set a warning instead of error if cache is available
+        const cacheAge = await AsyncStorage.getItem(LAST_FETCH_KEY);
+        if (cacheAge) {
+          const ageMs = Date.now() - parseInt(cacheAge, 10);
+          const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
+          if (ageHours > 1) {
+            store.setError(`Eski veriler gösteriliyor (${ageHours} saat önce). İnternet bağlantınızı kontrol edin.`);
+          } else {
+            store.setError(null); // Clear error if cache is fresh
+          }
+        }
       } else {
-        store.setError('Deprem verisi alınamadı. Lütfen tekrar deneyin.');
+        // ELITE: Provide specific error messages based on error type
+        let errorMessage = 'Deprem verisi alınamadı. Lütfen tekrar deneyin.';
+        
+        if (error?.name === 'AbortError' || error?.message?.includes('timeout')) {
+          errorMessage = 'Bağlantı zaman aşımına uğradı. İnternet bağlantınızı kontrol edin.';
+        } else if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
+          errorMessage = 'İnternet bağlantısı sorunu. Lütfen bağlantınızı kontrol edin.';
+        } else if (error?.message?.includes('JSON') || error?.message?.includes('parse')) {
+          errorMessage = 'Veri işleme hatası. Lütfen tekrar deneyin.';
+        }
+        
+        store.setError(errorMessage);
       }
     } finally {
       store.setLoading(false);
@@ -153,8 +214,10 @@ class EarthquakeService {
       // Alternative fallback URL (last 500 events)
       const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
       
-      console.log('📡 AFAD API çağrılıyor:', url);
-      console.log('📅 Tarih aralığı:', startDate, 'dan', endDate, 'a kadar');
+      if (__DEV__) {
+        logger.debug('📡 AFAD API çağrılıyor:', url);
+        logger.debug('📅 Tarih aralığı:', startDate, 'dan', endDate, 'a kadar');
+      }
 
       let response = await fetch(url, {
         method: 'GET',
@@ -169,7 +232,9 @@ class EarthquakeService {
 
       // If primary endpoint fails, try fallback
       if (!response.ok) {
-        console.warn('⚠️ Primary AFAD endpoint failed, trying fallback...');
+        if (__DEV__) {
+          logger.warn('⚠️ Primary AFAD endpoint failed, trying fallback...');
+        }
         const fallbackController = new AbortController();
         const fallbackTimeout = setTimeout(() => fallbackController.abort(), 15000);
         
@@ -185,11 +250,13 @@ class EarthquakeService {
         clearTimeout(fallbackTimeout);
         
         if (!response.ok) {
-          console.error('❌ Both AFAD endpoints failed');
+          logger.error('❌ Both AFAD endpoints failed');
           return [];
         }
         
-        console.log('✅ Fallback endpoint successful');
+        if (__DEV__) {
+          logger.info('✅ Fallback endpoint successful');
+        }
       }
 
       const data = await response.json();
@@ -197,60 +264,161 @@ class EarthquakeService {
       // AFAD apiv2 returns array directly
       const events = Array.isArray(data) ? data : [];
       
-      console.log(`✅ AFAD'dan ${events.length} deprem verisi alındı`);
+      if (__DEV__) {
+        logger.info(`✅ AFAD'dan ${events.length} deprem verisi alındı`);
+      }
       
       if (events.length === 0) {
-        console.warn('⚠️ AFAD API boş veri döndü!');
+        if (__DEV__) {
+          logger.warn('⚠️ AFAD API boş veri döndü!');
+        }
         return [];
       }
       
-      // İlk 3 depremi logla
-      console.log('📊 İlk 3 deprem:');
-      events.slice(0, 3).forEach((eq: any, i: number) => {
-        console.log(`  ${i + 1}. ${eq.location} - Büyüklük: ${eq.mag} - Tarih: ${eq.eventDate}`);
-      });
+      // İlk 3 depremi logla (sadece development'ta)
+      if (__DEV__) {
+        logger.debug('📊 İlk 3 deprem:');
+        events.slice(0, 3).forEach((eq: any, i: number) => {
+          const mag = eq.mag || eq.magnitude || eq.ml || 'N/A';
+          const date = eq.eventDate || eq.date || eq.originTime || 'N/A';
+          const loc = eq.location || eq.ilce || eq.sehir || 'N/A';
+          logger.debug(`  ${i + 1}. ${loc} - Büyüklük: ${mag} - Tarih: ${date}`);
+        });
+      }
       
-      const earthquakes = events.map((item: any) => {
-        // AFAD apiv2 format
-        const eventDate = item.eventDate || item.date || item.originTime;
-        const magnitude = parseFloat(item.mag || item.magnitude || item.ml || '0');
-        
-        // Location parsing
-        const locationParts = [
-          item.location,
-          item.ilce,
-          item.sehir,
-          item.title,
-          item.place
-        ].filter(Boolean);
-        
-        const location = locationParts.length > 0 
-          ? locationParts.join(', ') 
-          : 'Türkiye';
-        
-        return {
-          id: `afad-${item.eventID || item.eventId || item.id || Date.now()}-${Math.random()}`,
-          magnitude,
-          location,
-          depth: parseFloat(item.depth || item.derinlik || '10'),
-          time: eventDate ? new Date(eventDate).getTime() : Date.now(),
-          latitude: parseFloat(item.geojson?.coordinates?.[1] || item.latitude || item.lat || '0'),
-          longitude: parseFloat(item.geojson?.coordinates?.[0] || item.longitude || item.lng || '0'),
-          source: 'AFAD' as const,
-        };
-      })
-      .filter((eq: Earthquake) => 
-        eq.latitude !== 0 && 
-        eq.longitude !== 0 &&
-        eq.magnitude >= 1.0 // Minimum 1.0 magnitude
-      )
-      .sort((a, b) => b.time - a.time) // Newest first
-      .slice(0, 100); // Max 100
+      // ELITE: Validate and transform earthquake data with comprehensive error handling
+      const earthquakes = events
+        .map((item: any) => {
+          try {
+            // AFAD apiv2 format
+            const eventDate = item.eventDate || item.date || item.originTime;
+            const magnitude = parseFloat(item.mag || item.magnitude || item.ml || '0');
+            
+            // ELITE: Validate magnitude
+            if (isNaN(magnitude) || magnitude < 0 || magnitude > 10) {
+              if (__DEV__) {
+                logger.warn('Invalid magnitude detected:', magnitude, item);
+              }
+              return null;
+            }
+            
+            // Location parsing with validation
+            const locationParts = [
+              item.location,
+              item.ilce,
+              item.sehir,
+              item.title,
+              item.place
+            ].filter(Boolean);
+            
+            const location = locationParts.length > 0 
+              ? locationParts.join(', ').trim()
+              : 'Türkiye';
+            
+            // ELITE: Validate location is not empty
+            if (!location || location.length === 0) {
+              if (__DEV__) {
+                logger.warn('Empty location detected:', item);
+              }
+              return null;
+            }
+            
+            // ELITE: Parse coordinates with validation
+            const latitude = parseFloat(item.geojson?.coordinates?.[1] || item.latitude || item.lat || '0');
+            const longitude = parseFloat(item.geojson?.coordinates?.[0] || item.longitude || item.lng || '0');
+            
+            // ELITE: Validate coordinates (Turkey bounds: 35-43N, 25-45E)
+            if (isNaN(latitude) || isNaN(longitude) || 
+                latitude < 35 || latitude > 43 || 
+                longitude < 25 || longitude > 45) {
+              if (__DEV__) {
+                logger.warn('Invalid coordinates detected:', { latitude, longitude }, item);
+              }
+              return null;
+            }
+            
+            // ELITE: Parse depth with validation
+            const depth = parseFloat(item.depth || item.derinlik || '10');
+            if (isNaN(depth) || depth < 0 || depth > 1000) {
+              if (__DEV__) {
+                logger.warn('Invalid depth detected:', depth, item);
+              }
+            }
+            
+            // ELITE: Parse time with validation and timezone conversion
+            // AFAD API returns dates in Turkey timezone - parse correctly
+            let time: number;
+            if (eventDate) {
+              // Use specialized AFAD date parser that handles timezone correctly
+              time = parseAFADDate(eventDate);
+              
+              // Validate parsed time is reasonable (not in future, not too old)
+              const now = Date.now();
+              const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+              if (time > now || time < now - maxAge) {
+                if (__DEV__) {
+                  logger.warn('Parsed time out of range, using current time:', {
+                    parsed: time,
+                    now,
+                    eventDate
+                  });
+                }
+                time = Date.now();
+              }
+            } else {
+              time = Date.now();
+              if (__DEV__) {
+                logger.warn('Missing date, using current time:', item);
+              }
+            }
+            
+            // ELITE: Generate stable ID
+            const eventId = item.eventID || item.eventId || item.id;
+            const id = eventId 
+              ? `afad-${eventId}`
+              : `afad-${Math.round(latitude * 1000)}-${Math.round(longitude * 1000)}-${time}`;
+            
+            return {
+              id,
+              magnitude,
+              location,
+              depth: isNaN(depth) ? 10 : Math.max(0, Math.min(1000, depth)),
+              time,
+              latitude,
+              longitude,
+              source: 'AFAD' as const,
+            };
+          } catch (parseError: any) {
+            // ELITE: Log parse errors but continue processing other items
+            if (__DEV__) {
+              logger.warn('Error parsing earthquake item:', parseError?.message, item);
+            }
+            return null;
+          }
+        })
+        .filter((eq: Earthquake | null): eq is Earthquake => 
+          eq !== null &&
+          eq.latitude >= 35 && eq.latitude <= 43 &&
+          eq.longitude >= 25 && eq.longitude <= 45 &&
+          eq.magnitude >= 1.0 && eq.magnitude <= 10 &&
+          eq.location && eq.location.length > 0
+        )
+        .sort((a, b) => b.time - a.time) // Newest first
+        .slice(0, 100); // Max 100
+
+      if (__DEV__) {
+        logger.info(`✅ Validated ${earthquakes.length} earthquakes from ${events.length} raw events`);
+      }
 
       return earthquakes;
       
-    } catch (error) {
-      // Silent fail - return empty array, cache will be used
+    } catch (error: any) {
+      // ELITE: Log error details instead of silent fail
+      logger.error('❌ Failed to fetch from AFAD:', {
+        error: error?.message,
+        name: error?.name,
+        url: error?.url || 'unknown'
+      });
       return [];
     }
   }
