@@ -332,7 +332,10 @@ class EarthquakeService {
                 latitude < 35 || latitude > 43 || 
                 longitude < 25 || longitude > 45) {
               if (__DEV__) {
-                logger.warn('Invalid coordinates detected:', { latitude, longitude }, item);
+                // Filter out earthquakes outside Turkey bounds (this is expected, not an error)
+                if (__DEV__) {
+                  logger.debug('Filtered earthquake outside Turkey bounds:', { latitude, longitude, location: item.location });
+                }
               }
               return null;
             }
