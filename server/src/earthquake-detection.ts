@@ -33,6 +33,15 @@ class EarthquakeDetectionService {
   private verificationQueue: EarthquakeEvent[] = [];
   private readonly VERIFICATION_WINDOW_MS = 30_000; // 30 seconds for multi-source confirmation
   
+  // ELITE: Circuit breaker for EMSC API to prevent rate limiting
+  private emscCircuitBreaker = {
+    failures: 0,
+    lastFailureTime: 0,
+    state: 'CLOSED' as 'CLOSED' | 'OPEN' | 'HALF_OPEN',
+    readonly FAILURE_THRESHOLD = 3,
+    readonly RESET_TIMEOUT_MS = 5 * 60 * 1000, // 5 minutes
+  };
+  
   constructor() {
     // Start continuous monitoring
     this.startMonitoring();
@@ -45,32 +54,88 @@ class EarthquakeDetectionService {
   private async startMonitoring() {
     console.log('🌍 Starting earthquake detection monitoring...');
     
+    // ELITE: Reduced polling frequency to prevent rate limiting
+    // EMSC API has rate limits - polling every 60 seconds instead of 10
     setInterval(async () => {
       try {
         await this.fetchEMSCEvents();
       } catch (error) {
         console.error('❌ EMSC fetch failed:', error);
       }
-    }, 10_000); // Every 10 seconds
+    }, 60_000); // Every 60 seconds (reduced from 10s to prevent rate limiting)
     
+    // ELITE: Reduced polling frequency to prevent rate limiting
     setInterval(async () => {
       try {
         await this.fetchKOERIEvents();
       } catch (error) {
         console.error('❌ KOERI fetch failed:', error);
       }
-    }, 15_000); // Every 15 seconds
+    }, 60_000); // Every 60 seconds (reduced from 15s to prevent rate limiting)
   }
 
   /**
    * Fetch events from EMSC (European-Mediterranean Seismological Centre)
+   * ELITE: Circuit breaker pattern to prevent rate limiting
    */
   private async fetchEMSCEvents() {
+    const now = Date.now();
+    
+    // Check circuit breaker state
+    if (this.emscCircuitBreaker.state === 'OPEN') {
+      // Check if reset timeout has passed
+      if (now - this.emscCircuitBreaker.lastFailureTime < this.emscCircuitBreaker.RESET_TIMEOUT_MS) {
+        // Still in cooldown period - skip request
+        return;
+      } else {
+        // Try again - move to HALF_OPEN
+        this.emscCircuitBreaker.state = 'HALF_OPEN';
+        console.log('🔄 EMSC circuit breaker reset - retrying');
+      }
+    }
+    
     try {
+      // ELITE: Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
-        `${this.EMSC_API}?starttime=${new Date(Date.now() - 3600000).toISOString()}&minmagnitude=3.0&format=json`
+        `${this.EMSC_API}?starttime=${new Date(Date.now() - 3600000).toISOString()}&minmagnitude=3.0&format=json`,
+        {
+          headers: {
+            'User-Agent': 'AfetNet/1.0',
+            'Accept': 'application/json',
+          },
+          signal: controller.signal,
+        }
       );
+      
+      clearTimeout(timeoutId);
+      
+      // Check for rate limit errors
+      if (response.status === 429 || response.status === 503) {
+        throw new Error(`Rate limit exceeded: ${response.status}`);
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        // EMSC sometimes returns HTML instead of JSON
+        console.warn('⚠️ EMSC API returned non-JSON response (HTML?) - circuit breaker active');
+        throw new Error('Invalid content type');
+      }
+      
       const data: any = await response.json();
+      
+      // Success - reset circuit breaker
+      if (this.emscCircuitBreaker.state === 'HALF_OPEN') {
+        this.emscCircuitBreaker.state = 'CLOSED';
+        this.emscCircuitBreaker.failures = 0;
+        console.log('✅ EMSC circuit breaker CLOSED - API recovered');
+      }
       
       if (data?.features) {
         for (const feature of data.features) {
@@ -93,8 +158,19 @@ class EarthquakeDetectionService {
           }
         }
       }
-    } catch (error) {
-      console.error('❌ EMSC fetch error:', error);
+    } catch (error: any) {
+      // Increment failure count
+      this.emscCircuitBreaker.failures++;
+      this.emscCircuitBreaker.lastFailureTime = now;
+      
+      // Check if threshold exceeded
+      if (this.emscCircuitBreaker.failures >= this.emscCircuitBreaker.FAILURE_THRESHOLD) {
+        this.emscCircuitBreaker.state = 'OPEN';
+        console.warn(`⚠️ EMSC circuit breaker OPEN (${this.emscCircuitBreaker.failures} failures) - pausing requests for ${this.emscCircuitBreaker.RESET_TIMEOUT_MS / 1000}s`);
+        console.info('💡 This is normal - EMSC API sometimes returns HTML instead of JSON. Circuit breaker will auto-reset in 5 minutes.');
+      } else {
+        console.warn(`⚠️ EMSC API issue (${this.emscCircuitBreaker.failures}/${this.emscCircuitBreaker.FAILURE_THRESHOLD}): ${error?.message || error} - circuit breaker active`);
+      }
     }
   }
 

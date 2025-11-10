@@ -14,6 +14,7 @@ import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
 import { newsBackgroundService } from './services/newsBackgroundService';
+import { globalRateLimiter, publicRateLimiter, apiRateLimiter } from './middleware/rateLimiter';
 
 // Load environment variables
 dotenv.config();
@@ -29,15 +30,26 @@ app.use(cors({
 app.set('trust proxy', 1);
 app.use(express.json());
 
-// Routes
-app.use('/api', iapRoutes);
-app.use('/push', pushRoutes);
-app.use('/api', eewRoutes);
-app.use('/api/news', newsRoutes);
-app.use('/api/preparedness', preparednessRoutes);
+// ELITE: Rate limiting - protect against DDoS and excessive requests
+// Apply global rate limiter to all routes except health check
+app.use((req, res, next) => {
+  // Skip rate limiting for health check
+  if (req.path === '/health') {
+    return next();
+  }
+  // Apply global rate limiter
+  globalRateLimiter(req, res, next);
+});
 
-// Health check with database status
-app.get('/health', async (req, res) => {
+// Routes with rate limiting
+app.use('/api', apiRateLimiter, iapRoutes);
+app.use('/push', pushRoutes);
+app.use('/api', apiRateLimiter, eewRoutes);
+app.use('/api/news', apiRateLimiter, newsRoutes);
+app.use('/api/preparedness', apiRateLimiter, preparednessRoutes);
+
+// Health check with database status (no rate limiting)
+app.get('/health', publicRateLimiter, async (req, res) => {
   try {
     const dbConnected = await pingDb();
     res.json({
