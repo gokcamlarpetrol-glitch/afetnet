@@ -35,6 +35,7 @@ import AddFamilyMemberScreen from './screens/family/AddFamilyMemberScreen';
 import HealthProfileScreen from './screens/health/HealthProfileScreen';
 import NewMessageScreen from './screens/messages/NewMessageScreen';
 import ConversationScreen from './screens/messages/ConversationScreen';
+import NewsDetailScreen from './screens/news/NewsDetailScreen';
 
 // Navigation
 import MainTabs from './navigation/MainTabs';
@@ -135,6 +136,11 @@ export default function CoreApp() {
               <Stack.Screen 
                 name="Conversation" 
                 component={ConversationScreen}
+              />
+              <Stack.Screen 
+                name="NewsDetail" 
+                component={NewsDetailScreen}
+                options={{ presentation: 'modal' }}
               />
             </Stack.Navigator>
           </NavigationContainer>

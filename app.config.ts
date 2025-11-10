@@ -110,6 +110,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EXPO_PUBLIC_OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || '',
     RC_IOS_KEY: process.env.RC_IOS_KEY || '',
     RC_ANDROID_KEY: process.env.RC_ANDROID_KEY || '',
+    EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     ORG_SECRET: process.env.ORG_SECRET || '',

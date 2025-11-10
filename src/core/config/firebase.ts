@@ -5,7 +5,12 @@
  */
 
 // SECURITY: Load API key from environment variable (REQUIRED - no hardcoded fallback)
-const FIREBASE_API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '';
+import Constants from 'expo-constants';
+const FIREBASE_API_KEY = 
+  Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_API_KEY ||
+  process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 
+  process.env.FIREBASE_API_KEY || 
+  '';
 
 if (!FIREBASE_API_KEY && __DEV__) {
   console.warn('⚠️ FIREBASE_API_KEY not found in environment variables. Firebase features may not work.');
