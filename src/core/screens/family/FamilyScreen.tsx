@@ -802,11 +802,11 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
-      {/* Header */}
+      {/* Header - Fixed Position */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Aile Güvenlik Zinciri</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Aile Güvenlik Zinciri</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
             {members.length} üye • {safeCount} güvende
           </Text>
         </View>
@@ -1040,6 +1040,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     backgroundColor: colors.background.primary,
+    zIndex: 10,
+    elevation: 4,
   },
   headerContent: {
     flex: 1,

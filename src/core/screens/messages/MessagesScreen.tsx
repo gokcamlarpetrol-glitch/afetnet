@@ -357,11 +357,11 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
         </View>
       </Modal>
 
-      {/* Header - Fixed */}
+      {/* Header - Fixed Position */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Mesajlar</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Mesajlar</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
             {filteredConversations.length} konuşma • {isMeshConnected ? 'Online' : 'Offline'}
           </Text>
           <View style={styles.meshRow}>
@@ -555,6 +555,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     backgroundColor: colors.background.primary,
+    zIndex: 10,
+    elevation: 4,
   },
   headerContent: {
     flex: 1,
