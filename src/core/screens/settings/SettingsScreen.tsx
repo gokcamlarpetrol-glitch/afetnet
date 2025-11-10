@@ -62,8 +62,8 @@ export default function SettingsScreen({ navigation }: any) {
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
   
-  // AI Features State
-  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
+  // AI Features State - Her zaman aktif
+  const [aiFeaturesEnabled] = useState(true);
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
   
   const setNotificationsEnabled = useSettingsStore((state) => state.setNotifications);
@@ -83,16 +83,7 @@ export default function SettingsScreen({ navigation }: any) {
       setMeshStats(useMeshStore.getState().stats);
     }, 500);
 
-    // AI features durumunu yükle
-    const loadAIFeatures = async () => {
-      try {
-        await aiFeatureToggle.initialize();
-        setAiFeaturesEnabled(aiFeatureToggle.isFeatureEnabled());
-      } catch (error) {
-        logger.error('Failed to load AI features state:', error);
-      }
-    };
-    loadAIFeatures();
+    // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
 
     return () => clearInterval(interval);
   }, []);
