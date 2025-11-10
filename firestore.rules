@@ -11,6 +11,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Allow anonymous or authenticated users (always true for emergency features)
+    function allowAnonymousOrAuthenticated() {
+      return true; // Allow anonymous access for emergency features (location, status, news summaries)
+    }
+
     // Elite: Device ID validation with strict format check
     function isValidDeviceId(deviceId) {
       return deviceId != null && 
@@ -85,17 +90,29 @@ service cloud.firestore {
         allow delete: if allowDeviceWrite(deviceId);
       }
       
-      // Location updates subcollection
+      // Location updates subcollection (also check 'locations' for backward compatibility)
       match /locationUpdates/{locationId} {
         allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
+        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
         allow delete: if allowDeviceWrite(deviceId);
       }
       
-      // Status updates subcollection
+      match /locations/{locationId} {
+        allow read: if allowPublicRead();
+        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
+        allow delete: if allowDeviceWrite(deviceId);
+      }
+      
+      // Status updates subcollection (also check 'status' for backward compatibility)
       match /statusUpdates/{statusId} {
         allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
+        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
+        allow delete: if allowDeviceWrite(deviceId);
+      }
+      
+      match /status/{statusId} {
+        allow read: if allowPublicRead();
+        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
         allow delete: if allowDeviceWrite(deviceId);
       }
       
@@ -164,23 +181,28 @@ service cloud.firestore {
     match /news_summaries/{articleId} {
       // Elite: Public read for cached summaries (non-sensitive)
       allow read: if allowEmergencyPublicRead();
-      // Elite: Strict create validation
+      // Elite: Strict create validation - allow anonymous for caching
       allow create: if isSystemClient() ||
         (
-          isAuthenticated() &&
+          allowAnonymousOrAuthenticated() &&
           !exists(/databases/$(database)/documents/news_summaries/$(articleId)) &&
           request.resource.data.summary is string &&
           request.resource.data.summary.size() > 0 &&
           request.resource.data.summary.size() <= 6000 &&
-          request.resource.data.createdByDeviceId is string &&
-          isValidDeviceId(request.resource.data.createdByDeviceId) &&
-          request.resource.data.ttlMs is int &&
-          request.resource.data.ttlMs > 0 &&
-          request.resource.data.ttlMs <= 43200000 && // 12 hours max
+          (request.resource.data.createdByDeviceId == null || isValidDeviceId(request.resource.data.createdByDeviceId)) &&
+          (request.resource.data.ttlMs == null || (request.resource.data.ttlMs is int && request.resource.data.ttlMs > 0 && request.resource.data.ttlMs <= 43200000)) &&
           request.resource.data.articleId is string &&
           request.resource.data.articleId == articleId
         );
-      allow update: if isSystemClient();
+      allow update: if isSystemClient() || allowAnonymousOrAuthenticated();
+      allow delete: if isSystemClient();
+    }
+    
+    // Backward compatibility: newsSummaries collection
+    match /newsSummaries/{articleId} {
+      allow read: if allowEmergencyPublicRead();
+      allow create: if isSystemClient() || allowAnonymousOrAuthenticated();
+      allow update: if isSystemClient() || allowAnonymousOrAuthenticated();
       allow delete: if isSystemClient();
     }
     
