@@ -11,6 +11,7 @@ import eewRoutes from './routes/eew';
 import newsRoutes from './routes/news';
 import preparednessRoutes from './routes/preparedness';
 import earthquakesRoutes from './routes/earthquakes';
+import sensorDataRoutes from './routes/sensorData';
 import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
@@ -49,6 +50,7 @@ app.use('/api', apiRateLimiter, eewRoutes);
 app.use('/api/earthquakes', apiRateLimiter, earthquakesRoutes);
 app.use('/api/news', apiRateLimiter, newsRoutes);
 app.use('/api/preparedness', apiRateLimiter, preparednessRoutes);
+app.use('/api', sensorDataRoutes);
 
 // Health check with database status (no rate limiting)
 app.get('/health', publicRateLimiter, async (req, res) => {
@@ -142,6 +144,34 @@ app.listen(PORT, async () => {
       console.log('✅ Preparedness plans table ready');
     } catch (error) {
       console.warn('⚠️ Failed to create preparedness_plans table (may already exist):', error);
+    }
+
+    // ELITE: Auto-create news_summaries table if it doesn't exist
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS news_summaries (
+          id SERIAL PRIMARY KEY,
+          article_id VARCHAR(255) UNIQUE NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          source VARCHAR(255),
+          url TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          expires_at TIMESTAMP,
+          ttl_ms BIGINT,
+          created_by_device_id VARCHAR(50)
+        )
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_news_summaries_article_id ON news_summaries(article_id)
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_news_summaries_expires_at ON news_summaries(expires_at)
+      `);
+      console.log('✅ News summaries table ready');
+    } catch (error) {
+      console.warn('⚠️ Failed to create news_summaries table (may already exist):', error);
     }
   }
   

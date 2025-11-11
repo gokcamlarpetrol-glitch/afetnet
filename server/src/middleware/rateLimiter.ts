@@ -100,4 +100,17 @@ export const eewRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Sensor data rate limiter - moderate rate for sensor data submissions
+ */
+export const sensorDataRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // Limit each IP to 100 sensor data submissions per minute
+  message: {
+    success: false,
+    error: 'Too many sensor data submissions, please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
