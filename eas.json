@@ -9,6 +9,9 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "SKIP_BUNDLING": "0"
       }
     },
     "preview": {
