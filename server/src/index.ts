@@ -10,6 +10,7 @@ import { pool, pingDb } from './database';
 import eewRoutes from './routes/eew';
 import newsRoutes from './routes/news';
 import preparednessRoutes from './routes/preparedness';
+import earthquakesRoutes from './routes/earthquakes';
 import { startEEW } from './eew';
 import { earthquakeDetectionService } from './earthquake-detection';
 import { earthquakeWarningService } from './earthquake-warnings';
@@ -45,6 +46,7 @@ app.use((req, res, next) => {
 app.use('/api', apiRateLimiter, iapRoutes);
 app.use('/push', pushRoutes);
 app.use('/api', apiRateLimiter, eewRoutes);
+app.use('/api/earthquakes', apiRateLimiter, earthquakesRoutes);
 app.use('/api/news', apiRateLimiter, newsRoutes);
 app.use('/api/preparedness', apiRateLimiter, preparednessRoutes);
 
@@ -104,6 +106,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /push/tick`);
   console.log(`   GET  /api/eew/health`);
   console.log(`   POST /api/eew/test`);
+  console.log(`   GET  /api/earthquakes`);
   console.log(`   POST /api/news/summarize`);
   console.log(`   GET  /api/news/summary/:articleId`);
   console.log(`   POST /api/news/process`);

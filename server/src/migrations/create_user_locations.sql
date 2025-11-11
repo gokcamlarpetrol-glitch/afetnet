@@ -44,3 +44,4 @@ CREATE TABLE IF NOT EXISTS earthquake_analyses (
   ai_tokens_used INTEGER DEFAULT 0
 );
 
+

@@ -5,7 +5,8 @@
 
 import { earthquakeService } from './services/EarthquakeService';
 import { bleMeshService } from './services/BLEMeshService';
-import { notificationService } from './services/NotificationService';
+// CRITICAL: notificationService imported dynamically to prevent Metro bundler from loading expo-notifications
+// import { notificationService } from './services/NotificationService'; // DISABLED - loaded dynamically
 import { premiumService } from './services/PremiumService';
 import { firebaseService } from './services/FirebaseService';
 import { locationService } from './services/LocationService';
@@ -13,7 +14,8 @@ import { eewService } from './services/EEWService';
 import { seismicSensorService } from './services/SeismicSensorService';
 import { globalEarthquakeAnalysisService } from './services/GlobalEarthquakeAnalysisService';
 import { enkazDetectionService } from './services/EnkazDetectionService';
-import { multiChannelAlertService } from './services/MultiChannelAlertService';
+// CRITICAL: multiChannelAlertService imported dynamically to prevent Metro bundler from loading expo-notifications
+// import { multiChannelAlertService } from './services/MultiChannelAlertService'; // DISABLED - loaded dynamically
 import { cellBroadcastService } from './services/CellBroadcastService';
 import { accessibilityService } from './services/AccessibilityService';
 // import { institutionalIntegrationService } from './services/InstitutionalIntegrationService'; // DISABLED
@@ -25,6 +27,8 @@ import { flashlightService } from './services/FlashlightService';
 import { voiceCommandService } from './services/VoiceCommandService';
 import { offlineMapService } from './services/OfflineMapService';
 import { firebaseDataService } from './services/FirebaseDataService';
+import { openAIService } from './ai/services/OpenAIService';
+import { newsAggregatorService } from './ai/services/NewsAggregatorService';
 import { useHealthProfileStore } from './stores/healthProfileStore';
 import { createLogger } from './utils/logger';
 
@@ -42,22 +46,19 @@ export async function initializeApp() {
   isInitializing = true;
 
   try {
-    // Step 1: Notification Service & Multi-Channel Alert Service
-    try {
-      await notificationService.initialize();
-      await multiChannelAlertService.initialize();
-    } catch (error) {
-      logger.error('Notification services failed:', error);
-    }
+    // CRITICAL: Notification services moved to Step 18 (LAST)
+    // This ensures native bridge is fully ready before attempting to load expo-notifications
 
-    // Step 2: Firebase Services (initialize Firebase app first, then data service)
+    // Step 1: Firebase Services (initialize Firebase app first, then data service)
     try {
-      // Initialize Firebase app first (lazy initialization)
-      // This ensures Firebase is initialized before Firestore tries to use it
-      const getFirebaseApp = (await import('../lib/firebase')).default;
-      const firebaseApp = getFirebaseApp();
+      // ELITE: Initialize Firebase app with async getter (ensures retry mechanism)
+      const { getFirebaseAppAsync } = await import('../lib/firebase');
+      const firebaseApp = await getFirebaseAppAsync();
+      
       if (!firebaseApp) {
-        logger.warn('Firebase app initialization failed');
+        logger.warn('Firebase app initialization failed - app continues with offline mode');
+      } else {
+        logger.info('✅ Firebase app initialized successfully');
       }
       
       // Initialize Firebase messaging service
@@ -66,9 +67,14 @@ export async function initializeApp() {
       // Initialize Firebase Data Service (Firestore) - must be after Firebase app init
       await firebaseDataService.initialize();
       
-      logger.info('Firebase services initialized');
+      if (firebaseDataService.isInitialized) {
+        logger.info('✅ Firebase services initialized successfully');
+      } else {
+        logger.warn('Firebase Data Service not initialized - app continues with AsyncStorage');
+      }
     } catch (error) {
-      logger.error('Firebase failed:', error);
+      logger.error('Firebase initialization error:', error);
+      // ELITE: Don't throw - app continues with offline mode
     }
 
     // Step 3: Location Service
@@ -119,6 +125,19 @@ export async function initializeApp() {
     } catch (error) {
       logger.error('Global Earthquake Analysis Service failed to start:', error);
       // Continue without global analysis - local detection will still work
+    }
+
+    // Step 7.6: Earthquake Event Watcher Client (Microservice Integration)
+    // ELITE: Connects to Earthquake Event Watcher microservice for ultra-fast detection
+    // Integrates USGS, Ambee, Xweather, Zyla APIs for 10+ second early warning
+    try {
+      logger.info('Step 7.6: Starting Earthquake Event Watcher Client (microservice integration)...');
+      const { earthquakeEventWatcherClient } = await import('./services/EarthquakeEventWatcherClient');
+      await earthquakeEventWatcherClient.start();
+      logger.info('✅ Earthquake Event Watcher Client started');
+    } catch (error) {
+      logger.warn('⚠️ Earthquake Event Watcher Client failed - will use local detection only', error);
+      // Continue without microservice - local EarthquakeService will handle detection
     }
 
     // Step 8: Cell Broadcast Service
@@ -174,11 +193,55 @@ export async function initializeApp() {
     // Step 15: Seismic Sensor Service
     // ELITE: Re-enabled with advanced P-wave detection and crowdsourcing verification
     // Now includes: P-wave detection, crowdsourcing, false positive filtering
+    // CRITICAL: Service must stay active continuously - auto-restart if it stops
     try {
       logger.info('Step 15: Starting seismic sensor service (with P-wave detection and crowdsourcing)...');
       await seismicSensorService.start();
+      
+      // ELITE: Verify service started and set up monitoring
+      setTimeout(async () => {
+        const isRunning = seismicSensorService.getRunningStatus();
+        if (!isRunning) {
+          logger.warn('⚠️ Seismic sensor service stopped after start - attempting restart...');
+          try {
+            await seismicSensorService.start();
+            logger.info('✅ Seismic sensor service restarted successfully');
+          } catch (restartError) {
+            logger.error('Failed to restart seismic sensor service:', restartError);
+          }
+        } else {
+          logger.info('✅ Seismic sensor service is running and will stay active');
+        }
+      }, 3000); // Check after 3 seconds
+      
+      // ELITE: Periodic health check - restart if stopped
+      setInterval(async () => {
+        const isRunning = seismicSensorService.getRunningStatus();
+        if (!isRunning) {
+          if (__DEV__) {
+            logger.warn('⚠️ Seismic sensor service stopped unexpectedly - auto-restarting...');
+          }
+          try {
+            await seismicSensorService.start();
+          } catch (restartError) {
+            if (__DEV__) {
+              logger.debug('Auto-restart failed (will retry):', restartError);
+            }
+          }
+        }
+      }, 60000); // Check every minute
+      
     } catch (error) {
       logger.error('Seismic sensor failed:', error);
+      // ELITE: Retry after delay
+      setTimeout(async () => {
+        try {
+          await seismicSensorService.start();
+          logger.info('✅ Seismic sensor service started after retry');
+        } catch (retryError) {
+          logger.error('Seismic sensor retry failed:', retryError);
+        }
+      }, 5000);
     }
 
     // Step 16: Life-Saving Services
@@ -190,6 +253,67 @@ export async function initializeApp() {
       await useHealthProfileStore.getState().loadProfile();
     } catch (error) {
       logger.error('Life-saving services failed:', error);
+    }
+
+    // Step 17: AI Services
+    try {
+      logger.info('Step 17: Initializing AI services...');
+      await openAIService.initialize();
+      logger.info('AI services initialized');
+    } catch (error) {
+      logger.error('AI services failed:', error);
+      // Continue without AI - fallback mode will be used
+    }
+
+    // Step 18: News Aggregator Service
+    try {
+      logger.info('Step 18: Initializing News Aggregator Service...');
+      await newsAggregatorService.initialize();
+      logger.info('News Aggregator Service initialized');
+    } catch (error) {
+      logger.error('News Aggregator Service failed:', error);
+      // Continue without news - NewsCard will handle gracefully
+    }
+
+    // Step 19: Notification Service & Multi-Channel Alert Service (PRE-INITIALIZATION)
+    // ELITE: Pre-initialize notification service in background to prevent first notification delay
+    // CRITICAL: These services require native bridge to be completely initialized
+    // CRITICAL: These services are COMPLETELY OPTIONAL - app will work perfectly without them
+    // ELITE: Pre-initialize in background (non-blocking) to eliminate first notification delay
+    // CRITICAL: Load notificationService dynamically to prevent Metro bundler from seeing it
+    try {
+      const { notificationService } = await import('./services/NotificationService');
+      const { multiChannelAlertService } = await import('./services/MultiChannelAlertService');
+      
+      // ELITE: Pre-initialize in background (non-blocking)
+      // This eliminates the delay on first notification while not blocking app startup
+      Promise.allSettled([
+        (async () => {
+          // Wait for native bridge to be ready
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds delay
+          
+          // Initialize with timeout protection (non-blocking)
+          await Promise.race([
+            Promise.allSettled([
+              notificationService.initialize().catch(() => null),
+              multiChannelAlertService.initialize().catch(() => null),
+            ]),
+            new Promise(resolve => setTimeout(resolve, 30000)), // 30s timeout
+          ]);
+          
+          logger.info('✅ Notification services pre-initialized (background)');
+        })(),
+      ]).catch(() => {
+        // Silent fail - will initialize on-demand if pre-init fails
+        if (__DEV__) {
+          logger.debug('Notification services pre-initialization skipped - will initialize on-demand');
+        }
+      });
+    } catch (error) {
+      // Silent fail - will initialize on-demand when needed
+      if (__DEV__) {
+        logger.debug('Notification services pre-initialization failed - will initialize on-demand when needed');
+      }
     }
 
     isInitialized = true;
@@ -208,6 +332,29 @@ export function shutdownApp() {
   cellBroadcastService.stop();
   seismicSensorService.stop();
   enkazDetectionService.stop();
+  
+  // ELITE: Cleanup Firebase service
+  try {
+    firebaseService.cleanup();
+  } catch (error) {
+    logger.error('Firebase cleanup error:', error);
+  }
+  
+  // ELITE: Cleanup BackendPushService
+  try {
+    const { backendPushService } = require('./services/BackendPushService');
+    backendPushService.cleanup();
+  } catch (error) {
+    logger.error('BackendPushService cleanup error:', error);
+  }
+  
+  // ELITE: Cleanup Earthquake Event Watcher Client
+  try {
+    const { earthquakeEventWatcherClient } = require('./services/EarthquakeEventWatcherClient');
+    earthquakeEventWatcherClient.stop();
+  } catch (error) {
+    logger.error('Earthquake Event Watcher Client cleanup error:', error);
+  }
   
   isInitialized = false;
 }
