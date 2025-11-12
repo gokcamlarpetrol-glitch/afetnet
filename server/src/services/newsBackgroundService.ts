@@ -121,6 +121,7 @@ class NewsBackgroundService {
       // ELITE: Get articles that have original summary but no AI-generated summary
       // This query finds articles where summary exists but is likely the original RSS summary
       // (short summaries < 100 chars are likely original, not AI-generated)
+      // CRITICAL: When using SELECT DISTINCT, ORDER BY expressions must appear in SELECT list
       const result = await pool.query(
         `SELECT DISTINCT 
           ns.article_id as id,
@@ -128,7 +129,8 @@ class NewsBackgroundService {
           ns.summary as original_summary,
           ns.source,
           ns.url,
-          EXTRACT(EPOCH FROM ns.created_at) * 1000 as published_at
+          EXTRACT(EPOCH FROM ns.created_at) * 1000 as published_at,
+          ns.created_at
         FROM news_summaries ns
         WHERE ns.summary IS NOT NULL
           AND ns.summary != ''
