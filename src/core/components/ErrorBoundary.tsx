@@ -51,14 +51,14 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // ELITE: Unicorn-level error handling - comprehensive logging without console
     // Log to production logger (automatically handles DEV vs PROD)
-    if (__DEV__) {
-      // In dev mode, also log to console for immediate visibility
-      console.error('❌ ERROR BOUNDARY CAUGHT:', error);
-      console.error('Component Stack:', errorInfo.componentStack);
-    }
-    
-    logger.error('Caught error:', error, errorInfo);
+    logger.error('Caught error:', {
+      error: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      errorId: this.state.errorId,
+    });
     
     // Update state with error info
     this.setState({ errorInfo });

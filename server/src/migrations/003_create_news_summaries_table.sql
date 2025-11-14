@@ -23,3 +23,11 @@ CREATE INDEX IF NOT EXISTS idx_news_summaries_expires_at ON news_summaries(expir
 COMMENT ON TABLE news_summaries IS 'Centralized AI summaries for news articles - one summary per article shared by all users';
 
 
+
+
+
+
+
+
+
+

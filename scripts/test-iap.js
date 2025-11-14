@@ -9,9 +9,9 @@
 
 // Test the centralized products configuration
 const IAP_PRODUCTS = {
-  MONTHLY: "afetnet_premium_monthly1",
-  YEARLY: "afetnet_premium_yearly1",
-  LIFETIME: "afetnet_premium_lifetime",
+  MONTHLY: "org.afetapp.premium.monthly.v2",
+  YEARLY: "org.afetapp.premium.yearly.v2",
+  LIFETIME: "org.afetapp.premium.lifetime.v2",
 };
 
 const IAP_PRODUCT_LIST = Object.values(IAP_PRODUCTS);

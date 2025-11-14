@@ -7,12 +7,18 @@ type PurchasesOfferings = Awaited<ReturnType<typeof Purchases.getOfferings>>;
 import { Platform, Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { logger } from '../utils/productionLogger';
+import { ENV } from '../core/config/env';
 
 // RevenueCat API Keys - MUST BE SET BEFORE BUILD
 // Get these from RevenueCat Dashboard → API Keys
-// Try both RC_IOS_KEY and REVENUECAT_API_KEY for compatibility
-const RC_IOS_KEY = process.env.RC_IOS_KEY || process.env.REVENUECAT_API_KEY || '';
-const RC_ANDROID_KEY = process.env.RC_ANDROID_KEY || '';
+// Try environment variables injected at build time and fall back to core ENV
+const RC_IOS_KEY =
+  process.env.RC_IOS_KEY ||
+  process.env.REVENUECAT_API_KEY ||
+  (typeof ENV?.RC_IOS_KEY === 'string' ? ENV.RC_IOS_KEY : '');
+const RC_ANDROID_KEY =
+  process.env.RC_ANDROID_KEY ||
+  (typeof ENV?.RC_ANDROID_KEY === 'string' ? ENV.RC_ANDROID_KEY : '');
 
 // Initialize RevenueCat
 let isInitialized = false;
@@ -21,9 +27,9 @@ let currentOfferings: PurchasesOfferings | null = null;
 
 // Product ID mapping (fallback)
 export const PRODUCT_IDS = {
-  MONTHLY: 'org.afetapp.premium.monthly',
-  YEARLY: 'org.afetapp.premium.yearly',
-  LIFETIME: 'org.afetapp.premium.lifetime',
+  MONTHLY: 'org.afetapp.premium.monthly.v2',
+  YEARLY: 'org.afetapp.premium.yearly.v2',
+  LIFETIME: 'org.afetapp.premium.lifetime.v2',
 } as const;
 
 export interface RevenueCatConfig {

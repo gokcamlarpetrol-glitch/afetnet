@@ -23,11 +23,15 @@ const logger = createLogger('MapScreen');
 // NOTE: Requires development build (not Expo Go)
 let MapView: any = null;
 let Marker: any = null;
+let Circle: any = null;
+let Polygon: any = null;
 
 try {
   const rnMaps = require('react-native-maps');
   MapView = rnMaps.default || rnMaps;
   Marker = rnMaps.Marker;
+  Circle = rnMaps.Circle;
+  Polygon = rnMaps.Polygon;
 } catch (e) {
   logger.warn('react-native-maps not available:', e);
   // Will show fallback UI
@@ -42,6 +46,7 @@ import { useCompass } from '../../../hooks/useCompass';
 import { useUserStatusStore } from '../../stores/userStatusStore';
 import { useRescueStore, TrappedUser } from '../../stores/rescueStore';
 import { clusterMarkers, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
+import { useViewportData } from '../../hooks/useViewportData';
 
 const { width, height } = Dimensions.get('window');
 
@@ -95,6 +100,20 @@ export default function MapScreen({ navigation, route }: any) {
     latitudeDelta: number;
     longitudeDelta: number;
   } | null>(null);
+  const [hazardZones, setHazardZones] = useState<any[]>([]);
+  const [isSampleMapData, setIsSampleMapData] = useState(false);
+  
+  // ELITE: Ref-based region tracking to prevent infinite loops
+  const currentRegionRef = useRef<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
+  const isAnimatingRef = useRef(false); // CRITICAL: Prevent infinite loops during animations
+  const regionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null); // CRITICAL: Debounce region updates
+  const lastRegionUpdateTimeRef = useRef<number>(0); // ELITE: Track last update time to prevent rapid updates
+  const isInitialMountRef = useRef(true); // ELITE: Track initial mount to prevent unnecessary updates
   
   // Elite: Layer control state
   const [layers, setLayers] = useState<MapLayers>({
@@ -152,6 +171,7 @@ export default function MapScreen({ navigation, route }: any) {
       }
       
       setOfflineLocations(locations);
+      setIsSampleMapData(offlineMapService.isUsingSampleData());
       
       if (__DEV__ && locations.length > 0) {
         logger.info(`MapScreen: Loaded ${locations.length} offline locations`);
@@ -169,53 +189,7 @@ export default function MapScreen({ navigation, route }: any) {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    getUserLocation();
-    
-    // Handle navigation params (focusOnMember, focusOnEarthquake)
-    if (route?.params) {
-      const { focusOnMember, focusOnEarthquake } = route.params;
-      
-      if (focusOnMember) {
-        const member = useFamilyStore.getState().members.find(m => m.id === focusOnMember);
-        if (member && mapRef.current) {
-          setTimeout(() => {
-            mapRef.current?.animateToRegion({
-              latitude: member.latitude,
-              longitude: member.longitude,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }, 1000);
-            setSelectedItem(member);
-            bottomSheetRef.current?.expand();
-          }, 500);
-        }
-      }
-      
-      if (focusOnEarthquake) {
-        const eq = useEarthquakeStore.getState().items.find(e => e.id === focusOnEarthquake);
-        if (eq && mapRef.current) {
-          setTimeout(() => {
-            mapRef.current?.animateToRegion({
-              latitude: eq.latitude,
-              longitude: eq.longitude,
-              latitudeDelta: 0.5,
-              longitudeDelta: 0.5,
-            }, 1000);
-            setSelectedItem(eq);
-            bottomSheetRef.current?.expand();
-          }, 500);
-        }
-      }
-    }
-    
-    // Cleanup function
-    return () => {
-      // Location request cleanup if needed
-    };
-  }, [route?.params]);
-
-  const getUserLocation = async () => {
+  const getUserLocation = useCallback(async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -234,7 +208,130 @@ export default function MapScreen({ navigation, route }: any) {
     } catch (error) {
       logger.error('Location error:', error);
     }
-  };
+  }, []);
+
+  // CRITICAL: Extract route params to stable values using useMemo to prevent infinite loops
+  const focusOnMember = useMemo(() => route?.params?.focusOnMember, [route?.params?.focusOnMember]);
+  const focusOnEarthquake = useMemo(() => route?.params?.focusOnEarthquake, [route?.params?.focusOnEarthquake]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let hazardInterval: NodeJS.Timeout | null = null;
+    let focusTimeout1: NodeJS.Timeout | null = null;
+    let focusTimeout2: NodeJS.Timeout | null = null;
+    
+    // CRITICAL: Get user location with mounted check
+    getUserLocation().catch((error) => {
+      if (isMounted) {
+        logger.error('Failed to get user location:', error);
+      }
+    });
+    
+    // Load hazard zones
+    const loadHazardZones = async () => {
+      if (!isMounted) return;
+      try {
+        const { listHazards } = await import('../../../../src/hazard/store');
+        const zones = await listHazards();
+        if (isMounted) {
+          setHazardZones(zones);
+        }
+      } catch (error) {
+        if (isMounted) {
+          logger.warn('Failed to load hazard zones:', error);
+        }
+      }
+    };
+    loadHazardZones();
+    
+    // Refresh hazard zones periodically (every 30 seconds)
+    hazardInterval = setInterval(() => {
+      if (isMounted) {
+        loadHazardZones();
+      }
+    }, 30000);
+    
+    // Handle navigation params (focusOnMember, focusOnEarthquake)
+    if (focusOnMember) {
+      const member = useFamilyStore.getState().members.find(m => m.id === focusOnMember);
+      if (member && mapRef.current && isMounted) {
+        // ELITE: Support both latitude/longitude properties and location object
+        const lat = member.location?.latitude ?? member.latitude;
+        const lng = member.location?.longitude ?? member.longitude;
+        
+        // Validate coordinates before focusing
+        if (typeof lat === 'number' && !isNaN(lat) && lat >= -90 && lat <= 90 &&
+            typeof lng === 'number' && !isNaN(lng) && lng >= -180 && lng <= 180) {
+          focusTimeout1 = setTimeout(() => {
+            if (isMounted && mapRef.current) {
+              // ELITE: Set animating flag to prevent region change updates during animation
+              isAnimatingRef.current = true;
+              mapRef.current.animateToRegion({
+                latitude: lat,
+                longitude: lng,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }, 1000);
+              setSelectedItem(member);
+              bottomSheetRef.current?.expand();
+              setTimeout(() => {
+                isAnimatingRef.current = false;
+                lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+              }, 1500); // Increased buffer
+            }
+          }, 500);
+        } else {
+          logger.warn('Invalid coordinates for member focus:', { member, lat, lng });
+        }
+      }
+    }
+    
+    if (focusOnEarthquake) {
+      const eq = useEarthquakeStore.getState().items.find(e => e.id === focusOnEarthquake);
+      if (eq && mapRef.current && isMounted) {
+        focusTimeout2 = setTimeout(() => {
+          if (isMounted && mapRef.current) {
+            // ELITE: Set animating flag to prevent region change updates during animation
+            isAnimatingRef.current = true;
+            mapRef.current.animateToRegion({
+              latitude: eq.latitude,
+              longitude: eq.longitude,
+              latitudeDelta: 0.5,
+              longitudeDelta: 0.5,
+            }, 1000);
+            setSelectedItem(eq);
+            bottomSheetRef.current?.expand();
+            setTimeout(() => {
+              isAnimatingRef.current = false;
+              lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+            }, 1500); // Increased buffer
+          }
+        }, 500);
+      }
+    }
+    
+    // CRITICAL: Cleanup function
+    return () => {
+      isMounted = false;
+      // Clear hazard zones refresh interval
+      if (hazardInterval) {
+        clearInterval(hazardInterval);
+      }
+      // Clear focus timeouts
+      if (focusTimeout1) {
+        clearTimeout(focusTimeout1);
+      }
+      if (focusTimeout2) {
+        clearTimeout(focusTimeout2);
+      }
+      // CRITICAL: Clear region update timeout
+      if (regionUpdateTimeoutRef.current) {
+        clearTimeout(regionUpdateTimeoutRef.current);
+        regionUpdateTimeoutRef.current = null;
+      }
+    };
+    // CRITICAL: Use stable dependencies to prevent infinite loops
+  }, [focusOnMember, focusOnEarthquake, getUserLocation]);
 
   const getLocationIcon = (type: MapLocation['type']): keyof typeof Ionicons.glyphMap => {
     switch (type) {
@@ -258,43 +355,68 @@ export default function MapScreen({ navigation, route }: any) {
     }
   };
 
-  const handleMarkerPress = (item: Earthquake | FamilyMember | MapLocation) => {
+  const handleMarkerPress = useCallback((item: Earthquake | FamilyMember | MapLocation) => {
     haptics.impactLight();
     setSelectedItem(item);
     bottomSheetRef.current?.expand();
     
     // Check if the item has latitude and longitude before animating
     if ('latitude' in item && 'longitude' in item) {
+      // ELITE: Set animating flag to prevent region change updates during animation
+      isAnimatingRef.current = true;
       mapRef.current?.animateToRegion({
         latitude: item.latitude,
         longitude: item.longitude,
         latitudeDelta: 0.5,
         longitudeDelta: 0.5,
       }, 500);
+      // ELITE: Reset animating flag after animation completes (with extra buffer)
+      setTimeout(() => {
+        isAnimatingRef.current = false;
+        lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+      }, 1000); // Increased buffer to ensure animation completes
     }
-  };
+  }, []);
 
-  const handleMapControlPress = async (action: 'zoomIn' | 'zoomOut' | 'locate' | 'cycleMapType') => {
+  const handleMapControlPress = useCallback(async (action: 'zoomIn' | 'zoomOut' | 'locate' | 'cycleMapType') => {
     haptics.impactLight();
     const camera = await mapRef.current?.getCamera();
     switch (action) {
       case 'zoomIn':
         if (camera) {
+          // ELITE: Set animating flag to prevent region change updates during animation
+          isAnimatingRef.current = true;
           camera.zoom += 1;
           mapRef.current?.animateCamera(camera, { duration: 250 });
           setCurrentZoom(camera.zoom + 1);
+          setTimeout(() => {
+            isAnimatingRef.current = false;
+            lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+          }, 500); // Increased buffer
         }
         break;
       case 'zoomOut':
         if (camera) {
+          // ELITE: Set animating flag to prevent region change updates during animation
+          isAnimatingRef.current = true;
           camera.zoom -= 1;
           mapRef.current?.animateCamera(camera, { duration: 250 });
           setCurrentZoom(camera.zoom - 1);
+          setTimeout(() => {
+            isAnimatingRef.current = false;
+            lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+          }, 500); // Increased buffer
         }
         break;
       case 'locate':
         if (userLocation) {
+          // ELITE: Set animating flag to prevent region change updates during animation
+          isAnimatingRef.current = true;
           mapRef.current?.animateToRegion({ ...userLocation, latitudeDelta: 0.5, longitudeDelta: 0.5 }, 500);
+          setTimeout(() => {
+            isAnimatingRef.current = false;
+            lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+          }, 1000); // Increased buffer
         } else {
           getUserLocation();
         }
@@ -303,30 +425,59 @@ export default function MapScreen({ navigation, route }: any) {
         setMapType(prev => prev === 'standard' ? 'satellite' : prev === 'satellite' ? 'hybrid' : 'standard');
         break;
     }
-  };
+  }, [userLocation, getUserLocation]);
 
   // Elite: Handle layer toggle
   const handleLayerToggle = useCallback((layer: keyof MapLayers) => {
     setLayers(prev => ({ ...prev, [layer]: !prev[layer] }));
   }, []);
 
+  // ELITE: Viewport-based data filtering for performance
+  // CRITICAL: Use ref-based region to prevent unnecessary re-renders
+  const viewportRegion = currentRegionRef.current || currentRegion;
+  const viewportEarthquakes = useViewportData({
+    data: earthquakes,
+    region: viewportRegion,
+    enabled: layers.earthquakes && !!viewportRegion,
+    buffer: 0.2, // 20% buffer
+  });
+
+  // ELITE: Memoize filtered family members to prevent unnecessary recalculations
+  const validFamilyMembers = useMemo(() => {
+    return familyMembers.filter(member => {
+      const lat = member.location?.latitude ?? member.latitude;
+      const lng = member.location?.longitude ?? member.longitude;
+      return typeof lat === 'number' && !isNaN(lat) && lat >= -90 && lat <= 90 &&
+             typeof lng === 'number' && !isNaN(lng) && lng >= -180 && lng <= 180;
+    });
+  }, [familyMembers]);
+
+  const viewportFamilyMembers = useViewportData({
+    data: validFamilyMembers,
+    region: viewportRegion,
+    enabled: layers.family && !!viewportRegion,
+    buffer: 0.2,
+  });
+
   // Elite: Marker clustering for performance
+  // ELITE: Use ref-based region to prevent unnecessary recalculations
   const clusteredMarkers = useMemo(() => {
-    if (!currentRegion) return { earthquakes: [], family: [] };
+    const region = currentRegionRef.current || currentRegion;
+    if (!region) return { earthquakes: [], family: [] };
     
-    const zoomLevel = getZoomLevel(currentRegion.latitudeDelta);
+    const zoomLevel = getZoomLevel(region.latitudeDelta);
     
-    const eqMarkers: ClusterableMarker[] = earthquakes.map(eq => ({
+    const eqMarkers: ClusterableMarker[] = viewportEarthquakes.map(eq => ({
       id: `eq-${eq.id}`,
       latitude: eq.latitude,
       longitude: eq.longitude,
       ...eq,
     }));
     
-    const familyMarkers: ClusterableMarker[] = familyMembers.map(member => ({
+    const familyMarkers: ClusterableMarker[] = viewportFamilyMembers.map(member => ({
       id: `fm-${member.id}`,
-      latitude: member.latitude,
-      longitude: member.longitude,
+      latitude: member.location?.latitude ?? member.latitude,
+      longitude: member.location?.longitude ?? member.longitude,
       ...member,
     }));
     
@@ -334,7 +485,9 @@ export default function MapScreen({ navigation, route }: any) {
       earthquakes: clusterMarkers(eqMarkers, zoomLevel),
       family: clusterMarkers(familyMarkers, zoomLevel),
     };
-  }, [earthquakes, familyMembers, currentRegion]);
+    // ELITE: Only recalculate when viewport data or currentRegion state changes (not ref)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportEarthquakes, viewportFamilyMembers, currentRegion]);
   
   // Elite: Empty state check
   const hasAnyMarkers = useMemo(() => {
@@ -466,6 +619,14 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      {isSampleMapData && (
+        <View style={styles.sampleDataBanner}>
+          <Ionicons name="information-circle" size={16} color="#fbbf24" style={{ marginRight: 8 }} />
+          <Text style={styles.sampleDataText}>
+            Bu harita örnek veriler içeriyor. Bölgenize özel noktalar yakında eklenecek.
+          </Text>
+        </View>
+      )}
       
       <MapView
         ref={mapRef}
@@ -483,18 +644,101 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
         }}
         onMapReady={() => {
           logger.info('MapView ready');
-          // Set initial region for clustering
-          setCurrentRegion({
+          // ELITE: Set animating flag to prevent region change updates during initial setup
+          isAnimatingRef.current = true;
+          isInitialMountRef.current = true;
+          
+          // ELITE: Set initial region using ref first (no state update = no re-render)
+          const initialRegion = {
             latitude: 41.0082,
             longitude: 28.9784,
             latitudeDelta: 8,
             longitudeDelta: 8,
-          });
+          };
+          currentRegionRef.current = initialRegion;
+          
+          // ELITE: Update state only once after initial mount
+          setCurrentRegion(initialRegion);
+          setCurrentZoom(getZoomLevel(initialRegion.latitudeDelta));
+          
+          // ELITE: Reset flags after MapView is fully ready
+          setTimeout(() => {
+            isAnimatingRef.current = false;
+            isInitialMountRef.current = false;
+            lastRegionUpdateTimeRef.current = Date.now();
+          }, 1000); // Increased delay to ensure MapView is fully ready
         }}
-        onRegionChangeComplete={(region) => {
-          setCurrentRegion(region);
-          setCurrentZoom(getZoomLevel(region.latitudeDelta));
-        }}
+        onRegionChangeComplete={useCallback((region: {
+          latitude: number;
+          longitude: number;
+          latitudeDelta: number;
+          longitudeDelta: number;
+        }) => {
+          // ELITE: Aggressive infinite loop prevention
+          const now = Date.now();
+          
+          // CRITICAL: Ignore if animating or initial mount
+          if (isAnimatingRef.current || isInitialMountRef.current) {
+            return;
+          }
+          
+          // ELITE: Rate limiting - prevent updates more frequent than 500ms
+          const timeSinceLastUpdate = now - lastRegionUpdateTimeRef.current;
+          if (timeSinceLastUpdate < 500) {
+            return;
+          }
+          
+          // ELITE: Check if region actually changed significantly using ref
+          const prevRegion = currentRegionRef.current;
+          if (prevRegion) {
+            const latDiff = Math.abs(prevRegion.latitude - region.latitude);
+            const lngDiff = Math.abs(prevRegion.longitude - region.longitude);
+            const latDeltaDiff = Math.abs(prevRegion.latitudeDelta - region.latitudeDelta);
+            const lngDeltaDiff = Math.abs(prevRegion.longitudeDelta - region.longitudeDelta);
+            
+            // ELITE: Very strict thresholds to prevent unnecessary updates
+            const latLngThreshold = 0.01; // 1% threshold for lat/lng (more lenient for user interaction)
+            const deltaThreshold = 0.05; // 5% threshold for delta (more lenient for zoom)
+            const hasSignificantChange = 
+              latDiff > latLngThreshold ||
+              lngDiff > latLngThreshold ||
+              latDeltaDiff > deltaThreshold ||
+              lngDeltaDiff > deltaThreshold;
+            
+            if (!hasSignificantChange) {
+              // No significant change, update ref only (no state update)
+              currentRegionRef.current = region;
+              return;
+            }
+          }
+          
+          // ELITE: Clear existing timeout
+          if (regionUpdateTimeoutRef.current) {
+            clearTimeout(regionUpdateTimeoutRef.current);
+            regionUpdateTimeoutRef.current = null;
+          }
+          
+          // ELITE: Debounced state update with ref sync
+          regionUpdateTimeoutRef.current = setTimeout(() => {
+            // Update ref immediately
+            currentRegionRef.current = region;
+            
+            // Update state only if significant change
+            setCurrentRegion(region);
+            
+            // Update zoom only if changed significantly
+            const newZoom = getZoomLevel(region.latitudeDelta);
+            setCurrentZoom((prevZoom) => {
+              if (Math.abs(prevZoom - newZoom) > 0.5) {
+                return newZoom;
+              }
+              return prevZoom;
+            });
+            
+            // Update last update time
+            lastRegionUpdateTimeRef.current = Date.now();
+          }, 500); // Increased debounce to 500ms for stability
+        }, [])}
         customMapStyle={mapStyle}
         loadingEnabled
         loadingIndicatorColor={colors.accent.primary}
@@ -516,12 +760,19 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
                 onPress={(cluster) => {
                   // Zoom in on cluster
                   if (mapRef.current) {
+                    // ELITE: Set animating flag to prevent region change updates during animation
+                    isAnimatingRef.current = true;
+                    const region = currentRegionRef.current || currentRegion;
                     mapRef.current.animateToRegion({
                       latitude: cluster.latitude,
                       longitude: cluster.longitude,
-                      latitudeDelta: currentRegion?.latitudeDelta ? currentRegion.latitudeDelta * 0.5 : 2,
-                      longitudeDelta: currentRegion?.longitudeDelta ? currentRegion.longitudeDelta * 0.5 : 2,
+                      latitudeDelta: region?.latitudeDelta ? region.latitudeDelta * 0.5 : 2,
+                      longitudeDelta: region?.longitudeDelta ? region.longitudeDelta * 0.5 : 2,
                     }, 500);
+                    setTimeout(() => {
+                      isAnimatingRef.current = false;
+                      lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+                    }, 1000); // Increased buffer
                   }
                 }}
               />
@@ -549,22 +800,39 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
                 cluster={item}
                 onPress={(cluster) => {
                   if (mapRef.current) {
+                    // ELITE: Set animating flag to prevent region change updates during animation
+                    isAnimatingRef.current = true;
+                    const region = currentRegionRef.current || currentRegion;
                     mapRef.current.animateToRegion({
                       latitude: cluster.latitude,
                       longitude: cluster.longitude,
-                      latitudeDelta: currentRegion?.latitudeDelta ? currentRegion.latitudeDelta * 0.5 : 2,
-                      longitudeDelta: currentRegion?.longitudeDelta ? currentRegion.longitudeDelta * 0.5 : 2,
+                      latitudeDelta: region?.latitudeDelta ? region.latitudeDelta * 0.5 : 2,
+                      longitudeDelta: region?.longitudeDelta ? region.longitudeDelta * 0.5 : 2,
                     }, 500);
+                    setTimeout(() => {
+                      isAnimatingRef.current = false;
+                      lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+                    }, 1000); // Increased buffer
                   }
                 }}
               />
             );
           }
           const member = item as FamilyMember;
+          // ELITE: Support both latitude/longitude properties and location object
+          const lat = member.location?.latitude ?? member.latitude;
+          const lng = member.location?.longitude ?? member.longitude;
+          
+          // Validate coordinates before rendering marker
+          if (typeof lat !== 'number' || isNaN(lat) || lat < -90 || lat > 90 ||
+              typeof lng !== 'number' || isNaN(lng) || lng < -180 || lng > 180) {
+            return null;
+          }
+          
           return (
             <Marker
               key={`fm-${member.id}`}
-              coordinate={{ latitude: member.latitude, longitude: member.longitude }}
+              coordinate={{ latitude: lat, longitude: lng }}
               onPress={() => handleMarkerPress(member)}
               tracksViewChanges={false}
             >
@@ -621,6 +889,8 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
             onPress={(user) => {
               // Zoom to user location
               if (user.location && mapRef.current) {
+                // ELITE: Set animating flag to prevent region change updates during animation
+                isAnimatingRef.current = true;
                 mapRef.current.animateToRegion({
                   latitude: user.location.latitude,
                   longitude: user.location.longitude,
@@ -629,10 +899,49 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
                 }, 1000);
                 setSelectedItem(user as any);
                 bottomSheetRef.current?.expand();
+                setTimeout(() => {
+                  isAnimatingRef.current = false;
+                  lastRegionUpdateTimeRef.current = Date.now(); // Reset rate limit timer
+                }, 1500); // Increased buffer to ensure animation completes
               }
             }}
           />
         ))}
+
+        {/* ELITE: Hazard Zones (Circle Overlays) */}
+        {layers.hazardZones && Circle && hazardZones.map((zone) => {
+          const getZoneColor = () => {
+            switch (zone.severity) {
+              case 3: return 'rgba(220, 38, 38, 0.3)'; // Critical - Red
+              case 2: return 'rgba(245, 158, 11, 0.3)'; // High - Orange
+              case 1: return 'rgba(251, 191, 36, 0.3)'; // Medium - Yellow
+              default: return 'rgba(107, 114, 128, 0.3)'; // Low - Gray
+            }
+          };
+          
+          const getZoneStrokeColor = () => {
+            switch (zone.severity) {
+              case 3: return '#DC2626'; // Critical - Red
+              case 2: return '#F59E0B'; // High - Orange
+              case 1: return '#FBBF24'; // Medium - Yellow
+              default: return '#6B7280'; // Low - Gray
+            }
+          };
+
+          return (
+            <Circle
+              key={`hazard-${zone.id}`}
+              center={{
+                latitude: zone.center.lat,
+                longitude: zone.center.lng,
+              }}
+              radius={zone.radius} // meters
+              fillColor={getZoneColor()}
+              strokeColor={getZoneStrokeColor()}
+              strokeWidth={2}
+            />
+          );
+        })}
       </MapView>
 
       {/* Floating UI Elements */}
@@ -645,10 +954,10 @@ const DetailRow = ({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
                 {layers.trappedUsers && trappedUsers.length > 0 && ` • ${trappedUsers.length} enkaz`}
               </Text>
             </View>
-            {/* Elite: Offline Mode Indicator */}
+            {/* Elite: Mesh Network Indicator */}
             <View style={styles.offlineBadge}>
               <Ionicons name="bluetooth" size={16} color={colors.status.online} />
-              <Text style={styles.offlineBadgeText}>Offline</Text>
+              <Text style={styles.offlineBadgeText}>Mesh</Text>
             </View>
           </View>
         </BlurView>
@@ -738,6 +1047,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
+  },
+  sampleDataBanner: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    zIndex: 2,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sampleDataText: {
+    color: colors.text.primary,
+    fontSize: 12,
+    lineHeight: 16,
+    flex: 1,
   },
   userLocationMarker: {
     width: 20,

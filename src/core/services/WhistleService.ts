@@ -14,7 +14,7 @@ class WhistleService {
   private sound: Audio.Sound | null = null;
   private isPlaying: boolean = false;
   private currentMode: WhistleMode = 'morse';
-  private intervalId: NodeJS.Timeout | null = null;
+  private timeoutIds: Set<NodeJS.Timeout> = new Set();
 
   /**
    * Initialize audio system
@@ -143,13 +143,31 @@ class WhistleService {
 
     try {
       if (this.sound) {
-        await this.sound.replayAsync();
+        // Reset position and play
+        await this.sound.setPositionAsync(0);
+        await this.sound.playAsync();
+        
+        // Wait for duration
         await this.wait(duration);
+        
+        // Stop sound
         await this.sound.stopAsync();
+        await this.sound.setPositionAsync(0);
       }
     } catch (error) {
       logger.error('Beep failed:', error);
+      // Continue - don't break the pattern
     }
+  }
+
+  /**
+   * Clear all active timeouts
+   */
+  private clearAllTimeouts() {
+    this.timeoutIds.forEach((timeoutId) => {
+      clearTimeout(timeoutId);
+    });
+    this.timeoutIds.clear();
   }
 
   /**
@@ -157,27 +175,55 @@ class WhistleService {
    */
   private wait(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      this.intervalId = setTimeout(resolve, ms);
+      const timeoutId = setTimeout(() => {
+        this.timeoutIds.delete(timeoutId);
+        resolve();
+      }, ms);
+      this.timeoutIds.add(timeoutId);
     });
   }
 
   /**
    * Play whistle audio using Audio API
-   * If audio file doesn't exist, throws error and falls back to haptic
+   * Uses real whistle.wav file from assets
    */
   private async playWhistleAudio(mode: WhistleMode) {
     try {
-      // Try to load 4000Hz whistle sound
-      // TODO: Add whistle.mp3 to assets/sounds/ directory
-      // const { sound } = await Audio.Sound.createAsync(
-      //   require('../../../assets/sounds/whistle.mp3')
-      // );
-      // this.sound = sound;
-      // await sound.playAsync();
+      // ELITE: Load real whistle sound from assets
+      const { sound } = await Audio.Sound.createAsync(
+        require('../../../assets/sounds/whistle.wav'),
+        {
+          shouldPlay: false,
+          isLooping: false,
+          volume: 1.0,
+        }
+      );
       
-      // For now, throw to use haptic fallback
-      throw new Error('Whistle audio file not available yet');
+      this.sound = sound;
+      
+      // CRITICAL: Start pattern based on mode - don't await to allow stop() to work
+      // Patterns will check isPlaying flag and stop when needed
+      if (mode === 'morse') {
+        this.playMorsePattern().catch((error) => {
+          if (this.isPlaying) {
+            logger.error('Morse pattern error:', error);
+          }
+        });
+      } else if (mode === 'continuous') {
+        this.playContinuousPattern().catch((error) => {
+          if (this.isPlaying) {
+            logger.error('Continuous pattern error:', error);
+          }
+        });
+      } else if (mode === 'vibration') {
+        this.playVibrationPattern().catch((error) => {
+          if (this.isPlaying) {
+            logger.error('Vibration pattern error:', error);
+          }
+        });
+      }
     } catch (error) {
+      logger.error('Whistle audio load failed:', error);
       // Rethrow to trigger haptic fallback
       throw error;
     }
@@ -224,22 +270,26 @@ class WhistleService {
    * Stop whistle
    */
   async stop() {
+    // CRITICAL: Set flag first to stop all loops
     this.isPlaying = false;
 
-    if (this.intervalId) {
-      clearTimeout(this.intervalId);
-      this.intervalId = null;
-    }
+    // Clear all timeouts immediately
+    this.clearAllTimeouts();
 
+    // Stop and unload sound
     if (this.sound) {
       try {
         await this.sound.stopAsync();
+        await this.sound.setPositionAsync(0);
         await this.sound.unloadAsync();
       } catch (error) {
         logger.error('WhistleService stop failed:', error);
       }
       this.sound = null;
     }
+
+    // CRITICAL: Wait a bit to ensure loops have checked isPlaying flag
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     logger.info('WhistleService stopped');
   }

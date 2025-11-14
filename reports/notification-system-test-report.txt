@@ -1,0 +1,38 @@
+[2025-11-10T22:38:49.265Z] ℹ️ ========================================
+[2025-11-10T22:38:49.268Z] ℹ️ NOTIFICATION SYSTEM TEST
+[2025-11-10T22:38:49.268Z] ℹ️ ========================================
+[2025-11-10T22:38:49.268Z] ℹ️ 
+[2025-11-10T22:38:49.268Z] ℹ️ Testing Notification Service...
+[2025-11-10T22:38:49.268Z] ✅ NotificationService.ts: ✅ File exists
+[2025-11-10T22:38:49.268Z] ✅ showEarthquakeNotification: ✅ Method exists
+[2025-11-10T22:38:49.268Z] ✅ showSOSNotification: ✅ Method exists
+[2025-11-10T22:38:49.268Z] ✅ Lazy loading: ✅ Implemented
+[2025-11-10T22:38:49.268Z] ✅ Native bridge check: ✅ Implemented
+[2025-11-10T22:38:49.268Z] ✅ Error handling: ✅ Implemented
+[2025-11-10T22:38:49.268Z] ℹ️ 
+[2025-11-10T22:38:49.269Z] ℹ️ Testing EEW Notification System...
+[2025-11-10T22:38:49.269Z] ✅ EEW notifications.ts: ✅ File exists
+[2025-11-10T22:38:49.269Z] ✅ Permission handling: ✅ Implemented
+[2025-11-10T22:38:49.269Z] ℹ️ 
+[2025-11-10T22:38:49.269Z] ℹ️ Testing Multi-Channel Alert Service...
+[2025-11-10T22:38:49.269Z] ✅ MultiChannelAlertService.ts: ✅ File exists
+[2025-11-10T22:38:49.269Z] ✅ sendAlert: ✅ Method exists
+[2025-11-10T22:38:49.269Z] ✅ pushNotification: ✅ Supported
+[2025-11-10T22:38:49.269Z] ✅ fullScreenAlert: ✅ Supported
+[2025-11-10T22:38:49.269Z] ✅ alarmSound: ✅ Supported
+[2025-11-10T22:38:49.269Z] ✅ vibration: ✅ Supported
+[2025-11-10T22:38:49.269Z] ✅ tts: ✅ Supported
+[2025-11-10T22:38:49.269Z] ℹ️ 
+[2025-11-10T22:38:49.269Z] ℹ️ Testing Notification Integration Points...
+[2025-11-10T22:38:49.269Z] ✅ EarthquakeService integration: ✅ Found
+[2025-11-10T22:38:49.269Z] ✅ Earthquake notifications: ✅ Integrated
+[2025-11-10T22:38:49.269Z] ✅ GlobalEarthquakeAnalysisService integration: ✅ Found
+[2025-11-10T22:38:49.269Z] ✅ Early warning alerts: ✅ Integrated
+[2025-11-10T22:38:49.269Z] ℹ️ 
+[2025-11-10T22:38:49.269Z] ℹ️ ========================================
+[2025-11-10T22:38:49.269Z] ℹ️ TEST SUMMARY
+[2025-11-10T22:38:49.269Z] ℹ️ ========================================
+[2025-11-10T22:38:49.269Z] ℹ️ Success: 19
+[2025-11-10T22:38:49.269Z] ℹ️ Errors: 0
+[2025-11-10T22:38:49.269Z] ℹ️ Warnings: 0
+[2025-11-10T22:38:49.269Z] ✅ ✅ Notification system is properly configured

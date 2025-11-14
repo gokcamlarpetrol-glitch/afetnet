@@ -134,8 +134,21 @@ export default function MessageTemplates() {
       // ELITE: Create message content with proper structure
       const messageContent = template.message; // Send plain message text, not JSON
       
-      // ELITE: Send via BLE mesh service broadcast
+      // ELITE: Send via BLE mesh service broadcast with validation
       try {
+        // ELITE: Validate BLE mesh service is running
+        if (!bleMeshService.getIsRunning()) {
+          Alert.alert('Hata', 'BLE Mesh servisi çalışmıyor. Lütfen Bluetooth\'u açın.');
+          return;
+        }
+
+        // ELITE: Validate message content
+        if (!messageContent || typeof messageContent !== 'string' || messageContent.trim().length === 0) {
+          logger.warn('Invalid message content for template:', template.id);
+          Alert.alert('Hata', 'Mesaj içeriği geçersiz.');
+          return;
+        }
+
         await bleMeshService.broadcastMessage({
           content: messageContent,
           priority: template.priority as 'critical' | 'high' | 'normal',
@@ -144,35 +157,54 @@ export default function MessageTemplates() {
           ackRequired: false,
           sequence: 0,
           attempts: 0,
+        }).catch((error) => {
+          logger.error('Error broadcasting template message:', error);
+          throw error; // Re-throw to be caught by outer try-catch
         });
 
-        const timestamp = Date.now();
-        const messageId = `template_${template.id}_${timestamp}`;
-        
-        // ELITE: Add message to store for local display
-        useMessageStore.getState().addMessage({
-          id: messageId,
-          from: 'me',
-          to: 'broadcast',
-          content: template.message,
-          timestamp,
-          delivered: true,
-          read: true,
-        });
+            const timestamp = Date.now();
+            const messageId = `template_${template.id}_${timestamp}`;
+            
+            // ELITE: Add message to store for local display (await async operation)
+            await useMessageStore.getState().addMessage({
+              id: messageId,
+              from: 'me',
+              to: 'broadcast',
+              content: template.message,
+              timestamp,
+              delivered: true,
+              read: true,
+            });
 
-        // ELITE: Update conversations
-        useMessageStore.getState().updateConversations();
-        
-        logger.info(`Template "${template.title}" sent successfully`);
-        
-        // ELITE: Show success feedback
-        Alert.alert(
-          'Mesaj Gönderildi',
-          `"${template.title}" mesajı mesh ağına yayınlandı.`,
-          [{ text: 'Tamam' }]
-        );
-        
-        haptics.notificationSuccess();
+            // ELITE: Update conversations (sync operation, no await needed)
+            useMessageStore.getState().updateConversations();
+            
+            // ELITE: Send push notification for critical templates (hayati önem)
+            if (template.priority === 'critical' || template.priority === 'high') {
+              try {
+                const { notificationService } = await import('../../services/NotificationService');
+                await notificationService.showMessageNotification(
+                  'Acil Durum Mesajı',
+                  template.message,
+                  messageId,
+                  'broadcast',
+                  template.priority
+                );
+              } catch (notifError) {
+                logger.error('Failed to send template notification:', notifError);
+              }
+            }
+            
+            logger.info(`Template "${template.title}" sent successfully`);
+            
+            // ELITE: Show success feedback
+            Alert.alert(
+              'Mesaj Gönderildi',
+              `"${template.title}" mesajı mesh ağına yayınlandı.`,
+              [{ text: 'Tamam' }]
+            );
+            
+            haptics.notificationSuccess();
       } catch (sendError) {
         logger.error('BLE send error:', sendError);
         Alert.alert(

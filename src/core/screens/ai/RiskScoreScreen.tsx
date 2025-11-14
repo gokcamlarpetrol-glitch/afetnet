@@ -8,15 +8,41 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/core';
 import { colors, spacing } from '../../theme';
 import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
 import { RiskLevel, RiskTrend } from '../../ai/types/ai.types';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
+import { i18nService } from '../../services/I18nService';
 
 const logger = createLogger('RiskScoreScreen');
+
+// ELITE: Güvenli string render helper - Text component hatası önleme
+const safeString = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) {
+    const joined = value.join(', ');
+    return joined || '';
+  }
+  if (typeof value === 'object') {
+    try {
+      const str = JSON.stringify(value);
+      return str || '';
+    } catch {
+      return '';
+    }
+  }
+  try {
+    const str = String(value);
+    return str || '';
+  } catch {
+    return '';
+  }
+};
 
 export default function RiskScoreScreen() {
   const navigation = useNavigation();
@@ -50,22 +76,22 @@ export default function RiskScoreScreen() {
 
   const getRiskLabel = (level: RiskLevel) => {
     switch (level) {
-      case 'critical': return 'Kritik';
-      case 'high': return 'Yuksek';
-      case 'medium': return 'Orta';
-      case 'low': return 'Dusuk';
-      default: return 'Bilinmiyor';
+      case 'critical': return i18nService.t('ai.criticalLevel');
+      case 'high': return i18nService.t('ai.highRisk');
+      case 'medium': return i18nService.t('ai.mediumRisk');
+      case 'low': return i18nService.t('ai.lowRisk');
+      default: return i18nService.t('common.unknown');
     }
   };
 
   const getTrendLabel = (trend: RiskTrend) => {
     switch (trend) {
       case 'improving':
-        return 'İyileşiyor';
+        return i18nService.t('ai.improving');
       case 'worsening':
-        return 'Artıyor';
+        return i18nService.t('ai.worsening');
       default:
-        return 'Stabil';
+        return i18nService.t('ai.stable');
     }
   };
 
@@ -87,14 +113,118 @@ export default function RiskScoreScreen() {
   const getHazardLevelLabel = (hazardLevel: 'very_high' | 'high' | 'medium' | 'low') => {
     switch (hazardLevel) {
       case 'very_high':
-        return 'Çok Yüksek Risk';
+        return i18nService.t('ai.veryHighRisk');
       case 'high':
-        return 'Yüksek Risk';
+        return i18nService.t('ai.highRisk');
       case 'medium':
-        return 'Orta Risk';
+        return i18nService.t('ai.mediumRisk');
       case 'low':
       default:
-        return 'Düşük Risk';
+        return i18nService.t('ai.lowRisk');
+    }
+  };
+
+  const getDamageLabel = (level: 'minimal' | 'light' | 'moderate' | 'severe' | 'collapse') => {
+    switch (level) {
+      case 'collapse': return i18nService.t('ai.collapseRisk');
+      case 'severe': return i18nService.t('ai.severeDamage');
+      case 'moderate': return i18nService.t('ai.moderateDamage');
+      case 'light': return i18nService.t('ai.lightDamage');
+      case 'minimal': return i18nService.t('ai.minimalDamage');
+      default: return i18nService.t('common.unknown');
+    }
+  };
+
+  const getDamageColor = (level: 'minimal' | 'light' | 'moderate' | 'severe' | 'collapse') => {
+    switch (level) {
+      case 'collapse': return colors.emergency.critical;
+      case 'severe': return colors.emergency.warning;
+      case 'moderate': return colors.status.alert;
+      case 'light': return colors.status.info;
+      case 'minimal': return colors.status.success;
+      default: return colors.text.secondary;
+    }
+  };
+
+  const getUrgencyLabel = (urgency: 'none' | 'low' | 'medium' | 'high' | 'critical') => {
+    switch (urgency) {
+      case 'critical': return 'Kritik';
+      case 'high': return 'Yüksek';
+      case 'medium': return 'Orta';
+      case 'low': return 'Düşük';
+      case 'none': return 'Gerek Yok';
+      default: return 'Bilinmiyor';
+    }
+  };
+
+  const getUrgencyColor = (urgency: 'none' | 'low' | 'medium' | 'high' | 'critical') => {
+    switch (urgency) {
+      case 'critical': return colors.emergency.critical;
+      case 'high': return colors.emergency.warning;
+      case 'medium': return colors.status.alert;
+      case 'low': return colors.status.info;
+      case 'none': return colors.status.success;
+      default: return colors.text.secondary;
+    }
+  };
+
+  const getDifficultyLabel = (difficulty: 'easy' | 'moderate' | 'difficult' | 'critical') => {
+    switch (difficulty) {
+      case 'critical': return 'Kritik';
+      case 'difficult': return 'Zor';
+      case 'moderate': return 'Orta';
+      case 'easy': return 'Kolay';
+      default: return 'Bilinmiyor';
+    }
+  };
+
+  const getDifficultyColor = (difficulty: 'easy' | 'moderate' | 'difficult' | 'critical') => {
+    switch (difficulty) {
+      case 'critical': return colors.emergency.critical;
+      case 'difficult': return colors.emergency.warning;
+      case 'moderate': return colors.status.alert;
+      case 'easy': return colors.status.success;
+      default: return colors.text.secondary;
+    }
+  };
+
+  const getRiskLevelLabel = (risk: 'none' | 'low' | 'medium' | 'high') => {
+    switch (risk) {
+      case 'high': return 'Yüksek';
+      case 'medium': return 'Orta';
+      case 'low': return 'Düşük';
+      case 'none': return 'Yok';
+      default: return 'Bilinmiyor';
+    }
+  };
+
+  const getRiskLevelColor = (risk: 'none' | 'low' | 'medium' | 'high') => {
+    switch (risk) {
+      case 'high': return colors.emergency.warning;
+      case 'medium': return colors.status.alert;
+      case 'low': return colors.status.info;
+      case 'none': return colors.status.success;
+      default: return colors.text.secondary;
+    }
+  };
+
+  const getReadinessLabel = (readiness: 'excellent' | 'good' | 'fair' | 'poor') => {
+    switch (readiness) {
+      case 'excellent': return 'Mükemmel';
+      case 'good': return 'İyi';
+      case 'fair': return 'Orta';
+      case 'poor': return 'Zayıf';
+      default: return 'Bilinmiyor';
+    }
+  };
+
+  const getReadinessColor = (readiness: 'excellent' | 'good' | 'fair' | 'poor') => {
+    switch (readiness) {
+      case 'excellent': return colors.status.success;
+      case 'good': return colors.status.info;
+      case 'fair': return colors.status.alert;
+      case 'poor': return colors.emergency.warning;
+      default: return colors.text.secondary;
     }
   };
 
@@ -102,7 +232,7 @@ export default function RiskScoreScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.accent.primary} />
-        <Text style={styles.loadingText}>Risk skoru hesaplaniyor...</Text>
+        <Text style={styles.loadingText}>{safeString(i18nService.t('ai.riskScoreLoading') || 'Risk skoru hesaplanıyor...')}</Text>
       </View>
     );
   }
@@ -111,9 +241,9 @@ export default function RiskScoreScreen() {
     return (
       <View style={styles.emptyContainer}>
         <Ionicons name="analytics-outline" size={64} color={colors.text.tertiary} />
-        <Text style={styles.emptyText}>Risk skoru bulunamadi</Text>
+        <Text style={styles.emptyText}>{safeString(i18nService.t('ai.riskScoreNotFound') || 'Risk skoru bulunamadı')}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={refreshRiskScore}>
-          <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          <Text style={styles.retryButtonText}>{safeString(i18nService.t('common.retry') || 'Tekrar Dene')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -132,7 +262,7 @@ export default function RiskScoreScreen() {
         >
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </Pressable>
-        <Text style={styles.headerTitle}>Risk Skoru</Text>
+        <Text style={styles.headerTitle}>{safeString(i18nService.t('ai.riskScore'))}</Text>
         <View style={styles.headerRight} />
       </View>
 
@@ -143,28 +273,28 @@ export default function RiskScoreScreen() {
         style={styles.scoreCard}
       >
         <View style={styles.scoreHeader}>
-          <Text style={styles.scoreTitle}>Risk Skorunuz</Text>
+          <Text style={styles.scoreTitle}>{safeString(i18nService.t('ai.riskScoreTitle'))}</Text>
           <View style={[styles.scoreBadge, { backgroundColor: getRiskColor(riskScore.level) }]}>
-            <Text style={styles.scoreBadgeText}>{getRiskLabel(riskScore.level)}</Text>
+            <Text style={styles.scoreBadgeText}>{safeString(getRiskLabel(riskScore.level))}</Text>
           </View>
         </View>
         <View style={styles.scoreCircle}>
-          <Text style={styles.scoreValue}>{riskScore.score}</Text>
+          <Text style={styles.scoreValue}>{safeString(riskScore.score)}</Text>
           <Text style={styles.scoreMax}>/100</Text>
         </View>
         <Text style={styles.scoreDescription}>
-          Son guncelleme: {new Date(riskScore.lastUpdated).toLocaleString('tr-TR')}
+          {safeString(i18nService.t('ai.lastUpdate'))}: {safeString(new Date(riskScore.lastUpdated).toLocaleString('tr-TR'))}
         </Text>
         <View style={styles.scoreMetaRow}>
           <View style={styles.metaPill}>
             <Ionicons name="trending-up" size={16} color={colors.accent.primary} />
-            <Text style={styles.metaPillText}>Trend: {getTrendLabel(riskScore.trend)}</Text>
+            <Text style={styles.metaPillText}>{safeString(i18nService.t('ai.trend'))}: {safeString(getTrendLabel(riskScore.trend))}</Text>
           </View>
           {typeof riskScore.aftershockProbability === 'number' && (
             <View style={styles.metaPill}>
               <Ionicons name="pulse" size={16} color={colors.emergency.warning} />
               <Text style={styles.metaPillText}>
-                Artci Olasiligi %{riskScore.aftershockProbability}
+                {safeString(i18nService.t('ai.aftershockProbability'))} %{safeString(riskScore.aftershockProbability)}
               </Text>
             </View>
           )}
@@ -174,26 +304,26 @@ export default function RiskScoreScreen() {
       {/* Regional Summary */}
       {riskScore.regionalSummary && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Bolgesel Durum</Text>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.regionalStatus') || 'Bölgesel Durum')}</Text>
           <View style={styles.regionCard}>
             <View style={styles.regionHeader}>
               <View style={styles.regionBadge}>
                 <Ionicons name="earth" size={18} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.regionTitle}>{riskScore.regionalSummary.regionName}</Text>
+                <Text style={styles.regionTitle}>{safeString(riskScore.regionalSummary.regionName)}</Text>
                 <Text style={styles.regionSubtitle}>
-                  {getHazardLevelLabel(riskScore.regionalSummary.hazardLevel)}
+                  {safeString(getHazardLevelLabel(riskScore.regionalSummary.hazardLevel))}
                 </Text>
               </View>
             </View>
-            <Text style={styles.regionDescription}>{riskScore.regionalSummary.description}</Text>
+            <Text style={styles.regionDescription}>{safeString(riskScore.regionalSummary.description)}</Text>
             <View style={styles.regionMetaRow}>
               {typeof riskScore.regionalSummary.distanceKm === 'number' && (
                 <View style={styles.regionMetaPill}>
                   <Ionicons name="navigate" size={14} color={colors.accent.primary} />
                   <Text style={styles.regionMetaText}>
-                    Merkez mesafesi {riskScore.regionalSummary.distanceKm.toFixed(0)} km
+                    Merkez mesafesi {safeString(riskScore.regionalSummary.distanceKm.toFixed(0))} km
                   </Text>
                 </View>
               )}
@@ -201,19 +331,19 @@ export default function RiskScoreScreen() {
                 <View style={styles.regionMetaPill}>
                   <Ionicons name="shield-checkmark" size={14} color={colors.status.info} />
                   <Text style={styles.regionMetaText}>
-                    Kritik noktalar: {riskScore.regionalSummary.criticalInfrastructure.slice(0, 2).join(', ')}
+                    Kritik noktalar: {safeString(riskScore.regionalSummary.criticalInfrastructure.slice(0, 2).join(', '))}
                   </Text>
                 </View>
               )}
             </View>
             {!!riskScore.regionalSummary.historicalEvents?.length && (
               <View style={styles.historyContainer}>
-                <Text style={styles.historyTitle}>Onemli depremler</Text>
+                <Text style={styles.historyTitle}>Önemli depremler</Text>
                 {riskScore.regionalSummary.historicalEvents.slice(0, 3).map((event, idx) => (
                   <View key={idx} style={styles.historyItem}>
                     <Ionicons name="time" size={14} color={colors.text.secondary} />
                     <Text style={styles.historyText}>
-                      {event.year} • M{event.magnitude} • {event.note}
+                      {safeString(event.year)} • M{safeString(event.magnitude)} • {safeString(event.note)}
                     </Text>
                   </View>
                 ))}
@@ -225,19 +355,19 @@ export default function RiskScoreScreen() {
 
       {/* Risk Faktorleri */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Risk Faktorleri</Text>
+        <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.riskFactors') || 'Risk Faktorleri')}</Text>
         {riskScore.factors.map((factor) => (
           <View key={factor.id} style={styles.factorCard}>
             <View style={styles.factorHeader}>
-              <Text style={styles.factorName}>{factor.name}</Text>
-              <Text style={styles.factorValue}>{factor.value}%</Text>
+              <Text style={styles.factorName}>{safeString(factor.name)}</Text>
+              <Text style={styles.factorValue}>{safeString(factor.value)}%</Text>
             </View>
-            <Text style={styles.factorDescription}>{factor.description}</Text>
+            <Text style={styles.factorDescription}>{safeString(factor.description)}</Text>
             {factor.severity && (
               <View style={styles.factorSeverity}>
                 <View style={[styles.severityDot, { backgroundColor: getSeverityColor(factor.severity) }]} />
                 <Text style={[styles.factorSeverityText, { color: getSeverityColor(factor.severity) }]}>
-                  {getRiskLabel(factor.severity)} seviye
+                  {safeString(getRiskLabel(factor.severity))} seviye
                 </Text>
               </View>
             )}
@@ -251,7 +381,7 @@ export default function RiskScoreScreen() {
       {/* Insights */}
       {!!riskScore.insights?.length && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Analiz Ozeti</Text>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.analysisSummary') || 'Analiz Ozeti')}</Text>
           {riskScore.insights.map((insight) => (
             <View key={insight.id} style={styles.insightCard}>
               <View style={styles.insightHeader}>
@@ -262,15 +392,15 @@ export default function RiskScoreScreen() {
                     color="#fff"
                   />
                 </View>
-                <Text style={styles.insightTitle}>{insight.title}</Text>
+                <Text style={styles.insightTitle}>{safeString(insight.title)}</Text>
               </View>
-              <Text style={styles.insightDescription}>{insight.description}</Text>
+              <Text style={styles.insightDescription}>{safeString(insight.description)}</Text>
               {!!insight.actions?.length && (
                 <View style={styles.insightActions}>
                   {insight.actions.slice(0, 3).map((action, idx) => (
                     <View key={idx} style={styles.insightActionPill}>
                       <Ionicons name="checkmark" size={12} color={colors.status.success} />
-                      <Text style={styles.insightActionText}>{action}</Text>
+                      <Text style={styles.insightActionText}>{safeString(action)}</Text>
                     </View>
                   ))}
                 </View>
@@ -282,11 +412,11 @@ export default function RiskScoreScreen() {
 
       {/* Oneriler */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Oneriler</Text>
+        <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.recommendations') || 'Öneriler')}</Text>
         {riskScore.recommendations.map((rec, index) => (
           <View key={index} style={styles.recommendationCard}>
             <Ionicons name="checkmark-circle" size={20} color={colors.status.success} />
-            <Text style={styles.recommendationText}>{rec}</Text>
+            <Text style={styles.recommendationText}>{safeString(rec)}</Text>
           </View>
         ))}
       </View>
@@ -294,13 +424,270 @@ export default function RiskScoreScreen() {
       {/* Checklist */}
       {!!riskScore.checklist?.length && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Oncelikli Yapilacaklar</Text>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.priorityTasks') || 'Öncelikli Yapılacaklar')}</Text>
           {riskScore.checklist.map((item, idx) => (
             <View key={idx} style={styles.checklistCard}>
               <Ionicons name="square-outline" size={18} color={colors.text.secondary} />
-              <Text style={styles.checklistText}>{item}</Text>
+              <Text style={styles.checklistText}>{safeString(item)}</Text>
             </View>
           ))}
+        </View>
+      )}
+
+      {/* Detaylı Bina Analizi */}
+      {riskScore.buildingAnalysis && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.buildingAnalysis') || 'Bina Analizi')}</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Yapısal Bütünlük</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.buildingAnalysis.structuralIntegrity)}/100</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Yaş Riski</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.buildingAnalysis.ageRisk)}/100</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Kat Riski</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.buildingAnalysis.floorRisk)}/100</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Zemin Riski</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.buildingAnalysis.soilRisk)}/100</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Tahmini Hasar</Text>
+              <Text style={[styles.detailValue, { color: getDamageColor(riskScore.buildingAnalysis.estimatedDamageLevel) }]}>
+                {safeString(getDamageLabel(riskScore.buildingAnalysis.estimatedDamageLevel))}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Güçlendirme Aciliyeti</Text>
+              <Text style={[styles.detailValue, { color: getUrgencyColor(riskScore.buildingAnalysis.retrofitUrgency) }]}>
+                {safeString(getUrgencyLabel(riskScore.buildingAnalysis.retrofitUrgency))}
+              </Text>
+            </View>
+            {riskScore.buildingAnalysis.vulnerabilities.length > 0 && (
+              <View style={styles.vulnerabilitiesContainer}>
+                <Text style={styles.vulnerabilitiesTitle}>Zayıflıklar</Text>
+                {riskScore.buildingAnalysis.vulnerabilities.map((v, idx) => (
+                  <View key={idx} style={styles.vulnerabilityItem}>
+                    <Ionicons name="warning" size={14} color={colors.emergency.warning} />
+                    <Text style={styles.vulnerabilityText}>{safeString(v)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {riskScore.buildingAnalysis.strengths.length > 0 && (
+              <View style={styles.strengthsContainer}>
+                <Text style={styles.strengthsTitle}>Güçlü Yönler</Text>
+                {riskScore.buildingAnalysis.strengths.map((s, idx) => (
+                  <View key={idx} style={styles.strengthItem}>
+                    <Ionicons name="checkmark-circle" size={14} color={colors.status.success} />
+                    <Text style={styles.strengthText}>{safeString(s)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* Aile Profili */}
+      {riskScore.familyProfile && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.familyProfile') || 'Aile Profili')}</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Toplam Üye</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.familyProfile.totalMembers)} kişi</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Çocuk Sayısı</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.familyProfile.childrenCount)}</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Yaşlı Sayısı</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.familyProfile.elderlyCount)}</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Tahliye Zorluğu</Text>
+              <Text style={[styles.detailValue, { color: getDifficultyColor(riskScore.familyProfile.evacuationDifficulty) }]}>
+                {safeString(getDifficultyLabel(riskScore.familyProfile.evacuationDifficulty))}
+              </Text>
+            </View>
+            {riskScore.familyProfile.specialConsiderations.length > 0 && (
+              <View style={styles.considerationsContainer}>
+                <Text style={styles.considerationsTitle}>Özel Dikkat Gerekenler</Text>
+                {riskScore.familyProfile.specialConsiderations.map((c, idx) => (
+                  <View key={idx} style={styles.considerationItem}>
+                    <Ionicons name="information-circle" size={14} color={colors.accent.primary} />
+                    <Text style={styles.considerationText}>{safeString(c)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* Çevresel Faktörler */}
+      {riskScore.environmentalFactors && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.environmentalFactors') || 'Çevresel Faktörler')}</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Fay Yakınlığı</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.environmentalFactors.proximityToFault.toFixed(1))} km</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Zemin Sıvılaşması</Text>
+              <Text style={[styles.detailValue, { color: getRiskLevelColor(riskScore.environmentalFactors.soilLiquefactionRisk) }]}>
+                {safeString(getRiskLevelLabel(riskScore.environmentalFactors.soilLiquefactionRisk))}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Heyelan Riski</Text>
+              <Text style={[styles.detailValue, { color: getRiskLevelColor(riskScore.environmentalFactors.landslideRisk) }]}>
+                {safeString(getRiskLevelLabel(riskScore.environmentalFactors.landslideRisk))}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Yangın Riski</Text>
+              <Text style={[styles.detailValue, { color: getRiskLevelColor(riskScore.environmentalFactors.fireRisk) }]}>
+                {safeString(getRiskLevelLabel(riskScore.environmentalFactors.fireRisk))}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Genel Çevresel Skor</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.environmentalFactors.overallEnvironmentalScore)}/100</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Tahliye Hazırlığı */}
+      {riskScore.evacuationReadiness && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.evacuationReadiness') || 'Tahliye Hazırlığı')}</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Rota Netliği</Text>
+              <Text style={[styles.detailValue, { color: getReadinessColor(riskScore.evacuationReadiness.routeClarity) }]}>
+                {safeString(getReadinessLabel(riskScore.evacuationReadiness.routeClarity))}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Alternatif Rotalar</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.evacuationReadiness.alternativeRoutes)} rota</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Toplanma Alanı Mesafesi</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.evacuationReadiness.assemblyPointDistance.toFixed(1))} km</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Tahliye Süresi</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.evacuationReadiness.evacuationTimeEstimate)} dakika</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Hazırlık Skoru</Text>
+              <Text style={styles.detailValue}>{safeString(riskScore.evacuationReadiness.readinessScore)}/100</Text>
+            </View>
+            {riskScore.evacuationReadiness.obstacles.length > 0 && (
+              <View style={styles.obstaclesContainer}>
+                <Text style={styles.obstaclesTitle}>Engeller</Text>
+                {riskScore.evacuationReadiness.obstacles.map((o, idx) => (
+                  <View key={idx} style={styles.obstacleItem}>
+                    <Ionicons name="alert-circle" size={14} color={colors.emergency.warning} />
+                    <Text style={styles.obstacleText}>{safeString(o)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* Azaltma Potansiyeli */}
+      {riskScore.mitigationPotential && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.mitigationPotential') || 'Risk Azaltma Potansiyeli')}</Text>
+          <View style={styles.mitigationCard}>
+            <Text style={styles.mitigationSubtitle}>Hızlı Kazanımlar</Text>
+            {riskScore.mitigationPotential.quickWins.map((win, idx) => (
+              <View key={idx} style={styles.mitigationItem}>
+                <View style={styles.mitigationHeader}>
+                  <Text style={styles.mitigationAction}>{safeString(win.action)}</Text>
+                  <View style={styles.mitigationImpact}>
+                    <Text style={styles.mitigationImpactText}>-{safeString(win.impact)} puan</Text>
+                  </View>
+                </View>
+                <View style={styles.mitigationMeta}>
+                  <View style={styles.mitigationMetaPill}>
+                    <Text style={styles.mitigationMetaText}>{safeString(win.timeframe)}</Text>
+                  </View>
+                  <View style={styles.mitigationMetaPill}>
+                    <Text style={styles.mitigationMetaText}>{safeString(win.cost === 'free' ? 'Ücretsiz' : win.cost === 'low' ? 'Düşük' : win.cost === 'medium' ? 'Orta' : 'Yüksek')}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+            {riskScore.mitigationPotential.longTermImprovements.length > 0 && (
+              <>
+                <Text style={[styles.mitigationSubtitle, { marginTop: spacing[4] }]}>Uzun Vadeli İyileştirmeler</Text>
+                {riskScore.mitigationPotential.longTermImprovements.map((improvement, idx) => (
+                  <View key={idx} style={styles.mitigationItem}>
+                    <View style={styles.mitigationHeader}>
+                      <Text style={styles.mitigationAction}>{safeString(improvement.action)}</Text>
+                      <View style={styles.mitigationImpact}>
+                        <Text style={styles.mitigationImpactText}>-{safeString(improvement.impact)} puan</Text>
+                      </View>
+                    </View>
+                    <View style={styles.mitigationMeta}>
+                      <View style={styles.mitigationMetaPill}>
+                        <Text style={styles.mitigationMetaText}>{safeString(improvement.timeframe)}</Text>
+                      </View>
+                      <View style={styles.mitigationMetaPill}>
+                        <Text style={styles.mitigationMetaText}>{safeString(improvement.cost === 'free' ? 'Ücretsiz' : improvement.cost === 'low' ? 'Düşük' : improvement.cost === 'medium' ? 'Orta' : 'Yüksek')}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
+            <View style={styles.maxPotentialContainer}>
+              <Text style={styles.maxPotentialText}>
+                Maksimum potansiyel risk azaltma: <Text style={styles.maxPotentialValue}>-{safeString(riskScore.mitigationPotential.maxPotentialReduction)} puan</Text>
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Hayatta Kalma Olasılığı ve Süre */}
+      {(typeof riskScore.survivalProbability === 'number' || typeof riskScore.timeToSafety === 'number') && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{safeString(i18nService.t('ai.survivalAnalysis') || 'Hayatta Kalma Analizi')}</Text>
+          <View style={styles.survivalCard}>
+            {typeof riskScore.survivalProbability === 'number' && (
+              <View style={styles.survivalItem}>
+                <Ionicons name="shield-checkmark" size={24} color={colors.status.success} />
+                <View style={styles.survivalContent}>
+                  <Text style={styles.survivalLabel}>Hayatta Kalma Olasılığı</Text>
+                  <Text style={styles.survivalValue}>%{safeString(riskScore.survivalProbability)}</Text>
+                </View>
+              </View>
+            )}
+            {typeof riskScore.timeToSafety === 'number' && (
+              <View style={styles.survivalItem}>
+                <Ionicons name="time" size={24} color={colors.accent.primary} />
+                <View style={styles.survivalContent}>
+                  <Text style={styles.survivalLabel}>Güvenli Bölgeye Ulaşım Süresi</Text>
+                  <Text style={styles.survivalValue}>{safeString(riskScore.timeToSafety)} dakika</Text>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
       )}
 
@@ -308,7 +695,7 @@ export default function RiskScoreScreen() {
       <View style={styles.disclaimer}>
         <Ionicons name="information-circle-outline" size={16} color={colors.text.tertiary} />
         <Text style={styles.disclaimerText}>
-          Bu risk skoru bilgilendirme amaclidir. AFAD ve resmi kurumlarin uyarilari onceliklidir.
+          Bu risk skoru bilgilendirme amaçlıdır. AFAD ve resmi kurumların uyarıları önceliklidir.
         </Text>
       </View>
     </ScrollView>
@@ -698,6 +1085,233 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.secondary,
     lineHeight: 18,
+  },
+  detailCard: {
+    backgroundColor: colors.background.card,
+    borderRadius: 16,
+    padding: spacing[5],
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    gap: spacing[3],
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.light,
+  },
+  detailLabel: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  detailValue: {
+    fontSize: 14,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  vulnerabilitiesContainer: {
+    marginTop: spacing[3],
+    padding: spacing[3],
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 12,
+    gap: spacing[2],
+  },
+  vulnerabilitiesTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.emergency.warning,
+    marginBottom: spacing[1],
+  },
+  vulnerabilityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  vulnerabilityText: {
+    fontSize: 12,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  strengthsContainer: {
+    marginTop: spacing[3],
+    padding: spacing[3],
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    borderRadius: 12,
+    gap: spacing[2],
+  },
+  strengthsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.status.success,
+    marginBottom: spacing[1],
+  },
+  strengthItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  strengthText: {
+    fontSize: 12,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  considerationsContainer: {
+    marginTop: spacing[3],
+    padding: spacing[3],
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderRadius: 12,
+    gap: spacing[2],
+  },
+  considerationsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    marginBottom: spacing[1],
+  },
+  considerationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  considerationText: {
+    fontSize: 12,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  obstaclesContainer: {
+    marginTop: spacing[3],
+    padding: spacing[3],
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 12,
+    gap: spacing[2],
+  },
+  obstaclesTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.emergency.warning,
+    marginBottom: spacing[1],
+  },
+  obstacleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  obstacleText: {
+    fontSize: 12,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  mitigationCard: {
+    backgroundColor: colors.background.card,
+    borderRadius: 16,
+    padding: spacing[5],
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    gap: spacing[3],
+  },
+  mitigationSubtitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing[2],
+  },
+  mitigationItem: {
+    padding: spacing[4],
+    backgroundColor: colors.background.elevated,
+    borderRadius: 12,
+    marginBottom: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  mitigationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing[2],
+  },
+  mitigationAction: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginRight: spacing[2],
+  },
+  mitigationImpact: {
+    backgroundColor: colors.status.success,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  mitigationImpactText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  mitigationMeta: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  mitigationMetaPill: {
+    backgroundColor: colors.background.card,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  mitigationMetaText: {
+    fontSize: 11,
+    color: colors.text.secondary,
+  },
+  maxPotentialContainer: {
+    marginTop: spacing[4],
+    padding: spacing[4],
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  maxPotentialText: {
+    fontSize: 14,
+    color: colors.text.primary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  maxPotentialValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.accent.primary,
+  },
+  survivalCard: {
+    backgroundColor: colors.background.card,
+    borderRadius: 16,
+    padding: spacing[5],
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    gap: spacing[4],
+  },
+  survivalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+    padding: spacing[4],
+    backgroundColor: colors.background.elevated,
+    borderRadius: 12,
+  },
+  survivalContent: {
+    flex: 1,
+  },
+  survivalLabel: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginBottom: spacing[1],
+  },
+  survivalValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.primary,
   },
 });
 

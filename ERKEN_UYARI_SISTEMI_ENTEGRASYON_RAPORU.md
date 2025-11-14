@@ -158,3 +158,12 @@
 5. ⏳ Backend environment variables kontrol edilmeli
 6. ⏳ Push notification credentials kontrol edilmeli
 
+
+
+
+
+
+
+
+
+

@@ -200,3 +200,11 @@ For questions or issues:
 - Check metrics: `curl http://localhost:9090/metrics | grep ai`
 - Review confidence scores in logs
 
+
+
+
+
+
+
+
+

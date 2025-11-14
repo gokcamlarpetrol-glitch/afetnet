@@ -5,7 +5,8 @@
 
 import openDatabase from './mbtiles';
 import { createLogger } from '../core/utils/logger';
-import * as FileSystem from 'expo-file-system';
+// ELITE: Use legacy API to avoid deprecation warnings (migration to new API planned)
+import * as FileSystem from 'expo-file-system/legacy';
 
 const logger = createLogger('MBTilesProvider');
 

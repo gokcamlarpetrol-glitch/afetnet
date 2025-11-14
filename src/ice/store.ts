@@ -25,6 +25,26 @@ export async function saveICE(data: ICE) {
   } catch (error) {
     console.error('Failed to save ICE to Firebase:', error);
   }
+
+  // CRITICAL: Send to backend for rescue coordination
+  // ELITE: This ensures rescue teams have emergency contact information
+  try {
+    const { backendEmergencyService } = await import('../core/services/BackendEmergencyService');
+    if (backendEmergencyService.initialized) {
+      await backendEmergencyService.sendICEData({
+        name: data.name,
+        blood: data.blood,
+        allergies: data.allergies,
+        meds: data.meds,
+        contacts: data.contacts,
+        updatedAt: Date.now(),
+      }).catch((error) => {
+        console.error('Failed to send ICE data to backend:', error);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to send ICE data to backend:', error);
+  }
 }
 
 export async function loadICE(): Promise<ICE | null> {

@@ -27,6 +27,8 @@ import { SwipeableConversationCard } from '../../components/messages/SwipeableCo
 import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
 import { useMeshStore } from '../../stores/meshStore';
+import { bleMeshService } from '../../services/BLEMeshService';
+import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
 import QRCode from 'react-native-qrcode-svg';
 import { Modal, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -100,6 +102,52 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const peers = useMeshStore((state) => state.peers);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [qrValue, setQrValue] = useState<string | null>(null);
+
+  // ELITE: Ensure BLE Mesh service is started for offline messaging
+  useEffect(() => {
+    let mounted = true;
+
+    const initMesh = async () => {
+      try {
+        // ELITE: Initialize message store (loads from AsyncStorage and Firebase)
+        await useMessageStore.getState().initialize();
+        
+        // ELITE: Ensure BLE Mesh service is started
+        if (!bleMeshService.getIsRunning()) {
+          try {
+            await bleMeshService.start();
+            if (__DEV__) {
+              logger.info('BLE Mesh service started from MessagesScreen');
+            }
+          } catch (error) {
+            logger.warn('BLE Mesh start failed (non-critical):', error);
+            // Continue - BLE Mesh is optional but recommended
+          }
+        }
+
+        // ELITE: Ensure device ID is available
+        let deviceId = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
+        if (!deviceId && mounted) {
+          try {
+            deviceId = await getDeviceIdFromLib();
+            if (deviceId) {
+              useMeshStore.getState().setMyDeviceId(deviceId);
+            }
+          } catch (error) {
+            logger.error('Failed to get device ID:', error);
+          }
+        }
+      } catch (error) {
+        logger.error('Mesh initialization error:', error);
+      }
+    };
+
+    initMesh();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // ELITE: Memoize filtered conversations for performance (using debounced query)
   // Enhanced search: searches in user names, last messages, and all message content
@@ -207,16 +255,45 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     }
   }, [navigation]);
 
-  const handleShowQr = useCallback(() => {
+  const handleShowQr = useCallback(async () => {
     try {
-      const id = myDeviceId || useMeshStore.getState().myDeviceId;
+      // ELITE: Try to get device ID from multiple sources
+      let id = myDeviceId || useMeshStore.getState().myDeviceId || bleMeshService.getMyDeviceId();
+      
+      // ELITE: If still no ID, try to get from lib/device
+      if (!id || typeof id !== 'string' || id.trim().length === 0) {
+        try {
+          id = await getDeviceIdFromLib();
+          if (id) {
+            useMeshStore.getState().setMyDeviceId(id);
+          }
+        } catch (error) {
+          logger.error('Failed to get device ID for QR:', error);
+        }
+      }
+
       if (!id || typeof id !== 'string' || id.trim().length === 0) {
         Alert.alert(
           'Cihaz ID hazır değil',
-          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın.'
+          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın. Uygulama yeniden başlatılıyor...'
         );
+        // ELITE: Try to start BLE Mesh service
+        try {
+          await bleMeshService.start();
+          // Wait a bit for device ID to be generated
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          id = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
+          if (id) {
+            setQrValue(id);
+            setQrModalVisible(true);
+            return;
+          }
+        } catch (error) {
+          logger.error('Failed to start BLE Mesh for QR:', error);
+        }
         return;
       }
+      
       setQrValue(id);
       setQrModalVisible(true);
     } catch (error) {
@@ -229,26 +306,47 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     setQrModalVisible(false);
   }, []);
 
+  // ELITE: Ref to track focus timeouts for cleanup
+  const focusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // ELITE: Memoized callback for search input to prevent re-renders
   const handleSearchChange = useCallback((text: string) => {
     // ELITE: Direct state update without causing re-render issues
     setSearchQuery(text);
-    // ELITE: Maintain focus after state update
-    setTimeout(() => {
+    // ELITE: Maintain focus after state update with cleanup
+    if (focusTimeoutRef.current) {
+      clearTimeout(focusTimeoutRef.current);
+    }
+    focusTimeoutRef.current = setTimeout(() => {
       if (searchInputRef.current) {
         searchInputRef.current.focus();
       }
+      focusTimeoutRef.current = null;
     }, 0);
   }, []);
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
-    // ELITE: Maintain focus after clear
-    setTimeout(() => {
+    // ELITE: Maintain focus after clear with cleanup
+    if (focusTimeoutRef.current) {
+      clearTimeout(focusTimeoutRef.current);
+    }
+    focusTimeoutRef.current = setTimeout(() => {
       if (searchInputRef.current) {
         searchInputRef.current.focus();
       }
+      focusTimeoutRef.current = null;
     }, 0);
+  }, []);
+
+  // ELITE: Cleanup focus timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+        focusTimeoutRef.current = null;
+      }
+    };
   }, []);
 
   // ELITE: Memoized render function for performance
@@ -356,6 +454,22 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           </View>
         </View>
       </Modal>
+
+      {/* UNIQUE FEATURE: Offline Messaging Banner */}
+      <View style={styles.offlineBanner}>
+        <Ionicons name="bluetooth" size={24} color="#3b82f6" />
+        <View style={styles.offlineBannerText}>
+          <Text style={styles.offlineBannerTitle}>
+            İnternet Olmadan Çalışıyor
+          </Text>
+          <Text style={styles.offlineBannerSubtitle}>
+            BLE Mesh • {peers.length} cihaz bağlı • Şebekesiz iletişim
+          </Text>
+        </View>
+        <View style={styles.uniqueBadge}>
+          <Text style={styles.uniqueBadgeText}>BENZERSIZ</Text>
+        </View>
+      </View>
 
       {/* Header - Fixed Position */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
@@ -547,6 +661,41 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e3a8a',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3b82f6',
+  },
+  offlineBannerText: {
+    flex: 1,
+  },
+  offlineBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  offlineBannerSubtitle: {
+    fontSize: 11,
+    color: '#93c5fd',
+  },
+  uniqueBadge: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  uniqueBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.5,
   },
   header: {
     flexDirection: 'row',

@@ -3,7 +3,8 @@
  * Downloads and manages offline map tiles
  */
 
-import * as FileSystem from 'expo-file-system';
+// ELITE: Use legacy API to avoid deprecation warnings (migration to new API planned)
+import * as FileSystem from 'expo-file-system/legacy';
 import { createLogger } from '../utils/logger';
 import { mbtilesProvider } from '../../offline/MBTilesProvider';
 

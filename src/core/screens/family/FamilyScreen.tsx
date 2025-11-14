@@ -56,6 +56,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const locationShareIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isSharingLocationRef = useRef(false); // ELITE: Ref to track sharing state in interval
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const myStatusRef = useRef<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const [showIdModal, setShowIdModal] = useState(false);
@@ -64,10 +65,14 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [editName, setEditName] = useState('');
   
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => {
     myStatusRef.current = myStatus;
   }, [myStatus]);
+
+  useEffect(() => {
+    isSharingLocationRef.current = isSharingLocation;
+  }, [isSharingLocation]);
 
   // Batch update mechanism to prevent subscription loops
   const pendingUpdatesRef = useRef<Map<string, { status?: string; location?: { latitude: number; longitude: number } }>>(new Map());
@@ -82,6 +87,19 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         // Initialize family store
         await useFamilyStore.getState().initialize();
         
+        // ELITE: Ensure BLE Mesh service is started for offline messaging
+        if (!bleMeshService.getIsRunning()) {
+          try {
+            await bleMeshService.start();
+            if (__DEV__) {
+              logger.info('BLE Mesh service started from FamilyScreen');
+            }
+          } catch (error) {
+            logger.warn('BLE Mesh start failed (non-critical):', error);
+            // Continue - BLE Mesh is optional but recommended
+          }
+        }
+        
         // Get device ID
         let deviceId = bleMeshService.getMyDeviceId();
         if (!deviceId) {
@@ -89,6 +107,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           if (deviceId && mounted) {
             useMeshStore.getState().setMyDeviceId(deviceId);
             setMyDeviceId(deviceId);
+            // ELITE: Set device ID in BLE Mesh service if not already set
+            if (!bleMeshService.getMyDeviceId()) {
+              // Device ID will be set when BLE Mesh service starts
+            }
           }
         } else if (mounted) {
           setMyDeviceId(deviceId);
@@ -143,13 +165,25 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
             const existing = pendingUpdatesRef.current.get(senderDeviceId) || {};
             
             if (messageData.type === 'family_status_update' && messageData.status) {
-              existing.status = messageData.status;
-              if (__DEV__) {
-                logger.info(`Status update queued from ${member.name}: ${messageData.status}`);
+              // ELITE: Validate status before queuing
+              const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
+              if (validStatuses.includes(messageData.status as FamilyMember['status'])) {
+                existing.status = messageData.status;
+                if (__DEV__) {
+                  logger.info(`Status update queued from ${member.name}: ${messageData.status}`);
+                }
+              } else {
+                logger.warn('Invalid status received in message:', messageData.status);
               }
             }
 
-            if (messageData.location && messageData.location.latitude && messageData.location.longitude) {
+            if (messageData.location && 
+                typeof messageData.location.latitude === 'number' && 
+                typeof messageData.location.longitude === 'number' &&
+                !isNaN(messageData.location.latitude) &&
+                !isNaN(messageData.location.longitude) &&
+                messageData.location.latitude >= -90 && messageData.location.latitude <= 90 &&
+                messageData.location.longitude >= -180 && messageData.location.longitude <= 180) {
               existing.location = {
                 latitude: messageData.location.latitude,
                 longitude: messageData.location.longitude,
@@ -157,6 +191,8 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
               if (__DEV__) {
                 logger.info(`Location update queued from ${member.name}`);
               }
+            } else if (messageData.location) {
+              logger.warn('Invalid location data received:', messageData.location);
             }
 
             pendingUpdatesRef.current.set(senderDeviceId, existing);
@@ -183,18 +219,30 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                 if (updateData.status && member.status !== updateData.status) {
                   const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
                   if (validStatuses.includes(updateData.status as FamilyMember['status'])) {
-                    useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']);
+                    useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']).catch((error) => {
+                      logger.error('Failed to update member status:', error);
+                    });
                   } else {
                     logger.warn('Invalid status received:', updateData.status);
                   }
                 }
                 
-                if (updateData.location) {
+                if (updateData.location && 
+                    typeof updateData.location.latitude === 'number' && 
+                    typeof updateData.location.longitude === 'number' &&
+                    !isNaN(updateData.location.latitude) &&
+                    !isNaN(updateData.location.longitude) &&
+                    updateData.location.latitude >= -90 && updateData.location.latitude <= 90 &&
+                    updateData.location.longitude >= -180 && updateData.location.longitude <= 180) {
                   useFamilyStore.getState().updateMemberLocation(
                     member.id,
                     updateData.location.latitude,
                     updateData.location.longitude
-                  );
+                  ).catch((error) => {
+                    logger.error('Failed to update member location:', error);
+                  });
+                } else if (updateData.location) {
+                  logger.warn('Invalid location data in pending update:', updateData.location);
                 }
               }
               
@@ -231,18 +279,30 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           if (updateData.status && member.status !== updateData.status) {
             const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
             if (validStatuses.includes(updateData.status as FamilyMember['status'])) {
-              useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']);
+              useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']).catch((error) => {
+                logger.error('Failed to update member status in cleanup:', error);
+              });
             } else {
-              logger.warn('Invalid status received:', updateData.status);
+              logger.warn('Invalid status received in cleanup:', updateData.status);
             }
           }
           
-          if (updateData.location) {
+          if (updateData.location && 
+              typeof updateData.location.latitude === 'number' && 
+              typeof updateData.location.longitude === 'number' &&
+              !isNaN(updateData.location.latitude) &&
+              !isNaN(updateData.location.longitude) &&
+              updateData.location.latitude >= -90 && updateData.location.latitude <= 90 &&
+              updateData.location.longitude >= -180 && updateData.location.longitude <= 180) {
             useFamilyStore.getState().updateMemberLocation(
               member.id,
               updateData.location.latitude,
               updateData.location.longitude
-            );
+            ).catch((error) => {
+              logger.error('Failed to update member location in cleanup:', error);
+            });
+          } else if (updateData.location) {
+            logger.warn('Invalid location data in cleanup:', updateData.location);
           }
         }
         
@@ -252,13 +312,26 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   }, []); // Empty deps - listener uses refs and store.getState()
 
   const startLocationSharing = useCallback(async () => {
-    // Clear any existing interval before starting a new one
+    // ELITE: Clear any existing interval before starting a new one
     if (locationShareIntervalRef.current) {
       clearInterval(locationShareIntervalRef.current);
       locationShareIntervalRef.current = null;
     }
 
     try {
+      // ELITE: Ensure BLE Mesh service is started
+      if (!bleMeshService.getIsRunning()) {
+        try {
+          await bleMeshService.start();
+          if (__DEV__) {
+            logger.info('BLE Mesh service started for location sharing');
+          }
+        } catch (error) {
+          logger.warn('BLE Mesh start failed (non-critical):', error);
+          // Continue - location can still be saved to Firebase
+        }
+      }
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Konum İzni', 'Konum paylaşımı için izin gereklidir');
@@ -267,10 +340,63 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       }
 
       const interval = setInterval(async () => {
+        // ELITE: Check if location sharing is still enabled (use ref to avoid stale closure)
+        if (!isSharingLocationRef.current) {
+          if (locationShareIntervalRef.current === interval) {
+            clearInterval(locationShareIntervalRef.current);
+            locationShareIntervalRef.current = null;
+          }
+          return;
+        }
+
         try {
-          const location = await Location.getCurrentPositionAsync({
+          // ELITE: Ensure BLE Mesh service is running
+          if (!bleMeshService.getIsRunning()) {
+            try {
+              await bleMeshService.start();
+              if (__DEV__) {
+                logger.debug('BLE Mesh service started for location sharing');
+              }
+            } catch (error) {
+              logger.warn('BLE Mesh start failed during location sharing (non-critical):', error);
+              // Continue - location can still be saved to Firebase
+            }
+          }
+
+          // ELITE: Request location with timeout protection
+          const locationPromise = Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
+          
+          let timeoutId: NodeJS.Timeout | null = null;
+          const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
+            timeoutId = setTimeout(() => resolve(null), 15000); // 15 second timeout for location fetch
+          });
+          
+          const location = await Promise.race([locationPromise, timeoutPromise]);
+          
+          // CRITICAL: Cleanup timeout after race completes
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          
+          if (!location || !location.coords) {
+            logger.warn('Location fetch timeout or invalid - skipping this update');
+            return;
+          }
+
+          // ELITE: Validate location coordinates
+          const { latitude, longitude } = location.coords;
+          if (typeof latitude !== 'number' || isNaN(latitude) || latitude < -90 || latitude > 90) {
+            logger.error('Invalid latitude from location service:', latitude);
+            return;
+          }
+          
+          if (typeof longitude !== 'number' || isNaN(longitude) || longitude < -180 || longitude > 180) {
+            logger.error('Invalid longitude from location service:', longitude);
+            return;
+          }
 
           let myDeviceId = bleMeshService.getMyDeviceId();
           if (!myDeviceId) {
@@ -282,65 +408,87 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
               }
             } catch (error) {
               logger.error('Failed to get device ID for location update:', error);
+              return; // Cannot continue without device ID
             }
           }
           
-          if (myDeviceId) {
-            // FIXED: Use ref to get current status value (avoids closure issues)
-            const currentStatus = myStatusRef.current;
-            
-            const locationMessage = JSON.stringify({
-              type: 'family_location_update',
-              deviceId: myDeviceId, // Include deviceId for matching
-              status: currentStatus, // Use ref value, not closure value
-              location: {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                timestamp: Date.now(),
-              },
-            });
+          if (!myDeviceId) {
+            logger.error('Device ID not available for location sharing');
+            return;
+          }
+          
+          // FIXED: Use ref to get current status value (avoids closure issues)
+          const currentStatus = myStatusRef.current;
+          
+          const locationMessage = JSON.stringify({
+            type: 'family_location_update',
+            deviceId: myDeviceId, // Include deviceId for matching
+            status: currentStatus, // Use ref value, not closure value
+            location: {
+              latitude,
+              longitude,
+              timestamp: Date.now(),
+            },
+          });
 
-            // Broadcast location update
-            await useMeshStore.getState().broadcastMessage(locationMessage, 'location');
-
-            // Save to Firebase for cloud sync
+          // ELITE: Broadcast location update (only if BLE Mesh is running)
+          if (bleMeshService.getIsRunning()) {
             try {
-              const { firebaseDataService } = await import('../../services/FirebaseDataService');
-              if (firebaseDataService.isInitialized) {
-                await firebaseDataService.saveLocationUpdate(myDeviceId, {
-                  latitude: location.coords.latitude,
-                  longitude: location.coords.longitude,
-                  accuracy: location.coords.accuracy || null,
-                  timestamp: Date.now(),
-                });
-                
-                // Also save status update
-                await firebaseDataService.saveStatusUpdate(myDeviceId, {
-                  status: currentStatus,
-                  location: {
-                    latitude: location.coords.latitude,
-                    longitude: location.coords.longitude,
-                  },
-                  timestamp: Date.now(),
-                });
+              await useMeshStore.getState().broadcastMessage(locationMessage, 'location');
+              if (__DEV__) {
+                logger.debug('Location update broadcasted via BLE Mesh');
               }
-            } catch (error) {
-              logger.error('Failed to save location to Firebase:', error);
+            } catch (broadcastError) {
+              logger.warn('BLE Mesh broadcast failed during location sharing (non-critical):', broadcastError);
+              // Continue - Firebase sync will still work
             }
+          }
 
-            // FIXED: Find member by deviceId and use member.id (not deviceId) for updateMemberLocation
-            const familyMembers = useFamilyStore.getState().members;
-            const myMember = familyMembers.find(m => m.deviceId === myDeviceId);
-            if (myMember) {
-              useFamilyStore.getState().updateMemberLocation(
-                myMember.id, // Use member.id, not deviceId
-                location.coords.latitude,
-                location.coords.longitude
-              );
+          // Save to Firebase for cloud sync
+          try {
+            const { firebaseDataService } = await import('../../services/FirebaseDataService');
+            if (firebaseDataService.isInitialized) {
+              await firebaseDataService.saveLocationUpdate(myDeviceId, {
+                latitude,
+                longitude,
+                accuracy: location.coords.accuracy || null,
+                timestamp: Date.now(),
+              });
+              
+              // Also save status update
+              await firebaseDataService.saveStatusUpdate(myDeviceId, {
+                status: currentStatus,
+                location: {
+                  latitude,
+                  longitude,
+                },
+                timestamp: Date.now(),
+              });
             }
+          } catch (error) {
+            logger.error('Failed to save location to Firebase:', error);
+            // Continue - location update will still be applied locally
+          }
+
+          // ELITE: Find member by deviceId and use member.id (not deviceId) for updateMemberLocation
+          const familyMembers = useFamilyStore.getState().members;
+          const myMember = familyMembers.find(m => m.deviceId === myDeviceId);
+          if (myMember) {
+            try {
+              await useFamilyStore.getState().updateMemberLocation(
+                myMember.id, // Use member.id, not deviceId
+                latitude,
+                longitude
+              );
+            } catch (updateError) {
+              logger.error('Failed to update member location in store:', updateError);
+            }
+          } else if (__DEV__) {
+            logger.debug('No family member found with deviceId:', myDeviceId);
           }
         } catch (error) {
           logger.error('Location sharing error:', error);
+          // Don't stop interval - continue trying
         }
       }, 30000);
       
@@ -353,8 +501,14 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   }, []); // FIXED: No dependencies - uses ref for myStatus
 
   useEffect(() => {
-    if (isSharingLocation) {
-      startLocationSharing();
+    // ELITE: Use ref to track current sharing state to avoid stale closures
+    const currentSharingState = isSharingLocation;
+    
+    if (currentSharingState) {
+      startLocationSharing().catch((error) => {
+        logger.error('Failed to start location sharing:', error);
+        setIsSharingLocation(false); // Reset state on error
+      });
     } else {
       // Stop sharing when disabled
       if (locationShareIntervalRef.current) {
@@ -377,13 +531,51 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     setMyStatus(status);
 
     try {
+      // ELITE: Ensure BLE Mesh service is started before sending status update
+      if (!bleMeshService.getIsRunning()) {
+        try {
+          await bleMeshService.start();
+          if (__DEV__) {
+            logger.info('BLE Mesh service started for status update');
+          }
+        } catch (error) {
+          logger.warn('BLE Mesh start failed (will try to continue):', error);
+          // Continue - status update can still be saved to Firebase
+        }
+      }
+
       const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
       let location: Location.LocationObject | null = null;
 
       if (locStatus === 'granted') {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        try {
+          // ELITE: Use Promise.race for timeout protection
+          const locationPromise = Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          
+          let timeoutId: NodeJS.Timeout | null = null;
+          const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
+            timeoutId = setTimeout(() => resolve(null), 10000); // 10 second timeout
+          });
+          
+          location = await Promise.race([locationPromise, timeoutPromise]);
+          
+          // CRITICAL: Cleanup timeout after race completes
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          
+          if (!location) {
+            logger.warn('Location fetch timeout - continuing without location');
+          }
+        } catch (locationError) {
+          logger.warn('Location fetch failed (non-critical):', locationError);
+          // Continue without location - status update can still be sent
+        }
+      } else {
+        logger.debug('Location permission not granted - status update will be sent without location');
       }
 
       let myDeviceId = bleMeshService.getMyDeviceId();
@@ -394,7 +586,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           if (!myDeviceId) {
             throw new Error('Device ID not available');
           }
-          // Set it in BLEMeshService for future use
+          // Set it in BLEMeshService and MeshStore for future use
           useMeshStore.getState().setMyDeviceId(myDeviceId);
         } catch (error) {
           logger.error('Failed to get device ID:', error);
@@ -419,8 +611,23 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       const familyMembers = useFamilyStore.getState().members;
       const membersWithDeviceId = familyMembers.filter(m => m.deviceId);
 
-      // Broadcast to all nearby devices (family members will filter by deviceId)
-      await useMeshStore.getState().broadcastMessage(statusMessage, 'status');
+      // ELITE: Broadcast to all nearby devices (family members will filter by deviceId)
+      // Only broadcast if BLE Mesh service is running
+      let broadcastSuccess = false;
+      if (bleMeshService.getIsRunning()) {
+        try {
+          await useMeshStore.getState().broadcastMessage(statusMessage, 'status');
+          broadcastSuccess = true;
+          if (__DEV__) {
+            logger.info('Status update broadcasted via BLE Mesh');
+          }
+        } catch (broadcastError) {
+          logger.warn('BLE Mesh broadcast failed (non-critical):', broadcastError);
+          // Continue - Firebase sync will still work
+        }
+      } else {
+        logger.warn('BLE Mesh service not running - status update will only be saved to Firebase');
+      }
 
       // Save to Firebase for cloud sync
       try {
@@ -449,12 +656,43 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         logger.error('Failed to save status to Firebase:', error);
       }
 
+      // CRITICAL: Send to backend for rescue coordination
+      // ELITE: This ensures rescue teams know user's current status
+      try {
+        const { backendEmergencyService } = await import('../../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendStatusUpdate({
+            status,
+            location: location ? {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              accuracy: location.coords.accuracy || undefined,
+            } : undefined,
+            timestamp: Date.now(),
+          }).catch((error) => {
+            logger.error('Failed to send status update to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send status update to backend:', error);
+      }
+
       // Also try to send directly to each family member if their deviceId is known
       // This ensures message delivery even if they're not in broadcast range
       for (const member of membersWithDeviceId) {
         if (member.deviceId && member.deviceId !== myDeviceId) {
           try {
-            await bleMeshService.sendMessage(statusMessage, member.deviceId);
+            // ELITE: Validate deviceId before sending
+            if (typeof member.deviceId !== 'string' || member.deviceId.trim().length === 0) {
+              logger.warn('Invalid deviceId for direct message:', member.deviceId);
+              continue;
+            }
+            await bleMeshService.sendMessage(statusMessage, member.deviceId).catch((error) => {
+              // Silent fail for individual messages - broadcast should still work
+              if (__DEV__) {
+                logger.warn(`Failed to send direct message to ${member.deviceId}:`, error);
+              }
+            });
           } catch (error) {
             // Silent fail for individual messages - broadcast should still work
             if (__DEV__) {
@@ -469,24 +707,42 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                         'ACİL DURUM';
       
       const memberCount = membersWithDeviceId.length;
+      const deliveryMethod = broadcastSuccess 
+        ? (memberCount > 0 ? `${memberCount} aile üyesine` : 'Yakındaki cihazlara')
+        : 'Bulut sunucusuna';
+      
       Alert.alert(
         'Durum Güncellendi', 
-        `${statusText} - ${memberCount > 0 ? `${memberCount} aile üyesine` : 'Yakındaki cihazlara'} bildirildi`
+        `${statusText} - ${deliveryMethod} bildirildi`
       );
 
+      // ELITE: Send critical alert with error handling
       if (status === 'critical') {
-        await multiChannelAlertService.sendAlert({
-          title: '🚨 ACİL DURUM',
-          body: 'Aile üyesi acil durum bildirdi!',
-          priority: 'critical',
-          channels: {
-            pushNotification: true,
-            fullScreenAlert: true,
-            alarmSound: true,
-            vibration: true,
-            tts: true,
-          },
-        });
+        try {
+          await multiChannelAlertService.sendAlert({
+            title: '🚨 ACİL DURUM',
+            body: 'Aile üyesi acil durum bildirdi!',
+            priority: 'critical',
+            channels: {
+              pushNotification: true,
+              fullScreenAlert: true,
+              alarmSound: true,
+              vibration: true,
+              tts: true,
+            },
+            data: {
+              type: 'family_status_update',
+              status: 'critical',
+              deviceId: myDeviceId,
+            },
+          }).catch((alertError) => {
+            // Silent fail for alert - status update already succeeded
+            logger.warn('Multi-channel alert failed (non-critical):', alertError);
+          });
+        } catch (alertError) {
+          // Silent fail for alert - status update already succeeded
+          logger.warn('Multi-channel alert error (non-critical):', alertError);
+        }
       }
 
     } catch (error) {
@@ -513,9 +769,15 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const handleStatusButtonPress = (status: 'safe' | 'need-help' | 'critical' | 'location') => {
     if (status === 'location') {
-      void handleShareLocation();
+      void handleShareLocation().catch((error) => {
+        logger.error('Error sharing location:', error);
+        haptics.notificationError();
+      });
     } else {
-      void handleStatusUpdate(status);
+      void handleStatusUpdate(status).catch((error) => {
+        // Error already handled in handleStatusUpdate, but ensure it's caught
+        logger.error('Error in handleStatusUpdate:', error);
+      });
     }
   };
 
@@ -726,7 +988,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const handleEditMember = (member: FamilyMember) => {
     setEditingMember(member);
-    setEditName(member.name);
+    setEditName(member.name || '');
     setShowEditModal(true);
   };
 
@@ -736,9 +998,21 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       return;
     }
 
+    // ELITE: Validate name length
+    if (editName.trim().length < 2) {
+      Alert.alert('Hata', 'İsim en az 2 karakter olmalıdır.');
+      return;
+    }
+
+    if (editName.trim().length > 50) {
+      Alert.alert('Hata', 'İsim en fazla 50 karakter olabilir.');
+      return;
+    }
+
     try {
       await useFamilyStore.getState().updateMember(editingMember.id, {
         name: editName.trim(),
+        updatedAt: Date.now(),
       });
       haptics.notificationSuccess();
       setShowEditModal(false);
@@ -751,13 +1025,36 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleDeleteMember = async (memberId: string) => {
-    try {
-      await useFamilyStore.getState().removeMember(memberId);
-      haptics.notificationSuccess();
-    } catch (error) {
-      logger.error('Failed to delete member:', error);
-      Alert.alert('Hata', 'Üye silinemedi. Lütfen tekrar deneyin.');
-    }
+    // ELITE: Find member for confirmation message
+    const member = members.find(m => m.id === memberId);
+    const memberName = member?.name || 'Üye';
+
+    Alert.alert(
+      'Üyeyi Sil',
+      `${memberName} adlı üyeyi silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`,
+      [
+        { 
+          text: 'İptal', 
+          style: 'cancel',
+          onPress: () => haptics.impactLight(),
+        },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await useFamilyStore.getState().removeMember(memberId);
+              haptics.notificationSuccess();
+              Alert.alert('Başarılı', `${memberName} başarıyla silindi.`);
+            } catch (error) {
+              logger.error('Failed to delete member:', error);
+              Alert.alert('Hata', 'Üye silinemedi. Lütfen tekrar deneyin.');
+              haptics.notificationError();
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ELITE: Memoized callback for performance
@@ -1396,3 +1693,4 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
+

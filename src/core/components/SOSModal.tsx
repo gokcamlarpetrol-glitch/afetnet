@@ -19,10 +19,23 @@ interface SOSModalProps {
   onConfirm: () => void;
 }
 
+type LocationStatusState =
+  | 'idle'
+  | 'requesting'
+  | 'success'
+  | 'low-accuracy'
+  | 'denied'
+  | 'error';
+
 export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps) {
   const [countdown, setCountdown] = useState(3);
   const [isSending, setIsSending] = useState(false);
   const [isSent, setIsSent] = useState(false);
+  const [environmentStatus, setEnvironmentStatus] = useState<{
+    batteryLevel: number | null;
+    networkStatus: 'connected' | 'disconnected' | 'unknown';
+  }>({ batteryLevel: null, networkStatus: 'unknown' });
+  const [locationStatus, setLocationStatus] = useState<LocationStatusState>('idle');
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const sosService = getSOSService();
 
@@ -32,6 +45,21 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
       setCountdown(3);
       setIsSending(false);
       setIsSent(false);
+      setLocationStatus('idle');
+
+      let isMounted = true;
+      sosService.getEnvironmentStatus()
+        .then(status => {
+          if (isMounted) {
+            setEnvironmentStatus(status);
+          }
+        })
+        .catch((error) => {
+          logger.warn('Environment status fetch failed:', error);
+          if (isMounted) {
+            setEnvironmentStatus({ batteryLevel: null, networkStatus: 'unknown' });
+          }
+        });
 
       // Start pulse animation
       pulse(pulseAnim, 0.9, 1.1, 800).start();
@@ -49,7 +77,13 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
         });
       }, 1000);
 
-      return () => clearInterval(timer);
+      return () => {
+        isMounted = false;
+        clearInterval(timer);
+      };
+    } else {
+      setEnvironmentStatus({ batteryLevel: null, networkStatus: 'unknown' });
+      setLocationStatus('idle');
     }
     return undefined;
   }, [visible]);
@@ -63,7 +97,8 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
     const maxRetries = 3;
     let sosSent = false;
     let location: { latitude: number; longitude: number; accuracy: number } | null = null;
-    let locationStatus = 'unknown';
+    let resolvedLocationStatus: LocationStatusState = 'requesting';
+    setLocationStatus('requesting');
 
     // Step 1: Get location with timeout and fallback
     try {
@@ -98,7 +133,7 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy || 10,
           };
-          locationStatus = 'success';
+          resolvedLocationStatus = 'success';
         } catch (highAccError) {
           // Fallback to balanced accuracy
           try {
@@ -110,30 +145,32 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
               longitude: position.coords.longitude,
               accuracy: position.coords.accuracy || 50,
             };
-            locationStatus = 'low-accuracy';
+            resolvedLocationStatus = 'low-accuracy';
           } catch (fallbackError) {
-            locationStatus = 'failed';
+            resolvedLocationStatus = 'error';
             logger.warn('Could not get location, sending SOS without location:', fallbackError);
           }
         }
       } else {
-        locationStatus = 'denied';
+        resolvedLocationStatus = 'denied';
         logger.warn('Location permission denied');
       }
     } catch (locError) {
-      locationStatus = 'error';
+      resolvedLocationStatus = 'error';
       logger.warn('Location error, sending SOS without location:', locError);
       // Continue without location - still send SOS
     }
+    setLocationStatus(resolvedLocationStatus);
 
     // Step 2: Send SOS with retry mechanism
     while (!sosSent && retryCount < maxRetries) {
       try {
         await sosService.sendSOSSignal(
           location,
-          locationStatus === 'success' || locationStatus === 'low-accuracy'
+          resolvedLocationStatus === 'success' || resolvedLocationStatus === 'low-accuracy'
             ? 'Acil yardım gerekiyor! Konum paylaşıldı.'
-            : 'Acil yardım gerekiyor!'
+            : 'Acil yardım gerekiyor!',
+          { autoLocation: false }
         );
         sosSent = true;
       } catch (error) {
@@ -192,6 +229,41 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
     onClose();
   };
 
+  const getBatteryStatusText = () => {
+    if (environmentStatus.batteryLevel === null) {
+      return 'Veri yok';
+    }
+    return `${environmentStatus.batteryLevel}%`;
+  };
+
+  const getNetworkStatusText = () => {
+    switch (environmentStatus.networkStatus) {
+      case 'connected':
+        return 'Bağlı';
+      case 'disconnected':
+        return 'Çevrim dışı';
+      default:
+        return 'Bilinmiyor';
+    }
+  };
+
+  const getLocationStatusText = () => {
+    switch (locationStatus) {
+      case 'success':
+        return 'Konum paylaşıldı';
+      case 'low-accuracy':
+        return 'Düşük doğruluk';
+      case 'denied':
+        return 'İzin gerekli';
+      case 'error':
+        return 'Belirlenemedi';
+      case 'requesting':
+        return 'Konum alınıyor...';
+      default:
+        return 'Beklemede';
+    }
+  };
+
   return (
     <Modal
       visible={visible}
@@ -245,30 +317,39 @@ export default function SOSModal({ visible, onClose, onConfirm }: SOSModalProps)
               </>
             )}
 
-            {/* Info Cards */}
-            {(isSending || isSent) && (
-              <View style={styles.infoCards}>
-                <View style={styles.infoCard}>
-                  <Ionicons name="bluetooth" size={24} color={colors.text.primary} />
-                  <Text style={styles.infoText}>BLE Mesh</Text>
-                  <Text style={styles.infoStatus}>Aktif</Text>
-                </View>
-                <View style={styles.infoCard}>
-                  <Ionicons name="location" size={24} color={colors.text.primary} />
-                  <Text style={styles.infoText}>Konum</Text>
-                  <Text style={styles.infoStatus}>Paylaşıldı</Text>
-                </View>
-                <View style={styles.infoCard}>
-                  <Ionicons name="people" size={24} color={colors.text.primary} />
-                  <Text style={styles.infoText}>Yakındakiler</Text>
-                  <Text style={styles.infoStatus}>Bilgilendirildi</Text>
-                </View>
-              </View>
-            )}
+            <View style={styles.statusContainer}>
+              <StatusItem icon="location" label="Konum" value={getLocationStatusText()} />
+              <StatusItem icon="battery-half" label="Batarya" value={getBatteryStatusText()} />
+              <StatusItem
+                icon={environmentStatus.networkStatus === 'disconnected' ? 'cloud-offline' : 'wifi'}
+                label="Ağ"
+                value={getNetworkStatusText()}
+              />
+            </View>
           </View>
         </LinearGradient>
       </View>
     </Modal>
+  );
+}
+
+function StatusItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.statusItem}>
+      <Ionicons name={icon} size={20} color={colors.text.primary} style={styles.statusIcon} />
+      <View>
+        <Text style={styles.statusLabel}>{label}</Text>
+        <Text style={styles.statusValue}>{value}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -319,29 +400,30 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
   },
-  infoCards: {
+  statusContainer: {
     flexDirection: 'row',
-    gap: 16,
-    marginTop: 40,
-  },
-  infoCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
     borderRadius: 16,
-    padding: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 16,
+    marginTop: 32,
+  },
+  statusItem: {
+    flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 100,
+    flex: 1,
   },
-  infoText: {
-    fontSize: 13,
-    fontWeight: '600',
+  statusIcon: {
+    marginRight: 10,
+  },
+  statusLabel: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  statusValue: {
+    fontSize: 14,
+    fontWeight: '700',
     color: colors.text.primary,
-    marginTop: 8,
-  },
-  infoStatus: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
   },
 });
-

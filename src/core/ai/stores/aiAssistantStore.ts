@@ -71,11 +71,22 @@ export const useAIAssistantStore = create<AIAssistantState & AIAssistantActions>
   setRiskScoreLoading: (loading) => set({ riskScoreLoading: loading }),
   setRiskScoreError: (error) => set({ riskScoreError: error, riskScoreLoading: false }),
 
-  setPreparednessPlan: (plan) => set({
-    preparednessPlan: plan,
-    preparednessPlanError: null,
-    preparednessPlanFetchedAt: Date.now(),
-  }),
+  setPreparednessPlan: (plan) => {
+    if (__DEV__) {
+      const logger = require('../../utils/logger').createLogger('AIAssistantStore');
+      logger.debug('setPreparednessPlan called:', {
+        hasPlan: !!plan,
+        sections: plan?.sections?.length || 0,
+        totalItems: plan?.totalItems || 0,
+        completedItems: plan?.completedItems || 0,
+      });
+    }
+    set({
+      preparednessPlan: plan,
+      preparednessPlanError: null,
+      preparednessPlanFetchedAt: Date.now(),
+    });
+  },
   setPreparednessPlanLoading: (loading) => set({ preparednessPlanLoading: loading }),
   setPreparednessPlanError: (error) => set({ preparednessPlanError: error, preparednessPlanLoading: false }),
 

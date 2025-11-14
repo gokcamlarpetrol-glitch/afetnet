@@ -296,10 +296,12 @@ Sadece JSON döndür, başka metin ekleme.`;
 
       const systemPrompt = `Sen bir deprem tahmin uzmanısın. Verilen verileri analiz edip deprem olasılığını hesaplıyorsun. Sadece JSON formatında yanıt ver.`;
 
+      // ELITE: Cost optimization - reduced maxTokens for small JSON response
       const aiResponse = await openAIService.generateText(prompt, {
         systemPrompt,
-        maxTokens: 200,
+        maxTokens: 150, // Optimized: Reduced from 200 to save ~$0.00003 per call (small JSON response)
         temperature: 0.3, // Low temperature for consistent results
+        serviceName: 'AIEarthquakePredictionService', // ELITE: For cost tracking
       });
 
       const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);

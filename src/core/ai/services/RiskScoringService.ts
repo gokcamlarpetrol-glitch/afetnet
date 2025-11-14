@@ -11,6 +11,13 @@ import {
   RiskInsight,
   RegionalRiskSummary,
   RiskTrend,
+  BuildingRiskAnalysis,
+  FamilyRiskProfile,
+  EnvironmentalRiskFactors,
+  EvacuationReadiness,
+  HistoricalRiskComparison,
+  MitigationPotential,
+  RiskSubFactor,
 } from '../types/ai.types';
 import { createLogger } from '../../utils/logger';
 import { openAIService } from './OpenAIService';
@@ -55,6 +62,11 @@ interface RiskContext {
   preparedness: PreparednessStats;
   earthquakes: EarthquakeStats;
   familySize: number;
+  hasChildren?: boolean;
+  hasElderly?: boolean;
+  hasDisabled?: boolean;
+  petsCount?: number;
+  soilType?: 'soft' | 'rock' | 'reclaimed' | 'unknown';
 }
 
 class RiskScoringService {
@@ -152,6 +164,45 @@ class RiskScoringService {
     const preparedness = await this.getPreparednessStats();
     const earthquakes = await this.getEarthquakeStats(location);
 
+    // ELITE: Get family profile information (disabilities and pets)
+    let hasDisabled = false;
+    let petsCount = 0;
+    try {
+      const { useFamilyStore } = await import('../../stores/familyStore');
+      const familyState = useFamilyStore.getState();
+      const members = familyState.members || [];
+      
+      // Check for disabilities (from notes)
+      hasDisabled = members.some(m => {
+        const notes = m.notes?.toLowerCase() || '';
+        return notes.includes('engel') || notes.includes('disability') ||
+               notes.includes('özürlü') || notes.includes('handicap');
+      });
+      
+      // Count pets (from relationship or notes)
+      petsCount = members.filter(m => {
+        const rel = m.relationship?.toLowerCase() || '';
+        const notes = m.notes?.toLowerCase() || '';
+        return rel.includes('pet') || rel.includes('hayvan') ||
+               rel.includes('köpek') || rel.includes('kedi') ||
+               notes.includes('pet') || notes.includes('hayvan');
+      }).length;
+    } catch (familyError: any) {
+      // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
+      const errorMessage = familyError?.message || String(familyError);
+      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') || 
+                           errorMessage.includes('Could not load bundle');
+      
+      if (isBundleError) {
+        // ELITE: Bundle errors are expected in some environments - log as debug silently
+        if (__DEV__) {
+          logger.debug('Family profile collection skipped for risk scoring (bundle error - expected)');
+        }
+      } else {
+        logger.debug('Failed to collect family profile for risk scoring, using defaults:', familyError);
+      }
+    }
+
     return {
       location,
       hazardCluster,
@@ -160,6 +211,11 @@ class RiskScoringService {
       preparedness,
       earthquakes,
       familySize: params.familySize ?? 4,
+      hasChildren: params.hasChildren,
+      hasElderly: params.hasElderly,
+      hasDisabled,
+      petsCount,
+      soilType: params.soilType,
     };
   }
 
@@ -370,6 +426,8 @@ class RiskScoringService {
           : 'Bölgesel veriler sınırlı, ulusal risk katsayısı kullanıldı.',
         severity: this.valueToSeverity(hazardScore),
         references: context.hazardCluster?.notableFaults,
+        impact: this.valueToSeverity(hazardScore) === 'critical' ? 'critical' : this.valueToSeverity(hazardScore) === 'high' ? 'high' : 'medium',
+        controllability: 'low',
       },
       {
         id: 'recent_activity',
@@ -378,6 +436,8 @@ class RiskScoringService {
         value: activityScore,
         description: this.describeSeismicActivity(context),
         severity: this.valueToSeverity(activityScore),
+        impact: this.valueToSeverity(activityScore) === 'critical' ? 'critical' : this.valueToSeverity(activityScore) === 'high' ? 'high' : 'medium',
+        controllability: 'none',
       },
       {
         id: 'building_vulnerability',
@@ -386,6 +446,8 @@ class RiskScoringService {
         value: buildingScore,
         description: context.building.description,
         severity: this.valueToSeverity(buildingScore),
+        impact: this.valueToSeverity(buildingScore) === 'critical' ? 'critical' : this.valueToSeverity(buildingScore) === 'high' ? 'high' : 'medium',
+        controllability: 'medium',
       },
       {
         id: 'preparedness_gap',
@@ -396,6 +458,8 @@ class RiskScoringService {
           ? `Hazırlık planınız tamamlanma oranı %${context.preparedness.completionRate}. Eksikler risk skoruna yansıtıldı.`
           : 'Kişisel hazırlık planı bulunmuyor. Temel hazırlık adımları tamamlanmalı.',
         severity: this.valueToSeverity(preparednessScore),
+        impact: this.valueToSeverity(preparednessScore) === 'critical' ? 'high' : 'medium',
+        controllability: 'high',
       },
       {
         id: 'response_pressure',
@@ -405,6 +469,8 @@ class RiskScoringService {
         description:
           'Bölgesel nüfus yoğunluğu, altyapı ve toplanma alanı kapasitesi dikkate alınarak afet sonrası erişim riski değerlendirildi.',
         severity: this.valueToSeverity(responseScore),
+        impact: this.valueToSeverity(responseScore) === 'critical' ? 'high' : 'medium',
+        controllability: 'low',
       },
     ];
 
@@ -431,10 +497,20 @@ class RiskScoringService {
     const recommendations = this.createRecommendations(context, regionalSummary);
     const checklist = this.createChecklist(context);
 
+    // Yeni detaylı analizler
+    const buildingAnalysis = this.analyzeBuildingRisk(context);
+    const familyProfile = this.analyzeFamilyRisk(context);
+    const environmentalFactors = this.analyzeEnvironmentalRisk(context);
+    const evacuationReadiness = this.analyzeEvacuationReadiness(context);
+    const historicalComparison = this.buildHistoricalComparison(cacheKey, totalScore);
+    const mitigationPotential = this.calculateMitigationPotential(context, totalScore, buildingAnalysis);
+    const timeToSafety = this.calculateTimeToSafety(context, evacuationReadiness);
+    const survivalProbability = this.calculateSurvivalProbability(totalScore, buildingAnalysis, evacuationReadiness);
+
     return {
       level,
       score: Math.round(totalScore),
-      factors,
+      factors: this.enrichFactorsWithDetails(factors, context),
       recommendations,
       insights,
       regionalSummary,
@@ -442,6 +518,15 @@ class RiskScoringService {
       trend,
       checklist,
       lastUpdated: Date.now(),
+      // Yeni detaylı alanlar
+      buildingAnalysis,
+      familyProfile,
+      environmentalFactors,
+      evacuationReadiness,
+      historicalComparison,
+      mitigationPotential,
+      timeToSafety,
+      survivalProbability,
     };
   }
 
@@ -718,6 +803,553 @@ class RiskScoringService {
     return 'low';
   }
 
+  // YENİ DETAYLI ANALİZ FONKSİYONLARI
+
+  private analyzeBuildingRisk(context: RiskContext): BuildingRiskAnalysis {
+    const building = context.building;
+    const constructionYear = building.constructionYear ?? 2000;
+    const floorNumber = building.floorNumber;
+    const soilType = context.soilType ?? 'unknown';
+
+    // Yapısal bütünlük skoru
+    let structuralIntegrity = 70;
+    if (building.type.toLowerCase().includes('beton') || building.type.toLowerCase().includes('arme')) {
+      structuralIntegrity = 75;
+    } else if (building.type.toLowerCase().includes('çelik')) {
+      structuralIntegrity = 85;
+    } else if (building.type.toLowerCase().includes('yığma') || building.type.toLowerCase().includes('ahşap')) {
+      structuralIntegrity = 45;
+    }
+
+    // Yaş riski
+    let ageRisk = 50;
+    if (constructionYear < 2000) {
+      ageRisk = 85;
+    } else if (constructionYear < 2010) {
+      ageRisk = 65;
+    } else if (constructionYear >= 2019) {
+      ageRisk = 30;
+    }
+
+    // Kat riski
+    let floorRisk = 40;
+    if (floorNumber >= 10) {
+      floorRisk = 80;
+    } else if (floorNumber >= 5) {
+      floorRisk = 60;
+    } else if (floorNumber === 1) {
+      floorRisk = 25;
+    }
+
+    // Zemin riski
+    let soilRisk = 50;
+    if (soilType === 'soft' || soilType === 'reclaimed') {
+      soilRisk = 85;
+    } else if (soilType === 'rock') {
+      soilRisk = 30;
+    }
+
+    // Bakım skoru (varsayılan)
+    const maintenanceScore = 60;
+
+    // Güçlendirme aciliyeti
+    let retrofitUrgency: 'none' | 'low' | 'medium' | 'high' | 'critical' = 'low';
+    if (constructionYear < 2000 && structuralIntegrity < 50) {
+      retrofitUrgency = 'critical';
+    } else if (constructionYear < 2000) {
+      retrofitUrgency = 'high';
+    } else if (structuralIntegrity < 50) {
+      retrofitUrgency = 'medium';
+    }
+
+    // Zayıflıklar ve güçlü yönler
+    const vulnerabilities: string[] = [];
+    const strengths: string[] = [];
+
+    if (constructionYear < 2000) {
+      vulnerabilities.push('2000 öncesi deprem yönetmeliği');
+    }
+    if (floorNumber >= 8) {
+      vulnerabilities.push('Yüksek kat sayısı');
+    }
+    if (soilType === 'soft' || soilType === 'reclaimed') {
+      vulnerabilities.push('Yumuşak zemin');
+    }
+    if (building.type.toLowerCase().includes('yığma')) {
+      vulnerabilities.push('Yığma yapı tipi');
+    }
+
+    if (constructionYear >= 2019) {
+      strengths.push('Yeni deprem yönetmeliği');
+    }
+    if (floorNumber <= 3) {
+      strengths.push('Düşük kat sayısı');
+    }
+    if (soilType === 'rock') {
+      strengths.push('Sağlam zemin');
+    }
+    if (building.type.toLowerCase().includes('çelik')) {
+      strengths.push('Çelik yapı');
+    }
+
+    // Tahmini hasar seviyesi
+    const avgRisk = (structuralIntegrity + ageRisk + floorRisk + soilRisk) / 4;
+    let estimatedDamageLevel: 'minimal' | 'light' | 'moderate' | 'severe' | 'collapse' = 'moderate';
+    if (avgRisk >= 80) {
+      estimatedDamageLevel = 'collapse';
+    } else if (avgRisk >= 65) {
+      estimatedDamageLevel = 'severe';
+    } else if (avgRisk >= 50) {
+      estimatedDamageLevel = 'moderate';
+    } else if (avgRisk >= 35) {
+      estimatedDamageLevel = 'light';
+    } else {
+      estimatedDamageLevel = 'minimal';
+    }
+
+    // Tahliye süresi (dakika)
+    let evacuationTimeMinutes = 5;
+    if (floorNumber >= 10) {
+      evacuationTimeMinutes = 15;
+    } else if (floorNumber >= 5) {
+      evacuationTimeMinutes = 10;
+    }
+
+    return {
+      structuralIntegrity,
+      ageRisk,
+      floorRisk,
+      soilRisk,
+      maintenanceScore,
+      retrofitUrgency,
+      vulnerabilities,
+      strengths,
+      estimatedDamageLevel,
+      evacuationTimeMinutes,
+    };
+  }
+
+  private analyzeFamilyRisk(context: RiskContext): FamilyRiskProfile {
+    const familySize = context.familySize;
+    const childrenCount = context.hasChildren ? Math.floor(familySize * 0.3) : 0;
+    const elderlyCount = context.hasElderly ? Math.floor(familySize * 0.2) : 0;
+    const disabledCount = context.hasDisabled ? 1 : 0;
+    const petsCount = context.petsCount ?? 0;
+
+    const specialNeeds: string[] = [];
+    if (childrenCount > 0) specialNeeds.push('Çocuk bakımı');
+    if (elderlyCount > 0) specialNeeds.push('Yaşlı bakımı');
+    if (disabledCount > 0) specialNeeds.push('Özel ihtiyaçlar');
+    if (petsCount > 0) specialNeeds.push('Evcil hayvan');
+
+    const mobilityLimitations = elderlyCount > 0 || disabledCount > 0;
+
+    // Tahliye zorluğu
+    let evacuationDifficulty: 'easy' | 'moderate' | 'difficult' | 'critical' = 'easy';
+    if (disabledCount > 0 || (elderlyCount > 0 && familySize > 5)) {
+      evacuationDifficulty = 'critical';
+    } else if (elderlyCount > 0 || childrenCount > 3) {
+      evacuationDifficulty = 'difficult';
+    } else if (childrenCount > 0 || familySize > 5) {
+      evacuationDifficulty = 'moderate';
+    }
+
+    // Risk çarpanı
+    let riskMultiplier = 1.0;
+    if (evacuationDifficulty === 'critical') {
+      riskMultiplier = 1.8;
+    } else if (evacuationDifficulty === 'difficult') {
+      riskMultiplier = 1.5;
+    } else if (evacuationDifficulty === 'moderate') {
+      riskMultiplier = 1.2;
+    }
+
+    const specialConsiderations: string[] = [];
+    if (childrenCount > 0) {
+      specialConsiderations.push('Çocuklar için özel tahliye planı gerekli');
+    }
+    if (elderlyCount > 0) {
+      specialConsiderations.push('Yaşlılar için yardım gerekebilir');
+    }
+    if (disabledCount > 0) {
+      specialConsiderations.push('Engelli erişim yolları kontrol edilmeli');
+    }
+    if (petsCount > 0) {
+      specialConsiderations.push('Evcil hayvanlar için hazırlık yapılmalı');
+    }
+
+    return {
+      totalMembers: familySize,
+      childrenCount,
+      elderlyCount,
+      disabledCount,
+      petsCount,
+      specialNeeds,
+      mobilityLimitations,
+      evacuationDifficulty,
+      riskMultiplier,
+      specialConsiderations,
+    };
+  }
+
+  private analyzeEnvironmentalRisk(context: RiskContext): EnvironmentalRiskFactors {
+    const hazardCluster = context.hazardCluster;
+    const distanceToFault = context.distanceToClusterCenterKm ?? 50;
+
+    // Fay yakınlığı
+    const proximityToFault = distanceToFault;
+
+    // Zemin sıvılaşması riski
+    let soilLiquefactionRisk: 'none' | 'low' | 'medium' | 'high' = 'low';
+    if (context.soilType === 'soft' && hazardCluster?.hazardLevel === 'very_high') {
+      soilLiquefactionRisk = 'high';
+    } else if (context.soilType === 'soft') {
+      soilLiquefactionRisk = 'medium';
+    }
+
+    // Heyelan riski
+    let landslideRisk: 'none' | 'low' | 'medium' | 'high' = 'low';
+    if (hazardCluster?.hazardLevel === 'very_high' && distanceToFault < 20) {
+      landslideRisk = 'medium';
+    }
+
+    // Tsunami riski (Türkiye için genelde düşük)
+    const tsunamiRisk: 'none' | 'low' | 'medium' | 'high' = 'low';
+
+    // Yangın riski
+    let fireRisk: 'none' | 'low' | 'medium' | 'high' = 'medium';
+    if (hazardCluster?.hazardLevel === 'very_high') {
+      fireRisk = 'high';
+    }
+
+    // Altyapı yakınlığı (varsayılan)
+    const gasLineProximity = false;
+    const powerLineProximity = false;
+    const industrialProximity = hazardCluster?.hazardLevel === 'very_high' || hazardCluster?.hazardLevel === 'high';
+
+    // Genel çevresel skor
+    let overallScore = 50;
+    if (soilLiquefactionRisk === 'high') overallScore += 20;
+    if (fireRisk === 'high') overallScore += 15;
+    if (proximityToFault < 10) overallScore += 15;
+    overallScore = Math.min(95, Math.max(20, overallScore));
+
+    return {
+      proximityToFault,
+      soilLiquefactionRisk,
+      landslideRisk,
+      tsunamiRisk,
+      fireRisk,
+      gasLineProximity,
+      powerLineProximity,
+      industrialProximity,
+      overallEnvironmentalScore: overallScore,
+    };
+  }
+
+  private analyzeEvacuationReadiness(context: RiskContext): EvacuationReadiness {
+    const building = context.building;
+    const floorNumber = building.floorNumber;
+    const familyProfile = this.analyzeFamilyRisk(context);
+
+    // Rota netliği (varsayılan)
+    let routeClarity: 'excellent' | 'good' | 'fair' | 'poor' = 'good';
+    if (context.preparedness.hasPlan && context.preparedness.completionRate > 70) {
+      routeClarity = 'excellent';
+    } else if (!context.preparedness.hasPlan) {
+      routeClarity = 'fair';
+    }
+
+    // Alternatif rotalar
+    const alternativeRoutes = context.preparedness.hasPlan ? 2 : 1;
+
+    // Toplanma alanı mesafesi (varsayılan)
+    const assemblyPointDistance = 2.5;
+
+    // Erişilebilirlik
+    let assemblyPointAccessibility: 'excellent' | 'good' | 'fair' | 'poor' = 'good';
+    if (familyProfile.mobilityLimitations) {
+      assemblyPointAccessibility = 'fair';
+    }
+
+    // Araç erişimi
+    const vehicleAccess = true; // Varsayılan
+
+    // Toplu taşıma erişimi
+    const publicTransportAccess = context.hazardCluster?.hazardLevel === 'very_high' || context.hazardCluster?.hazardLevel === 'high';
+
+    // Tahliye süresi tahmini
+    let evacuationTimeEstimate = 10;
+    if (floorNumber >= 10) {
+      evacuationTimeEstimate = 20;
+    } else if (floorNumber >= 5) {
+      evacuationTimeEstimate = 15;
+    }
+    if (familyProfile.evacuationDifficulty === 'critical') {
+      evacuationTimeEstimate += 15;
+    } else if (familyProfile.evacuationDifficulty === 'difficult') {
+      evacuationTimeEstimate += 10;
+    }
+
+    // Engeller
+    const obstacles: string[] = [];
+    if (floorNumber >= 8) {
+      obstacles.push('Yüksek kat sayısı');
+    }
+    if (familyProfile.mobilityLimitations) {
+      obstacles.push('Hareket kısıtlamaları');
+    }
+    if (!context.preparedness.hasPlan) {
+      obstacles.push('Hazırlık planı eksik');
+    }
+
+    // Hazırlık skoru
+    let readinessScore = 60;
+    if (routeClarity === 'excellent') readinessScore += 20;
+    if (alternativeRoutes >= 2) readinessScore += 10;
+    if (context.preparedness.hasPlan) readinessScore += 10;
+    readinessScore = Math.min(100, Math.max(30, readinessScore));
+
+    return {
+      routeClarity,
+      alternativeRoutes,
+      assemblyPointDistance,
+      assemblyPointAccessibility,
+      vehicleAccess,
+      publicTransportAccess,
+      evacuationTimeEstimate,
+      obstacles,
+      readinessScore,
+    };
+  }
+
+  private buildHistoricalComparison(cacheKey: string, newScore: number): HistoricalRiskComparison {
+    const previous = this.lastScores.get(cacheKey);
+    const previousScore = typeof previous === 'number' ? previous : undefined;
+    const scoreChange = previousScore ? newScore - previousScore : 0;
+    const trendDirection = this.computeTrend(cacheKey, newScore);
+
+    const factorsImproved: string[] = [];
+    const factorsWorsened: string[] = [];
+
+    if (scoreChange < -3) {
+      factorsImproved.push('Genel risk azaldı');
+    } else if (scoreChange > 3) {
+      factorsWorsened.push('Genel risk arttı');
+    }
+
+    return {
+      previousScore,
+      previousDate: previousScore ? Date.now() - 3600000 : undefined, // 1 saat önce varsayımı
+      scoreChange,
+      trendDirection,
+      factorsImproved,
+      factorsWorsened,
+      comparisonPeriod: '24h',
+    };
+  }
+
+  private calculateMitigationPotential(
+    context: RiskContext,
+    currentScore: number,
+    buildingAnalysis: BuildingRiskAnalysis
+  ): MitigationPotential {
+    const quickWins: Array<{
+      action: string;
+      impact: number;
+      effort: 'low' | 'medium' | 'high';
+      cost: 'free' | 'low' | 'medium' | 'high';
+      timeframe: string;
+    }> = [];
+
+    const longTermImprovements: Array<{
+      action: string;
+      impact: number;
+      effort: 'low' | 'medium' | 'high';
+      cost: 'free' | 'low' | 'medium' | 'high';
+      timeframe: string;
+    }> = [];
+
+    // Hızlı kazanımlar
+    if (!context.preparedness.hasPlan) {
+      quickWins.push({
+        action: 'Hazırlık planı oluştur',
+        impact: 8,
+        effort: 'low',
+        cost: 'free',
+        timeframe: '1 gün',
+      });
+    }
+
+    if (context.preparedness.completionRate < 50) {
+      quickWins.push({
+        action: 'Hazırlık planını tamamla',
+        impact: 5,
+        effort: 'low',
+        cost: 'free',
+        timeframe: '1 hafta',
+      });
+    }
+
+    quickWins.push({
+      action: 'Acil durum çantası hazırla',
+      impact: 3,
+      effort: 'low',
+      cost: 'low',
+      timeframe: '1 gün',
+    });
+
+    quickWins.push({
+      action: 'Ağır eşyaları sabitle',
+      impact: 4,
+      effort: 'low',
+      cost: 'low',
+      timeframe: '1 hafta',
+    });
+
+    // Uzun vadeli iyileştirmeler
+    if (buildingAnalysis.retrofitUrgency === 'critical' || buildingAnalysis.retrofitUrgency === 'high') {
+      longTermImprovements.push({
+        action: 'Bina güçlendirme yap',
+        impact: 25,
+        effort: 'high',
+        cost: 'high',
+        timeframe: '6-12 ay',
+      });
+    }
+
+    if (buildingAnalysis.soilRisk > 70) {
+      longTermImprovements.push({
+        action: 'Zemin iyileştirme',
+        impact: 15,
+        effort: 'high',
+        cost: 'high',
+        timeframe: '3-6 ay',
+      });
+    }
+
+    longTermImprovements.push({
+      action: 'Düzenli bina bakımı',
+      impact: 8,
+      effort: 'medium',
+      cost: 'medium',
+      timeframe: 'Sürekli',
+    });
+
+    const maxPotentialReduction = Math.min(30, quickWins.reduce((sum, w) => sum + w.impact, 0) + longTermImprovements.reduce((sum, w) => sum + w.impact, 0));
+    const priorityActions = [
+      ...quickWins.slice(0, 2).map((w) => w.action),
+      ...longTermImprovements.slice(0, 1).map((w) => w.action),
+    ];
+
+    return {
+      quickWins,
+      longTermImprovements,
+      maxPotentialReduction,
+      priorityActions,
+    };
+  }
+
+  private calculateTimeToSafety(context: RiskContext, evacuationReadiness: EvacuationReadiness): number {
+    return evacuationReadiness.evacuationTimeEstimate + Math.round(evacuationReadiness.assemblyPointDistance * 2);
+  }
+
+  private calculateSurvivalProbability(
+    totalScore: number,
+    buildingAnalysis: BuildingRiskAnalysis,
+    evacuationReadiness: EvacuationReadiness
+  ): number {
+    let probability = 100 - totalScore; // Temel skor
+
+    // Bina analizi etkisi
+    if (buildingAnalysis.estimatedDamageLevel === 'collapse') {
+      probability -= 30;
+    } else if (buildingAnalysis.estimatedDamageLevel === 'severe') {
+      probability -= 15;
+    }
+
+    // Tahliye hazırlığı etkisi
+    if (evacuationReadiness.readinessScore < 50) {
+      probability -= 10;
+    } else if (evacuationReadiness.readinessScore > 80) {
+      probability += 10;
+    }
+
+    return Math.max(30, Math.min(95, Math.round(probability)));
+  }
+
+  private enrichFactorsWithDetails(factors: RiskFactor[], context: RiskContext): RiskFactor[] {
+    return factors.map((factor) => {
+      const enriched: RiskFactor = {
+        ...factor,
+        impact: factor.severity === 'critical' ? 'critical' : factor.severity === 'high' ? 'high' : factor.severity === 'medium' ? 'medium' : 'low',
+        controllability: this.getControllability(factor.id),
+        mitigationOptions: this.getMitigationOptions(factor.id, context),
+        trend: 'stable',
+      };
+
+      // Alt faktörler ekle
+      if (factor.id === 'building_vulnerability') {
+        enriched.subFactors = [
+          {
+            id: 'age',
+            name: 'Bina Yaşı',
+            value: context.building.constructionYear ? (context.building.constructionYear < 2000 ? 85 : 50) : 60,
+            description: context.building.constructionYear ? `${context.building.constructionYear} yılında inşa edilmiş` : 'Bilinmiyor',
+            contribution: 30,
+          },
+          {
+            id: 'floor',
+            name: 'Kat Sayısı',
+            value: context.building.floorNumber >= 8 ? 75 : context.building.floorNumber >= 5 ? 60 : 40,
+            description: `${context.building.floorNumber} katlı bina`,
+            contribution: 25,
+          },
+          {
+            id: 'type',
+            name: 'Yapı Tipi',
+            value: context.building.vulnerabilityScore,
+            description: context.building.type,
+            contribution: 45,
+          },
+        ];
+      }
+
+      return enriched;
+    });
+  }
+
+  private getControllability(factorId: string): 'high' | 'medium' | 'low' | 'none' {
+    const controllabilityMap: Record<string, 'high' | 'medium' | 'low' | 'none'> = {
+      regional_hazard: 'none',
+      recent_activity: 'none',
+      building_vulnerability: 'medium',
+      preparedness_gap: 'high',
+      response_pressure: 'low',
+    };
+    return controllabilityMap[factorId] ?? 'medium';
+  }
+
+  private getMitigationOptions(factorId: string, context: RiskContext): string[] {
+    const options: Record<string, string[]> = {
+      building_vulnerability: [
+        'Bina güçlendirme yapılabilir',
+        'Ağır eşyalar sabitlenebilir',
+        'Zemin iyileştirme yapılabilir',
+      ],
+      preparedness_gap: [
+        'Hazırlık planı oluşturulabilir',
+        'Acil durum çantası hazırlanabilir',
+        'Tatbikat yapılabilir',
+      ],
+      response_pressure: [
+        'Alternatif rotalar belirlenebilir',
+        'Toplanma alanları önceden ziyaret edilebilir',
+      ],
+    };
+    return options[factorId] ?? [];
+  }
+
   private async enrichWithAI(score: RiskScore, context: RiskContext): Promise<RiskScore> {
     try {
       const region = context.hazardCluster?.name ?? 'Bilinmiyor';
@@ -743,18 +1375,62 @@ Yapısal Not: ${context.building.description}`;
 
       const systemPrompt = `AFAD standartlarına uygun, insan hayatını koruyan öneriler üret. Yanıtta yalnızca JSON bulunsun.`;
 
+      // ELITE: Cost optimization - reduced maxTokens
       const aiResponse = await openAIService.generateText(prompt, {
         systemPrompt,
-        maxTokens: 600,
+        maxTokens: 400, // Optimized: Reduced from 600 to save ~$0.00012 per call
         temperature: 0.4,
+        serviceName: 'RiskScoringService', // ELITE: For cost tracking
       });
 
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      // ELITE: Extract JSON more safely - handle truncated responses
+      let jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('AI enrichment JSON not found');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let jsonStr = jsonMatch[0];
+      
+      // ELITE: Fix truncated JSON by attempting to close unclosed brackets/braces
+      // This handles cases where maxTokens limit cuts off the response
+      const openBraces = (jsonStr.match(/\{/g) || []).length;
+      const closeBraces = (jsonStr.match(/\}/g) || []).length;
+      const openBrackets = (jsonStr.match(/\[/g) || []).length;
+      const closeBrackets = (jsonStr.match(/\]/g) || []).length;
+      
+      // Close unclosed structures
+      if (openBraces > closeBraces) {
+        jsonStr += '}'.repeat(openBraces - closeBraces);
+      }
+      if (openBrackets > closeBrackets) {
+        jsonStr += ']'.repeat(openBrackets - closeBrackets);
+      }
+      
+      // ELITE: Try to parse, if it fails, try to extract valid JSON substring
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseError) {
+        // If parse fails, try to find a valid JSON substring
+        // Start from the first { and try progressively shorter substrings
+        const firstBrace = jsonStr.indexOf('{');
+        if (firstBrace >= 0) {
+          for (let i = jsonStr.length; i > firstBrace + 10; i--) {
+            try {
+              const candidate = jsonStr.substring(firstBrace, i);
+              parsed = JSON.parse(candidate);
+              break;
+            } catch {
+              // Continue trying shorter strings
+            }
+          }
+        }
+        
+        // If still no valid JSON, throw original error
+        if (!parsed) {
+          throw parseError;
+        }
+      }
 
       if (Array.isArray(parsed.insights)) {
         const extraInsights: RiskInsight[] = parsed.insights

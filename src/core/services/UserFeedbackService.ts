@@ -111,6 +111,27 @@ class UserFeedbackService {
         await this.saveReportLocally(report);
       }
 
+      // CRITICAL: Send to backend for rescue coordination
+      // ELITE: This helps rescue teams understand earthquake impact
+      try {
+        const { backendEmergencyService } = await import('./BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendFeltEarthquakeReport({
+            earthquakeId,
+            intensity,
+            feltDuration,
+            effects,
+            comments,
+            location: report.location,
+            timestamp: report.timestamp,
+          }).catch((error) => {
+            logger.error('Failed to send felt earthquake report to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send felt earthquake report to backend:', error);
+      }
+
       // Set cooldown
       await AsyncStorage.setItem(cooldownKey, String(Date.now()));
 

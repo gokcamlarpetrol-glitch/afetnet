@@ -50,11 +50,17 @@ export default function MeshNetworkPanel() {
   const signalProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(signalProgress, {
+    const animation = Animated.timing(signalProgress, {
       toValue: signalStrength / 100,
       duration: 1000,
       useNativeDriver: false,
-    }).start();
+    });
+    animation.start();
+    
+    // CRITICAL: Cleanup animation on unmount
+    return () => {
+      animation.stop();
+    };
   }, [signalStrength]);
 
   // Network status text
@@ -71,12 +77,13 @@ export default function MeshNetworkPanel() {
     haptics.impactLight();
     setExpanded(!expanded);
     
-    Animated.spring(heightAnim, {
+    const animation = Animated.spring(heightAnim, {
       toValue: expanded ? 0 : 1,
       useNativeDriver: false,
       tension: 65,
       friction: 11,
-    }).start();
+    });
+    animation.start();
   };
 
   useEffect(() => {
@@ -86,6 +93,12 @@ export default function MeshNetworkPanel() {
     } else {
       heightAnim.setValue(0);
     }
+    
+    // CRITICAL: Cleanup animation on unmount
+    return () => {
+      heightAnim.stopAnimation();
+      heightAnim.setValue(0);
+    };
   }, []);
 
   return (

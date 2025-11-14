@@ -14,7 +14,11 @@ import { colors, typography } from '../../../theme';
 const logDebug = (...args: any[]) => {
   if (__DEV__) {
     // eslint-disable-next-line no-console
-    console.log(...args);
+    // ELITE: Use logger instead of console.log
+    if (__DEV__) {
+      const logger = require('../../../utils/logger').createLogger('HomeHeader');
+      logger.debug(...args);
+    }
   }
 };
 
@@ -29,9 +33,8 @@ export default function HomeHeader() {
   const badgePulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-
     // Subtle pulse animation
-    Animated.loop(
+    const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1.02,
@@ -44,11 +47,13 @@ export default function HomeHeader() {
           useNativeDriver: true,
         }),
       ])
-    ).start();
+    );
+    pulseLoop.start();
 
     // Badge pulse (only when online)
+    let badgeLoop: Animated.CompositeAnimation | null = null;
     if (isOnline) {
-      Animated.loop(
+      badgeLoop = Animated.loop(
         Animated.sequence([
           Animated.timing(badgePulse, {
             toValue: 1.08,
@@ -61,9 +66,31 @@ export default function HomeHeader() {
             useNativeDriver: true,
           }),
         ])
-      ).start();
+      );
+      badgeLoop.start();
     }
+
+    // CRITICAL: Cleanup animations on unmount
+    return () => {
+      pulseLoop.stop();
+      if (badgeLoop) {
+        badgeLoop.stop();
+      }
+      pulseAnim.setValue(1);
+      badgePulse.setValue(1);
+    };
   }, [isOnline]);
+
+  // CRITICAL: Cleanup video on unmount
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.pauseAsync().catch(() => {
+          // Ignore cleanup errors
+        });
+      }
+    };
+  }, []);
 
   return (
     <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
@@ -98,6 +125,13 @@ export default function HomeHeader() {
                 logDebug('⚠️ Video yükleme hatası:', error);
                 setVideoLoaded(false);
                 // Keep fallback gradient visible
+              }}
+              onPlaybackStatusUpdate={(status) => {
+                // CRITICAL: Handle video playback errors
+                if (status.isLoaded && 'error' in status && status.error) {
+                  logDebug('⚠️ Video playback hatası:', status.error);
+                  setVideoLoaded(false);
+                }
               }}
             />
             {/* Fallback: Video yüklenene kadar gradient göster */}

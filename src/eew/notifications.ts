@@ -1,13 +1,25 @@
 import { Platform } from 'react-native';
 
-// Lazy import to avoid early initialization
+// ELITE: Zero static dependencies - lazy load expo-notifications
 let Notifications: any = null;
+let isNotificationsLoading = false;
 
-function getNotifications() {
-  if (!Notifications) {
-    try {
-      Notifications = require('expo-notifications');
-      // Set notification handler on first use
+async function getNotificationsAsync(): Promise<any> {
+  if (Notifications) return Notifications;
+  if (isNotificationsLoading) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return Notifications;
+  }
+  
+  isNotificationsLoading = true;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // ELITE: Use eval to prevent static analysis
+    const moduleName = 'expo-' + 'notifications';
+    Notifications = eval(`require('${moduleName}')`);
+    
+    // Set notification handler on first use
+    if (Notifications && typeof Notifications.setNotificationHandler === 'function') {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
@@ -20,16 +32,23 @@ function getNotifications() {
       } catch (e) {
         // ignore
       }
-    } catch (error) {
-      return null;
     }
+    
+    return Notifications;
+  } catch (error) {
+    return null;
+  } finally {
+    isNotificationsLoading = false;
   }
+}
+
+function getNotifications() {
   return Notifications;
 }
 
 export async function ensureNotifPermissions(): Promise<void> {
   try {
-    const Notif = getNotifications();
+    const Notif = await getNotificationsAsync();
     if (!Notif) return;
     
     const settings = await Notif.getPermissionsAsync();
@@ -43,5 +62,3 @@ export async function ensureNotifPermissions(): Promise<void> {
     // ignore
   }
 }
-
-

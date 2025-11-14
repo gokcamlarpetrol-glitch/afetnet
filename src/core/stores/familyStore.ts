@@ -6,6 +6,12 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getDeviceId } from '../../lib/device';
+import { FamilyMember } from '../types/family';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('FamilyStore');
+
 // FIXED: Lazy import to break circular dependency
 let firebaseDataService: any = null;
 const getFirebaseDataService = () => {
@@ -14,14 +20,14 @@ const getFirebaseDataService = () => {
   }
   return firebaseDataService;
 };
-import { getDeviceId } from '../../lib/device';
-import { FamilyMember } from '../types/family';
 
 // Re-export for backward compatibility
 export type { FamilyMember };
 
 interface FamilyState {
   members: FamilyMember[];
+  // ELITE: Store Firebase unsubscribe function for cleanup
+  firebaseUnsubscribe: (() => void) | null;
 }
 
 interface FamilyActions {
@@ -38,6 +44,7 @@ const STORAGE_KEY = '@afetnet:family_members';
 
 const initialState: FamilyState = {
   members: [],
+  firebaseUnsubscribe: null,
 };
 
 // Load from storage
@@ -48,7 +55,7 @@ const loadMembers = async (): Promise<FamilyMember[]> => {
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Failed to load family members:', error);
+    logger.error('Failed to load family members:', error);
   }
   return [];
 };
@@ -58,7 +65,7 @@ const saveMembers = async (members: FamilyMember[]) => {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(members));
   } catch (error) {
-    console.error('Failed to save family members:', error);
+    logger.error('Failed to save family members:', error);
   }
 };
 
@@ -67,6 +74,19 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
   
   // Initialize by loading from storage and Firebase
   initialize: async () => {
+    // ELITE: Cleanup existing Firebase subscription before re-initializing
+    const { firebaseUnsubscribe } = get();
+    if (firebaseUnsubscribe && typeof firebaseUnsubscribe === 'function') {
+      try {
+        firebaseUnsubscribe();
+      } catch (error) {
+        if (__DEV__) {
+          logger.debug('Error unsubscribing from old Firebase family subscription:', error);
+        }
+      }
+      set({ firebaseUnsubscribe: null });
+    }
+
     // First load from AsyncStorage (fast)
     const localMembers = await loadMembers();
     set({ members: localMembers });
@@ -89,10 +109,48 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             // Save merged data to AsyncStorage
             await saveMembers(cloudMembers);
           }
+
+          // ELITE: Subscribe to real-time family member updates
+          try {
+            const unsubscribe = await firebaseService.subscribeToFamilyMembers?.(deviceId, async (firebaseMembers) => {
+              try {
+                // ELITE: Merge Firebase members with local state
+                const currentMembers = get().members;
+                const memberMap = new Map(currentMembers.map(m => [m.id, m]));
+                
+                // Update or add Firebase members
+                firebaseMembers.forEach((member: FamilyMember) => {
+                  if (member && member.id) {
+                    memberMap.set(member.id, member);
+                  }
+                });
+                
+                const mergedMembers = Array.from(memberMap.values());
+                set({ members: mergedMembers });
+                await saveMembers(mergedMembers);
+              } catch (error) {
+                logger.error('Error processing real-time family members:', error);
+              }
+            });
+            
+            // ELITE: Store unsubscribe function for cleanup
+            if (unsubscribe && typeof unsubscribe === 'function') {
+              set({ firebaseUnsubscribe: unsubscribe });
+            }
+          } catch (subscribeError: any) {
+            // ELITE: Don't log permission errors as errors - they're expected in offline-first apps
+            if (subscribeError?.code === 'permission-denied' || subscribeError?.message?.includes('permission') || subscribeError?.message?.includes('Missing or insufficient permissions')) {
+              if (__DEV__) {
+                logger.debug('Firebase family subscription permission denied (app continues with local storage)');
+              }
+            } else {
+              logger.error('Firebase family subscription error:', subscribeError);
+            }
+          }
         }
       }
     } catch (error) {
-      console.error('Firebase sync failed, using local data:', error);
+      logger.error('Firebase sync failed, using local data:', error);
     }
   },
   
@@ -140,7 +198,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         }
       }
     } catch (error) {
-      console.error('Failed to save to Firebase:', error);
+      logger.error('Failed to save to Firebase:', error);
       // Queue for offline sync on error
       try {
         const { offlineSyncService } = await import('../services/OfflineSyncService');
@@ -152,8 +210,35 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           priority: 'normal',
         });
       } catch (syncError) {
-        console.error('Failed to queue for sync:', syncError);
+        logger.error('Failed to queue for sync:', syncError);
       }
+    }
+
+    // CRITICAL: Send to backend for rescue coordination
+    // ELITE: This ensures rescue teams know who to look for during disasters
+    try {
+      const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+      if (backendEmergencyService.initialized) {
+        await backendEmergencyService.sendFamilyMemberData({
+          memberId: newMember.id,
+          name: newMember.name,
+          status: newMember.status,
+          location: newMember.location ? {
+            latitude: newMember.location.latitude,
+            longitude: newMember.location.longitude,
+            timestamp: newMember.location.timestamp || Date.now(),
+          } : undefined,
+          lastSeen: newMember.lastSeen,
+          relationship: newMember.relationship,
+          phoneNumber: newMember.phoneNumber,
+        }).catch((error) => {
+          // ELITE: Backend save failures are logged but don't block app
+          logger.error('Failed to send family member to backend:', error);
+        });
+      }
+    } catch (error) {
+      // ELITE: Backend save is optional - app continues without it
+      logger.error('Failed to send family member to backend:', error);
     }
   },
   
@@ -198,7 +283,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           }
         }
       } catch (error) {
-        console.error('Failed to update in Firebase:', error);
+        logger.error('Failed to update in Firebase:', error);
         // Queue for offline sync on error
         try {
           const { offlineSyncService } = await import('../services/OfflineSyncService');
@@ -210,8 +295,32 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             priority: 'normal',
           });
         } catch (syncError) {
-          console.error('Failed to queue for sync:', syncError);
+          logger.error('Failed to queue for sync:', syncError);
         }
+      }
+
+      // CRITICAL: Send update to backend for rescue coordination
+      try {
+        const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendFamilyMemberData({
+            memberId: updatedMember.id,
+            name: updatedMember.name,
+            status: updatedMember.status,
+            location: updatedMember.location ? {
+              latitude: updatedMember.location.latitude,
+              longitude: updatedMember.location.longitude,
+              timestamp: updatedMember.location.timestamp || Date.now(),
+            } : undefined,
+            lastSeen: updatedMember.lastSeen,
+            relationship: updatedMember.relationship,
+            phoneNumber: updatedMember.phoneNumber,
+          }).catch((error) => {
+            logger.error('Failed to send member update to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send member update to backend:', error);
       }
     }
   },
@@ -255,7 +364,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         }
       }
     } catch (error) {
-      console.error('Failed to delete from Firebase:', error);
+      logger.error('Failed to delete from Firebase:', error);
       // Queue for offline sync on error
       try {
         const { offlineSyncService } = await import('../services/OfflineSyncService');
@@ -267,17 +376,52 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           priority: 'normal',
         });
       } catch (syncError) {
-        console.error('Failed to queue for sync:', syncError);
+        logger.error('Failed to queue for sync:', syncError);
       }
+    }
+
+    // CRITICAL: Delete from backend for rescue coordination
+    try {
+      const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+      if (backendEmergencyService.initialized) {
+        await backendEmergencyService.deleteFamilyMember(id).catch((error) => {
+          logger.error('Failed to delete family member from backend:', error);
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to delete family member from backend:', error);
     }
   },
   
   updateMemberLocation: async (id, latitude, longitude) => {
+    // ELITE: Validate inputs
+    if (!id || typeof id !== 'string' || id.trim().length === 0) {
+      logger.error('Invalid member ID for location update:', id);
+      return;
+    }
+    
+    if (typeof latitude !== 'number' || isNaN(latitude) || latitude < -90 || latitude > 90) {
+      logger.error('Invalid latitude:', latitude);
+      return;
+    }
+    
+    if (typeof longitude !== 'number' || isNaN(longitude) || longitude < -180 || longitude > 180) {
+      logger.error('Invalid longitude:', longitude);
+      return;
+    }
+
     const { members } = get();
     // OPTIMIZED: Check if update is actually needed (prevents unnecessary re-renders)
     const existingMember = members.find(m => m.id === id);
-    const locationChanged = !existingMember || 
-      existingMember.location?.latitude !== latitude || 
+    if (!existingMember) {
+      logger.warn('Member not found for location update:', id);
+      return;
+    }
+    
+    const locationChanged = 
+      existingMember.latitude !== latitude || 
+      existingMember.longitude !== longitude ||
+      existingMember.location?.latitude !== latitude ||
       existingMember.location?.longitude !== longitude;
     
     if (!locationChanged) {
@@ -285,9 +429,16 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       return;
     }
     
+    // ELITE: Update both latitude/longitude (for backward compatibility) and location object
     const updatedMembers = members.map(m => 
       m.id === id 
-        ? { ...m, location: { latitude, longitude, timestamp: Date.now() }, lastSeen: Date.now() }
+        ? { 
+            ...m, 
+            latitude, // Update direct properties for backward compatibility
+            longitude,
+            location: { latitude, longitude, timestamp: Date.now() }, // Update location object
+            lastSeen: Date.now() 
+          }
         : m
     );
     const updatedMember = updatedMembers.find(m => m.id === id);
@@ -307,20 +458,46 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           }
         }
       } catch (error) {
-        console.error('Failed to update location in Firebase:', error);
+        logger.error('Failed to update location in Firebase:', error);
+      }
+
+      // CRITICAL: Send location update to backend for rescue coordination
+      try {
+        const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendFamilyMemberData({
+            memberId: updatedMember.id,
+            name: updatedMember.name,
+            status: updatedMember.status,
+            location: {
+              latitude,
+              longitude,
+              timestamp: Date.now(),
+            },
+            lastSeen: updatedMember.lastSeen,
+            relationship: updatedMember.relationship,
+            phoneNumber: updatedMember.phoneNumber,
+          }).catch((error) => {
+            logger.error('Failed to send location update to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send location update to backend:', error);
       }
     }
 
-    // Elite: Send notification for significant location changes (only if member is in critical status)
+    // ELITE: Send notification for significant location changes (only if member is in critical status)
     if (locationChanged && updatedMember && (updatedMember.status === 'critical' || updatedMember.status === 'need-help')) {
       try {
         const { notificationService } = await import('../services/NotificationService');
         await notificationService.showFamilyLocationUpdateNotification(
           updatedMember.name,
           { latitude, longitude }
-        );
+        ).catch((error) => {
+          logger.error('Failed to send location update notification:', error);
+        });
       } catch (error) {
-        console.error('Failed to send location update notification:', error);
+        logger.error('Failed to import notification service:', error);
       }
     }
   },
@@ -353,11 +530,35 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           }
         }
       } catch (error) {
-        console.error('Failed to update status in Firebase:', error);
+        logger.error('Failed to update status in Firebase:', error);
+      }
+
+      // CRITICAL: Send status update to backend for rescue coordination
+      try {
+        const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendFamilyMemberData({
+            memberId: updatedMember.id,
+            name: updatedMember.name,
+            status,
+            location: updatedMember.location ? {
+              latitude: updatedMember.location.latitude,
+              longitude: updatedMember.location.longitude,
+              timestamp: updatedMember.location.timestamp || Date.now(),
+            } : undefined,
+            lastSeen: updatedMember.lastSeen,
+            relationship: updatedMember.relationship,
+            phoneNumber: updatedMember.phoneNumber,
+          }).catch((error) => {
+            logger.error('Failed to send status update to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send status update to backend:', error);
       }
     }
 
-    // Elite: Send notification for critical status changes
+    // ELITE: Send notification for critical status changes
     if (statusChanged && updatedMember && (status === 'critical' || status === 'need-help')) {
       try {
         const { multiChannelAlertService } = await import('../services/MultiChannelAlertService');
@@ -379,16 +580,30 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             memberName: updatedMember.name,
             status,
           },
+        }).catch((error) => {
+          logger.error('Failed to send family status alert:', error);
         });
       } catch (error) {
-        console.error('Failed to send family status notification:', error);
+        logger.error('Failed to import multi-channel alert service:', error);
       }
     }
   },
   
   clear: async () => {
-    set(initialState);
-    await AsyncStorage.removeItem(STORAGE_KEY).catch(console.error);
+    // ELITE: Cleanup Firebase subscription before clearing
+    const { firebaseUnsubscribe } = get();
+    if (firebaseUnsubscribe && typeof firebaseUnsubscribe === 'function') {
+      try {
+        firebaseUnsubscribe();
+      } catch (error) {
+        logger.error('Error unsubscribing from Firebase family members:', error);
+      }
+    }
+    
+    set({ ...initialState, firebaseUnsubscribe: null });
+    await AsyncStorage.removeItem(STORAGE_KEY).catch((error) => {
+      logger.error('Failed to clear AsyncStorage:', error);
+    });
     
     // Clear Firebase data (lazy load to avoid circular dependency)
     try {
@@ -403,7 +618,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         }
       }
     } catch (error) {
-      console.error('Failed to clear Firebase:', error);
+      logger.error('Failed to clear Firebase:', error);
     }
   },
 }));

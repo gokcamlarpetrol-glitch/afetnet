@@ -33,16 +33,22 @@ class EmergencyModeService {
 
   /**
    * Check if earthquake should trigger emergency mode
+   * ELITE: Updated to trigger for 5.0+ earthquakes (as requested)
    */
   shouldTriggerEmergencyMode(earthquake: Earthquake): boolean {
-    // Major earthquakes (6.0+) always trigger
-    if (earthquake.magnitude >= 6.0) {
-      // Check cooldown to prevent spam
-      const now = Date.now();
-      if (now - this.lastTriggerTime < this.COOLDOWN_MS) {
-        logger.warn('Emergency mode cooldown active');
-        return false;
+    // ELITE: Significant earthquakes (5.0+) trigger emergency mode
+    // CRITICAL: 5.0-5.9: High priority emergency mode
+    // CRITICAL: 6.0+: Critical priority emergency mode
+    if (earthquake.magnitude >= 5.0) {
+      // Check cooldown to prevent spam (only for 6.0+)
+      if (earthquake.magnitude >= 6.0) {
+        const now = Date.now();
+        if (now - this.lastTriggerTime < this.COOLDOWN_MS) {
+          logger.warn('Emergency mode cooldown active');
+          return false;
+        }
       }
+      // ELITE: 5.0-5.9 earthquakes bypass cooldown for faster response
       return true;
     }
     return false;
@@ -57,14 +63,25 @@ class EmergencyModeService {
       return;
     }
 
-    logger.info(`🚨 ACTIVATING EMERGENCY MODE - Magnitude ${earthquake.magnitude} earthquake detected`);
+    // ELITE: Determine emergency mode priority based on magnitude
+    const isCritical = earthquake.magnitude >= 6.0;
+    const priority = isCritical ? 'CRITICAL' : 'HIGH';
+    
+    logger.info(`🚨 ACTIVATING ${priority} EMERGENCY MODE - Magnitude ${earthquake.magnitude} earthquake detected`);
     this.isEmergencyMode = true;
     this.lastTriggerTime = Date.now();
 
-    // Haptic feedback - STRONG
-    haptics.impactHeavy();
-    haptics.impactHeavy();
-    haptics.impactHeavy();
+    // ELITE: Haptic feedback based on magnitude
+    if (isCritical) {
+      // Critical (6.0+): Heavy haptic feedback (3x)
+      haptics.impactHeavy();
+      haptics.impactHeavy();
+      haptics.impactHeavy();
+    } else {
+      // High (5.0-5.9): Medium haptic feedback (2x)
+      haptics.impactMedium();
+      haptics.impactMedium();
+    }
 
     try {
       // STEP 1: Send critical notification
@@ -95,14 +112,28 @@ class EmergencyModeService {
   }
 
   /**
-   * Send critical earthquake notification
+   * Send critical earthquake notification - ELITE IMPLEMENTATION
+   * CRITICAL: Instant delivery, magnitude-based priority, multi-channel alerts
    */
   private async sendCriticalNotification(earthquake: Earthquake) {
     try {
-      await notificationService.showEarthquakeNotification(
+      // ELITE: Use magnitude-based notification for premium features
+      const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
+      await showMagnitudeBasedNotification(
         earthquake.magnitude,
-        earthquake.location
-      );
+        earthquake.location,
+        false, // Not EEW
+        undefined, // No time advance
+        earthquake.time // Timestamp
+      ).catch(async (error) => {
+        logger.error('Failed to show magnitude-based critical notification:', error);
+        // Fallback to standard notification
+        await notificationService.showEarthquakeNotification(
+          earthquake.magnitude,
+          earthquake.location,
+          new Date(earthquake.time)
+        );
+      });
     } catch (error) {
       logger.error('Critical notification error:', error);
     }
@@ -189,18 +220,27 @@ class EmergencyModeService {
 
   /**
    * Show emergency mode UI alert
+   * ELITE: Enhanced alert based on magnitude priority
    */
   private showEmergencyModeAlert(earthquake: Earthquake) {
+    const isCritical = earthquake.magnitude >= 6.0;
+    const priority = isCritical ? 'CRITICAL' : 'HIGH';
+    const title = isCritical ? '🚨 ACİL DURUM MODU AKTİF' : '⚠️ ACİL DURUM MODU AKTİF';
+    const magnitudeText = isCritical 
+      ? `Büyüklük ${earthquake.magnitude} BÜYÜK DEPREM algılandı!`
+      : `Büyüklük ${earthquake.magnitude} ÖNEMLİ DEPREM algılandı!`;
+    
     Alert.alert(
-      '🚨 ACİL DURUM MODU AKTİF',
-      `Büyüklük ${earthquake.magnitude} deprem algılandı!\n\n` +
+      title,
+      `${magnitudeText}\n\n` +
       `📍 ${earthquake.location}\n\n` +
       `Acil durum protokolleri aktif edildi:\n` +
       `✓ Konumunuz sürekli paylaşılıyor\n` +
       `✓ Aile üyeleriniz bilgilendirildi\n` +
       `✓ BLE mesh aktif (şebekesiz iletişim)\n` +
-      `✓ SOS butonu hazırda bekliyor\n\n` +
-      `Güvende misiniz? Durum güncellemesi yapın.`,
+      `✓ SOS butonu hazırda bekliyor\n` +
+      `${isCritical ? '✓ Multi-channel alerts aktif\n' : ''}` +
+      `\nGüvende misiniz? Durum güncellemesi yapın.`,
       [
         {
           text: 'Güvendeyim',

@@ -165,3 +165,11 @@ export class KafkaPublisher implements QueuePublisher {
 // Export default publisher (RabbitMQ)
 export const queuePublisher: QueuePublisher = new RabbitMQPublisher();
 
+
+
+
+
+
+
+
+

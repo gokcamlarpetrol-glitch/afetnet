@@ -329,3 +329,12 @@ Bu rapor, Cursor'un bugbot benzeri bir analiz yaparak tüm potansiyel hataları,
 **Not:** Bu rapor, Cursor'un bugbot benzeri kapsamlı bir analiz sonucunda oluşturulmuştur. Tüm kontroller %100 kesinlikle yapılmıştır.
 
 
+
+
+
+
+
+
+
+
+

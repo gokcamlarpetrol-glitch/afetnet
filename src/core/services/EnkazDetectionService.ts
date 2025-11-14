@@ -24,6 +24,8 @@ class EnkazDetectionService {
   private lastLocation: { latitude: number; longitude: number } | null = null;
   private immobileStartTime: number | null = null;
   private suspectedFall = false;
+  private lastFallLogTime: number = 0; // ELITE: Debounce fall detection logs
+  private readonly FALL_LOG_DEBOUNCE_MS = 5000; // 5 seconds between fall logs
   
   private accelerometerSubscription: any = null;
   private gyroscopeSubscription: any = null;
@@ -105,7 +107,15 @@ class EnkazDetectionService {
     if (magnitude > this.FALL_THRESHOLD) {
       this.suspectedFall = true;
       this.immobileStartTime = Date.now();
-      logger.warn('Fall detected! Monitoring for immobility...');
+      
+      // ELITE: Debounce fall detection logs to prevent spam
+      const now = Date.now();
+      if (now - this.lastFallLogTime > this.FALL_LOG_DEBOUNCE_MS) {
+        this.lastFallLogTime = now;
+        if (__DEV__) {
+          logger.warn('Fall detected! Monitoring for immobility...');
+        }
+      }
     }
 
     // Detect motion
@@ -181,11 +191,29 @@ class EnkazDetectionService {
     if (!store.sosTriggered) {
       store.setSosTriggered(true);
       
-      // Broadcast SOS via BLE Mesh
-      const { bleMeshService } = await import('./BLEMeshService');
-      await bleMeshService.sendSOS();
-      
-      logger.warn('Auto-triggered SOS!');
+      // ELITE: Use SOS Service for comprehensive SOS handling
+      try {
+        const { getSOSService } = await import('./SOSService');
+        const sosService = getSOSService();
+        
+        // ELITE: Auto-trigger SOS with current location
+        await sosService.autoTriggerFromEnkazDetection(this.lastLocation ? {
+          latitude: this.lastLocation.latitude,
+          longitude: this.lastLocation.longitude,
+          accuracy: 10, // Default accuracy
+        } : null);
+        
+        logger.warn('✅ ELITE SOS: Auto-triggered from enkaz detection!');
+      } catch (error) {
+        logger.error('Failed to auto-trigger SOS:', error);
+        // Fallback to basic BLE SOS
+        try {
+          const { bleMeshService } = await import('./BLEMeshService');
+          await bleMeshService.sendSOS();
+        } catch (fallbackError) {
+          logger.error('Fallback SOS also failed:', fallbackError);
+        }
+      }
     }
   }
 

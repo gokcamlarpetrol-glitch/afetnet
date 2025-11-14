@@ -1,20 +1,34 @@
 /**
  * FIREBASE STORAGE SERVICE
  * File upload/download for profile images, SOS attachments, etc.
+ * CRITICAL: Lazy imports to prevent module loading errors
  */
 
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
-import getFirebaseApp from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FirebaseStorage');
 
+// CRITICAL: Lazy load Firebase modules to prevent module loading errors
 let storage: any = null;
 
-function getStorageInstance() {
+async function getFirebaseAppAsync() {
+  try {
+    const firebaseModule = await import('../../lib/firebase');
+    return firebaseModule.getFirebaseAppAsync ? await firebaseModule.getFirebaseAppAsync() : null;
+  } catch (error) {
+    if (__DEV__) {
+      logger.debug('Firebase app not available:', error);
+    }
+    return null;
+  }
+}
+
+async function getStorageInstance() {
   if (!storage) {
     try {
-      const firebaseApp = getFirebaseApp();
+      // CRITICAL: Lazy load Firebase Storage module
+      const { getStorage } = await import('firebase/storage');
+      const firebaseApp = await getFirebaseAppAsync();
       if (!firebaseApp) {
         logger.warn('Firebase app not initialized');
         return null;
@@ -39,13 +53,13 @@ class FirebaseStorageService {
     if (this._isInitialized) return;
 
     try {
-      const firebaseApp = getFirebaseApp();
+      const firebaseApp = await getFirebaseAppAsync();
       if (!firebaseApp) {
         logger.warn('Firebase app not initialized - Storage disabled');
         return;
       }
 
-      const storageInstance = getStorageInstance();
+      const storageInstance = await getStorageInstance();
       if (!storageInstance) {
         logger.warn('Storage not available');
         return;
@@ -72,12 +86,14 @@ class FirebaseStorageService {
     }
 
     try {
-      const storageInstance = getStorageInstance();
+      const storageInstance = await getStorageInstance();
       if (!storageInstance) {
         logger.warn('Storage not available');
         return null;
       }
 
+      // CRITICAL: Lazy load Firebase Storage functions
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       await uploadBytes(storageRef, file, metadata || {});
       
@@ -104,12 +120,14 @@ class FirebaseStorageService {
     }
 
     try {
-      const storageInstance = getStorageInstance();
+      const storageInstance = await getStorageInstance();
       if (!storageInstance) {
         logger.warn('Storage not available');
         return null;
       }
 
+      // CRITICAL: Lazy load Firebase Storage functions
+      const { ref, getDownloadURL } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       const url = await getDownloadURL(storageRef);
       
@@ -130,12 +148,14 @@ class FirebaseStorageService {
     }
 
     try {
-      const storageInstance = getStorageInstance();
+      const storageInstance = await getStorageInstance();
       if (!storageInstance) {
         logger.warn('Storage not available');
         return false;
       }
 
+      // CRITICAL: Lazy load Firebase Storage functions
+      const { ref, deleteObject } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       await deleteObject(storageRef);
       
@@ -160,12 +180,14 @@ class FirebaseStorageService {
     }
 
     try {
-      const storageInstance = getStorageInstance();
+      const storageInstance = await getStorageInstance();
       if (!storageInstance) {
         logger.warn('Storage not available');
         return [];
       }
 
+      // CRITICAL: Lazy load Firebase Storage functions
+      const { ref, listAll } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       const result = await listAll(storageRef);
       

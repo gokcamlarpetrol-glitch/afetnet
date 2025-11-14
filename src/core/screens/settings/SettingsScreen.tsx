@@ -14,6 +14,9 @@ import {
   Switch,
   StatusBar,
   Linking,
+  Platform,
+  BackHandler,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,6 +32,9 @@ import { SettingItem as SettingItemRow } from '../../components/settings/Setting
 import * as haptics from '../../utils/haptics';
 import { batterySaverService } from '../../services/BatterySaverService';
 import { createLogger } from '../../utils/logger';
+import { accountDeletionService } from '../../services/AccountDeletionService';
+import { getDeviceId } from '../../utils/device';
+import { ActivityIndicator } from 'react-native';
 
 const logger = createLogger('SettingsScreen');
 // AI Feature Toggle import kaldırıldı - AI Asistan her zaman aktif
@@ -50,6 +56,8 @@ export default function SettingsScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [isPremium, setIsPremium] = useState(false);
   const [meshStats, setMeshStats] = useState({ messagesSent: 0, messagesReceived: 0, peersDiscovered: 0 });
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deletionProgress, setDeletionProgress] = useState<{ step: string; progress: number; total: number } | null>(null);
   
   // Use settings store for persistent settings
   const notificationsEnabled = useSettingsStore((state) => state.notificationsEnabled);
@@ -90,25 +98,114 @@ export default function SettingsScreen({ navigation }: any) {
 
   const handleRestorePurchases = async () => {
     haptics.impactMedium();
-    Alert.alert('Satın Alımları Geri Yükle', 'Önceki satın alımlarınız kontrol ediliyor...');
+    Alert.alert(i18nService.t('premium.actions.restore'), i18nService.t('premium.restoring'));
     const restored = await premiumService.restorePurchases();
     if (restored) {
-      Alert.alert('Başarılı', 'Premium üyeliğiniz geri yüklendi!');
+      Alert.alert(i18nService.t('common.success'), i18nService.t('premium.restored'));
     } else {
-      Alert.alert('Bilgi', 'Geri yüklenecek satın alım bulunamadı.');
+      Alert.alert(i18nService.t('common.info'), i18nService.t('premium.noPurchases'));
     }
   };
 
   const handleLanguageChange = () => {
     haptics.impactMedium();
     Alert.alert(
-      'Dil Seç',
-      'Kullanmak istediğiniz dili seçin',
+      i18nService.t('settings.languageSelect'),
+      i18nService.t('settings.languageDescription'),
       [
-        { text: 'Türkçe', onPress: () => { i18nService.setLocale('tr'); setLanguage('tr'); } },
-        { text: 'English', onPress: () => { i18nService.setLocale('en'); setLanguage('en'); } },
-        { text: 'العربية', onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
-        { text: 'İptal', style: 'cancel' },
+        { text: i18nService.getLocaleDisplayName('tr'), onPress: () => { i18nService.setLocale('tr'); setLanguage('tr'); } },
+        { text: i18nService.getLocaleDisplayName('en'), onPress: () => { i18nService.setLocale('en'); setLanguage('en'); } },
+        { text: i18nService.getLocaleDisplayName('ar'), onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
+        { text: i18nService.getLocaleDisplayName('ru'), onPress: () => { i18nService.setLocale('ru'); setLanguage('ru'); } },
+        { text: i18nService.t('common.cancel'), style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleDeleteAccount = async () => {
+    haptics.impactMedium();
+    
+    Alert.alert(
+      'Hesabı Sil',
+      'Hesabınızı silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve şunlar silinecektir:\n\n• Tüm kişisel verileriniz\n• Aile üyeleri bilgileri\n• Mesajlar ve konuşmalar\n• Konum geçmişi\n• Sağlık profili\n• Tüm ayarlar\n\nBu işlem kalıcıdır ve geri alınamaz!',
+      [
+        {
+          text: 'İptal',
+          style: 'cancel',
+        },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            // Final confirmation
+            Alert.alert(
+              'Son Onay',
+              'Hesabınızı kalıcı olarak silmek istediğinizden kesinlikle emin misiniz? Bu işlem geri alınamaz!',
+              [
+                {
+                  text: 'Hayır, İptal',
+                  style: 'cancel',
+                },
+                {
+                  text: 'Evet, Kesinlikle Sil',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      setIsDeletingAccount(true);
+                      const deviceId = await getDeviceId();
+                      
+                      const result = await accountDeletionService.deleteAccount(
+                        deviceId,
+                        (progress) => {
+                          setDeletionProgress(progress);
+                        }
+                      );
+                      
+                      setIsDeletingAccount(false);
+                      setDeletionProgress(null);
+                      
+                      if (result.success) {
+                        Alert.alert(
+                          'Hesap Silindi',
+                          'Hesabınız ve tüm verileriniz başarıyla silindi. Uygulama kapatılacak.',
+                          [
+                            {
+                              text: 'Tamam',
+                              onPress: () => {
+                                // Exit app (platform specific)
+                                if (Platform.OS === 'ios') {
+                                  // iOS doesn't allow programmatic exit, but we can clear everything
+                                } else {
+                                  // Android
+                                  BackHandler.exitApp();
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      } else {
+                        Alert.alert(
+                          'Hesap Silme Hatası',
+                          `Hesap silinirken bazı hatalar oluştu:\n\n${result.errors.join('\n')}\n\nLütfen tekrar deneyin veya destek ekibiyle iletişime geçin.`,
+                          [{ text: 'Tamam' }]
+                        );
+                      }
+                    } catch (error: any) {
+                      setIsDeletingAccount(false);
+                      setDeletionProgress(null);
+                      logger.error('Account deletion error:', error);
+                      Alert.alert(
+                        'Hata',
+                        `Hesap silinirken bir hata oluştu: ${error.message || 'Bilinmeyen hata'}`,
+                        [{ text: 'Tamam' }]
+                      );
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
       ]
     );
   };
@@ -168,6 +265,17 @@ export default function SettingsScreen({ navigation }: any) {
       type: 'switch',
       value: notificationsEnabled,
       onPress: () => setNotificationsEnabled(!notificationsEnabled),
+    },
+    {
+      icon: 'settings',
+      title: 'Detaylı Bildirim Ayarları',
+      subtitle: 'Ses tonları, modlar ve şiddet bazlı ayarlar',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('NotificationSettings');
+      },
     },
     {
       icon: 'volume-high',
@@ -529,7 +637,7 @@ export default function SettingsScreen({ navigation }: any) {
     const items: SettingOption[] = [
       {
         icon: 'language',
-        title: 'Dil',
+        title: i18nService.t('settings.language'),
         subtitle: i18nService.getLocaleDisplayName(currentLanguage),
         type: 'arrow',
         onPress: handleLanguageChange,
@@ -622,81 +730,45 @@ export default function SettingsScreen({ navigation }: any) {
     {
       icon: 'information-circle',
       title: 'Hakkında',
-      subtitle: 'AfetNet v1.0.0',
+      subtitle: 'Uygulama bilgileri ve özellikler',
       type: 'arrow',
       onPress: () => {
-        Alert.alert(
-          'AfetNet',
-          'AfetNet v1.0.0\n\nAfet durumlarında offline iletişim için tasarlanmış acil durum uygulaması.',
-          [{ text: 'Tamam' }]
-        );
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('About');
       },
     },
     {
       icon: 'document-text',
       title: 'Gizlilik Politikası',
-      subtitle: 'Politikayı görüntüle',
+      subtitle: 'Detaylı gizlilik politikası',
       type: 'arrow',
-      onPress: async () => {
+      onPress: () => {
         haptics.impactLight();
-        try {
-          const url = ENV.PRIVACY_POLICY_URL;
-          if (!url) {
-            throw new Error('URL tanımlı değil');
-          }
-          const canOpen = await Linking.canOpenURL(url);
-          if (!canOpen) {
-            throw new Error('URL açılamıyor');
-          }
-          await Linking.openURL(url);
-        } catch (error) {
-          logger.error('Gizlilik politikası açma hatası:', error);
-          Alert.alert(
-            'Gizlilik Politikası',
-            'Gizlilik politikası şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html adresini ziyaret edin.',
-            [{ text: 'Tamam' }]
-          );
-        }
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('PrivacyPolicy');
       },
     },
     {
       icon: 'document',
       title: 'Kullanım Koşulları',
-      subtitle: 'Koşulları görüntüle',
+      subtitle: 'Detaylı kullanım koşulları',
       type: 'arrow',
-      onPress: async () => {
+      onPress: () => {
         haptics.impactLight();
-        try {
-          const url = ENV.TERMS_OF_SERVICE_URL;
-          if (!url) {
-            throw new Error('URL tanımlı değil');
-          }
-          const canOpen = await Linking.canOpenURL(url);
-          if (!canOpen) {
-            throw new Error('URL açılamıyor');
-          }
-          await Linking.openURL(url);
-        } catch (error) {
-          logger.error('Kullanım koşulları açma hatası:', error);
-          Alert.alert(
-            'Kullanım Koşulları',
-            'Kullanım koşulları şu anda açılamıyor. Lütfen https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html adresini ziyaret edin.',
-            [{ text: 'Tamam' }]
-          );
-        }
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('TermsOfService');
       },
     },
     {
       icon: 'shield-checkmark',
       title: 'Güvenlik',
-      subtitle: 'Güvenlik ve şifreleme',
+      subtitle: 'Güvenlik ve şifreleme detayları',
       type: 'arrow',
       onPress: () => {
-        Alert.alert(
-          'Güvenlik',
-          'Tüm verileriniz şifrelenmiş olarak saklanmaktadır. E2E encryption aktif.',
-          [{ text: 'Tamam' }]
-        );
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('Security');
       },
     },
     {
@@ -709,6 +781,13 @@ export default function SettingsScreen({ navigation }: any) {
         const parentNavigator = navigation.getParent?.() || navigation;
         parentNavigator.navigate('PsychologicalSupport');
       },
+    },
+    {
+      icon: 'trash',
+      title: 'Hesabı Sil',
+      subtitle: 'Tüm verilerinizi kalıcı olarak silin',
+      type: 'arrow',
+      onPress: handleDeleteAccount,
     },
   ];
 
@@ -767,6 +846,39 @@ export default function SettingsScreen({ navigation }: any) {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Account Deletion Progress Modal */}
+      <Modal
+        visible={isDeletingAccount}
+        transparent
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+            <Text style={styles.modalTitle}>Hesap Siliniyor...</Text>
+            {deletionProgress && (
+              <>
+                <Text style={styles.modalStep}>{deletionProgress.step}</Text>
+                <View style={styles.progressBar}>
+                  <View 
+                    style={[
+                      styles.progressFill,
+                      { width: `${(deletionProgress.progress / deletionProgress.total) * 100}%` }
+                    ]} 
+                  />
+                </View>
+                <Text style={styles.modalProgress}>
+                  {deletionProgress.progress} / {deletionProgress.total}
+                </Text>
+              </>
+            )}
+            <Text style={styles.modalNote}>
+              Lütfen bekleyin, bu işlem birkaç dakika sürebilir...
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -900,5 +1012,60 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1e293b',
+    borderRadius: 20,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  modalStep: {
+    fontSize: 14,
+    color: '#cbd5e1',
+    marginTop: 16,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  progressBar: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#334155',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#3b82f6',
+    borderRadius: 4,
+  },
+  modalProgress: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginBottom: 16,
+  },
+  modalNote: {
+    fontSize: 13,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

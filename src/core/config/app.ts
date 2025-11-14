@@ -16,9 +16,9 @@ export const APP_CONFIG = {
   // RevenueCat Product IDs - Must match Apple StoreKit configuration
   iap: {
     productIds: {
-      monthly: 'org.afetnet1.premium.monthly',
-      yearly: 'org.afetnet1.premium.yearly',
-      lifetime: 'org.afetnet1.premium.lifetime',
+      monthly: 'org.afetapp.premium.monthly.v2',
+      yearly: 'org.afetapp.premium.yearly.v2',
+      lifetime: 'org.afetapp.premium.lifetime.v2',
     },
     entitlementId: 'Premium',
   },

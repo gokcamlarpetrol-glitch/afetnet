@@ -279,3 +279,12 @@ class RealTimeAnomalyDetectionService {
 
 export const realTimeAnomalyDetectionService = new RealTimeAnomalyDetectionService();
 
+
+
+
+
+
+
+
+
+

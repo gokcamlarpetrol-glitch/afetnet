@@ -39,7 +39,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>10</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
@@ -54,9 +54,9 @@
       <true/>
     </dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.</string>
+    <string>AfetNet'in benzersiz BLE Mesh teknolojisi, deprem anında internet olmadan bile yakındaki kişilerle mesajlaşmanızı sağlar. Bu hayat kurtarıcı özelliktir.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.</string>
+    <string>AfetNet'in şebekesiz acil iletişim sistemi, Bluetooth ile mesh ağı oluşturarak SOS sinyallerinizi internet olmadan yakındaki tüm AfetNet kullanıcılarına iletir.</string>
     <key>NSCameraUsageDescription</key>
     <string>AfetNet, QR kodları okumak için kameraya erişir.</string>
     <key>NSContactsUsageDescription</key>
@@ -72,7 +72,7 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.</string>
     <key>NSMotionUsageDescription</key>
-    <string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.</string>
+    <string>AfetNet'in benzersiz 100 Hz seismik sensörü, telefonunuzu sismografa dönüştürerek P ve S dalgalarını algılar ve depremden saniyeler önce sizi uyarır. Bu teknoloji hayat kurtarır.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>

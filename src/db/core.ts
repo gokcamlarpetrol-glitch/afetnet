@@ -6,12 +6,12 @@ declare namespace SQLite {
      
     executeSql: (sql: string, params?: unknown[]) => Promise<any[]>;
      
-    transaction: (fn: (tx: any) => void) => Promise<void>;
+    transaction: (fn: (tx: SQLite.SQLiteDatabase) => void) => Promise<void>;
     close: () => Promise<void>;
   }
 }
 
-let db: any = null;
+let db: SQLite.SQLiteDatabase | null = null;
 
 export async function openDB(){
   if (db) {return db;}

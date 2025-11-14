@@ -27,7 +27,7 @@ interface SettingsState {
   // Battery Saver
   batterySaverEnabled: boolean;
   // Language
-  language: 'tr' | 'en' | 'ar';
+  language: 'tr' | 'en' | 'ar' | 'ru';
   // News
   newsEnabled: boolean;
   
@@ -55,6 +55,9 @@ interface SettingsState {
   sourceKOERI: boolean; // KOERI source enabled (default: true)
   sourceCommunity: boolean; // Community/Sensor source enabled (default: true)
   
+  // Observatory Selection (for display)
+  selectedObservatory: 'AFAD' | 'KANDILLI'; // Selected observatory for earthquake monitoring (default: 'AFAD')
+  
   // Notification Types
   notificationPush: boolean; // Push notifications (default: true)
   notificationFullScreen: boolean; // Full-screen alerts (default: true)
@@ -67,6 +70,30 @@ interface SettingsState {
   priorityHigh: 'critical' | 'high' | 'normal'; // Priority for high magnitude (5.0-6.0) (default: 'high')
   priorityMedium: 'high' | 'normal' | 'low'; // Priority for medium magnitude (4.0-5.0) (default: 'normal')
   priorityLow: 'normal' | 'low'; // Priority for low magnitude (3.0-4.0) (default: 'normal')
+  
+  // ELITE: Advanced Notification Settings
+  // Sound Settings
+  notificationSoundType: 'default' | 'alarm' | 'sos' | 'beep' | 'chime' | 'siren' | 'custom'; // Sound type (default: 'alarm')
+  notificationSoundVolume: number; // Sound volume 0-100 (default: 80)
+  notificationSoundRepeat: number; // Number of times to repeat sound (default: 3)
+  
+  // Notification Mode
+  notificationMode: 'silent' | 'vibrate' | 'sound' | 'sound+vibrate' | 'critical-only'; // Notification mode (default: 'sound+vibrate')
+  
+  // Time-based Settings
+  quietHoursEnabled: boolean; // Enable quiet hours (default: false)
+  quietHoursStart: string; // Quiet hours start time (HH:mm format, default: '22:00')
+  quietHoursEnd: string; // Quiet hours end time (HH:mm format, default: '07:00')
+  quietHoursCriticalOnly: boolean; // Only critical earthquakes during quiet hours (default: true)
+  
+  // Magnitude-based Custom Settings
+  magnitudeBasedSound: boolean; // Different sounds for different magnitudes (default: true)
+  magnitudeBasedVibration: boolean; // Different vibration patterns for different magnitudes (default: true)
+  
+  // Display Settings
+  notificationShowOnLockScreen: boolean; // Show notifications on lock screen (default: true)
+  notificationShowPreview: boolean; // Show preview text in notifications (default: true)
+  notificationGroupByMagnitude: boolean; // Group notifications by magnitude (default: false)
 }
 
 interface SettingsActions {
@@ -79,7 +106,7 @@ interface SettingsActions {
   setVibration: (enabled: boolean) => void;
   setVoiceCommand: (enabled: boolean) => void;
   setBatterySaver: (enabled: boolean) => void;
-  setLanguage: (lang: 'tr' | 'en' | 'ar') => void;
+  setLanguage: (lang: 'tr' | 'en' | 'ar' | 'ru') => void;
   setNews: (enabled: boolean) => void;
   
   // ELITE: Comprehensive Earthquake Settings Actions
@@ -96,6 +123,7 @@ interface SettingsActions {
   setSourceEMSC: (enabled: boolean) => void;
   setSourceKOERI: (enabled: boolean) => void;
   setSourceCommunity: (enabled: boolean) => void;
+  setSelectedObservatory: (observatory: 'AFAD' | 'KANDILLI') => void;
   setNotificationPush: (enabled: boolean) => void;
   setNotificationFullScreen: (enabled: boolean) => void;
   setNotificationSound: (enabled: boolean) => void;
@@ -105,6 +133,21 @@ interface SettingsActions {
   setPriorityHigh: (priority: 'critical' | 'high' | 'normal') => void;
   setPriorityMedium: (priority: 'high' | 'normal' | 'low') => void;
   setPriorityLow: (priority: 'normal' | 'low') => void;
+  
+  // ELITE: Advanced Notification Settings Actions
+  setNotificationSoundType: (type: 'default' | 'alarm' | 'sos' | 'beep' | 'chime' | 'siren' | 'custom') => void;
+  setNotificationSoundVolume: (volume: number) => void;
+  setNotificationSoundRepeat: (repeat: number) => void;
+  setNotificationMode: (mode: 'silent' | 'vibrate' | 'sound' | 'sound+vibrate' | 'critical-only') => void;
+  setQuietHoursEnabled: (enabled: boolean) => void;
+  setQuietHoursStart: (time: string) => void;
+  setQuietHoursEnd: (time: string) => void;
+  setQuietHoursCriticalOnly: (enabled: boolean) => void;
+  setMagnitudeBasedSound: (enabled: boolean) => void;
+  setMagnitudeBasedVibration: (enabled: boolean) => void;
+  setNotificationShowOnLockScreen: (enabled: boolean) => void;
+  setNotificationShowPreview: (enabled: boolean) => void;
+  setNotificationGroupByMagnitude: (enabled: boolean) => void;
   
   resetToDefaults: () => void;
 }
@@ -123,7 +166,8 @@ const defaultSettings: SettingsState = {
   newsEnabled: true,
   
   // ELITE: Comprehensive Earthquake Settings Defaults
-  minMagnitudeForNotification: 3.0,
+  // CRITICAL: Default notification threshold is 4.0 M (user requirement)
+  minMagnitudeForNotification: 4.0,
   maxDistanceForNotification: 0, // 0 = unlimited
   criticalMagnitudeThreshold: 6.0,
   criticalDistanceThreshold: 100,
@@ -136,6 +180,7 @@ const defaultSettings: SettingsState = {
   sourceEMSC: true,
   sourceKOERI: true,
   sourceCommunity: true,
+  selectedObservatory: 'AFAD' as const,
   notificationPush: true,
   notificationFullScreen: true,
   notificationSound: true,
@@ -145,6 +190,21 @@ const defaultSettings: SettingsState = {
   priorityHigh: 'high',
   priorityMedium: 'normal',
   priorityLow: 'normal',
+  
+  // ELITE: Advanced Notification Settings Defaults
+  notificationSoundType: 'alarm',
+  notificationSoundVolume: 80,
+  notificationSoundRepeat: 3,
+  notificationMode: 'sound+vibrate',
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  quietHoursCriticalOnly: true,
+  magnitudeBasedSound: true,
+  magnitudeBasedVibration: true,
+  notificationShowOnLockScreen: true,
+  notificationShowPreview: true,
+  notificationGroupByMagnitude: false,
 };
 
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
@@ -178,6 +238,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setSourceEMSC: (enabled) => set({ sourceEMSC: enabled }),
       setSourceKOERI: (enabled) => set({ sourceKOERI: enabled }),
       setSourceCommunity: (enabled) => set({ sourceCommunity: enabled }),
+      setSelectedObservatory: (observatory) => set({ selectedObservatory: observatory }),
       setNotificationPush: (enabled) => set({ notificationPush: enabled }),
       setNotificationFullScreen: (enabled) => set({ notificationFullScreen: enabled }),
       setNotificationSound: (enabled) => set({ notificationSound: enabled }),
@@ -187,6 +248,21 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setPriorityHigh: (priority) => set({ priorityHigh: priority }),
       setPriorityMedium: (priority) => set({ priorityMedium: priority }),
       setPriorityLow: (priority) => set({ priorityLow: priority }),
+      
+      // ELITE: Advanced Notification Settings Actions
+      setNotificationSoundType: (type) => set({ notificationSoundType: type }),
+      setNotificationSoundVolume: (volume) => set({ notificationSoundVolume: Math.max(0, Math.min(100, volume)) }),
+      setNotificationSoundRepeat: (repeat) => set({ notificationSoundRepeat: Math.max(1, Math.min(10, repeat)) }),
+      setNotificationMode: (mode) => set({ notificationMode: mode }),
+      setQuietHoursEnabled: (enabled) => set({ quietHoursEnabled: enabled }),
+      setQuietHoursStart: (time) => set({ quietHoursStart: time }),
+      setQuietHoursEnd: (time) => set({ quietHoursEnd: time }),
+      setQuietHoursCriticalOnly: (enabled) => set({ quietHoursCriticalOnly: enabled }),
+      setMagnitudeBasedSound: (enabled) => set({ magnitudeBasedSound: enabled }),
+      setMagnitudeBasedVibration: (enabled) => set({ magnitudeBasedVibration: enabled }),
+      setNotificationShowOnLockScreen: (enabled) => set({ notificationShowOnLockScreen: enabled }),
+      setNotificationShowPreview: (enabled) => set({ notificationShowPreview: enabled }),
+      setNotificationGroupByMagnitude: (enabled) => set({ notificationGroupByMagnitude: enabled }),
       
       resetToDefaults: () => set(defaultSettings),
     }),

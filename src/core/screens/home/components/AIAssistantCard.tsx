@@ -13,6 +13,7 @@ import { useAIAssistantStore } from '../../../ai/stores/aiAssistantStore';
 import { aiAssistantCoordinator } from '../../../ai/services/AIAssistantCoordinator';
 import { createLogger } from '../../../utils/logger';
 import { RiskLevel } from '../../../ai/types/ai.types';
+import { i18nService } from '../../../services/I18nService';
 
 interface Props {
   navigation: any;
@@ -37,25 +38,25 @@ const getRiskColor = (level?: RiskLevel) => {
 const getRiskLabel = (level?: RiskLevel) => {
   switch (level) {
     case 'critical':
-      return 'Kritik Seviye';
+      return i18nService.t('ai.criticalLevel');
     case 'high':
-      return 'Yüksek Risk';
+      return i18nService.t('ai.highRisk');
     case 'medium':
-      return 'Orta Risk';
+      return i18nService.t('ai.mediumRisk');
     case 'low':
-      return 'Düşük Risk';
+      return i18nService.t('ai.lowRisk');
     default:
-      return 'Hazırlanmadı';
+      return i18nService.t('ai.notPrepared');
   }
 };
 
 const formatUpdateTime = (timestamp?: number | null) => {
-  if (!timestamp) return 'Veri bekleniyor';
+  if (!timestamp) return i18nService.t('ai.dataPending');
   const diff = Date.now() - timestamp;
-  if (diff < 60 * 1000) return 'Az önce';
+  if (diff < 60 * 1000) return i18nService.t('ai.justNow');
   if (diff < 60 * 60 * 1000) {
     const minutes = Math.round(diff / (60 * 1000));
-    return `${minutes} dk önce`;
+    return i18nService.t('ai.minutesAgo', { minutes: minutes.toString() });
   }
   return new Date(timestamp).toLocaleTimeString('tr-TR', {
     hour: '2-digit',
@@ -200,7 +201,7 @@ export default function AIAssistantCard({ navigation }: Props) {
     return {
       value: '--',
       suffix: '',
-      status: 'Hazırlığı başlat',
+      status: i18nService.t('ai.startPreparation'),
       statusColor: colors.text.secondary,
       updated: 'Veri bekleniyor',
     };
@@ -210,7 +211,7 @@ export default function AIAssistantCard({ navigation }: Props) {
     () => [
       {
         key: 'risk',
-        label: 'Risk Skoru',
+        label: i18nService.t('ai.riskScore'),
         value: riskMetric.value,
         suffix: riskMetric.suffix,
         caption: riskMetric.status,
@@ -220,7 +221,7 @@ export default function AIAssistantCard({ navigation }: Props) {
       },
       {
         key: 'plan',
-        label: 'Hazırlık Planı',
+        label: i18nService.t('ai.preparednessPlan'),
         value: planMetric.value,
         suffix: planMetric.suffix,
         caption: planMetric.status,
@@ -230,7 +231,7 @@ export default function AIAssistantCard({ navigation }: Props) {
       },
       {
         key: 'panic',
-        label: 'Afet Anı Rehberi',
+        label: i18nService.t('ai.disasterGuide'),
         value: panicMetric.value,
         suffix: panicMetric.suffix,
         caption: panicMetric.status,
@@ -274,19 +275,19 @@ export default function AIAssistantCard({ navigation }: Props) {
       if (screen === 'RiskScore') {
         const ensurePromise = aiAssistantCoordinator.ensureRiskScore(true);
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('RiskScore timeout')), 15000)
+          setTimeout(() => reject(new Error(i18nService.t('ai.riskScoreTimeout'))), 15000)
         );
         ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       } else if (screen === 'PreparednessPlan') {
         const ensurePromise = aiAssistantCoordinator.ensurePreparednessPlan(true);
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('PreparednessPlan timeout')), 15000)
+          setTimeout(() => reject(new Error(i18nService.t('ai.planTimeout'))), 15000)
         );
         ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       } else {
         const ensurePromise = aiAssistantCoordinator.ensurePanicAssistant('earthquake', true);
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('PanicAssistant timeout')), 15000)
+          setTimeout(() => reject(new Error(i18nService.t('ai.guideTimeout'))), 15000)
         );
         ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
       }
@@ -295,7 +296,7 @@ export default function AIAssistantCard({ navigation }: Props) {
       await Promise.race([
         Promise.all(ensurePromises),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Overall timeout')), 20000)
+          setTimeout(() => reject(new Error(i18nService.t('ai.dataLoadTimeout'))), 20000)
         )
       ]);
 
@@ -303,7 +304,7 @@ export default function AIAssistantCard({ navigation }: Props) {
       if (navigation && typeof navigation.navigate === 'function') {
         navigation.navigate(screen);
       } else {
-        throw new Error('Navigation not available');
+          throw new Error(i18nService.t('ai.navigationNotAvailable'));
       }
     } catch (error: any) {
       logger.error('AI assistant action failed:', error);
@@ -315,14 +316,19 @@ export default function AIAssistantCard({ navigation }: Props) {
           navigation.navigate(screen);
         } else {
           Alert.alert(
-            'Navigasyon Hatası',
-            'Ekrana geçiş yapılamadı. Lütfen tekrar deneyin.'
+            i18nService.t('ai.navigationError'),
+            i18nService.t('ai.navigationUnavailable'),
+            [{ text: i18nService.t('common.ok'), style: 'default' }]
           );
         }
       } catch (navError) {
+        const errorMessage = error?.message || 'Bilinmeyen hata';
         Alert.alert(
-          'AI Asistan servisi',
-          'Veri alınırken bir sorun oluştu. İnternet bağlantınızı kontrol edip tekrar deneyin.'
+          i18nService.t('ai.serviceError'),
+          errorMessage.includes('zaman aşımı') || errorMessage.includes('timeout') || errorMessage.includes('Timeout')
+            ? i18nService.t('ai.timeoutMessage')
+            : i18nService.t('ai.dataLoadError'),
+          [{ text: i18nService.t('common.ok'), style: 'default' }]
         );
       }
     }
@@ -345,8 +351,8 @@ export default function AIAssistantCard({ navigation }: Props) {
               <Ionicons name="sparkles" size={20} color="#60a5fa" />
             </View>
             <View>
-              <Text style={styles.title}>AI Asistan</Text>
-              <Text style={styles.subtitle}>Hayat kurtaran analiz ve yönlendirme</Text>
+              <Text style={styles.title}>{i18nService.t('ai.assistant')}</Text>
+              <Text style={styles.subtitle}>{i18nService.t('ai.assistantSubtitle')}</Text>
             </View>
           </View>
           <View style={styles.headerRight}>
@@ -374,7 +380,7 @@ export default function AIAssistantCard({ navigation }: Props) {
                     {stat.suffix ? <Text style={[styles.statsSuffix, { color: stat.accent }]}>{stat.suffix}</Text> : null}
                   </View>
                   <Text style={styles.statsCaption} numberOfLines={1}>{stat.caption}</Text>
-                  <Text style={styles.statsUpdated}>Son: {stat.updated}</Text>
+                  <Text style={styles.statsUpdated}>{i18nService.t('ai.last')}: {stat.updated}</Text>
                 </View>
               ))}
             </View>
@@ -393,7 +399,7 @@ export default function AIAssistantCard({ navigation }: Props) {
                   end={{ x: 1, y: 1 }}
                 >
                   <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>Risk Skoru</Text>
+                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.riskScore')}</Text>
                     {riskScoreLoading ? (
                       <ActivityIndicator size="small" color="#bfdbfe" />
                     ) : null}
@@ -414,7 +420,7 @@ export default function AIAssistantCard({ navigation }: Props) {
                   end={{ x: 1, y: 1 }}
                 >
                   <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>Hazırlık Planı</Text>
+                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.preparednessPlan')}</Text>
                     {preparednessPlanLoading ? (
                       <ActivityIndicator size="small" color="#d1fae5" />
                     ) : null}
@@ -435,7 +441,7 @@ export default function AIAssistantCard({ navigation }: Props) {
                   end={{ x: 1, y: 1 }}
                 >
                   <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>Afet Rehberi</Text>
+                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.disasterGuide')}</Text>
                     {panicAssistantLoading ? (
                       <ActivityIndicator size="small" color="#fee2e2" />
                     ) : null}

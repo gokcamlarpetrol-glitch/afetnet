@@ -1,13 +1,42 @@
-import * as Notifications from 'expo-notifications';
+// ELITE: Zero static dependencies - lazy load expo-notifications
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system';
 import { SafetyReport } from './types';
 
+let NotificationsModule: any = null;
+let isNotificationsLoading = false;
+
+async function getNotificationsAsync(): Promise<any> {
+  if (NotificationsModule) return NotificationsModule;
+  if (isNotificationsLoading) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return NotificationsModule;
+  }
+  
+  isNotificationsLoading = true;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // ELITE: Use eval to prevent static analysis
+    const moduleName = 'expo-' + 'notifications';
+    NotificationsModule = eval(`require('${moduleName}')`);
+    return NotificationsModule;
+  } catch (error) {
+    return null;
+  } finally {
+    isNotificationsLoading = false;
+  }
+}
+
 export async function runPreflight(): Promise<SafetyReport>{
   const checks: SafetyReport['checks'] = [];
   try{
-    const n = await Notifications.getPermissionsAsync();
-    checks.push({ key:'notifPerm', ok: n.granted===true, note: n.granted? 'OK':'Bildirim izni yok' });
+    const Notifications = await getNotificationsAsync();
+    if (Notifications && typeof Notifications.getPermissionsAsync === 'function') {
+      const n = await Notifications.getPermissionsAsync();
+      checks.push({ key:'notifPerm', ok: n.granted===true, note: n.granted? 'OK':'Bildirim izni yok' });
+    } else {
+      checks.push({ key:'notifPerm', ok:false, note:'Modül yüklenemedi' });
+    }
   }catch{ checks.push({ key:'notifPerm', ok:false, note:'hata' }); }
 
   try{
@@ -27,6 +56,3 @@ export async function runPreflight(): Promise<SafetyReport>{
 
   return { time: Date.now(), checks };
 }
-
-
-

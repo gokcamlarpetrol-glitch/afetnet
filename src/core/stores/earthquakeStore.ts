@@ -4,6 +4,9 @@
  */
 
 import { create } from 'zustand';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('EarthquakeStore');
 
 export interface Earthquake {
   id: string;
@@ -40,7 +43,33 @@ const initialState: EarthquakeState = {
 export const useEarthquakeStore = create<EarthquakeState & EarthquakeActions>((set) => ({
   ...initialState,
   
-  setItems: (items) => set({ items, lastUpdate: Date.now(), error: null }),
+  // ELITE: Force update mechanism - always create new array reference
+  // This ensures Zustand subscribers always detect changes, even if items are identical
+  setItems: (items) => {
+    // CRITICAL: Create shallow copy to ensure new reference
+    // This guarantees Zustand's shallow equality check will detect the change
+    const newItems = Array.isArray(items) ? [...items] : items;
+    const updateTimestamp = Date.now(); // CRITICAL: Always use current timestamp for real-time updates
+    set({ 
+      items: newItems, 
+      lastUpdate: updateTimestamp, // CRITICAL: Always update timestamp when data changes - ensures UI shows real-time update time
+      error: null 
+    });
+    
+    // CRITICAL: Verify timestamp was set correctly
+    if (__DEV__) {
+      const updateTime = new Date(updateTimestamp).toLocaleTimeString('tr-TR', { 
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      // Only log if significant data change (avoid spam)
+      if (newItems.length > 0) {
+        logger.debug(`✅ Store lastUpdate set: ${updateTime} (${newItems.length} deprem)`);
+      }
+    }
+  },
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
   clear: () => set(initialState),

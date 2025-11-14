@@ -305,3 +305,12 @@ eas build --platform ios --profile production
 **İyi şanslar! 🍀**
 
 
+
+
+
+
+
+
+
+
+

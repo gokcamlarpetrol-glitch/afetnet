@@ -88,6 +88,66 @@ class LocationService {
         timestamp: location.timestamp,
       };
 
+      // CRITICAL: Save location update to Firebase in real-time
+      // ELITE: This ensures location is synced to Firebase for emergency services
+      try {
+        const { firebaseDataService } = await import('./FirebaseDataService');
+        const { getDeviceId } = await import('../../lib/device');
+        
+        if (firebaseDataService?.isInitialized) {
+          const deviceId = await getDeviceId();
+          if (deviceId) {
+            // ELITE: Save location update to Firebase (fire and forget - don't block return)
+            firebaseDataService.saveLocationUpdate(deviceId, {
+              latitude: this.currentLocation.latitude,
+              longitude: this.currentLocation.longitude,
+              accuracy: this.currentLocation.accuracy,
+              timestamp: this.currentLocation.timestamp,
+            }).catch((error) => {
+              // ELITE: Location save failures are non-critical - app continues
+              if (__DEV__) {
+                logger.debug('Location update save to Firebase failed (non-critical):', error);
+              }
+            });
+
+            // CRITICAL: Send location update to backend for rescue coordination
+            // ELITE: This ensures rescue teams can track user location during disasters
+            try {
+              const { backendEmergencyService } = await import('./BackendEmergencyService');
+              if (backendEmergencyService.initialized) {
+                await backendEmergencyService.sendEmergencyMessage({
+                  messageId: `loc_${this.currentLocation.timestamp}`,
+                  content: 'Location update',
+                  timestamp: this.currentLocation.timestamp,
+                  type: 'location',
+                  priority: 'normal',
+                  location: {
+                    latitude: this.currentLocation.latitude,
+                    longitude: this.currentLocation.longitude,
+                    accuracy: this.currentLocation.accuracy || undefined,
+                  },
+                }).catch((error) => {
+                  // ELITE: Backend save failures are non-critical - app continues
+                  if (__DEV__) {
+                    logger.debug('Location update save to backend failed (non-critical):', error);
+                  }
+                });
+              }
+            } catch (backendError) {
+              // ELITE: Backend save is optional - app continues without it
+              if (__DEV__) {
+                logger.debug('Backend location save skipped:', backendError);
+              }
+            }
+          }
+        }
+      } catch (firebaseError) {
+        // ELITE: Firebase save is optional - app continues without it
+        if (__DEV__) {
+          logger.debug('Firebase location save skipped:', firebaseError);
+        }
+      }
+
       if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;
 
@@ -118,16 +178,92 @@ class LocationService {
           timeInterval: 10000, // 10 seconds
           distanceInterval: 50, // 50 meters
         },
-        (location) => {
-          const coords: LocationCoords = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            accuracy: location.coords.accuracy,
-            timestamp: location.timestamp,
-          };
+        async (location) => {
+          try {
+            // ELITE: Validate location data before processing
+            if (!location || !location.coords) {
+              logger.warn('Invalid location data received');
+              return;
+            }
 
-          this.currentLocation = coords;
-          callback(coords);
+            const coords: LocationCoords = {
+              latitude: location.coords.latitude ?? 0,
+              longitude: location.coords.longitude ?? 0,
+              accuracy: location.coords.accuracy ?? null,
+              timestamp: location.timestamp ?? Date.now(),
+            };
+
+            // ELITE: Validate coordinates are valid numbers
+            if (isNaN(coords.latitude) || isNaN(coords.longitude)) {
+              logger.warn('Invalid coordinates received');
+              return;
+            }
+
+            this.currentLocation = coords;
+            callback(coords);
+            
+            // CRITICAL: Save location update to Firebase in real-time
+            // ELITE: This ensures location is synced to Firebase for emergency services
+            try {
+              const { firebaseDataService } = await import('./FirebaseDataService');
+              const { getDeviceId } = await import('../../lib/device');
+              
+              if (firebaseDataService?.isInitialized) {
+                const deviceId = await getDeviceId();
+                if (deviceId) {
+                  // ELITE: Save location update to Firebase (fire and forget - don't block callback)
+                  firebaseDataService.saveLocationUpdate(deviceId, {
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    accuracy: coords.accuracy,
+                    timestamp: coords.timestamp,
+                  }).catch((error) => {
+                    // ELITE: Location save failures are non-critical - app continues
+                    if (__DEV__) {
+                      logger.debug('Location update save to Firebase failed (non-critical):', error);
+                    }
+                  });
+
+                  // CRITICAL: Send location update to backend for rescue coordination
+                  // ELITE: This ensures rescue teams can track user location during disasters
+                  try {
+                    const { backendEmergencyService } = await import('./BackendEmergencyService');
+                    if (backendEmergencyService.initialized) {
+                      await backendEmergencyService.sendEmergencyMessage({
+                        messageId: `loc_${coords.timestamp}`,
+                        content: 'Location update',
+                        timestamp: coords.timestamp,
+                        type: 'location',
+                        priority: 'normal',
+                        location: {
+                          latitude: coords.latitude,
+                          longitude: coords.longitude,
+                          accuracy: coords.accuracy || undefined,
+                        },
+                      }).catch((error) => {
+                        // ELITE: Backend save failures are non-critical - app continues
+                        if (__DEV__) {
+                          logger.debug('Location update save to backend failed (non-critical):', error);
+                        }
+                      });
+                    }
+                  } catch (backendError) {
+                    // ELITE: Backend save is optional - app continues without it
+                    if (__DEV__) {
+                      logger.debug('Backend location save skipped:', backendError);
+                    }
+                  }
+                }
+              }
+            } catch (firebaseError) {
+              // ELITE: Firebase save is optional - app continues without it
+              if (__DEV__) {
+                logger.debug('Firebase location save skipped:', firebaseError);
+              }
+            }
+          } catch (error) {
+            logger.error('Error processing location update:', error);
+          }
         }
       );
 

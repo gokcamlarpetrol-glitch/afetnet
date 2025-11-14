@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEarthquakes } from '../../../hooks/useEarthquakes';
 import * as haptics from '../../../utils/haptics';
 import { calculateDistance } from '../../../utils/locationUtils';
+import { formatToTurkishTimeOnly, formatToTurkishDateTime, getTimeDifferenceTurkish } from '../../../utils/timeUtils';
 
 interface Props {
   onViewAll: () => void;
@@ -20,10 +21,11 @@ const ISTANBUL_LAT = 41.0082;
 const ISTANBUL_LON = 28.9784;
 const NEARBY_RADIUS_KM = 500; // 500km radius for "nearby"
 
+// ELITE: Use logger instead of console.log
+const logger = require('../../../utils/logger').createLogger('EarthquakeMonitorCard');
 const logDebug = (...args: any[]) => {
   if (__DEV__) {
-    // eslint-disable-next-line no-console
-    console.log(...args);
+    logger.debug(...args);
   }
 };
 
@@ -38,7 +40,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
         ? {
             location: sorted[0].location,
             magnitude: sorted[0].magnitude,
-            time: new Date(sorted[0].time).toLocaleString('tr-TR'),
+            time: formatToTurkishDateTime(sorted[0].time),
           }
         : null,
     });
@@ -79,26 +81,14 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
 
   const formatTimestamp = (timestamp: number): string => {
     const diffMs = Date.now() - timestamp;
-    const formatterShort = new Intl.DateTimeFormat('tr-TR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Europe/Istanbul',
-      hour12: false,
-    });
-
-    if (diffMs > 48 * 60 * 60 * 1000) {
-      const formatterLong = new Intl.DateTimeFormat('tr-TR', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Europe/Istanbul',
-        hour12: false,
-      });
-      return formatterLong.format(new Date(timestamp));
+    
+    // Son 48 saat içindeyse sadece saat göster
+    if (diffMs <= 48 * 60 * 60 * 1000) {
+      return formatToTurkishTimeOnly(timestamp);
     }
-
-    return formatterShort.format(new Date(timestamp));
+    
+    // Daha eskiyse tam tarih göster
+    return formatToTurkishDateTime(timestamp);
   };
 
   const getDistance = (eq: any): string => {
@@ -171,10 +161,10 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                       if (navigation && typeof navigation.navigate === 'function') {
                         navigation.navigate('EarthquakeDetail', { earthquake: latestEarthquake });
                       } else {
-                        console.warn('Navigation not available for earthquake detail');
+                        logger.warn('Navigation not available for earthquake detail');
                       }
                     } catch (error) {
-                      console.error('Failed to navigate to earthquake detail:', error);
+                      logger.error('Failed to navigate to earthquake detail:', error);
                     }
                   }}
                 >
@@ -219,10 +209,10 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
                           if (navigation && typeof navigation.navigate === 'function') {
                             navigation.navigate('EarthquakeDetail', { earthquake: eq });
                           } else {
-                            console.warn('Navigation not available for earthquake detail');
+                            logger.warn('Navigation not available for earthquake detail');
                           }
                         } catch (error) {
-                          console.error('Failed to navigate to earthquake detail:', error);
+                          logger.error('Failed to navigate to earthquake detail:', error);
                         }
                       }}
                     >
@@ -273,7 +263,7 @@ export default function EarthquakeMonitorCard({ onViewAll, navigation }: Props) 
               try {
                 onViewAll();
               } catch (error) {
-                console.error('Failed to navigate to all earthquakes:', error);
+                logger.error('Failed to navigate to all earthquakes:', error);
               }
             }}
           >

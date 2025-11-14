@@ -51,7 +51,9 @@ export default function NewsCard() {
       }
     }
     if (mutated) {
-      void persistNotified();
+      persistNotified().catch((error) => {
+        logger.warn('Failed to persist notified news:', error);
+      });
     }
   };
 
@@ -87,7 +89,9 @@ export default function NewsCard() {
       }
     }
     if (mutated) {
-      void persistNotified();
+      persistNotified().catch((error) => {
+        logger.warn('Failed to persist notified news:', error);
+      });
     }
   };
 
@@ -121,6 +125,14 @@ export default function NewsCard() {
     try {
       if (!background) {
         useNewsStore.getState().setLoading(true);
+        useNewsStore.getState().setError(null);
+      }
+      
+      // Ensure NewsAggregatorService is initialized
+      try {
+        await newsAggregatorService.initialize();
+      } catch (initError) {
+        logger.debug('NewsAggregatorService initialization:', initError);
       }
       
       // CRITICAL: Fetch news with timeout (30 seconds)
@@ -167,12 +179,19 @@ export default function NewsCard() {
           logger.error('Notification initialization failed:', error);
         });
 
+        // CRITICAL: Process notifications with shared summary optimization
+        // All users will receive the same shared summary (cost optimization)
+        // COST OPTIMIZATION: One summary per article, shared across ALL users
+        // Token cost: 1 API call per article (not per user)
         for (const article of notificationsToSend) {
           try {
-            const summary = await newsAggregatorService
-              .summarizeArticle(article)
-              .then((text) => text.replace(/\s+/g, ' ').trim());
+            // CRITICAL: Use getSummaryForNotification which uses shared cache
+            // This ensures ALL users get the same summary with ZERO additional token cost
+            // Flow: in-memory cache -> local cache -> cloud cache -> generate (if needed, shared)
+            // If cloud cache exists, it's used for ALL users without any API call
+            const summary = await newsAggregatorService.getSummaryForNotification(article);
 
+            // CRITICAL: Send professional notification with shared summary
             await notificationService.showNewsNotification({
               title: article.title,
               summary,
@@ -180,6 +199,10 @@ export default function NewsCard() {
               url: article.url && article.url !== '#' ? article.url : undefined,
               articleId: article.id,
             });
+            
+            if (__DEV__) {
+              logger.info(`✅ Professional news notification sent with shared summary (articleId: ${article.id}) - zero additional token cost for this user`);
+            }
           } catch (error) {
             logger.error('Failed to send news notification:', error, { articleId: article.id });
           }
@@ -188,18 +211,32 @@ export default function NewsCard() {
         markArticlesAsNotified(notificationsToSend);
       }
 
-      useNewsStore.getState().setArticles(allNews.slice(0, 5)); // En son 5 haber
+      // En az 1 haber varsa göster, yoksa fallback göster
+      if (allNews.length > 0) {
+        useNewsStore.getState().setArticles(allNews.slice(0, 5)); // En son 5 haber
+        useNewsStore.getState().setError(null);
+      } else {
+        // Fallback haber göster
+        const fallback = newsAggregatorService.getFallbackArticles();
+        useNewsStore.getState().setArticles(fallback);
+        useNewsStore.getState().setError(null);
+        logger.info('No news found, showing fallback');
+      }
     } catch (error: any) {
       logger.error('Failed to load news:', error);
       
       // CRITICAL: Try to use cached articles if available
       const currentArticles = useNewsStore.getState().articles;
       if (currentArticles.length === 0) {
-        // Only show error if we have no cached articles
-        useNewsStore.getState().setError('Haberler yuklenemedi');
+        // Show fallback articles instead of error
+        const fallback = newsAggregatorService.getFallbackArticles();
+        useNewsStore.getState().setArticles(fallback);
+        useNewsStore.getState().setError(null);
+        logger.info('Using fallback articles due to fetch failure');
       } else {
         // Keep showing cached articles, just log the error
         logger.warn('Using cached news articles due to fetch failure');
+        useNewsStore.getState().setError(null);
       }
     } finally {
       if (!background) {
@@ -265,47 +302,138 @@ export default function NewsCard() {
         </View>
 
         {/* News List */}
-        {loading ? (
+        {loading && articles.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Haberler yukleniyor...</Text>
+            <Text style={styles.loadingText}>Haberler yükleniyor...</Text>
           </View>
         ) : articles.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Haber bulunamadi</Text>
+            <Ionicons name="newspaper-outline" size={32} color={colors.text.tertiary} />
+            <Text style={styles.emptyText}>Henüz haber yok</Text>
+            <Text style={styles.emptySubtext}>Yenile butonuna basarak haberleri yükleyebilirsiniz</Text>
           </View>
         ) : (
           <ScrollView 
             horizontal 
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.newsScroll}
+            nestedScrollEnabled={true}
           >
             {articles.map((article, index) => (
-              <TouchableOpacity
+              <NewsItemCard
                 key={`${article.id}-${index}`}
-                style={styles.newsItem}
+                article={article}
                 onPress={() => handleArticlePress(article)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.newsContent}>
-                  {article.magnitude && (
-                    <View style={[styles.magnitudeBadge, { backgroundColor: colors.emergency.critical }]}>
-                      <Text style={styles.magnitudeText}>{article.magnitude}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.newsTitle} numberOfLines={2}>
-                    {article.title}
-                  </Text>
-                  <View style={styles.newsFooter}>
-                    <Text style={styles.newsSource}>{article.source}</Text>
-                    <Text style={styles.newsTime}>{getTimeAgo(article.publishedAt)}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
+              />
             ))}
           </ScrollView>
         )}
       </LinearGradient>
     </Animated.View>
+  );
+}
+
+// CRITICAL: News Item Card Component with AI Summary
+function NewsItemCard({ article, onPress }: { article: NewsArticle; onPress: () => void }) {
+  const [aiSummary, setAiSummary] = React.useState<string>('');
+  const [summaryLoading, setSummaryLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    // Load AI summary for this article
+    const loadSummary = async () => {
+      try {
+        setSummaryLoading(true);
+        // CRITICAL: Use getSummaryForNotification which uses shared cache (cost optimization)
+        const summary = await newsAggregatorService.getSummaryForNotification(article);
+        if (summary && summary.trim().length > 0) {
+          // Clean and truncate summary for card display
+          const cleaned = summary.replace(/<[^>]*>/g, '').trim();
+          const maxLength = 120; // Short summary for card
+          const truncated = cleaned.length > maxLength 
+            ? cleaned.substring(0, maxLength).trim() + '...'
+            : cleaned;
+          setAiSummary(truncated);
+        } else {
+          // Fallback to article summary or title
+          const fallback = article.summary || article.title || '';
+          const cleaned = fallback.replace(/<[^>]*>/g, '').trim();
+          const maxLength = 120;
+          const truncated = cleaned.length > maxLength 
+            ? cleaned.substring(0, maxLength).trim() + '...'
+            : cleaned;
+          setAiSummary(truncated);
+        }
+      } catch (error) {
+        logger.debug('Failed to load AI summary for card:', error);
+        // Fallback
+        const fallback = article.summary || article.title || '';
+        const cleaned = fallback.replace(/<[^>]*>/g, '').trim();
+        const maxLength = 120;
+        const truncated = cleaned.length > maxLength 
+          ? cleaned.substring(0, maxLength).trim() + '...'
+          : cleaned;
+        setAiSummary(truncated);
+      } finally {
+        setSummaryLoading(false);
+      }
+    };
+
+    loadSummary();
+  }, [article.id]);
+
+  const getTimeAgo = (timestamp: number): string => {
+    const diffMs = Date.now() - timestamp;
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    
+    if (diffMinutes < 1) return 'Az önce';
+    if (diffMinutes < 60) return `${diffMinutes} dk önce`;
+    if (diffHours < 24) return `${diffHours} saat önce`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} gün önce`;
+  };
+
+  return (
+    <TouchableOpacity
+      style={styles.newsItem}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={styles.newsContent}>
+        {article.magnitude && (
+          <View style={[styles.magnitudeBadge, { backgroundColor: colors.emergency.critical }]}>
+            <Text style={styles.magnitudeText}>{article.magnitude.toFixed(1)}</Text>
+          </View>
+        )}
+        <Text style={styles.newsTitle} numberOfLines={2}>
+          {article.title}
+        </Text>
+        
+        {/* AI Summary */}
+        {summaryLoading ? (
+          <View style={styles.summaryLoading}>
+            <Text style={styles.summaryLoadingText}>AI özeti hazırlanıyor...</Text>
+          </View>
+        ) : aiSummary ? (
+          <View style={styles.summaryContainer}>
+            <View style={styles.aiBadge}>
+              <Ionicons name="sparkles" size={12} color={colors.accent.primary} />
+              <Text style={styles.aiBadgeText}>AI Özet</Text>
+            </View>
+            <Text style={styles.newsSummary} numberOfLines={3}>
+              {aiSummary}
+            </Text>
+          </View>
+        ) : null}
+        
+        <View style={styles.newsFooter}>
+          <Text style={styles.newsSource} numberOfLines={1}>
+            {article.source}
+          </Text>
+          <Text style={styles.newsTime}>{getTimeAgo(article.publishedAt)}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -354,10 +482,19 @@ const styles = StyleSheet.create({
   emptyContainer: {
     paddingVertical: spacing[6],
     alignItems: 'center',
+    gap: spacing[2],
   },
   emptyText: {
     fontSize: 14,
+    fontWeight: '600',
     color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    marginTop: spacing[1],
   },
   newsScroll: {
     gap: spacing[4],
@@ -402,6 +539,38 @@ const styles = StyleSheet.create({
   },
   newsTime: {
     fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  summaryContainer: {
+    marginTop: spacing[2],
+    marginBottom: spacing[2],
+  },
+  aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    marginBottom: spacing[1],
+  },
+  aiBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    textTransform: 'uppercase',
+  },
+  newsSummary: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.text.secondary,
+    lineHeight: 16,
+  },
+  summaryLoading: {
+    marginTop: spacing[2],
+    marginBottom: spacing[2],
+  },
+  summaryLoadingText: {
+    fontSize: 11,
+    fontStyle: 'italic',
     color: colors.text.tertiary,
   },
 });

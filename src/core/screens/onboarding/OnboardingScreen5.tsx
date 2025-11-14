@@ -22,7 +22,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
+// ELITE: Lazy import expo-notifications to prevent NativeEventEmitter errors
+// CRITICAL: Do NOT import at top level - use async loader instead
+let NotificationsModule: any = null;
+async function getNotificationsAsync(): Promise<any> {
+  if (NotificationsModule) return NotificationsModule;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // ELITE: Use eval to prevent static analysis
+    const moduleName = 'expo-' + 'notifications';
+    NotificationsModule = eval(`require('${moduleName}')`);
+    return NotificationsModule;
+  } catch (error) {
+    return null;
+  }
+}
 import { Camera } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { PermissionsAndroid } from 'react-native';
@@ -157,43 +171,47 @@ export default function OnboardingScreen5({ navigation }: OnboardingScreen5Props
             }
           : {};
         
-        const { status, ios, android } = await Notifications.requestPermissionsAsync(permissionRequest);
-        
-        // ELITE: Check comprehensive permission status
-        if (Platform.OS === 'ios') {
-          // iOS: Check all notification types
-          statuses.notifications = status === 'granted' && 
-            ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED &&
+        // ELITE: Use async loader to get notifications module
+        const Notifications = await getNotificationsAsync();
+        if (!Notifications) {
+          logger.warn('Notifications module not available');
+          statuses.notifications = false;
+        } else {
+          const { status, ios, android } = await Notifications.requestPermissionsAsync(permissionRequest);
+          
+          // ELITE: Check comprehensive permission status
+          if (Platform.OS === 'ios') {
+            // iOS: Check all notification types
+            statuses.notifications = status === 'granted' && 
+              ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED &&
             (ios?.allowsAlert ?? false) &&
             (ios?.allowsBadge ?? false) &&
             (ios?.allowsSound ?? false);
           
-          if (statuses.notifications) {
-            logger.info('✅ [Onboarding] iOS notification permissions granted (alert, badge, sound)');
+            if (statuses.notifications) {
+              logger.info('✅ [Onboarding] iOS notification permissions granted (alert, badge, sound)');
+            } else {
+              logger.warn('⚠️ [Onboarding] iOS notification permissions partially granted:', {
+                status,
+                iosStatus: ios?.status,
+                allowsAlert: ios?.allowsAlert,
+                allowsBadge: ios?.allowsBadge,
+                allowsSound: ios?.allowsSound,
+              });
+              // Still mark as granted if basic permission is granted
+              statuses.notifications = status === 'granted';
+            }
           } else {
-            logger.warn('⚠️ [Onboarding] iOS notification permissions partially granted:', {
-              status,
-              iosStatus: ios?.status,
-              allowsAlert: ios?.allowsAlert,
-              allowsBadge: ios?.allowsBadge,
-              allowsSound: ios?.allowsSound,
-            });
-            // Still mark as granted if basic permission is granted
+            // Android: Basic permission check
             statuses.notifications = status === 'granted';
-          }
-        } else {
-          // Android: Basic permission check
-          statuses.notifications = status === 'granted';
-          
-          if (statuses.notifications) {
-            logger.info('✅ [Onboarding] Android notification permission granted');
             
-            // ELITE: Create notification channels immediately after permission granted
-            // This ensures all notification types are available
-            try {
-              const NotificationsModule = await import('expo-notifications');
-              const Notifications = NotificationsModule.default;
+            if (statuses.notifications) {
+              logger.info('✅ [Onboarding] Android notification permission granted');
               
+              // ELITE: Create notification channels immediately after permission granted
+              // This ensures all notification types are available
+              // CRITICAL: Notifications already loaded above, use it
+              try {
               // Create all notification channels
               await Notifications.setNotificationChannelAsync('earthquake', {
                 name: 'Deprem Bildirimleri',
@@ -257,13 +275,14 @@ export default function OnboardingScreen5({ navigation }: OnboardingScreen5Props
                 showBadge: true,
               });
 
-              logger.info('✅ [Onboarding] All notification channels created successfully');
-            } catch (channelError) {
-              logger.error('❌ [Onboarding] Failed to create notification channels:', channelError);
-              // Don't fail permission request if channels fail
+                logger.info('✅ [Onboarding] All notification channels created successfully');
+              } catch (channelError) {
+                logger.error('❌ [Onboarding] Failed to create notification channels:', channelError);
+                // Don't fail permission request if channels fail
+              }
+            } else {
+              logger.warn('❌ [Onboarding] Android notification permission denied');
             }
-          } else {
-            logger.warn('❌ [Onboarding] Android notification permission denied');
           }
         }
       } catch (error) {

@@ -31,18 +31,30 @@ import * as Clipboard from 'expo-clipboard';
 
 const logger = createLogger('PaywallScreen');
 
-// Elite: Safe WebBrowser import with fallback
-// CRITICAL: Silent fallback - don't log warnings in production
-let WebBrowser: any = null;
-try {
-  WebBrowser = require('expo-web-browser');
-} catch (error) {
-  // Silent fallback - Linking will be used instead
-  // Only log in development to avoid console spam
-  if (__DEV__) {
-    logger.debug('expo-web-browser not available, using Linking fallback');
+// ELITE: Lazy load WebBrowser module to avoid native bridge issues
+// CRITICAL: Load only when needed, not at module level
+const getWebBrowserModule = async (): Promise<any> => {
+  try {
+    // Wait a bit for native bridge to be ready
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const expoPart = 'expo';
+    const webBrowserPart = 'web-browser';
+    const moduleName = expoPart + '-' + webBrowserPart;
+    const module = require(moduleName);
+    
+    if (__DEV__) {
+      logger.debug('WebBrowser module loaded successfully');
+    }
+    
+    return module?.default || module || null;
+  } catch (error: any) {
+    if (__DEV__) {
+      logger.warn('expo-web-browser not available:', error?.message || error);
+    }
+    return null;
   }
-}
+};
 
 /**
  * Elite: Open URL with in-app browser (if available) or fallback to system browser
@@ -51,7 +63,9 @@ try {
 const openURL = async (url: string, title: string) => {
   try {
     // Try in-app browser first (preferred for Apple review)
-    if (WebBrowser && WebBrowser.openBrowserAsync) {
+    // Lazy load WebBrowser module
+    const WebBrowser = await getWebBrowserModule();
+    if (WebBrowser && typeof WebBrowser.openBrowserAsync === 'function') {
       await WebBrowser.openBrowserAsync(url, {
         presentationStyle: WebBrowser.WebBrowserPresentationStyle?.FORM_SHEET || 'formSheet',
         controlsColor: '#3b82f6',

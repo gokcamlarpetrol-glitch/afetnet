@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system';
+// ELITE: Use legacy API to avoid deprecation warnings (migration to new API planned)
+import * as FileSystem from 'expo-file-system/legacy';
 import { cellFor } from '../geo/grid';
 import { HazardZone } from './types';
 // import { haversine } from '../geo/haversine'; // Not used

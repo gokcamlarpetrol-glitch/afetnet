@@ -351,10 +351,12 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
 
     const systemPrompt = `Sen bir deprem uzmanısın. Depremleri analiz edip halka anlaşılır, sakin, bilimsel bilgi veriyorsun. AFAD ve Kandilli standartlarına uygun, Türkçe, net açıklamalar yapıyorsun. Sadece JSON formatında yanıt ver.`;
 
+    // ELITE: Cost optimization - reduced maxTokens
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 400,
+      maxTokens: 300, // Optimized: Reduced from 400 to save ~$0.00006 per call
       temperature: 0.6,
+      serviceName: 'EarthquakeAnalysisService', // ELITE: For cost tracking
     });
 
     // Parse

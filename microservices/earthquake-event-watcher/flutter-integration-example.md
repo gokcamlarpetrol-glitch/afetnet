@@ -153,3 +153,11 @@ void main() async {
 
 Update the RabbitMQ connection settings and radius in your Flutter app to match the microservice configuration.
 
+
+
+
+
+
+
+
+

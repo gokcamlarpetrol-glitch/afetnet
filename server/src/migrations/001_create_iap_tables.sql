@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    product_id VARCHAR(255) NOT NULL CHECK (product_id IN ('org.afetnetapp.premium.monthly', 'org.afetnetapp.premium.yearly', 'org.afetnetapp.premium.lifetime')),
+    product_id VARCHAR(255) NOT NULL CHECK (product_id IN ('org.afetapp.premium.monthly.v2', 'org.afetapp.premium.yearly.v2', 'org.afetapp.premium.lifetime.v2')),
     original_transaction_id VARCHAR(255) NOT NULL,
     transaction_id VARCHAR(255) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'refunded', 'revoked')),
@@ -64,9 +64,9 @@ BEGIN
             ELSE FALSE
         END as is_premium,
         CASE 
-            WHEN p.product_id = 'afetnet_premium_lifetime' THEN 'lifetime'
-            WHEN p.product_id = 'afetnet_premium_monthly1' THEN 'monthly'
-            WHEN p.product_id = 'afetnet_premium_yearly1' THEN 'yearly'
+            WHEN p.product_id = 'org.afetapp.premium.lifetime.v2' THEN 'lifetime'
+            WHEN p.product_id = 'org.afetapp.premium.monthly.v2' THEN 'monthly'
+            WHEN p.product_id = 'org.afetapp.premium.yearly.v2' THEN 'yearly'
         END as source,
         CASE 
             WHEN p.is_lifetime THEN NULL

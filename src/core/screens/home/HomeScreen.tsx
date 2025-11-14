@@ -25,6 +25,8 @@ import { Alert, Linking } from 'react-native';
 import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { createLogger } from '../../utils/logger';
+import { useMeshStore } from '../../stores/meshStore';
+import { bleMeshService } from '../../services/BLEMeshService';
 
 const logger = createLogger('HomeScreen');
 
@@ -34,6 +36,10 @@ export default function HomeScreen({ navigation }: any) {
   const [showSOSModal, setShowSOSModal] = useState(false);
   const [aiFeaturesEnabled] = useState(true); // AI Asistan her zaman aktif
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
+  
+  // UNIQUE FEATURE: BLE Mesh status
+  const meshPeers = useMeshStore((state) => state.peers);
+  const isMeshRunning = bleMeshService.getIsRunning();
 
   // Elite-level entrance animations with staggered delays
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -51,7 +57,9 @@ export default function HomeScreen({ navigation }: any) {
 
   useEffect(() => {
     // Initial load
-    refresh();
+    refresh().catch((error) => {
+      logger.error('Failed to refresh earthquakes on mount:', error);
+    });
     
     // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
     // Elite entrance animation with staggered cards
@@ -85,8 +93,27 @@ export default function HomeScreen({ navigation }: any) {
       ),
     ]).start();
     
+    // ELITE: Proper cleanup to prevent memory leaks
     return () => {
-      // Cleanup
+      // Stop all animations
+      fadeAnim.stopAnimation();
+      slideAnim.stopAnimation();
+      scrollY.stopAnimation();
+      
+      // Stop all card animations
+      cardAnimations.forEach(card => {
+        card.opacity.stopAnimation();
+        card.translateY.stopAnimation();
+      });
+      
+      // Reset animation values
+      fadeAnim.setValue(0);
+      slideAnim.setValue(30);
+      scrollY.setValue(0);
+      cardAnimations.forEach(card => {
+        card.opacity.setValue(0);
+        card.translateY.setValue(20);
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -94,8 +121,13 @@ export default function HomeScreen({ navigation }: any) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     haptics.impactLight();
-    await refresh();
-    setRefreshing(false);
+    try {
+      await refresh();
+    } catch (error) {
+      logger.error('Failed to refresh on pull:', error);
+    } finally {
+      setRefreshing(false);
+    }
   }, [refresh]);
 
   const handleViewAllEarthquakes = useCallback(() => {
@@ -298,6 +330,35 @@ export default function HomeScreen({ navigation }: any) {
         >
           <HomeHeader />
           
+          {/* UNIQUE FEATURE: BLE Mesh Offline Status Banner */}
+          {isMeshRunning && (
+            <Animated.View
+              style={{
+                opacity: cardAnimations[0].opacity,
+                transform: [{ translateY: cardAnimations[0].translateY }],
+              }}
+            >
+              <View style={styles.meshBanner}>
+                <View style={styles.meshBannerContent}>
+                  <Ionicons name="wifi-off" size={20} color="#10b981" />
+                  <View style={styles.meshBannerText}>
+                    <Text style={styles.meshBannerTitle}>
+                      Şebekesiz Mesajlaşma Aktif
+                    </Text>
+                    <Text style={styles.meshBannerSubtitle}>
+                      {meshPeers.length > 0 
+                        ? `${meshPeers.length} kişi yakınınızda` 
+                        : 'İnternet olmadan çalışıyor'}
+                    </Text>
+                  </View>
+                  <View style={styles.meshBadge}>
+                    <Text style={styles.meshBadgeText}>BENZERSIZ</Text>
+                  </View>
+                </View>
+              </View>
+            </Animated.View>
+          )}
+          
           {/* Elite staggered entrance animations - Cards appear sequentially with smooth fade-in */}
           {newsEnabled && (
             <Animated.View
@@ -382,6 +443,47 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
     // Elite spacing: Better visual hierarchy
     gap: 0, // Cards handle their own spacing
+  },
+  // UNIQUE FEATURE: BLE Mesh Banner Styles
+  meshBanner: {
+    marginHorizontal: spacing[4],
+    marginVertical: spacing[2],
+    backgroundColor: colors.background.elevated,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    overflow: 'hidden',
+  },
+  meshBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  meshBannerText: {
+    flex: 1,
+  },
+  meshBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  meshBannerSubtitle: {
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  meshBadge: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  meshBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.5,
   },
   // Voice command button removed - Apple review compliance
 });

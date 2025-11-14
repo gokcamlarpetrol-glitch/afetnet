@@ -22,7 +22,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMessageStore, Message } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
-import { useMeshStore } from '../../stores/meshStore';
 import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
 import { colors, typography, spacing } from '../../theme';
 import * as haptics from '../../utils/haptics';
@@ -66,6 +65,23 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const [inputText, setInputText] = useState('');
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // ELITE: Load messages callback (memoized to prevent re-renders)
+  const loadMessages = useCallback(() => {
+    try {
+      const conversationMessages = useMessageStore.getState().getConversationMessages(userId);
+      // ELITE: Sort messages by timestamp (oldest first for chat display)
+      const sortedMessages = [...conversationMessages].sort((a, b) => a.timestamp - b.timestamp);
+      setMessages(sortedMessages);
+      // Mark as read (async but don't await - fire and forget)
+      useMessageStore.getState().markConversationRead(userId).catch((error) => {
+        logger.error('Failed to mark conversation as read:', error);
+      });
+    } catch (error) {
+      logger.error('Error loading messages:', error);
+    }
+  }, [userId]);
 
   useEffect(() => {
     const getMyId = async () => {
@@ -79,13 +95,32 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     };
     getMyId();
 
-    // Load conversation messages
-    const loadMessages = () => {
-      const conversationMessages = useMessageStore.getState().getConversationMessages(userId);
-      setMessages(conversationMessages);
-      // Mark as read
-      useMessageStore.getState().markConversationRead(userId);
+    // ELITE: Initialize message store if not already initialized
+    const initStore = async () => {
+      try {
+        await useMessageStore.getState().initialize();
+      } catch (error) {
+        logger.error('Failed to initialize message store:', error);
+      }
     };
+    initStore();
+
+    // CRITICAL: Ensure BLE Mesh Service is started for offline messaging
+    // ELITE: This ensures messages can be sent/received without internet
+    const ensureMeshRunning = async () => {
+      try {
+        if (!bleMeshService.getIsRunning()) {
+          await bleMeshService.start();
+          if (__DEV__) {
+            logger.info('BLE Mesh service started from ConversationScreen for offline messaging');
+          }
+        }
+      } catch (error) {
+        logger.warn('BLE Mesh start failed (will retry on send):', error);
+        // Continue - service will be started when sending message
+      }
+    };
+    ensureMeshRunning();
 
     loadMessages();
 
@@ -119,7 +154,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
               const sanitizedContent = sanitizeString(content, 5000);
               if (sanitizedContent && sanitizedContent.length > 0) {
                 const newMessage: Message = {
-                  id: `msg-${Date.now()}-${Math.random()}`,
+                  id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                   from: userId,
                   to: 'me',
                   content: sanitizedContent,
@@ -127,9 +162,28 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                   delivered: true,
                   read: false,
                 };
-                useMessageStore.getState().addMessage(newMessage);
-                loadMessages();
-                haptics.notificationSuccess();
+                // ELITE: Await async addMessage to ensure proper state update
+                useMessageStore.getState().addMessage(newMessage).then(async () => {
+                  loadMessages();
+                  haptics.notificationSuccess();
+                  
+                  // ELITE: Send instant push notification (CRITICAL - hayati önem)
+                  try {
+                    const { notificationService } = await import('../../services/NotificationService');
+                    await notificationService.showMessageNotification(
+                      `Cihaz ${userId.slice(0, 8)}...`,
+                      sanitizedContent,
+                      newMessage.id,
+                      userId,
+                      'normal'
+                    );
+                  } catch (notifError) {
+                    logger.error('Failed to send message notification:', notifError);
+                    // Continue - notification failure shouldn't block message delivery
+                  }
+                }).catch((error) => {
+                  logger.error('Failed to add message:', error);
+                });
               }
             }
           }
@@ -163,7 +217,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                 const newMessage: Message = {
                   id: typeof messageData.id === 'string' && messageData.id.length <= 100
                     ? messageData.id
-                    : `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    : `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                   from: userId,
                   to: 'me',
                   content: messageContent,
@@ -171,9 +225,28 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                   delivered: true,
                   read: false,
                 };
-                useMessageStore.getState().addMessage(newMessage);
-                loadMessages();
-                haptics.notificationSuccess();
+                // ELITE: Await async addMessage to ensure proper state update
+                useMessageStore.getState().addMessage(newMessage).then(async () => {
+                  loadMessages();
+                  haptics.notificationSuccess();
+                  
+                  // ELITE: Send instant push notification (CRITICAL - hayati önem)
+                  try {
+                    const { notificationService } = await import('../../services/NotificationService');
+                    await notificationService.showMessageNotification(
+                      `Cihaz ${userId.slice(0, 8)}...`,
+                      messageContent,
+                      newMessage.id,
+                      userId,
+                      'normal'
+                    );
+                  } catch (notifError) {
+                    logger.error('Failed to send message notification:', notifError);
+                    // Continue - notification failure shouldn't block message delivery
+                  }
+                }).catch((error) => {
+                  logger.error('Failed to add message:', error);
+                });
               }
             }
           }
@@ -183,14 +256,23 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       }
     });
 
-    // Refresh messages periodically
-    const interval = setInterval(loadMessages, 1000);
+    // ELITE: Subscribe to message store changes instead of polling
+    // Zustand subscribe takes a single callback that receives the entire state
+    const unsubscribeStore = useMessageStore.subscribe(() => {
+      // Reload messages when store updates
+      loadMessages();
+    });
 
     return () => {
       unsubscribe();
-      clearInterval(interval);
+      unsubscribeStore();
+      // ELITE: Cleanup all timeouts on unmount
+      timeoutRefs.current.forEach((timeout) => {
+        clearTimeout(timeout);
+      });
+      timeoutRefs.current.clear();
     };
-  }, [userId]);
+  }, [userId, loadMessages]);
 
   const sendMessage = useCallback(async () => {
     try {
@@ -249,9 +331,9 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         read: false,
       };
 
-      // ELITE: Add to store with error handling
+      // ELITE: Add to store with error handling (await async operation)
       try {
-        useMessageStore.getState().addMessage(newMessage);
+        await useMessageStore.getState().addMessage(newMessage);
       } catch (error) {
         logger.error('Error adding message to store:', error);
         Alert.alert('Hata', 'Mesaj kaydedilemedi.');
@@ -263,10 +345,24 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       
       // ELITE: Send via BLE mesh with comprehensive error handling
       try {
+        // CRITICAL: Ensure BLE Mesh Service is running before sending
+        // ELITE: This ensures offline messaging works without internet
+        if (!bleMeshService.getIsRunning()) {
+          try {
+            await bleMeshService.start();
+            if (__DEV__) {
+              logger.info('BLE Mesh service started before sending message');
+            }
+          } catch (startError) {
+            logger.warn('BLE Mesh start failed before sending (will queue message):', startError);
+            // Continue - message will be queued and sent when service starts
+          }
+        }
+
         const messagePayload = JSON.stringify({
           type: 'chat',
           from: myDeviceId,
-          to: userId,
+          to: userId, // CRITICAL: userId is actually deviceId for offline messaging
           content: messageContent,
           timestamp,
         });
@@ -278,35 +374,76 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           return;
         }
 
-        // ELITE: Send via mesh store with timeout
-        const sendPromise = useMeshStore.getState().sendMessage(messagePayload, {
-          type: 'text',
-          to: userId,
-          priority: 'normal',
-          ackRequired: false,
+        // CRITICAL: Send via BLE Mesh Service directly (actual BLE transmission)
+        // This ensures message is actually sent over BLE, not just stored
+        // ELITE: userId is deviceId for offline messaging - BLE Mesh uses deviceId
+        const sendPromise = bleMeshService.sendMessage(messagePayload, userId);
+        
+        // CRITICAL: Also add to mesh store for tracking and statistics
+        // ELITE: Only broadcast if message contains critical keywords or is urgent
+        // This optimizes battery usage - not every message needs broadcast
+        const isUrgent = messageContent.toLowerCase().includes('acil') || 
+                        messageContent.toLowerCase().includes('sos') ||
+                        messageContent.toLowerCase().includes('yardım') ||
+                        messageContent.toLowerCase().includes('kurtar');
+        
+        const broadcastPromise = isUrgent 
+          ? bleMeshService.broadcastMessage({
+              content: messagePayload,
+              type: 'text',
+              to: userId,
+              priority: 'high', // Elevated priority for urgent messages
+              ackRequired: false,
+              ttl: 3600,
+              sequence: 0,
+              attempts: 0,
+            })
+          : Promise.resolve(); // Skip broadcast for normal messages
+
+        // CRITICAL: Create timeout promise with cleanup (20 seconds for offline reliability)
+        let timeoutId: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            timeoutId = null;
+            reject(new Error('Send timeout'));
+          }, 20000); // CRITICAL: 20 seconds for offline mesh networks
         });
         
-        // ELITE: Also broadcast for mesh routing
-        const broadcastPromise = useMeshStore.getState().broadcastMessage(messagePayload, 'text');
-
+        // CRITICAL: Wait for all operations with timeout protection
         await Promise.race([
-          Promise.all([sendPromise, broadcastPromise]),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Send timeout')), 10000)
-          ),
+          Promise.all([
+            sendPromise, 
+            broadcastPromise,
+          ]).finally(() => {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+          }),
+          timeoutPromise.finally(() => {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+          }),
         ]);
 
-        // ELITE: Mark as delivered with delay
-        setTimeout(() => {
+        // ELITE: Mark as delivered with delay (store timeout for cleanup)
+        const deliveredTimeoutId = setTimeout(() => {
           try {
             useMessageStore.getState().markAsDelivered(newMessage.id);
             setMessages(prev => prev.map(m => 
               m.id === newMessage.id ? { ...m, delivered: true } : m
             ));
+            timeoutRefs.current.delete(newMessage.id);
           } catch (error) {
             logger.error('Error marking message as delivered:', error);
+            timeoutRefs.current.delete(newMessage.id);
           }
         }, 1000);
+        
+        // ELITE: Store timeout for cleanup
+        timeoutRefs.current.set(newMessage.id, deliveredTimeoutId);
 
         haptics.notificationSuccess();
         logger.info('Message sent successfully:', messageId);
@@ -314,16 +451,30 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         logger.error('Failed to send message:', error);
         haptics.notificationError();
         Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
+        // ELITE: Cleanup timeout if exists
+        const deliveredTimeout = timeoutRefs.current.get(newMessage.id);
+        if (deliveredTimeout) {
+          clearTimeout(deliveredTimeout);
+          timeoutRefs.current.delete(newMessage.id);
+        }
+        // ELITE: Remove failed message from UI
+        setMessages(prev => prev.filter(msg => msg.id !== newMessage.id));
       }
 
-      // ELITE: Scroll to bottom with error handling
-      setTimeout(() => {
+      // ELITE: Scroll to bottom with error handling and cleanup
+      const scrollKey = `scroll-${Date.now()}`;
+      const scrollTimeoutId = setTimeout(() => {
         try {
           flatListRef.current?.scrollToEnd({ animated: true });
         } catch (error) {
           logger.warn('Error scrolling to end:', error);
         }
+        // CRITICAL: Cleanup timeout after scroll completes
+        timeoutRefs.current.delete(scrollKey);
       }, 100);
+      
+      // ELITE: Store timeout for cleanup
+      timeoutRefs.current.set(scrollKey, scrollTimeoutId);
     } catch (error) {
       logger.error('Error in sendMessage:', error);
       Alert.alert('Hata', 'Mesaj gönderilirken bir hata oluştu.');
@@ -423,7 +574,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
             value={inputText}
             onChangeText={setInputText}
             multiline
-            maxLength={500}
+            maxLength={5000}
           />
           <Pressable
             style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
@@ -590,4 +741,3 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
-

@@ -1,51 +1,36 @@
 /**
- * FIREBASE DATA SERVICE - Firestore Integration
+ * FIREBASE DATA SERVICE - ELITE MODULAR IMPLEMENTATION
  * Stores device IDs and family members in Firebase Firestore
- * Provides persistent cloud storage with offline sync
+ * Refactored into modular components for maintainability
+ * PRODUCTION-READY: Comprehensive error handling with graceful degradation
  */
 
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
-import { getDeviceId } from '../../lib/device';
-import { FamilyMember } from '../types/family';
 import { createLogger } from '../utils/logger';
+import { FamilyMember } from '../types/family';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
+import type {
+  MessageData,
+  ConversationData,
+  HealthProfileData,
+  ICEData,
+  LocationUpdateData,
+  StatusUpdateData,
+  EarthquakeFirebaseData,
+  FeltEarthquakeReportData,
+} from '../types/firebase';
+import { saveDeviceId as saveDeviceIdOp } from './firebase/FirebaseDeviceOperations';
+import { saveFamilyMember as saveFamilyMemberOp, loadFamilyMembers as loadFamilyMembersOp, deleteFamilyMember as deleteFamilyMemberOp, subscribeToFamilyMembers as subscribeToFamilyMembersOp } from './firebase/FirebaseFamilyOperations';
+import { saveMessage as saveMessageOp, loadMessages as loadMessagesOp, subscribeToMessages as subscribeToMessagesOp, saveConversation as saveConversationOp, loadConversations as loadConversationsOp, deleteConversation as deleteConversationOp } from './firebase/FirebaseMessageOperations';
+import { saveNewsSummary as saveNewsSummaryOp, getNewsSummary as getNewsSummaryOp, NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
+import { saveHealthProfile as saveHealthProfileOp, loadHealthProfile as loadHealthProfileOp, saveICE as saveICEOp, loadICE as loadICEOp } from './firebase/FirebaseHealthOperations';
+import { saveEarthquake as saveEarthquakeOp, saveFeltEarthquakeReport as saveFeltEarthquakeReportOp, getIntensityData as getIntensityDataOp } from './firebase/FirebaseEarthquakeOperations';
+import { saveLocationUpdate as saveLocationUpdateOp } from './firebase/FirebaseLocationOperations';
+import { saveStatusUpdate as saveStatusUpdateOp } from './firebase/FirebaseStatusOperations';
 
 const logger = createLogger('FirebaseDataService');
 
-// Import Firebase app getter function
-import getFirebaseApp from '../../lib/firebase';
-
-let firestore: any = null;
-
-function getFirestoreInstance() {
-  if (!firestore) {
-    try {
-      // Call getFirebaseApp() to get the app instance
-      const firebaseApp = getFirebaseApp();
-      if (!firebaseApp) {
-        logger.warn('Firebase app not initialized');
-        return null;
-      }
-      firestore = getFirestore(firebaseApp);
-      logger.info('Firestore instance created');
-    } catch (error) {
-      logger.error('Firestore initialization error:', error);
-    }
-  }
-  return firestore;
-}
-
-export interface NewsSummaryRecord {
-  id: string;
-  articleId: string;
-  title: string;
-  summary: string;
-  source: string;
-  url: string;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt?: string;
-  ttlMs?: number;
-}
+// Re-export NewsSummaryRecord for backward compatibility
+export type { NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
 
 class FirebaseDataService {
   private _isInitialized = false;
@@ -55,26 +40,79 @@ class FirebaseDataService {
   }
 
   async initialize() {
-    if (this._isInitialized) return;
+    if (this._isInitialized) {
+      if (__DEV__) {
+        logger.debug('FirebaseDataService already initialized');
+      }
+      return;
+    }
 
     try {
-      // Ensure Firebase app is initialized
-      const firebaseApp = getFirebaseApp();
+      // ELITE: Ensure Firebase app is initialized with async getter
+      const firebaseModule = await import('../../lib/firebase');
+      
+      // ELITE: Check for named export
+      const getFirebaseAppAsync = firebaseModule.getFirebaseAppAsync;
+      
+      if (!getFirebaseAppAsync || typeof getFirebaseAppAsync !== 'function') {
+        if (__DEV__) {
+          logger.debug('getFirebaseAppAsync is not available in firebase module - Firestore disabled');
+        }
+        return;
+      }
+      
+      // ELITE: Initialize Firebase app with timeout protection
+      const initPromise = getFirebaseAppAsync();
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 8000) // 8 second timeout
+      );
+      
+      const firebaseApp = await Promise.race([initPromise, timeoutPromise]);
+      
       if (!firebaseApp) {
-        logger.warn('Firebase app not initialized - Firestore disabled');
+        if (__DEV__) {
+          logger.debug('Firebase app not initialized - Firestore disabled (app continues with AsyncStorage)');
+        }
         return;
       }
 
-      const db = getFirestoreInstance();
+      // ELITE: Get Firestore instance with async initialization and timeout
+      const dbPromise = getFirestoreInstanceAsync();
+      const dbTimeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 5000) // 5 second timeout
+      );
+      
+      const db = await Promise.race([dbPromise, dbTimeoutPromise]);
+      
       if (!db) {
-        logger.warn('Firestore not available - using AsyncStorage fallback');
+        if (__DEV__) {
+          logger.debug('Firestore not available - using AsyncStorage fallback');
+        }
         return;
       }
 
       this._isInitialized = true;
-      logger.info('FirebaseDataService initialized successfully');
-    } catch (error) {
-      logger.error('FirebaseDataService init error:', error);
+      if (__DEV__) {
+        logger.info('✅ FirebaseDataService initialized successfully');
+      }
+    } catch (error: any) {
+      // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
+      const errorMessage = error?.message || String(error);
+      const errorType = error?.name || typeof error;
+      
+      // ELITE: Don't log bundle errors as errors - they're expected in some environments
+      if (errorMessage.includes('LoadBundleFromServerRequestError') || 
+          errorMessage.includes('Could not load bundle')) {
+        if (__DEV__) {
+          logger.debug('FirebaseDataService init skipped (bundle load error - expected in some environments)');
+        }
+      } else {
+        logger.error('FirebaseDataService init error:', {
+          error: errorMessage,
+          errorType,
+        });
+      }
+      // ELITE: Don't throw - app continues with AsyncStorage fallback
     }
   }
 
@@ -82,524 +120,243 @@ class FirebaseDataService {
    * Save device ID to Firestore
    */
   async saveDeviceId(deviceId: string): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveDeviceId');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      await setDoc(doc(db, 'devices', deviceId), {
-        deviceId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Device ID saved to Firestore: ${deviceId}`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save device ID:', error);
-      return false;
-    }
+    return saveDeviceIdOp(deviceId, this._isInitialized);
   }
 
   /**
    * Save family member to Firestore
    */
   async saveFamilyMember(userDeviceId: string, member: FamilyMember): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveFamilyMember');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const memberRef = doc(db, 'devices', userDeviceId, 'familyMembers', member.id);
-      await setDoc(memberRef, {
-        ...member,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`Family member ${member.id} saved to Firestore`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save family member:', error);
-      return false;
-    }
+    return saveFamilyMemberOp(userDeviceId, member, this._isInitialized);
   }
 
   /**
    * Load family members from Firestore
    */
   async loadFamilyMembers(userDeviceId: string): Promise<FamilyMember[]> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot load family members');
-      return [];
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return [];
-      }
-
-      const membersRef = collection(db, 'devices', userDeviceId, 'familyMembers');
-      const snapshot = await getDocs(membersRef);
-      
-      const members: FamilyMember[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        members.push(data as FamilyMember);
-      });
-
-      if (__DEV__) {
-        logger.info(`Loaded ${members.length} family members from Firestore`);
-      }
-      return members;
-    } catch (error) {
-      logger.error('Failed to load family members:', error);
-      return [];
-    }
+    return loadFamilyMembersOp(userDeviceId, this._isInitialized);
   }
 
   /**
    * Delete family member from Firestore
    */
   async deleteFamilyMember(userDeviceId: string, memberId: string): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping deleteFamilyMember');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const memberRef = doc(db, 'devices', userDeviceId, 'familyMembers', memberId);
-      await deleteDoc(memberRef);
-
-      if (__DEV__) {
-        logger.info(`Family member ${memberId} deleted from Firestore`);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to delete family member:', error);
-      return false;
-    }
+    return deleteFamilyMemberOp(userDeviceId, memberId, this._isInitialized);
   }
 
   /**
    * Subscribe to family members changes (real-time sync)
    */
-  subscribeToFamilyMembers(userDeviceId: string, callback: (members: FamilyMember[]) => void): () => void {
-    try {
-      const db = getFirestoreInstance();
-      if (!db) return () => {};
-
-      const membersRef = collection(db, 'devices', userDeviceId, 'familyMembers');
-      const unsubscribe = onSnapshot(membersRef, (snapshot) => {
-        const members: FamilyMember[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          members.push(data as FamilyMember);
-        });
-        callback(members);
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      logger.error('Failed to subscribe to family members:', error);
-      return () => {};
-    }
+  async subscribeToFamilyMembers(
+    userDeviceId: string, 
+    callback: (members: FamilyMember[]) => void,
+    onError?: (error: Error) => void
+  ): Promise<() => void> {
+    return subscribeToFamilyMembersOp(userDeviceId, callback, onError, this._isInitialized);
   }
 
   /**
    * Save news summary to Firestore
    */
   async saveNewsSummary(summary: NewsSummaryRecord): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveNewsSummary');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      // Use news_summaries collection (matches Firestore rules)
-      await setDoc(doc(db, 'news_summaries', summary.id), {
-        ...summary,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info(`News summary saved to Firestore: ${summary.id}`);
-      }
-      return true;
-    } catch (error: any) {
-      // Silent fail for permission errors - Firebase rules may restrict access
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        if (__DEV__) {
-          logger.debug('News summary skipped (permission denied - this is OK)');
-        }
-      } else {
-        logger.warn('Failed to save news summary:', error);
-      }
-      return false;
-    }
+    return saveNewsSummaryOp(summary, this._isInitialized);
   }
 
   /**
    * Get news summary from Firestore
    */
   async getNewsSummary(articleId: string): Promise<NewsSummaryRecord | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot get news summary');
-      return null;
-    }
+    return getNewsSummaryOp(articleId, this._isInitialized);
+  }
 
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
+  /**
+   * Save message to Firestore
+   */
+  async saveMessage(userDeviceId: string, message: MessageData): Promise<boolean> {
+    return saveMessageOp(userDeviceId, message, this._isInitialized);
+  }
 
-      // Use news_summaries collection (matches Firestore rules)
-      const q = query(collection(db, 'news_summaries'), where('articleId', '==', articleId));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        return null;
-      }
+  /**
+   * Load messages from Firestore
+   */
+  async loadMessages(userDeviceId: string): Promise<MessageData[]> {
+    return loadMessagesOp(userDeviceId, this._isInitialized);
+  }
 
-      return snapshot.docs[0].data() as NewsSummaryRecord;
-    } catch (error: any) {
-      // Silent fail for permission errors - Firebase rules may restrict access
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        if (__DEV__) {
-          logger.debug('News summary read skipped (permission denied - this is OK)');
-        }
-      } else {
-        logger.warn('Failed to get news summary:', error);
-      }
-      return null;
-    }
+  /**
+   * Subscribe to real-time message updates
+   */
+  async subscribeToMessages(
+    userDeviceId: string,
+    callback: (messages: MessageData[]) => void,
+    onError?: (error: Error) => void
+  ): Promise<(() => void) | null> {
+    return subscribeToMessagesOp(userDeviceId, callback, onError, this._isInitialized);
+  }
+
+  /**
+   * Save conversation to Firestore
+   */
+  async saveConversation(userDeviceId: string, conversation: ConversationData): Promise<boolean> {
+    return saveConversationOp(userDeviceId, conversation, this._isInitialized);
+  }
+
+  /**
+   * Load conversations from Firestore
+   */
+  async loadConversations(userDeviceId: string): Promise<ConversationData[]> {
+    return loadConversationsOp(userDeviceId, this._isInitialized);
+  }
+
+  /**
+   * Delete conversation from Firestore
+   */
+  async deleteConversation(userDeviceId: string, userId: string): Promise<boolean> {
+    return deleteConversationOp(userDeviceId, userId, this._isInitialized);
   }
 
   /**
    * Save health profile to Firestore
    */
   async saveHealthProfile(userDeviceId: string, profile: any): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveHealthProfile');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      await setDoc(doc(db, 'devices', userDeviceId, 'healthProfile', 'current'), {
-        ...profile,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info('Health profile saved to Firestore');
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save health profile:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save earthquake to Firestore
-   */
-  async saveEarthquake(earthquake: any): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveEarthquake');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const earthquakeId = earthquake.id || `${earthquake.timestamp}_${earthquake.magnitude}`;
-      await setDoc(doc(db, 'earthquakes', earthquakeId), {
-        ...earthquake,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info('Earthquake saved to Firestore:', earthquakeId);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save earthquake:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Save felt earthquake report to Firestore
-   */
-  async saveFeltEarthquakeReport(report: any): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveFeltEarthquakeReport');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      const reportId = report.id || `${report.earthquakeId}_${Date.now()}`;
-      await setDoc(doc(db, 'feltEarthquakes', reportId), {
-        ...report,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info('Felt earthquake report saved to Firestore:', reportId);
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save felt earthquake report:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get intensity data from Firestore
-   */
-  async getIntensityData(earthquakeId: string): Promise<any | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot get intensity data');
-      return null;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
-
-      const q = query(collection(db, 'feltEarthquakes'), where('earthquakeId', '==', earthquakeId));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        return null;
-      }
-
-      return snapshot.docs.map(doc => doc.data());
-    } catch (error) {
-      logger.error('Failed to get intensity data:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save location update to Firestore
-   */
-  async saveLocationUpdate(userDeviceId: string, location: any): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveLocationUpdate');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      await setDoc(doc(db, 'devices', userDeviceId, 'locations', Date.now().toString()), {
-        ...location,
-        timestamp: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info('Location update saved to Firestore');
-      }
-      return true;
-    } catch (error: any) {
-      // Silent fail for permission errors - Firebase rules may restrict access
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        if (__DEV__) {
-          logger.debug('Location update skipped (permission denied - this is OK)');
-        }
-      } else {
-        logger.warn('Failed to save location update:', error);
-      }
-      return false;
-    }
-  }
-
-  /**
-   * Save ICE (In Case of Emergency) data to Firestore
-   */
-  async saveICE(userDeviceId: string, iceData: any): Promise<boolean> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveICE');
-      return false;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return false;
-      }
-
-      await setDoc(doc(db, 'devices', userDeviceId, 'ice', 'current'), {
-        ...iceData,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-
-      if (__DEV__) {
-        logger.info('ICE data saved to Firestore');
-      }
-      return true;
-    } catch (error) {
-      logger.error('Failed to save ICE data:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Load ICE (In Case of Emergency) data from Firestore
-   */
-  async loadICE(userDeviceId: string): Promise<any | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot load ICE');
-      return null;
-    }
-
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
-
-      const iceRef = doc(db, 'devices', userDeviceId, 'ice', 'current');
-      const snapshot = await getDoc(iceRef);
-      
-      if (!snapshot.exists()) {
-        return null;
-      }
-
-      return snapshot.data();
-    } catch (error) {
-      logger.error('Failed to load ICE data:', error);
-      return null;
-    }
+    return saveHealthProfileOp(userDeviceId, profile, this._isInitialized);
   }
 
   /**
    * Load health profile from Firestore
    */
   async loadHealthProfile(userDeviceId: string): Promise<any | null> {
-    if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, cannot load health profile');
-      return null;
-    }
+    return loadHealthProfileOp(userDeviceId, this._isInitialized);
+  }
 
-    try {
-      const db = getFirestoreInstance();
-      if (!db) {
-        logger.warn('Firestore not available');
-        return null;
-      }
+  /**
+   * Save earthquake to Firestore
+   */
+  async saveEarthquake(earthquake: any): Promise<boolean> {
+    return saveEarthquakeOp(earthquake, this._isInitialized);
+  }
 
-      const profileRef = doc(db, 'devices', userDeviceId, 'healthProfile', 'current');
-      const snapshot = await getDoc(profileRef);
-      
-      if (!snapshot.exists()) {
-        return null;
-      }
+  /**
+   * Save felt earthquake report to Firestore
+   */
+  async saveFeltEarthquakeReport(report: any): Promise<boolean> {
+    return saveFeltEarthquakeReportOp(report, this._isInitialized);
+  }
 
-      return snapshot.data();
-    } catch (error) {
-      logger.error('Failed to load health profile:', error);
-      return null;
-    }
+  /**
+   * Get intensity data from Firestore
+   */
+  async getIntensityData(earthquakeId: string): Promise<any | null> {
+    return getIntensityDataOp(earthquakeId, this._isInitialized);
+  }
+
+  /**
+   * Save location update to Firestore
+   */
+  async saveLocationUpdate(userDeviceId: string, location: any): Promise<boolean> {
+    return saveLocationUpdateOp(userDeviceId, location, this._isInitialized);
+  }
+
+  /**
+   * Save ICE (In Case of Emergency) data to Firestore
+   */
+  async saveICE(userDeviceId: string, iceData: any): Promise<boolean> {
+    return saveICEOp(userDeviceId, iceData, this._isInitialized);
+  }
+
+  /**
+   * Load ICE (In Case of Emergency) data from Firestore
+   */
+  async loadICE(userDeviceId: string): Promise<any | null> {
+    return loadICEOp(userDeviceId, this._isInitialized);
   }
 
   /**
    * Save status update to Firestore
    */
   async saveStatusUpdate(userDeviceId: string, statusData: any): Promise<boolean> {
+    return saveStatusUpdateOp(userDeviceId, statusData, this._isInitialized);
+  }
+
+  /**
+   * ELITE: Save seismic detection to Firestore for crowdsourcing and verification
+   */
+  async saveSeismicDetection(detection: {
+    id: string;
+    deviceId: string;
+    timestamp: number;
+    latitude: number;
+    longitude: number;
+    magnitude: number;
+    depth: number;
+    pWaveDetected: boolean;
+    sWaveDetected: boolean;
+    confidence: number;
+    warningTime: number;
+    waveCalculation?: any;
+    source: string;
+  }): Promise<boolean> {
     if (!this._isInitialized) {
-      logger.warn('FirebaseDataService not initialized, skipping saveStatusUpdate');
+      if (__DEV__) {
+        logger.debug('FirebaseDataService not initialized, skipping saveSeismicDetection');
+      }
       return false;
     }
 
     try {
-      const db = getFirestoreInstance();
+      const db = await getFirestoreInstanceAsync();
       if (!db) {
-        logger.warn('Firestore not available');
+        if (__DEV__) {
+          logger.debug('Firestore not available');
+        }
         return false;
       }
 
-      await setDoc(doc(db, 'devices', userDeviceId, 'status', 'current'), {
-        ...statusData,
+      const { doc, setDoc } = await import('firebase/firestore');
+      
+      // ELITE: Timeout protection for seismic detection save
+      const TIMEOUT_MS = 10000; // 10 seconds
+      const savePromise = setDoc(doc(db, 'seismicDetections', detection.id), {
+        ...detection,
+        createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }, { merge: true });
+      
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Seismic detection save timeout')), TIMEOUT_MS)
+      );
+      
+      await Promise.race([savePromise, timeoutPromise]);
 
       if (__DEV__) {
-        logger.info('Status update saved to Firestore');
+        logger.info('Seismic detection saved to Firestore:', detection.id);
       }
       return true;
-    } catch (error: any) {
-      // Silent fail for permission errors - Firebase rules may restrict access
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+    } catch (error: unknown) {
+      const errorObj = error as { code?: string; message?: string };
+      const errorMessage = errorObj?.message || String(error);
+      
+      // ELITE: Handle permission errors gracefully
+      if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
         if (__DEV__) {
-          logger.debug('Status update skipped (permission denied - this is OK)');
+          logger.debug('Seismic detection save skipped (permission denied - this is OK)');
         }
-      } else {
-        logger.warn('Failed to save status update:', error);
+        return false;
       }
+      
+      // ELITE: Handle bundle errors gracefully
+      if (errorMessage.includes('LoadBundleFromServerRequestError') || 
+          errorMessage.includes('Could not load bundle')) {
+        if (__DEV__) {
+          logger.debug('Seismic detection save skipped (bundle error - expected in some environments)');
+        }
+        return false;
+      }
+      
+      logger.error('Failed to save seismic detection:', error);
       return false;
     }
   }
 }
 
 export const firebaseDataService = new FirebaseDataService();
-

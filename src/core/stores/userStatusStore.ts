@@ -4,6 +4,9 @@
  */
 
 import { create } from 'zustand';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('UserStatusStore');
 
 export type UserStatus = 'safe' | 'needs_help' | 'trapped' | 'sos' | 'offline';
 
@@ -60,7 +63,28 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
         }
       }
     } catch (error) {
-      console.error('Failed to save status to Firebase:', error);
+      logger.error('Failed to save status to Firebase:', error);
+    }
+
+    // CRITICAL: Send to backend for rescue coordination
+    // ELITE: This ensures rescue teams know user's current status
+    try {
+      const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+      if (backendEmergencyService.initialized) {
+        const { location } = get();
+        await backendEmergencyService.sendStatusUpdate({
+          status,
+          location: location ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+          } : undefined,
+          timestamp: Date.now(),
+        }).catch((error) => {
+          logger.error('Failed to send status update to backend:', error);
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to send status update to backend:', error);
     }
   },
   
@@ -83,7 +107,7 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
         }
       }
     } catch (error) {
-      console.error('Failed to save location to Firebase:', error);
+      logger.error('Failed to save location to Firebase:', error);
     }
   },
   
@@ -109,7 +133,27 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
         }
       }
     } catch (error) {
-      console.error('Failed to save status to Firebase:', error);
+      logger.error('Failed to save status to Firebase:', error);
+    }
+
+    // CRITICAL: Send to backend for rescue coordination
+    // ELITE: This ensures rescue teams know user's current status
+    try {
+      const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+      if (backendEmergencyService.initialized) {
+        await backendEmergencyService.sendStatusUpdate({
+          status,
+          location: location ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+          } : undefined,
+          timestamp: Date.now(),
+        }).catch((error) => {
+          logger.error('Failed to send status update to backend:', error);
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to send status update to backend:', error);
     }
   },
   

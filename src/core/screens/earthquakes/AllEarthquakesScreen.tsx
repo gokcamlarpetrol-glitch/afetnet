@@ -4,15 +4,35 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Platform, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
-import { filterByDistance, sortByDistance, ISTANBUL_CENTER, calculateDistance } from '../../utils/locationUtils';
+import * as Location from 'expo-location';
+import { filterByDistance, calculateDistance } from '../../utils/locationUtils';
 import * as haptics from '../../utils/haptics';
 import { Earthquake } from '../../stores/earthquakeStore';
+import { formatToTurkishTimeOnly, formatToTurkishDateTime } from '../../utils/timeUtils';
+import { createLogger } from '../../utils/logger';
+import { i18nService } from '../../services/I18nService';
+
+const logger = createLogger('AllEarthquakesScreen');
+
+// ELITE: Lazy load WebBrowser module
+let webBrowserModuleCache: any = null;
+const getWebBrowserModule = async (): Promise<any> => {
+  if (webBrowserModuleCache) return webBrowserModuleCache;
+  try {
+    const module = await import('expo-web-browser');
+    webBrowserModuleCache = module?.default || module || null;
+    return webBrowserModuleCache;
+  } catch (error: any) {
+    logger.warn('⚠️ expo-web-browser module load failed:', error?.message);
+    return null;
+  }
+};
 
 const formatTimestamp = (timestamp: number): string => {
   if (!timestamp) return '---';
@@ -22,48 +42,103 @@ const formatTimestamp = (timestamp: number): string => {
   const diffMs = Date.now() - date.getTime();
   const within48h = diffMs <= 48 * 60 * 60 * 1000;
 
-  const formatter = new Intl.DateTimeFormat('tr-TR', within48h
-    ? {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Europe/Istanbul',
-        hour12: false,
-      }
-    : {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Europe/Istanbul',
-        hour12: false,
-      });
-
-  return formatter.format(date);
+  // Son 48 saat içindeyse sadece saat göster
+  if (within48h) {
+    return formatToTurkishTimeOnly(timestamp);
+  }
+  
+  // Daha eskiyse tam tarih göster
+  return formatToTurkishDateTime(timestamp);
 };
 
 type TimeFilter = '1h' | '24h' | '7d' | '30d' | 'all';
 type LocationFilter = 25 | 50 | 100 | 999999; // 999999 = all Turkey
 type MagnitudeFilter = 0 | 3 | 4 | 5;
-
+type SourceFilter = 'AFAD' | null; // null = all sources (only AFAD now)
 
 export default function AllEarthquakesScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const { earthquakes, loading, refresh } = useEarthquakes();
+  const { earthquakes, loading, refresh, lastUpdate } = useEarthquakes(); // CRITICAL: Get lastUpdate from hook
   
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all'); // Show all time by default
   const [locationFilter, setLocationFilter] = useState<LocationFilter>(999999); // Show all Turkey by default
   const [magnitudeFilter, setMagnitudeFilter] = useState<MagnitudeFilter>(0); // Show all magnitudes by default
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>(null); // Show all sources by default
   const [showFilters, setShowFilters] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'unknown' | 'requesting' | 'granted' | 'denied' | 'error'>('unknown');
 
   useEffect(() => {
-    // Ekran açıldığında en güncel veriyi çek
-    void refresh();
+    // ELITE: Ekran açıldığında en güncel veriyi çek
+    refresh().catch((error) => {
+      logger.error('Failed to refresh earthquakes:', error);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const requestLocationPermission = useCallback(async () => {
+    try {
+      setLocationStatus('requesting');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationStatus('denied');
+        setUserLocation(null);
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setUserLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      setLocationStatus('granted');
+    } catch (error) {
+      logger.error('Failed to fetch location for earthquake filters:', error);
+      setUserLocation(null);
+      setLocationStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    requestLocationPermission();
+  }, [requestLocationPermission]);
+
+  // CRITICAL: Open original source website in Safari View Controller
+  const openOriginalSource = async (source: 'AFAD') => {
+    haptics.impactLight();
+    
+    const url = 'https://deprem.afad.gov.tr/last-earthquakes.html';
+
+    try {
+      if (Platform.OS === 'ios') {
+        try {
+          const WebBrowser = await getWebBrowserModule();
+          if (WebBrowser?.openBrowserAsync) {
+            await WebBrowser.openBrowserAsync(url, {
+              presentationStyle: WebBrowser.WebBrowserPresentationStyle?.FULL_SCREEN,
+              controlsColor: '#8b5cf6',
+              toolbarColor: '#1e293b',
+            });
+            return;
+          }
+        } catch (error) {
+          logger.warn('Safari View Controller failed, using fallback');
+        }
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      logger.error(`Failed to open AFAD:`, error);
+    }
+  };
 
   // Filter earthquakes
   const filteredEarthquakes = useMemo(() => {
     let filtered = [...earthquakes];
+
+    // Source filter (CRITICAL: Only show AFAD data)
+    // Always filter to show only AFAD earthquakes
+    filtered = filtered.filter((eq) => eq.source === 'AFAD');
 
     // Time filter
     const now = Date.now();
@@ -76,12 +151,11 @@ export default function AllEarthquakesScreen({ navigation }: any) {
     };
     filtered = filtered.filter((eq) => now - eq.time < timeFilters[timeFilter]);
 
-    // Location filter
-    if (locationFilter < 999999) {
+    if (userLocation && locationFilter < 999999) {
       filtered = filterByDistance(
         filtered,
-        ISTANBUL_CENTER.latitude,
-        ISTANBUL_CENTER.longitude,
+        userLocation.latitude,
+        userLocation.longitude,
         locationFilter
       );
     }
@@ -93,12 +167,18 @@ export default function AllEarthquakesScreen({ navigation }: any) {
 
     // Sort by time (newest first)
     return filtered.sort((a, b) => b.time - a.time);
-  }, [earthquakes, timeFilter, locationFilter, magnitudeFilter]);
+  }, [earthquakes, sourceFilter, timeFilter, locationFilter, magnitudeFilter, userLocation]);
 
+  // CRITICAL: Use store's lastUpdate timestamp for real-time updates
   const lastUpdatedText = useMemo(() => {
+    // Use store's lastUpdate timestamp (when data was last fetched)
+    if (lastUpdate) {
+      return formatToTurkishTimeOnly(lastUpdate);
+    }
+    // Fallback to latest earthquake time if lastUpdate not available
     const reference = filteredEarthquakes[0] ?? earthquakes[0];
     return reference ? formatTimestamp(reference.time) : '---';
-  }, [filteredEarthquakes, earthquakes]);
+  }, [lastUpdate, filteredEarthquakes, earthquakes]); // CRITICAL: Include lastUpdate in dependencies
 
   const getMagnitudeColor = (mag: number) => {
     if (mag >= 5.0) return colors.earthquake.major;
@@ -107,14 +187,27 @@ export default function AllEarthquakesScreen({ navigation }: any) {
   };
 
   const renderItem = ({ item }: { item: Earthquake }) => {
-    const distance = Math.round(
-      calculateDistance(
-        ISTANBUL_CENTER.latitude,
-        ISTANBUL_CENTER.longitude,
-        item.latitude,
-        item.longitude
-      )
-    );
+    const distance = userLocation
+      ? Math.round(
+          calculateDistance(
+            userLocation.latitude,
+            userLocation.longitude,
+            item.latitude,
+            item.longitude
+          )
+        )
+      : null;
+
+    // Source badge color
+  const getSourceColor = (source: string) => {
+    // Only AFAD is shown now
+    return '#3b82f6'; // Blue
+  };
+
+  const getSourceLabel = (source: string) => {
+    // Only AFAD is shown now
+    return 'AFAD';
+  };
 
     return (
       <TouchableOpacity
@@ -128,14 +221,19 @@ export default function AllEarthquakesScreen({ navigation }: any) {
         {/* Magnitude Badge */}
         <View style={[styles.magnitudeBadge, { backgroundColor: getMagnitudeColor(item.magnitude) }]}>
           <Text style={styles.magnitudeText}>{item.magnitude.toFixed(1)}</Text>
-          <Text style={styles.magnitudeLabel}>ML</Text>
         </View>
 
         {/* Info */}
         <View style={styles.itemInfo}>
-          <Text style={styles.itemLocation} numberOfLines={2}>
-            {item.location}
-          </Text>
+          <View style={styles.itemHeader}>
+            <Text style={styles.itemLocation} numberOfLines={2}>
+              {item.location}
+            </Text>
+            {/* Source Badge */}
+            <View style={[styles.sourceBadge, { backgroundColor: getSourceColor(item.source) }]}>
+              <Text style={styles.sourceBadgeText}>{getSourceLabel(item.source)}</Text>
+            </View>
+          </View>
           <View style={styles.itemMeta}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={13} color={colors.text.secondary} />
@@ -144,12 +242,16 @@ export default function AllEarthquakesScreen({ navigation }: any) {
             <View style={styles.metaDot} />
             <View style={styles.metaItem}>
               <Ionicons name="arrow-down-outline" size={13} color={colors.text.secondary} />
-              <Text style={styles.metaText}>{item.depth.toFixed(1)} km</Text>
+              <Text style={styles.metaText}>{item.depth.toFixed(1)} {i18nService.t('earthquake.km')}</Text>
             </View>
             <View style={styles.metaDot} />
             <View style={styles.metaItem}>
               <Ionicons name="location-outline" size={13} color={colors.text.secondary} />
-              <Text style={styles.metaText}>{distance} km</Text>
+              <Text style={styles.metaText}>
+                {distance !== null
+                  ? `${distance} ${i18nService.t('earthquake.km')}`
+                  : 'Konum paylaşılamadı'}
+              </Text>
             </View>
           </View>
         </View>
@@ -186,14 +288,32 @@ export default function AllEarthquakesScreen({ navigation }: any) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </TouchableOpacity>
+        
+        {/* Title */}
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>{i18nService.t('earthquake.title') || 'Depremler'}</Text>
+        </View>
+        
+        {/* ELITE: Premium Filter Button */}
         <TouchableOpacity
-          style={styles.filterButton}
+          style={[styles.filterButton, showFilters && styles.filterButtonActive]}
           onPress={() => {
             haptics.impactLight();
             setShowFilters(!showFilters);
           }}
         >
-          <Ionicons name="options" size={24} color={colors.text.primary} />
+          <Ionicons 
+            name={showFilters ? "close" : "options"} 
+            size={22} 
+            color={showFilters ? colors.text.primary : colors.text.secondary} 
+          />
+          {showFilters && (
+            <View style={styles.filterButtonBadge}>
+              <Text style={styles.filterButtonBadgeText}>
+                {filteredEarthquakes.length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </LinearGradient>
 
@@ -201,7 +321,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
       {showFilters && (
         <View style={styles.filtersContainer}>
           {/* Time Filter */}
-          <Text style={styles.filterLabel}>Zaman</Text>
+          <Text style={styles.filterLabel}>{i18nService.t('earthquake.timeFilter')}</Text>
           <View style={styles.filterRow}>
             {(['1h', '24h', '7d', '30d', 'all'] as TimeFilter[]).map((filter) => (
               <TouchableOpacity
@@ -220,7 +340,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
           </View>
 
           {/* Location Filter */}
-          <Text style={styles.filterLabel}>Konum (İstanbul)</Text>
+          <Text style={styles.filterLabel}>{i18nService.t('earthquake.locationFilter')}</Text>
           <View style={styles.filterRow}>
             {([25, 50, 100, 999999] as LocationFilter[]).map((filter) => (
               <TouchableOpacity
@@ -232,14 +352,14 @@ export default function AllEarthquakesScreen({ navigation }: any) {
                 }}
               >
                 <Text style={[styles.filterChipText, locationFilter === filter && styles.filterChipTextActive]}>
-                  {filter === 999999 ? 'Tüm Türkiye' : `${filter} km`}
+                  {filter === 999999 ? i18nService.t('earthquake.locationAllTurkey') : i18nService.t('earthquake.locationKm', { km: filter.toString() })}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
           {/* Magnitude Filter */}
-          <Text style={styles.filterLabel}>Büyüklük</Text>
+          <Text style={styles.filterLabel}>{i18nService.t('earthquake.magnitudeFilter')}</Text>
           <View style={styles.filterRow}>
             {([0, 3, 4, 5] as MagnitudeFilter[]).map((filter) => (
               <TouchableOpacity
@@ -251,7 +371,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
                 }}
               >
                 <Text style={[styles.filterChipText, magnitudeFilter === filter && styles.filterChipTextActive]}>
-                  {filter === 0 ? 'Tümü' : `>${filter}.0`}
+                  {filter === 0 ? i18nService.t('earthquake.magnitudeAll') : i18nService.t('earthquake.magnitudeGreater', { mag: filter.toString() })}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -259,13 +379,37 @@ export default function AllEarthquakesScreen({ navigation }: any) {
         </View>
       )}
 
+      {locationStatus !== 'granted' && (
+        <View style={styles.locationNotice}>
+          <Ionicons
+            name={locationStatus === 'denied' ? 'alert-circle' : 'navigate-circle'}
+            size={18}
+            color="#f97316"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.locationNoticeText}>
+            {locationStatus === 'denied'
+              ? 'Mesafe filtresi için konum izni gerekiyor.'
+              : locationStatus === 'requesting'
+              ? 'Konum bilgisi alınıyor...'
+              : 'Konum belirlenemedi; mesafe bilgisi devre dışı.'}
+          </Text>
+          {locationStatus !== 'requesting' && (
+            <TouchableOpacity style={styles.locationNoticeButton} onPress={requestLocationPermission}>
+              <Text style={styles.locationNoticeButtonText}>Tekrar Dene</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* Result Count & Info */}
       <View style={styles.resultCount}>
         <Text style={styles.resultText}>
-          {filteredEarthquakes.length} deprem bulundu (Türkiye - AFAD)
+          {filteredEarthquakes.length} {i18nService.t('earthquake.found')}
+          {` (${i18nService.t('earthquake.sourceAFAD')})`}
         </Text>
         <Text style={styles.resultSubtext}>
-          Son güncelleme: {lastUpdatedText} • Son 100 deprem gösteriliyor
+          {i18nService.t('earthquake.lastUpdate')}: {lastUpdatedText} • {i18nService.t('earthquake.fromSource')} AFAD {i18nService.t('earthquake.realTimeData')}
         </Text>
       </View>
 
@@ -300,13 +444,13 @@ export default function AllEarthquakesScreen({ navigation }: any) {
               </LinearGradient>
               <Text style={styles.emptyText}>
                 {earthquakes.length === 0 
-                  ? 'Henüz deprem verisi yok' 
-                  : 'Filtre sonucu bulunamadı'}
+                  ? i18nService.t('earthquake.noDataYet')
+                  : i18nService.t('earthquake.noFilterResults')}
               </Text>
               <Text style={styles.emptySubtext}>
                 {earthquakes.length === 0
-                  ? 'Deprem verileri yükleniyor veya şu anda aktif deprem yok'
-                  : 'Farklı filtreler deneyerek tekrar arayabilirsiniz'}
+                  ? i18nService.t('earthquake.loadingOrNoData')
+                  : i18nService.t('earthquake.tryDifferentFilters')}
               </Text>
               {earthquakes.length === 0 && (
                 <TouchableOpacity
@@ -323,7 +467,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
                     style={styles.emptyButtonGradient}
                   >
                     <Ionicons name="refresh" size={20} color="#fff" />
-                    <Text style={styles.emptyButtonText}>Yenile</Text>
+                    <Text style={styles.emptyButtonText}>{i18nService.t('earthquake.refresh')}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               )}
@@ -343,6 +487,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
@@ -354,21 +499,103 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
+  headerTitleContainer: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.text.primary,
     textAlign: 'center',
-    marginHorizontal: 16,
+    letterSpacing: -0.5,
+  },
+  headerSourceInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    justifyContent: 'center',
+    marginHorizontal: 12,
+  },
+  sourceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  sourceButtonActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    borderColor: '#8b5cf6',
+  },
+  sourceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  sourceButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  sourceButtonTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  sourceInfoButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
   },
   filterButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.background.secondary,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+    position: 'relative',
+  },
+  filterButtonActive: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#8b5cf6',
+    shadowColor: '#8b5cf6',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  filterButtonBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: colors.background.secondary,
+  },
+  filterButtonBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#ffffff',
   },
   filtersContainer: {
     backgroundColor: colors.background.secondary,
@@ -406,6 +633,34 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   filterChipTextActive: {
+    color: colors.text.primary,
+  },
+  locationNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.4)',
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+  },
+  locationNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.text.primary,
+  },
+  locationNoticeButton: {
+    marginLeft: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(249, 115, 22, 0.2)',
+  },
+  locationNoticeButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.text.primary,
   },
   resultCount: {
@@ -451,24 +706,38 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   magnitudeText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '900',
     color: colors.text.primary,
-  },
-  magnitudeLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 2,
+    letterSpacing: -0.5,
   },
   itemInfo: {
     flex: 1,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    gap: 8,
   },
   itemLocation: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.text.primary,
-    marginBottom: 6,
+    flex: 1,
+  },
+  sourceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  sourceBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#ffffff',
+    textTransform: 'uppercase',
   },
   itemMeta: {
     flexDirection: 'row',
@@ -548,4 +817,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-

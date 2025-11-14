@@ -283,6 +283,26 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
       } catch (error) {
         logger.error('Failed to save health profile to Firebase:', error);
       }
+
+      // CRITICAL: Send to backend for rescue coordination
+      // ELITE: This ensures rescue teams have medical information during emergencies
+      try {
+        const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendHealthProfile({
+            bloodType: profile.bloodType,
+            allergies: profile.allergies,
+            medications: profile.medications,
+            medicalConditions: profile.medicalConditions,
+            emergencyContacts: profile.emergencyContacts,
+            updatedAt: Date.now(),
+          }).catch((error) => {
+            logger.error('Failed to send health profile to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send health profile to backend:', error);
+      }
       
       logger.info('HealthProfile saved');
     } catch (error) {

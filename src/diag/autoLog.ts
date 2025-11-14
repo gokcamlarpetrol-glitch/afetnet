@@ -24,15 +24,20 @@ export async function flush(){
 // Hooks
 export function installGlobal(){
   const prevHandler = (globalThis as typeof globalThis).onerror;
-  (globalThis as typeof globalThis).onerror = (msg: any, src?: any, line?: any, col?: any, err?: any)=>{
+  (globalThis as typeof globalThis).onerror = (msg: unknown, src?: string, line?: number, col?: number, err?: Error | unknown) => {
     push('ERR ' + String(msg||err));
-    if (prevHandler) {try{ prevHandler(msg,src,line,col,err); }catch{
-      // Ignore errors
-    }}
+    if (prevHandler) {
+      try {
+        prevHandler(msg as string | Event, src, line, col, err as Error);
+      } catch {
+        // Ignore errors
+      }
+    }
   };
   const prevRej = (globalThis as typeof globalThis).onunhandledrejection;
-  (globalThis as typeof globalThis).onunhandledrejection = (ev:any)=>{
-    push('PRJ ' + String(ev?.reason || ev));
+  (globalThis as typeof globalThis).onunhandledrejection = (ev: { reason?: unknown } | unknown) => {
+    const reason = (ev && typeof ev === 'object' && 'reason' in ev) ? ev.reason : ev;
+    push('PRJ ' + String(reason || ev));
     if (prevRej) {try{ prevRej.call(globalThis, ev); }catch{
       // Ignore errors
     }}

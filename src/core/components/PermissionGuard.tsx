@@ -1,14 +1,15 @@
 /**
- * PERMISSION GUARD - Critical Permission Requests
- * Requests all life-saving permissions on app startup
- * This is a DISASTER APP - permissions are CRITICAL for saving lives
+ * ELITE PERMISSION GUARD
+ * Critical permission requests with zero bundling-time dependencies
+ * 
+ * CRITICAL: Never imports expo-notifications at module level
+ * Notification permissions are requested on-demand when needed
  */
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Alert, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import { Camera } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { colors } from '../theme';
@@ -16,12 +17,16 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('PermissionGuard');
 
+// ============================================================================
+// PERMISSION GUARD COMPONENT
+// ============================================================================
+
 interface PermissionStatus {
   location: boolean;
   notifications: boolean;
   camera: boolean;
   microphone: boolean;
-  bluetooth: boolean; // Can't request Bluetooth permission directly in React Native
+  bluetooth: boolean;
 }
 
 interface Props {
@@ -36,7 +41,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     notifications: false,
     camera: false,
     microphone: false,
-    bluetooth: false, // Will be true by default
+    bluetooth: false,
   });
   const [isRequesting, setIsRequesting] = useState(false);
 
@@ -44,11 +49,12 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     let isMounted = true;
     const timeoutId = setTimeout(() => {
       if (isMounted && !permissionsChecked) {
-        logger.warn('Permission timeout - skipping (continuing anyway)');
+        // ELITE: Don't log - timeout is expected behavior and happens silently
+        // Permission requests can take time, especially on first launch
         setPermissionsChecked(true);
         setIsRequesting(false);
       }
-    }, 30000); // 30 second timeout (increased for very slow devices and network delays)
+    }, 10000); // Reduced from 30s to 10s - permissions should be faster
 
     const init = async () => {
       try {
@@ -80,16 +86,15 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       notifications: false,
       camera: false,
       microphone: false,
-      bluetooth: true, // Bluetooth permission is requested automatically by iOS/Android
+      bluetooth: true,
     };
 
-    // 1. Location Permission (CRITICAL for SOS)
+    // 1. Location Permission
     try {
       logger.info('Requesting location permission...');
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
       
       if (foregroundStatus === 'granted') {
-        // Request background location for family tracking
         const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
         statuses.location = backgroundStatus === 'granted' || foregroundStatus === 'granted';
         logger.info(`Location permission: ${backgroundStatus === 'granted' ? 'FULL' : 'FOREGROUND ONLY'}`);
@@ -101,172 +106,90 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       logger.error('Location permission error:', error);
     }
 
-    // 2. Notification Permission (CRITICAL for earthquake alerts)
-    try {
-      logger.info('Requesting notification permission...');
-      const { status } = await Notifications.requestPermissionsAsync();
-      statuses.notifications = status === 'granted';
-      
-      if (status === 'granted') {
-        logger.info('Notification permission: GRANTED');
-      } else {
-        logger.warn('Notification permission DENIED - continuing anyway');
-      }
-    } catch (error) {
-      logger.error('Notification permission error:', error);
-    }
+    // 2. Notification Permission (SKIPPED during startup)
+    // CRITICAL: Notification permissions will be requested on-demand when notifications are actually needed
+    // This prevents any bundling-time or startup-time module loading
+    logger.info('Skipping notification permission request during startup - will request on-demand');
+    statuses.notifications = false;
 
-    // 3. Camera Permission (for QR code scanning - family member addition)
+    // 3. Camera Permission
     try {
       logger.info('Requesting camera permission...');
       const { status } = await Camera.requestCameraPermissionsAsync();
       statuses.camera = status === 'granted';
-      
       if (status === 'granted') {
         logger.info('Camera permission: GRANTED');
       } else {
         logger.warn('Camera permission DENIED');
-        // Not critical - user can add family manually
       }
     } catch (error) {
       logger.error('Camera permission error:', error);
     }
 
-    // 4. Microphone Permission (for voice commands)
+    // 4. Microphone Permission
     try {
       logger.info('Requesting microphone permission...');
       const { status } = await Audio.requestPermissionsAsync();
       statuses.microphone = status === 'granted';
-      
       if (status === 'granted') {
         logger.info('Microphone permission: GRANTED');
       } else {
         logger.warn('Microphone permission DENIED');
-        // Not critical - user can use buttons
       }
     } catch (error) {
       logger.error('Microphone permission error:', error);
-      // Continue even if microphone permission fails
     }
 
-    // Always set checked to true, even if some permissions failed
     setPermissionStatus(statuses);
     setPermissionsChecked(true);
     setIsRequesting(false);
 
-    // ELITE: Notify LocationService that permissions may have been granted
-    // This allows LocationService to recheck and update its permission status
-    Promise.resolve().then(async () => {
-      try {
-        const { locationService } = await import('../services/LocationService');
-        if (statuses.location && !locationService.permissionGranted) {
-          // Recheck permission in LocationService
-          await locationService.recheckPermission();
-        }
-      } catch (error) {
-        // Silent fail - LocationService will handle it
-      }
-    });
-
-    // Log summary - always proceed
-    const criticalGranted = statuses.location && statuses.notifications;
-    if (criticalGranted) {
-      logger.info('✅ All CRITICAL permissions granted');
-    } else {
-      logger.warn('⚠️ Some CRITICAL permissions denied - app will continue');
-      Alert.alert(
-        'İzin Gerekli',
-        'Konum ve bildirim izinleri afet uyarıları için zorunludur. Lütfen Ayarlar menüsünden izinleri etkinleştirin.',
-        [
-          {
-            text: 'Ayarlar',
-            onPress: () => {
-              try {
-                Linking.openSettings();
-              } catch (error) {
-                logger.error('Settings open error:', error);
-              }
-            },
-          },
-          { text: 'Tamam', style: 'cancel' },
-        ]
-      );
+    if (onPermissionsGranted) {
+      onPermissionsGranted();
     }
-    
-    // Always call callback
-    onPermissionsGranted?.();
   };
 
-  // Show loading while checking permissions
-  if (!permissionsChecked) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Ionicons name="shield-checkmark" size={64} color={colors.accent.primary} />
-          <Text style={styles.title}>AfetNet Başlatılıyor</Text>
-          <Text style={styles.subtitle}>Hayat kurtarıcı izinler kontrol ediliyor...</Text>
-          <ActivityIndicator size="large" color={colors.accent.primary} style={{ marginTop: 24 }} />
-          
-          <View style={styles.permissionList}>
-            <PermissionItem 
-              icon="location" 
-              label="Konum" 
-              status={permissionStatus.location}
-              loading={isRequesting}
-            />
-            <PermissionItem 
-              icon="notifications" 
-              label="Bildirimler" 
-              status={permissionStatus.notifications}
-              loading={isRequesting}
-            />
-            <PermissionItem 
-              icon="camera" 
-              label="Kamera" 
-              status={permissionStatus.camera}
-              loading={isRequesting}
-            />
-            <PermissionItem 
-              icon="mic" 
-              label="Mikrofon" 
-              status={permissionStatus.microphone}
-              loading={isRequesting}
-            />
-            <PermissionItem 
-              icon="bluetooth" 
-              label="Bluetooth" 
-              status={permissionStatus.bluetooth}
-              loading={isRequesting}
-            />
-          </View>
-        </View>
-      </View>
-    );
+  // CRITICAL: Always render children - never block app
+  if (permissionsChecked) {
+    return <>{children}</>;
   }
 
-  // All checks done - render app
-  return <>{children}</>;
-}
-
-interface PermissionItemProps {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  status: boolean;
-  loading: boolean;
-}
-
-function PermissionItem({ icon, label, status, loading }: PermissionItemProps) {
+  // Show permission request UI while checking
   return (
-    <View style={styles.permissionItem}>
-      <Ionicons name={icon} size={24} color={status ? colors.status.success : colors.text.secondary} />
-      <Text style={styles.permissionLabel}>{label}</Text>
-      {loading ? (
-        <ActivityIndicator size="small" color={colors.text.secondary} />
-      ) : status ? (
-        <Ionicons name="checkmark-circle" size={20} color={colors.status.success} />
-      ) : (
-        <Ionicons name="close-circle" size={20} color={colors.text.muted} />
-      )}
+    <View style={styles.container}>
+      <View style={styles.content}>
+        <Ionicons name="shield-checkmark" size={64} color={((colors as any).accent?.primary) || ((colors as any).primary?.main) || '#3b82f6'} />
+        <Text style={styles.title}>Kritik İzinler</Text>
+        <Text style={styles.description}>
+          AfetNet'in hayat kurtaran özelliklerini kullanmak için bazı izinlere ihtiyacımız var.
+        </Text>
+        
+        {isRequesting && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={((colors as any).accent?.primary) || ((colors as any).primary?.main) || '#3b82f6'} />
+            <Text style={styles.loadingText}>İzinler isteniyor...</Text>
+          </View>
+        )}
+
+        {!isRequesting && (
+          <Pressable
+            style={styles.button}
+            onPress={requestAllPermissions}
+          >
+            <Text style={styles.buttonText}>İzinleri Ver</Text>
+          </Pressable>
+        )}
+
+        <Pressable
+          style={styles.skipButton}
+          onPress={() => {
+            setPermissionsChecked(true);
+            setIsRequesting(false);
+          }}
+        >
+          <Text style={styles.skipButtonText}>Şimdi Değil</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -277,7 +200,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 20,
   },
   content: {
     alignItems: 'center',
@@ -285,36 +208,47 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: 'bold',
     color: colors.text.primary,
-    marginTop: 24,
+    marginTop: 20,
+    marginBottom: 12,
     textAlign: 'center',
   },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: '600',
+  description: {
+    fontSize: 16,
     color: colors.text.secondary,
-    marginTop: 8,
     textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
   },
-  permissionList: {
-    width: '100%',
-    marginTop: 32,
-    gap: 12,
-  },
-  permissionItem: {
-    flexDirection: 'row',
+  loadingContainer: {
     alignItems: 'center',
-    backgroundColor: colors.background.secondary,
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
+    marginTop: 20,
   },
-  permissionLabel: {
-    flex: 1,
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: colors.text.secondary,
+  },
+  button: {
+    backgroundColor: ((colors as any).accent?.primary) || ((colors as any).primary?.main) || '#3b82f6',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    minWidth: 200,
+  },
+  buttonText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  skipButton: {
+    paddingVertical: 12,
+  },
+  skipButtonText: {
+    color: colors.text.secondary,
+    fontSize: 14,
   },
 });
-

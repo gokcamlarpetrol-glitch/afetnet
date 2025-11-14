@@ -82,3 +82,11 @@ export class XweatherClient extends BaseAPIClient {
 
 export const xweatherClient = new XweatherClient(config.xweatherApiKey);
 
+
+
+
+
+
+
+
+

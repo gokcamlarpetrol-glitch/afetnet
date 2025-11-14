@@ -803,7 +803,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                         onPress={() => handleRemoveEmergencyContact(contact.id)}
                         style={styles.removeButton}
                       >
-                        <Ionicons name="trash-outline" size={20} color={colors.danger.main} />
+                        <Ionicons name="trash-outline" size={20} color={((colors as any).danger?.main) || ((colors as any).emergency?.critical) || '#ef4444'} />
                       </Pressable>
                     </View>
                     

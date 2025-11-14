@@ -1,13 +1,27 @@
 /**
  * API CLIENT
  * Backend communication with HMAC authentication
+ * ELITE: Production-ready error handling and validation
  */
 
 import { ENV } from '../config/env';
 import { sanitizeString } from '../utils/validation';
 
 const API_BASE_URL = ENV.API_BASE_URL;
-const API_SECRET = ENV.FIREBASE_API_KEY; // Using Firebase key as API secret for now
+// ELITE: Use empty string if no API secret (backend may not require auth)
+const API_SECRET = ENV.FIREBASE_API_KEY || ''; // Using Firebase key as API secret for now
+
+// ELITE: Custom API Error class for better error handling
+export class APIError extends Error {
+  constructor(
+    message: string,
+    public statusCode?: number,
+    public originalError?: any
+  ) {
+    super(message);
+    this.name = 'APIError';
+  }
+}
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -16,11 +30,15 @@ interface RequestOptions {
   timeout?: number;
 }
 
-class APIClient {
+export class APIClient {
   private baseURL: string;
 
   constructor(baseURL: string = API_BASE_URL) {
-    this.baseURL = baseURL;
+    // ELITE: Validate baseURL
+    if (!baseURL || typeof baseURL !== 'string' || !baseURL.startsWith('http')) {
+      throw new Error('Invalid API base URL');
+    }
+    this.baseURL = baseURL.replace(/\/$/, ''); // Remove trailing slash
   }
 
   async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
@@ -71,22 +89,41 @@ class APIClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        // ELITE: Try to parse error response for better error messages
+        const errorBody = await response.text(); // Get raw error body
+        let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+        try {
+          const jsonError = JSON.parse(errorBody);
+          errorMessage = jsonError.message || jsonError.error || errorMessage;
+        } catch {
+          // If not JSON, use raw text
+          errorMessage = errorBody || errorMessage;
+        }
+        throw new APIError(errorMessage, response.status);
       }
 
-      const data = await response.json();
-      return data as T;
-    } catch (error) {
+      // ELITE: Handle empty responses gracefully
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        return data as T;
+      } else {
+        // Non-JSON response (e.g., 204 No Content)
+        return {} as T;
+      }
+    } catch (error: any) {
       clearTimeout(timeoutId);
       
-      if (error instanceof Error) {
+      if (error instanceof APIError) {
+        throw error; // Re-throw custom API errors
+      } else if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new Error('Request timeout');
+          throw new APIError('Request timeout', 408); // Use 408 for timeout
         }
-        throw error;
+        throw new APIError(error.message, 0, error); // Wrap generic errors
       }
       
-      throw new Error('Unknown error');
+      throw new APIError('Unknown error', 0, error); // Catch all other errors
     }
   }
 

@@ -3,11 +3,12 @@
  * Real-time assembly point map with nearest points, directions, and offline support
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
@@ -15,6 +16,8 @@ import { usePremiumStore } from '../../stores/premiumStore';
 import PremiumGate from '../../components/PremiumGate';
 import { calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
+import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
+import * as haptics from '../../utils/haptics';
 
 const logger = createLogger('AssemblyPointsScreen');
 
@@ -29,121 +32,103 @@ interface AssemblyPoint {
   type: 'park' | 'stadium' | 'school' | 'community-center' | 'emergency';
   isActive: boolean;
   distance?: number; // Calculated distance from user
+  isSample?: boolean;
 }
 
-// Simplified database - In production, fetch from API or local database
-const ASSEMBLY_POINTS: AssemblyPoint[] = [
-  {
-    id: '1',
-    name: 'Küçükçekmece Stadyumu',
-    latitude: 41.0176,
-    longitude: 28.7769,
-    address: 'Küçükçekmece, İstanbul',
-    capacity: 5000,
-    facilities: ['water', 'toilet', 'medical', 'food'],
-    type: 'stadium',
-    isActive: true,
-  },
-  {
-    id: '2',
-    name: 'Atatürk Parkı',
-    latitude: 41.0082,
-    longitude: 28.9784,
-    address: 'Avcılar, İstanbul',
-    capacity: 3000,
-    facilities: ['water', 'toilet'],
-    type: 'park',
-    isActive: true,
-  },
-  {
-    id: '3',
-    name: 'Avcılar İlkokulu',
-    latitude: 41.0123,
-    longitude: 28.9823,
-    address: 'Avcılar, İstanbul',
-    capacity: 1500,
-    facilities: ['water', 'toilet', 'medical'],
-    type: 'school',
-    isActive: true,
-  },
-  {
-    id: '4',
-    name: 'Bakırköy Belediye Binası',
-    latitude: 40.9876,
-    longitude: 28.8592,
-    address: 'Bakırköy, İstanbul',
-    capacity: 2000,
-    facilities: ['water', 'toilet', 'medical', 'food'],
-    type: 'community-center',
-    isActive: true,
-  },
-  {
-    id: '5',
-    name: 'AFAD Toplanma Alanı',
-    latitude: 41.0425,
-    longitude: 28.9801,
-    address: 'Yeşilköy, İstanbul',
-    capacity: 10000,
-    facilities: ['water', 'toilet', 'medical', 'food', 'shelter'],
-    type: 'emergency',
-    isActive: true,
-  },
-];
+const mapLocationToAssemblyPoint = (loc: MapLocation): AssemblyPoint => ({
+  id: loc.id,
+  name: loc.name,
+  latitude: loc.latitude,
+  longitude: loc.longitude,
+  address: loc.address,
+  capacity: loc.capacity || 0,
+  facilities: [],
+  type:
+    loc.type === 'assembly'
+      ? 'park'
+      : loc.type === 'home'
+      ? 'park'
+      : loc.type === 'shelter' || loc.type === 'hospital'
+      ? 'emergency'
+      : 'park',
+  isActive: true,
+  isSample: !!loc.isSample,
+});
 
 export default function AssemblyPointsScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   // CRITICAL: Read premium status from store (includes trial check)
   // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
   const isPremium = usePremiumStore((state) => state.isPremium);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [basePoints, setBasePoints] = useState<AssemblyPoint[]>([]);
   const [points, setPoints] = useState<AssemblyPoint[]>([]);
+  const [usingSampleData, setUsingSampleData] = useState(false);
   const [selectedPoint, setSelectedPoint] = useState<AssemblyPoint | null>(null);
   const [sortBy, setSortBy] = useState<'distance' | 'capacity'>('distance');
+  const [showAddButton, setShowAddButton] = useState(true);
 
   useEffect(() => {
     getUserLocation();
+    loadAssemblyPoints();
+    
+    const unsubscribe = navigation.addListener?.('focus', () => {
+      loadAssemblyPoints();
+    });
+    
+    return () => {
+      unsubscribe?.();
+    };
+  }, [navigation, loadAssemblyPoints]);
+
+  const loadAssemblyPoints = useCallback(() => {
+    try {
+      const official = offlineMapService.getAllLocations().filter(loc => loc.type === 'assembly');
+      const custom = offlineMapService.getCustomLocations().filter(loc => loc.type === 'assembly');
+      const combined = [...official, ...custom].map(mapLocationToAssemblyPoint);
+      setBasePoints(combined);
+      setUsingSampleData(offlineMapService.isUsingSampleData());
+    } catch (error) {
+      logger.error('Failed to load assembly locations:', error);
+    }
   }, []);
 
   useEffect(() => {
-    // CRITICAL: Safe distance calculation with error handling
     try {
-      if (userLocation && userLocation.latitude && userLocation.longitude) {
-        const pointsWithDistance = ASSEMBLY_POINTS.map(point => {
-          try {
-            const distance = calculateDistance(
-              userLocation.latitude,
-              userLocation.longitude,
-              point.latitude,
-              point.longitude
-            );
-            return {
-              ...point,
-              distance: isNaN(distance) || !isFinite(distance) ? undefined : distance,
-            };
-          } catch (error) {
-            logger.error(`Distance calculation error for point ${point.id}:`, error);
-            return { ...point, distance: undefined };
-          }
-        });
+      const enriched = basePoints.map(point => {
+        if (!userLocation) {
+          return { ...point, distance: undefined };
+        }
+        try {
+          const distance = calculateDistance(
+            userLocation.latitude,
+            userLocation.longitude,
+            point.latitude,
+            point.longitude
+          );
+          return {
+            ...point,
+            distance: Number.isFinite(distance) ? distance : undefined,
+          };
+        } catch (error) {
+          logger.error(`Distance calculation error for point ${point.id}:`, error);
+          return { ...point, distance: undefined };
+        }
+      });
 
-        // Sort by distance or capacity
-        const sorted = pointsWithDistance.sort((a, b) => {
-          if (sortBy === 'distance') {
-            return (a.distance || Infinity) - (b.distance || Infinity);
-          } else {
-            return b.capacity - a.capacity;
-          }
-        });
+      const sorted = enriched.sort((a, b) => {
+        if (sortBy === 'distance') {
+          return (a.distance ?? Infinity) - (b.distance ?? Infinity);
+        }
+        return b.capacity - a.capacity;
+      });
 
-        setPoints(sorted);
-      } else {
-        setPoints(ASSEMBLY_POINTS);
-      }
+      setPoints(sorted);
     } catch (error) {
       logger.error('Points processing error:', error);
-      // Fallback: Show points without distance
-      setPoints(ASSEMBLY_POINTS);
+      setPoints(basePoints);
     }
-  }, [userLocation, sortBy]);
+  }, [basePoints, userLocation, sortBy]);
 
   const getUserLocation = async () => {
     // CRITICAL: Location fetching with timeout and comprehensive error handling
@@ -312,10 +297,80 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     );
   }
 
+  // ELITE: Handle add button
+  const handleAddLocation = useCallback(() => {
+    try {
+      haptics.impactMedium();
+      navigation.navigate('AddAssemblyPoint');
+    } catch (error) {
+      logger.error('Error navigating to AddAssemblyPoint:', error);
+    }
+  }, [navigation]);
+
+  // ELITE: Handle edit location
+  const handleEditLocation = useCallback((point: AssemblyPoint) => {
+    try {
+      // Check if it's a custom location
+      if (point.id.startsWith('custom-')) {
+        haptics.impactMedium();
+        navigation.navigate('AddAssemblyPoint', {
+          editLocationId: point.id,
+        });
+      }
+    } catch (error) {
+      logger.error('Error navigating to edit:', error);
+    }
+  }, [navigation]);
+
+  // ELITE: Handle delete location
+  const handleDeleteLocation = useCallback(async (pointId: string) => {
+    if (!pointId.startsWith('custom-')) {
+      Alert.alert('Hata', 'Resmi toplanma noktaları silinemez.');
+      return;
+    }
+
+    const point = points.find(p => p.id === pointId);
+    const pointName = point?.name || 'Konum';
+
+    Alert.alert(
+      'Konumu Sil',
+      `${pointName} adlı konumu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`,
+      [
+        { 
+          text: 'İptal', 
+          style: 'cancel',
+          onPress: () => haptics.impactLight(),
+        },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const success = await offlineMapService.removeCustomLocation(pointId);
+              if (success) {
+                haptics.notificationSuccess();
+                loadAssemblyPoints();
+                Alert.alert('Başarılı', `${pointName} başarıyla silindi.`);
+              } else {
+                throw new Error('Failed to delete');
+              }
+            } catch (error) {
+              logger.error('Failed to delete location:', error);
+              Alert.alert('Hata', 'Konum silinirken bir hata oluştu.');
+              haptics.notificationError();
+            }
+          },
+        },
+      ]
+    );
+  }, [points, loadAssemblyPoints]);
+
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable 
           onPress={() => {
             // CRITICAL: Navigation with error handling
@@ -329,18 +384,29 @@ export default function AssemblyPointsScreen({ navigation }: any) {
               logger.error('Navigation error:', error);
             }
           }}
+          style={styles.headerButton}
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <View>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Toplanma Noktaları</Text>
           <Text style={styles.headerSubtitle}>
             {points.filter(p => p.isActive).length} aktif nokta
           </Text>
         </View>
-        <Pressable style={styles.locateButton} onPress={getUserLocation}>
+        <Pressable style={styles.headerButton} onPress={getUserLocation}>
           <Ionicons name="locate" size={20} color={colors.brand.primary} />
         </Pressable>
       </View>
+
+      {usingSampleData && (
+        <View style={styles.sampleNotice}>
+          <Ionicons name="information-circle" size={16} color="#fbbf24" style={{ marginRight: 8 }} />
+          <Text style={styles.sampleNoticeText}>
+            Bu liste örnek veriler içeriyor. Bölgenize özel toplanma noktaları yakında eklenecek.
+          </Text>
+        </View>
+      )}
 
       {/* Sort Tabs */}
       <View style={styles.tabContainer}>
@@ -375,18 +441,60 @@ export default function AssemblyPointsScreen({ navigation }: any) {
         </View>
       </View>
 
+      {/* Add Button */}
+      <View style={styles.addButtonContainer}>
+        <Pressable style={styles.addButton} onPress={handleAddLocation}>
+          <LinearGradient
+            colors={[colors.brand.primary, colors.brand.secondary]}
+            style={styles.addButtonGradient}
+          >
+            <Ionicons name="add-circle" size={24} color="#fff" />
+            <Text style={styles.addButtonText}>Yeni Konum Ekle</Text>
+          </LinearGradient>
+        </Pressable>
+      </View>
+
       {/* Points List */}
       <View style={styles.listContainer}>
         <ScrollView contentContainerStyle={styles.listContent}>
-          {points.filter(p => p.isActive).map((point, index) => (
-            <Animated.View
-              key={point.id}
-              entering={FadeInDown.delay(index * 50)}
-            >
-              <Pressable
-                style={styles.pointCard}
-                onPress={() => setSelectedPoint(selectedPoint?.id === point.id ? null : point)}
+          {points.filter(p => p.isActive).map((point, index) => {
+            const isCustom = point.id.startsWith('custom-');
+            return (
+              <Animated.View
+                key={point.id}
+                entering={FadeInDown.delay(index * 50)}
               >
+                <Pressable
+                  style={styles.pointCard}
+                  onPress={() => setSelectedPoint(selectedPoint?.id === point.id ? null : point)}
+                  onLongPress={() => {
+                    if (isCustom) {
+                      haptics.impactMedium();
+                      Alert.alert(
+                        point.name,
+                        'Ne yapmak istersiniz?',
+                        [
+                          { text: 'İptal', style: 'cancel' },
+                          {
+                            text: 'Düzenle',
+                            onPress: () => handleEditLocation(point),
+                          },
+                          {
+                            text: 'Sil',
+                            style: 'destructive',
+                            onPress: () => handleDeleteLocation(point.id),
+                          },
+                        ]
+                      );
+                    }
+                  }}
+                >
+                  {isCustom && (
+                    <View style={styles.customBadge}>
+                      <Ionicons name="star" size={12} color={colors.brand.primary} />
+                      <Text style={styles.customBadgeText}>Özel</Text>
+                    </View>
+                  )}
                 <View style={styles.pointHeader}>
                   <View style={[styles.pointIcon, { backgroundColor: getTypeColor(point.type) + '20' }]}>
                     <Ionicons name={getTypeIcon(point.type) as keyof typeof Ionicons.glyphMap} size={24} color={getTypeColor(point.type)} />
@@ -459,9 +567,10 @@ export default function AssemblyPointsScreen({ navigation }: any) {
                     </Pressable>
                   </View>
                 )}
-              </Pressable>
-            </Animated.View>
-          ))}
+                </Pressable>
+              </Animated.View>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -485,11 +594,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 60,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     backgroundColor: colors.background.secondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.primary,
+  },
+  headerButton: {
+    padding: 8,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
   },
   headerTitle: {
     ...typography.h3,
@@ -501,13 +621,69 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: 2,
   },
-  locateButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background.tertiary,
-    justifyContent: 'center',
+  sampleNotice: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.3)',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  sampleNoticeText: {
+    flex: 1,
+    color: colors.text.primary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  addButtonContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background.secondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.primary,
+  },
+  addButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  addButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  addButtonText: {
+    ...typography.body,
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  customBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.brand.primary + '20',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.brand.primary,
+  },
+  customBadgeText: {
+    ...typography.small,
+    color: colors.brand.primary,
+    fontWeight: '700',
+    fontSize: 10,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -679,4 +855,3 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
-

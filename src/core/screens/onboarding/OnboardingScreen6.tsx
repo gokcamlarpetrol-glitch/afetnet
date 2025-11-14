@@ -20,7 +20,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { Video, ResizeMode } from 'expo-av';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
+// ELITE: Lazy import expo-notifications to prevent NativeEventEmitter errors
+// CRITICAL: Do NOT import at top level - use async loader instead
+let NotificationsModule: any = null;
+async function getNotificationsAsync(): Promise<any> {
+  if (NotificationsModule) return NotificationsModule;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // ELITE: Use eval to prevent static analysis
+    const moduleName = 'expo-' + 'notifications';
+    NotificationsModule = eval(`require('${moduleName}')`);
+    return NotificationsModule;
+  } catch (error) {
+    return null;
+  }
+}
 import { Camera } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { PermissionsAndroid } from 'react-native';
@@ -106,37 +120,44 @@ export default function OnboardingScreen6({ navigation }: OnboardingScreen6Props
       // 2. Notifications Permission
       try {
         logger.info('🔐 [Onboarding] Requesting notification permission...');
-        const { status } = await Notifications.requestPermissionsAsync({
-          ios: {
-            allowAlert: true,
-            allowBadge: true,
-            allowSound: true,
-          },
-        });
-        statuses.notifications = status === 'granted';
-        
-        if (statuses.notifications) {
-          logger.info('✅ [Onboarding] Notification permission granted');
-          
-          // Create notification channels for Android
-          if (Platform.OS === 'android') {
-            try {
-              await Notifications.setNotificationChannelAsync('eew', {
-                name: 'Erken Deprem Uyarısı',
-                importance: Notifications.AndroidImportance.MAX,
-                vibrationPattern: [0, 500, 500, 500],
-                sound: 'default',
-                enableVibrate: true,
-                showBadge: true,
-                bypassDnd: true,
-              });
-              logger.info('✅ [Onboarding] Notification channels created');
-            } catch (channelError) {
-              logger.error('❌ [Onboarding] Failed to create notification channels:', channelError);
-            }
-          }
+        // ELITE: Use async loader to get notifications module
+        const Notifications = await getNotificationsAsync();
+        if (!Notifications) {
+          logger.warn('Notifications module not available');
+          statuses.notifications = false;
         } else {
-          logger.warn('❌ [Onboarding] Notification permission denied');
+          const { status } = await Notifications.requestPermissionsAsync({
+            ios: {
+              allowAlert: true,
+              allowBadge: true,
+              allowSound: true,
+            },
+          });
+          statuses.notifications = status === 'granted';
+          
+          if (statuses.notifications) {
+            logger.info('✅ [Onboarding] Notification permission granted');
+            
+            // Create notification channels for Android
+            if (Platform.OS === 'android') {
+              try {
+                await Notifications.setNotificationChannelAsync('eew', {
+                  name: 'Erken Deprem Uyarısı',
+                  importance: Notifications.AndroidImportance.MAX,
+                  vibrationPattern: [0, 500, 500, 500],
+                  sound: 'default',
+                  enableVibrate: true,
+                  showBadge: true,
+                  bypassDnd: true,
+                });
+                logger.info('✅ [Onboarding] Notification channels created');
+              } catch (channelError) {
+                logger.error('❌ [Onboarding] Failed to create notification channels:', channelError);
+              }
+            }
+          } else {
+            logger.warn('❌ [Onboarding] Notification permission denied');
+          }
         }
       } catch (error) {
         logger.error('❌ [Onboarding] Notification permission error:', error);

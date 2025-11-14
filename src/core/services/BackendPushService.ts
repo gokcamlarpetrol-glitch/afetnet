@@ -12,42 +12,53 @@ const logger = createLogger('BackendPushService');
 
 class BackendPushService {
   private isRegistered = false;
+  private _isInitialized = false;
   private registrationAttempts = 0;
   private readonly MAX_ATTEMPTS = 3;
   private baseUrl: string | null = null;
   // Elite Security: Rate limiting storage
   private rateLimitStore: Map<string, number> = new Map();
+  // ELITE: Location update interval tracking (for cleanup)
+  private locationUpdateInterval: NodeJS.Timeout | null = null;
+  private retryTimeout: NodeJS.Timeout | null = null;
+
+  get isInitialized(): boolean {
+    return this._isInitialized;
+  }
 
   /**
    * Initialize and register push token with backend
    */
   async initialize(pushToken: string | null) {
     if (!pushToken) {
-      logger.warn('No push token available, skipping backend registration');
+      if (__DEV__) {
+        logger.debug('No push token available, skipping backend registration');
+      }
       return;
     }
 
     if (this.isRegistered) {
-      logger.info('Already registered with backend');
+      if (__DEV__) {
+        logger.debug('Already registered with backend');
+      }
       return;
     }
 
     try {
-      // Get backend URL from environment or use default
-      // Elite: Try multiple sources for backend URL
-      const Constants = require('expo-constants');
-      this.baseUrl = 
-        process.env.BACKEND_URL || 
-        Constants?.expoConfig?.extra?.backendUrl ||
-        'https://afetnet-backend.onrender.com';
+      // ELITE: Get backend URL from ENV config (centralized)
+      const { ENV } = await import('../config/env');
+      this.baseUrl = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
       
       if (__DEV__) {
         logger.info(`Backend URL: ${this.baseUrl}`);
       }
       
       await this.registerPushToken(pushToken);
+      this._isInitialized = true;
     } catch (error) {
       logger.error('Failed to initialize backend push service:', error);
+      // ELITE: Don't throw - backend registration is optional
+      this._isInitialized = false;
     }
   }
 
@@ -139,7 +150,8 @@ class BackendPushService {
         throw new Error(`Backend registration failed: ${response.statusText}`);
       }
 
-      const result = await response.json();
+      // ELITE: Safe JSON parsing with error handling
+      const result = await response.json().catch(() => ({ ok: false, error: 'Failed to parse response' }));
       if (result.ok) {
         this.isRegistered = true;
         logger.info('✅ Successfully registered push token with backend');
@@ -154,6 +166,12 @@ class BackendPushService {
       
       // Elite: Better error handling - don't spam logs for network errors
       if (this.registrationAttempts < this.MAX_ATTEMPTS) {
+        // ELITE: Clear any existing retry timeout
+        if (this.retryTimeout) {
+          clearTimeout(this.retryTimeout);
+          this.retryTimeout = null;
+        }
+        
         // Silent retry - don't log every attempt (reduces spam)
         // Only log in dev mode and only first attempt
         if (__DEV__ && this.registrationAttempts === 1) {
@@ -162,10 +180,17 @@ class BackendPushService {
         
         // Retry with exponential backoff
         const delay = Math.pow(2, this.registrationAttempts) * 1000; // 2s, 4s, 8s
-        setTimeout(() => {
+        this.retryTimeout = setTimeout(() => {
+          this.retryTimeout = null;
           this.registerPushToken(pushToken);
         }, delay);
       } else {
+        // ELITE: Clear retry timeout on final failure
+        if (this.retryTimeout) {
+          clearTimeout(this.retryTimeout);
+          this.retryTimeout = null;
+        }
+        
         // Only log final failure once (not every attempt)
         if (__DEV__) {
           logger.warn(`Backend registration failed after ${this.MAX_ATTEMPTS} attempts. Backend may be unavailable. App will continue without backend push notifications.`);
@@ -177,19 +202,64 @@ class BackendPushService {
 
   /**
    * Periodically update location with backend
+   * ELITE: Proper cleanup to prevent memory leaks
    */
   private startLocationUpdates(deviceId: string, pushToken: string, deviceType: string) {
-    // Update location every 5 minutes
-    setInterval(async () => {
+    // ELITE: Clear any existing interval to prevent duplicates
+    if (this.locationUpdateInterval) {
+      clearInterval(this.locationUpdateInterval);
+      this.locationUpdateInterval = null;
+    }
+    
+    // ELITE: Update location every 5 minutes with proper error handling
+    this.locationUpdateInterval = setInterval(async () => {
       try {
+        // ELITE: Validate baseUrl before making request
+        if (!this.baseUrl) {
+          logger.warn('Backend URL not configured, stopping location updates');
+          this.stopLocationUpdates();
+          return;
+        }
+        
         const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        if (status !== 'granted') {
+          if (__DEV__) {
+            logger.debug('Location permission not granted, skipping location update');
+          }
+          return;
+        }
 
-        const location = await Location.getCurrentPositionAsync({
+        // ELITE: Get location with timeout protection
+        const locationPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
+        
+        const timeoutPromise = new Promise<null>((resolve) => 
+          setTimeout(() => resolve(null), 10000) // 10 second timeout
+        );
+        
+        const location = await Promise.race([locationPromise, timeoutPromise]);
+        
+        if (!location) {
+          if (__DEV__) {
+            logger.debug('Location request timed out or failed');
+          }
+          return;
+        }
 
-        await fetch(`${this.baseUrl}/push/register`, {
+        // ELITE: Validate coordinates
+        const latitude = location.coords.latitude;
+        const longitude = location.coords.longitude;
+        
+        if (isNaN(latitude) || isNaN(longitude) || 
+            latitude < -90 || latitude > 90 ||
+            longitude < -180 || longitude > 180) {
+          logger.warn('Invalid location coordinates received');
+          return;
+        }
+
+        // ELITE: Make request with timeout
+        const fetchPromise = fetch(`${this.baseUrl}/push/register`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -198,14 +268,50 @@ class BackendPushService {
             userId: deviceId,
             pushToken,
             deviceType,
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
+            latitude: Math.round(latitude * 10000) / 10000, // Round to 4 decimals
+            longitude: Math.round(longitude * 10000) / 10000,
+            timestamp: Date.now(),
           }),
         });
-      } catch (error) {
-        logger.warn('Failed to update location with backend:', error);
+        
+        const fetchTimeoutPromise = new Promise<Response>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout')), 15000) // 15 second timeout
+        );
+        
+        const response = await Promise.race([fetchPromise, fetchTimeoutPromise]);
+        
+        if (!response.ok) {
+          if (__DEV__) {
+            logger.debug(`Location update failed: ${response.status} ${response.statusText}`);
+          }
+        } else {
+          if (__DEV__) {
+            logger.debug('Location updated successfully with backend');
+          }
+        }
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        
+        // ELITE: Don't log timeout errors as warnings (expected behavior)
+        if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+          if (__DEV__) {
+            logger.debug('Location update request timed out (expected in poor network conditions)');
+          }
+        } else {
+          logger.warn('Failed to update location with backend:', errorMessage);
+        }
       }
     }, 5 * 60 * 1000); // Every 5 minutes
+  }
+
+  /**
+   * ELITE: Stop location updates (cleanup)
+   */
+  private stopLocationUpdates(): void {
+    if (this.locationUpdateInterval) {
+      clearInterval(this.locationUpdateInterval);
+      this.locationUpdateInterval = null;
+    }
   }
 
   /**
@@ -231,10 +337,23 @@ class BackendPushService {
    */
   async unregister() {
     try {
+      // ELITE: Stop location updates first
+      this.stopLocationUpdates();
+      
+      // ELITE: Clear retry timeout
+      if (this.retryTimeout) {
+        clearTimeout(this.retryTimeout);
+        this.retryTimeout = null;
+      }
+      
       const deviceId = await getDeviceId();
-      if (!deviceId || !this.baseUrl) return;
+      if (!deviceId || !this.baseUrl) {
+        this.isRegistered = false;
+        return;
+      }
 
-      await fetch(`${this.baseUrl}/push/unregister`, {
+      // ELITE: Make request with timeout
+      const fetchPromise = fetch(`${this.baseUrl}/push/unregister`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -243,12 +362,130 @@ class BackendPushService {
           userId: deviceId,
         }),
       });
+      
+      const fetchTimeoutPromise = new Promise<Response>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout')), 10000) // 10 second timeout
+      );
+      
+      await Promise.race([fetchPromise, fetchTimeoutPromise]);
 
       this.isRegistered = false;
       logger.info('Unregistered from backend');
-    } catch (error) {
-      logger.error('Failed to unregister:', error);
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+      
+      // ELITE: Mark as unregistered even if request fails
+      this.isRegistered = false;
+      
+      if (errorMessage.includes('timeout')) {
+        if (__DEV__) {
+          logger.debug('Unregister request timed out (non-critical)');
+        }
+      } else {
+        logger.error('Failed to unregister:', errorMessage);
+      }
     }
+  }
+
+  /**
+   * ELITE: Send seismic detection to backend for early warning aggregation
+   */
+  async sendSeismicDetection(detection: {
+    id: string;
+    deviceId: string;
+    timestamp: number;
+    latitude: number;
+    longitude: number;
+    magnitude: number;
+    depth: number;
+    pWaveDetected: boolean;
+    sWaveDetected: boolean;
+    confidence: number;
+    warningTime: number;
+    source: string;
+  }): Promise<void> {
+    if (!this._isInitialized || !this.baseUrl) {
+      if (__DEV__) {
+        logger.debug('Backend not initialized, skipping seismic detection send');
+      }
+      return;
+    }
+
+    try {
+      // ELITE: Validate input
+      if (!detection.id || !detection.deviceId || 
+          isNaN(detection.latitude) || isNaN(detection.longitude) ||
+          detection.latitude < -90 || detection.latitude > 90 ||
+          detection.longitude < -180 || detection.longitude > 180) {
+        logger.warn('Invalid seismic detection data');
+        return;
+      }
+
+      // ELITE: Rate limiting
+      const rateLimitKey = `seismic_${detection.deviceId}`;
+      const lastSent = this.rateLimitStore.get(rateLimitKey) || 0;
+      const now = Date.now();
+      if (now - lastSent < 5000) { // Max 1 per 5 seconds
+        if (__DEV__) {
+          logger.debug('Seismic detection rate limited');
+        }
+        return;
+      }
+      this.rateLimitStore.set(rateLimitKey, now);
+
+      // ELITE: Send to backend with timeout
+      const fetchPromise = fetch(`${this.baseUrl}/seismic/detection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...detection,
+          timestamp: detection.timestamp,
+        }),
+      });
+
+      const timeoutPromise = new Promise<Response>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout')), 10000) // 10 second timeout
+      );
+
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+
+      if (!response.ok) {
+        if (__DEV__) {
+          logger.debug(`Seismic detection send failed: ${response.status}`);
+        }
+      } else {
+        if (__DEV__) {
+          logger.info('Seismic detection sent to backend successfully');
+        }
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+      if (errorMessage.includes('timeout')) {
+        if (__DEV__) {
+          logger.debug('Seismic detection send timed out');
+        }
+      } else {
+        logger.warn('Failed to send seismic detection to backend:', errorMessage);
+      }
+    }
+  }
+
+  /**
+   * ELITE: Cleanup on shutdown
+   */
+  cleanup(): void {
+    this.stopLocationUpdates();
+    
+    if (this.retryTimeout) {
+      clearTimeout(this.retryTimeout);
+      this.retryTimeout = null;
+    }
+    
+    this.isRegistered = false;
+    this._isInitialized = false;
+    this.registrationAttempts = 0;
   }
 }
 

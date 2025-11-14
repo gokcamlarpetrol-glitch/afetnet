@@ -5,6 +5,7 @@ import { appendTrail } from './store';
 let run=false;
 let lastGps: {lat:number;lng:number;ts:number}|null=null;
 let stepCount=0; let lastStepTs=0; let heading=0;
+let stateUpdateInterval: ReturnType<typeof setInterval> | null = null; // ELITE: Track interval for cleanup
 
 export async function startPDR(){
   if(run) {return;} run=true;
@@ -38,10 +39,21 @@ export async function startPDR(){
   try{ const p = await Location.getLastKnownPositionAsync({}); if(p){ lastGps={ lat:p.coords.latitude, lng:p.coords.longitude, ts: Date.now() }; await appendTrail({ ts: Date.now(), lat:lastGps.lat, lng:lastGps.lng, src:'gps' }); } }catch{
     // Ignore GPS errors
   }
-  // stop handle
-  (startPDR as any)._stop = ()=>{ run=false; m.remove(); a.remove(); };
+  // ELITE: Type-safe stop handle
+  (startPDR as typeof startPDR & { _stop?: () => void })._stop = () => {
+    run = false;
+    m.remove();
+    a.remove();
+  };
 }
-export function stopPDR(){ (startPDR as any)?._stop?.(); }
+export function stopPDR(){ 
+  (startPDR as any)?._stop?.();
+  // ELITE: Cleanup state update interval
+  if (stateUpdateInterval) {
+    (globalThis as any).clearInterval(stateUpdateInterval);
+    stateUpdateInterval = null;
+  }
+}
 
 // Legacy compatibility for existing screens
 export const state = { stepCount: 0, heading: 0 };
@@ -49,7 +61,8 @@ export function reset(){ stepCount = 0; }
 export function start(){ return startPDR(); }
 
 // Update state for legacy compatibility
-(globalThis as any).setInterval(() => {
+// ELITE: Store interval ID for cleanup
+stateUpdateInterval = (globalThis as any).setInterval(() => {
   state.stepCount = stepCount;
   state.heading = heading;
 }, 1000);

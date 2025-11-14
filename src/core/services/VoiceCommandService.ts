@@ -45,7 +45,12 @@ class VoiceCommandService {
                   accuracy: pos.coords.accuracy || 10,
                 };
               }
-            } catch {}
+            } catch (error) {
+              // ELITE: Log voice command errors but don't crash the app
+              if (__DEV__) {
+                logger.debug('Voice command processing failed (non-critical):', error);
+              }
+            }
             await sosService.sendSOSSignal(location, 'Acil yardım gerekiyor!');
           },
           response: 'Yardım çağrısı gönderiliyor',
@@ -97,7 +102,12 @@ class VoiceCommandService {
                   accuracy: pos.coords.accuracy || 10,
                 };
               }
-            } catch {}
+            } catch (error) {
+              // ELITE: Log voice command errors but don't crash the app
+              if (__DEV__) {
+                logger.debug('Voice command processing failed (non-critical):', error);
+              }
+            }
             await sosService.sendSOSSignal(location, 'Acil yardım gerekiyor!');
           },
           response: 'Acil durum sinyali gönderiliyor',

@@ -1,20 +1,41 @@
 /**
- * DISASTER MAP SCREEN
+ * DISASTER MAP SCREEN - ELITE VERSION
  * Real-time disaster map with active events, impact zones, and user reports
+ * Full MapView integration with Circle overlays for impact zones
  */
 
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, Alert, StatusBar, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import { BlurView } from 'expo-blur';
+import BottomSheet from '@gorhom/bottom-sheet';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { usePremiumStore } from '../../stores/premiumStore';
 import PremiumGate from '../../components/PremiumGate';
 import { getMagnitudeColor, getMagnitudeSize, calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
+import { useViewportData } from '../../hooks/useViewportData';
+import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
+import * as haptics from '../../utils/haptics';
 
 const logger = createLogger('DisasterMapScreen');
+
+// Use react-native-maps with error handling
+let MapView: any = null;
+let Marker: any = null;
+let Circle: any = null;
+
+try {
+  const rnMaps = require('react-native-maps');
+  MapView = rnMaps.default || rnMaps;
+  Marker = rnMaps.Marker;
+  Circle = rnMaps.Circle;
+} catch (e) {
+  logger.warn('react-native-maps not available:', e);
+}
 
 interface DisasterEvent {
   id: string;
@@ -46,8 +67,11 @@ const TURKEY_CENTER = {
 };
 
 export default function DisasterMapScreen({ navigation }: any) {
+  const mapRef = useRef<any>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const insets = useSafeAreaInsets();
+  
   // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
   const isPremium = usePremiumStore((state) => state.isPremium);
   const [earthquakes, setEarthquakes] = useState<any[]>([]);
   const [disasterEvents, setDisasterEvents] = useState<DisasterEvent[]>([]);
@@ -55,6 +79,14 @@ export default function DisasterMapScreen({ navigation }: any) {
   const [selectedEvent, setSelectedEvent] = useState<DisasterEvent | null>(null);
   const [showImpactZones, setShowImpactZones] = useState(true);
   const [filterType, setFilterType] = useState<string | null>(null);
+  const [currentRegion, setCurrentRegion] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
+  
+  const snapPoints = useMemo(() => ['25%', '50%', '85%'], []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -169,12 +201,63 @@ export default function DisasterMapScreen({ navigation }: any) {
     }
   };
 
-  const filteredEvents = filterType 
-    ? disasterEvents.filter(e => e.type === filterType)
-    : disasterEvents;
+  // ELITE: Viewport-based data filtering for performance
+  const viewportEvents = useViewportData({
+    data: disasterEvents,
+    region: currentRegion,
+    enabled: true,
+    buffer: 0.2, // 20% buffer
+  });
+
+  const filteredEvents = useMemo(() => {
+    const filtered = filterType 
+      ? viewportEvents.filter(e => e.type === filterType)
+      : viewportEvents;
+    return filtered;
+  }, [viewportEvents, filterType]);
+
+  // ELITE: Impact zones for selected event
+  const selectedImpactZones = useMemo(() => {
+    if (!selectedEvent) return [];
+    return getImpactZones(selectedEvent);
+  }, [selectedEvent]);
+
+  const handleMarkerPress = useCallback((event: DisasterEvent) => {
+    haptics.impactLight();
+    setSelectedEvent(event);
+    bottomSheetRef.current?.expand();
+    
+    // Animate to event location
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: event.latitude,
+        longitude: event.longitude,
+        latitudeDelta: Math.max(event.impactRadius ? event.impactRadius / 111 : 0.5, 0.1),
+        longitudeDelta: Math.max(event.impactRadius ? event.impactRadius / 111 : 0.5, 0.1),
+      }, 500);
+    }
+  }, []);
+
+  // If MapView is not available, show fallback
+  if (!MapView || !Marker) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a', padding: 24 }]}>
+          <Ionicons name="map-outline" size={64} color={colors.text.secondary} />
+          <Text style={[styles.headerSubtitle, { marginTop: 16, textAlign: 'center' }]}>Harita Modülü Yüklenemedi</Text>
+          <Text style={[styles.headerSubtitle, { textAlign: 'center', marginTop: 8 }]}>
+            Development build gereklidir{'\n'}
+            Expo Go'da harita çalışmaz
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -243,18 +326,86 @@ export default function DisasterMapScreen({ navigation }: any) {
         </Pressable>
       </ScrollView>
 
-      {/* Map Placeholder */}
-      <View style={styles.map}>
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="map" size={64} color={colors.text.tertiary} />
-          <Text style={styles.mapPlaceholderText}>Aktif Afet Haritası</Text>
-          <Text style={styles.mapPlaceholderSubtext}>
-            Offline harita desteği yakında aktif olacak
-          </Text>
-        </View>
+      {/* ELITE: Real MapView with Impact Zones */}
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        mapType="standard"
+        showsUserLocation
+        showsMyLocationButton={false}
+        showsCompass
+        showsScale
+        initialRegion={TURKEY_CENTER}
+        onMapReady={() => {
+          logger.info('DisasterMapView ready');
+          setCurrentRegion(TURKEY_CENTER);
+        }}
+        onRegionChangeComplete={(region) => {
+          setCurrentRegion(region);
+        }}
+        loadingEnabled
+        loadingIndicatorColor={colors.accent.primary}
+      >
+        {/* User Location Marker */}
+        {userLocation && (
+          <Marker coordinate={userLocation} title="Konumun">
+            <View style={styles.userLocationMarker} />
+          </Marker>
+        )}
 
-        {/* Event List */}
-        <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
+        {/* Disaster Event Markers */}
+        {filteredEvents.map((event) => (
+          <Marker
+            key={event.id}
+            coordinate={{ latitude: event.latitude, longitude: event.longitude }}
+            onPress={() => handleMarkerPress(event)}
+            tracksViewChanges={false}
+          >
+            <EarthquakeMarker 
+              magnitude={event.magnitude || 0} 
+              selected={selectedEvent?.id === event.id} 
+            />
+          </Marker>
+        ))}
+
+        {/* ELITE: Impact Zones Circle Overlays */}
+        {showImpactZones && selectedEvent && Circle && selectedImpactZones.map((zone, index) => {
+          const getZoneColor = () => {
+            switch (zone.expectedDamage) {
+              case 'severe': return 'rgba(220, 20, 60, 0.3)'; // Crimson
+              case 'moderate': return 'rgba(255, 69, 0, 0.3)'; // Orange Red
+              case 'light': return 'rgba(255, 165, 0, 0.3)'; // Orange
+              default: return 'rgba(255, 215, 0, 0.3)'; // Gold
+            }
+          };
+
+          const getZoneStrokeColor = () => {
+            switch (zone.expectedDamage) {
+              case 'severe': return '#DC143C';
+              case 'moderate': return '#FF4500';
+              case 'light': return '#FFA500';
+              default: return '#FFD700';
+            }
+          };
+
+          return (
+            <Circle
+              key={`impact-${selectedEvent.id}-${index}`}
+              center={{
+                latitude: zone.center.lat,
+                longitude: zone.center.lng,
+              }}
+              radius={zone.radius * 1000} // Convert km to meters
+              fillColor={getZoneColor()}
+              strokeColor={getZoneStrokeColor()}
+              strokeWidth={2}
+            />
+          );
+        })}
+      </MapView>
+
+      {/* Event List Overlay */}
+      <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
           {filteredEvents.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="checkmark-circle" size={48} color={colors.text.tertiary} />
@@ -360,10 +511,122 @@ export default function DisasterMapScreen({ navigation }: any) {
             })
           )}
         </ScrollView>
-      </View>
 
-      {/* Selected Event Info */}
-      {selectedEvent && (
+      {/* ELITE: Bottom Sheet for Event Details */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={-1}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        backgroundComponent={({ style }) => (
+          <BlurView intensity={50} tint="dark" style={[style, styles.bottomSheetBackground]} />
+        )}
+        handleIndicatorStyle={styles.bottomSheetHandle}
+      >
+        {selectedEvent ? (
+          <View style={styles.bottomSheetContent}>
+            <View style={styles.bottomSheetHeader}>
+              <View style={[styles.eventIcon, { backgroundColor: getEventColor(selectedEvent.severity) + '20' }]}>
+                <Ionicons 
+                  name={getEventIcon(selectedEvent.type)} 
+                  size={24} 
+                  color={getEventColor(selectedEvent.severity)} 
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.bottomSheetTitle}>
+                  {selectedEvent.type === 'earthquake' 
+                    ? `${selectedEvent.magnitude?.toFixed(1)} ML Deprem`
+                    : selectedEvent.type}
+                </Text>
+                <Text style={styles.bottomSheetSubtitle}>{selectedEvent.description || selectedEvent.source}</Text>
+              </View>
+              <Pressable onPress={() => {
+                setSelectedEvent(null);
+                bottomSheetRef.current?.close();
+              }}>
+                <Ionicons name="close" size={24} color={colors.text.secondary} />
+              </Pressable>
+            </View>
+
+            <View style={styles.bottomSheetDetails}>
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={20} color={colors.text.tertiary} />
+                <Text style={styles.detailLabel}>Zaman</Text>
+                <Text style={styles.detailValue}>
+                  {new Date(selectedEvent.reportedAt).toLocaleString('tr-TR')}
+                </Text>
+              </View>
+
+              {userLocation && (
+                <View style={styles.detailRow}>
+                  <Ionicons name="navigate-outline" size={20} color={colors.text.tertiary} />
+                  <Text style={styles.detailLabel}>Mesafe</Text>
+                  <Text style={styles.detailValue}>
+                    {formatDistance(
+                      calculateDistance(
+                        userLocation.latitude,
+                        userLocation.longitude,
+                        selectedEvent.latitude,
+                        selectedEvent.longitude
+                      )
+                    )}
+                  </Text>
+                </View>
+              )}
+
+              {selectedEvent.impactRadius && (
+                <View style={styles.detailRow}>
+                  <Ionicons name="radio-button-on-outline" size={20} color={colors.text.tertiary} />
+                  <Text style={styles.detailLabel}>Etki Yarıçapı</Text>
+                  <Text style={styles.detailValue}>{selectedEvent.impactRadius.toFixed(0)} km</Text>
+                </View>
+              )}
+
+              {showImpactZones && selectedImpactZones.length > 0 && (
+                <View style={styles.zonesSection}>
+                  <Text style={styles.zonesTitle}>Etki Zonları:</Text>
+                  {selectedImpactZones.map((zone, index) => (
+                    <View key={index} style={styles.zoneItem}>
+                      <View style={[
+                        styles.zoneDot,
+                        { backgroundColor: zone.expectedDamage === 'severe' ? '#DC143C' :
+                                          zone.expectedDamage === 'moderate' ? '#FF4500' :
+                                          zone.expectedDamage === 'light' ? '#FFA500' : '#FFD700' }
+                      ]} />
+                      <Text style={styles.zoneText}>
+                        {zone.expectedDamage === 'severe' ? 'Ağır' :
+                         zone.expectedDamage === 'moderate' ? 'Orta' :
+                         zone.expectedDamage === 'light' ? 'Hafif' : 'Minimal'} hasar
+                        {' • '}{zone.radius.toFixed(0)}km yarıçap
+                        {' • '}~{zone.population.toLocaleString('tr-TR')} kişi
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <Pressable 
+              style={styles.reportButton}
+              onPress={() => {
+                navigation.navigate('UserReports');
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={20} color={colors.brand.primary} />
+              <Text style={styles.reportButtonText}>Bu olayı raporla</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.bottomSheetEmpty}>
+            <Ionicons name="map-outline" size={48} color={colors.text.tertiary} />
+            <Text style={styles.bottomSheetEmptyText}>Detayları görmek için bir olay seçin</Text>
+          </View>
+        )}
+      </BottomSheet>
+
+      {/* Selected Event Info (Legacy - can be removed) */}
+      {false && selectedEvent && (
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
             <View>
@@ -779,6 +1042,77 @@ const styles = StyleSheet.create({
   legendText: {
     ...typography.small,
     color: colors.text.secondary,
+  },
+  // ELITE: Bottom Sheet Styles
+  bottomSheetBackground: {
+    backgroundColor: 'transparent',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    backgroundColor: colors.text.tertiary,
+  },
+  bottomSheetContent: {
+    padding: 16,
+  },
+  bottomSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  bottomSheetTitle: {
+    ...typography.h3,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  bottomSheetSubtitle: {
+    ...typography.body,
+    color: colors.text.secondary,
+    marginTop: 4,
+  },
+  bottomSheetDetails: {
+    gap: 12,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailLabel: {
+    ...typography.body,
+    color: colors.text.secondary,
+    flex: 1,
+  },
+  detailValue: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontWeight: '600',
+  },
+  bottomSheetEmpty: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  bottomSheetEmptyText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  zonesSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.primary,
+  },
+  userLocationMarker: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.brand.primary,
+    borderWidth: 3,
+    borderColor: '#fff',
   },
 });
 

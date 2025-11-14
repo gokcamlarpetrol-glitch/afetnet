@@ -32,3 +32,11 @@ docker-run:
 deploy:
 	./scripts/deploy.sh
 
+
+
+
+
+
+
+
+

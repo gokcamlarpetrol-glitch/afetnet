@@ -94,3 +94,12 @@ eas env:list --scope project
 4. ✅ Build yap: `eas build --platform ios --profile production`
 
 
+
+
+
+
+
+
+
+
+

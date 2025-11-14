@@ -37,3 +37,11 @@ else
   echo "⚠️  kubectl not found, skipping Kubernetes deployment"
 fi
 
+
+
+
+
+
+
+
+

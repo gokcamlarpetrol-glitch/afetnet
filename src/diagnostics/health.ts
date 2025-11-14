@@ -56,9 +56,15 @@ export async function getHealth(): Promise<Health>{
   let level: number | undefined; let isLowPower = false;
   try {
     const lvl = await Battery.getBatteryLevelAsync(); if (lvl!=null) {level = Math.round(lvl*100);}
-    // expo-battery lowPowerMode?
-    // @ts-ignore
-    isLowPower = Boolean(Battery.isLowPowerModeEnabledAsync && await Battery.isLowPowerModeEnabledAsync());
+    // ELITE: Type-safe battery low power mode check
+    if (typeof Battery.isLowPowerModeEnabledAsync === 'function') {
+      try {
+        isLowPower = Boolean(await Battery.isLowPowerModeEnabledAsync());
+      } catch {
+        // Ignore battery low power mode errors
+        isLowPower = false;
+      }
+    }
   } catch {
     // Ignore battery errors
   }

@@ -16,11 +16,10 @@ import {
   ActivityIndicator,
   Modal,
   TouchableOpacity,
-  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMessageStore } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
@@ -289,12 +288,30 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
       }
     });
 
-    // Broadcast discovery request via mesh store
+    // CRITICAL: Broadcast discovery request via BLE Mesh Service (actual transmission)
     if (id) {
-      useMeshStore.getState().broadcastMessage(JSON.stringify({
+      const discoveryPayload = JSON.stringify({
         type: 'discovery_request',
         deviceId: id,
-      }), 'text');
+      });
+      
+      // CRITICAL: Send via BLE Mesh Service for actual broadcast
+      bleMeshService.broadcastMessage({
+        content: discoveryPayload,
+        type: 'text',
+        priority: 'normal',
+        ackRequired: false,
+        ttl: 3600,
+        sequence: 0,
+        attempts: 0,
+      }).catch((error) => {
+        logger.error('Failed to broadcast discovery request:', error);
+      });
+      
+      // CRITICAL: Also add to mesh store for tracking
+      useMeshStore.getState().broadcastMessage(discoveryPayload, 'text').catch((error) => {
+        logger.error('Failed to add discovery request to store:', error);
+      });
     }
 
     // Auto-stop after 10 seconds
@@ -328,6 +345,17 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   useEffect(() => {
     if (!initRequestedRef.current) {
       initRequestedRef.current = true;
+      
+      // ELITE: Initialize message store
+      const initStore = async () => {
+        try {
+          await useMessageStore.getState().initialize();
+        } catch (error) {
+          logger.error('Failed to initialize message store:', error);
+        }
+      };
+      initStore();
+      
       void ensureMeshReady();
     }
 
@@ -427,7 +455,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     },
   ], [handleCopyId, isMeshConnected, meshStoreDeviceId, myDeviceId, scannedDevices.length]);
 
-  const startConversation = (targetDeviceId: string) => {
+  const startConversation = async (targetDeviceId: string) => {
     try {
       // Check if conversation already exists
       const existing = useMessageStore.getState().conversations.find(
@@ -447,7 +475,8 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
           unreadCount: 0,
         };
         
-        useMessageStore.getState().addConversation(newConversation);
+        // ELITE: Await async addConversation to ensure proper state update
+        await useMessageStore.getState().addConversation(newConversation);
         navigation.navigate('Conversation', { userId: targetDeviceId });
       }
     } catch (error) {

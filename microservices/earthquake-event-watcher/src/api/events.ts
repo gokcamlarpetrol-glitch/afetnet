@@ -73,3 +73,11 @@ export function storeEvent(event: NormalizedEarthquake): void {
   }
 }
 
+
+
+
+
+
+
+
+

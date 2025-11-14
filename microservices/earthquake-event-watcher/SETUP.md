@@ -143,3 +143,11 @@ Import dashboard JSON (create from Prometheus metrics):
 3. Set up Grafana dashboards
 4. Monitor metrics and adjust thresholds
 
+
+
+
+
+
+
+
+

@@ -3,7 +3,7 @@
  * Shows trapped users detected via BLE mesh beacon
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -39,11 +39,33 @@ export default function RescueTeamScreen({ navigation }: any) {
     toggleRescueTeamMode();
   };
 
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     rescueBeaconService.cleanupExpiredUsers();
-    setTimeout(() => setRefreshing(false), 1000);
+    
+    // CRITICAL: Clear previous timeout if exists
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    
+    // CRITICAL: Store timeout ref for cleanup
+    refreshTimeoutRef.current = setTimeout(() => {
+      setRefreshing(false);
+      refreshTimeoutRef.current = null;
+    }, 1000);
   };
+
+  // CRITICAL: Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const handleClearAll = () => {
     haptics.impactMedium();

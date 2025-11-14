@@ -180,16 +180,42 @@ class RescueBeaconService {
         message: userStatus.status === 'trapped' ? 'Enkaz altında yardım bekliyorum!' : undefined,
       };
 
-      // Broadcast via BLE Mesh
-      await bleMeshService.broadcastMessage({
-        type: 'sos',
-        content: JSON.stringify(payload),
-        ttl: 10,
-        priority: 'critical',
-        ackRequired: false,
-        sequence: 0,
-        attempts: 0,
-      });
+      // ELITE: Broadcast via BLE Mesh with validation
+      try {
+        // ELITE: Validate BLE mesh service is running
+        if (!bleMeshService.getIsRunning()) {
+          logger.warn('BLE Mesh service not running - SOS beacon not broadcasted');
+          return;
+        }
+
+        // ELITE: Validate payload before stringifying
+        if (!payload || typeof payload !== 'object') {
+          logger.error('Invalid SOS payload:', payload);
+          return;
+        }
+
+        const payloadString = JSON.stringify(payload);
+        if (!payloadString || payloadString.length === 0) {
+          logger.error('Failed to stringify SOS payload');
+          return;
+        }
+
+        await bleMeshService.broadcastMessage({
+          type: 'sos',
+          content: payloadString,
+          ttl: 10,
+          priority: 'critical',
+          ackRequired: false,
+          sequence: 0,
+          attempts: 0,
+        }).catch((error) => {
+          logger.error('Error broadcasting SOS beacon:', error);
+          // Don't throw - SOS beacon failure shouldn't break the service
+        });
+      } catch (error) {
+        logger.error('Failed to broadcast SOS beacon:', error);
+        // Don't throw - SOS beacon failure shouldn't break the service
+      }
 
       logger.info('SOS beacon broadcasted', {
         battery,

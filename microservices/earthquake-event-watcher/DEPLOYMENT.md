@@ -156,3 +156,11 @@ kubectl get hpa earthquake-event-watcher-hpa
 kubectl scale deployment/earthquake-event-watcher --replicas=5
 ```
 
+
+
+
+
+
+
+
+

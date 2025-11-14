@@ -112,3 +112,11 @@ export abstract class BaseAPIClient {
   protected abstract getSourceName(): 'USGS' | 'Ambee' | 'Xweather' | 'Zyla';
 }
 
+
+
+
+
+
+
+
+

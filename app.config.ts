@@ -1,8 +1,12 @@
 import { ConfigContext, ExpoConfig } from "@expo/config";
+import * as dotenv from 'dotenv';
+
+// CRITICAL: Load .env file before reading environment variables
+dotenv.config();
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "AfetNet",
+  name: "AfetNet - Şebekesiz Acil İletişim",
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
@@ -44,7 +48,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "1",
+    buildNumber: "10",
           bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     infoPlist: {
@@ -64,7 +68,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       UIBackgroundModes: [
         "fetch",
         "remote-notification",
-        "processing",
         "location",
         "bluetooth-central",
         "bluetooth-peripheral",
@@ -110,6 +113,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EXPO_PUBLIC_OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || '',
     RC_IOS_KEY: process.env.RC_IOS_KEY || '',
     RC_ANDROID_KEY: process.env.RC_ANDROID_KEY || '',
+    // CRITICAL: Firebase API Key from .env file (loaded via dotenv.config() above)
     EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',

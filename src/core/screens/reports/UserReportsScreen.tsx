@@ -122,6 +122,48 @@ export default function UserReportsScreen({ navigation }: any) {
         ...report,
       }));
 
+      // CRITICAL: Save to Firebase
+      try {
+        const { firebaseDataService } = await import('../../services/FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          // Save as felt earthquake report for consistency
+          await firebaseDataService.saveFeltEarthquakeReport({
+            earthquakeId: `user_report_${report.id}`,
+            userId: deviceId,
+            timestamp: report.timestamp,
+            location: report.location,
+            intensity: report.intensity,
+            feltDuration: 0, // User reports don't have duration
+            effects: [],
+            comments: report.description,
+          }).catch((error) => {
+            logger.error('Failed to save user report to Firebase:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to save user report to Firebase:', error);
+      }
+
+      // CRITICAL: Send to backend for rescue coordination
+      try {
+        const { backendEmergencyService } = await import('../../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendUserReport({
+            reportId: report.id,
+            timestamp: report.timestamp,
+            location: report.location,
+            intensity: report.intensity,
+            type: report.type,
+            description: report.description,
+            photoUri: report.photoUri,
+          }).catch((error) => {
+            logger.error('Failed to send user report to backend:', error);
+          });
+        }
+      } catch (error) {
+        logger.error('Failed to send user report to backend:', error);
+      }
+
       // Also send to seismic sensor service for community fusion
       // This would integrate with SeismicSensorService for community detection
 

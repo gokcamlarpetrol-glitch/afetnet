@@ -50,11 +50,31 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
   const [inputText, setInputText] = useState('');
   const [myDeviceId, setMyDeviceId] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const statusUpdateTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const { members } = useFamilyStore();
 
   useEffect(() => {
     loadDeviceId();
     loadMessages();
+
+    // ELITE: Ensure BLE Mesh service is started for offline messaging
+    const ensureMeshReady = async () => {
+      try {
+        if (!bleMeshService.getIsRunning()) {
+          await bleMeshService.start();
+          if (__DEV__) {
+            logger.info('BLE Mesh service started from FamilyGroupChatScreen');
+          }
+        }
+      } catch (error) {
+        logger.warn('BLE Mesh start failed (non-critical):', error);
+        // Continue - messages can still be queued for later
+      }
+    };
+    
+    ensureMeshReady().catch((error) => {
+      logger.error('Error ensuring mesh ready:', error);
+    });
 
     // Listen for new messages
     const unsubscribe = bleMeshService.onMessage(async (message) => {
@@ -90,7 +110,14 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      // ELITE: Cleanup all status update timeouts on unmount
+      statusUpdateTimeoutsRef.current.forEach((timeout) => {
+        clearTimeout(timeout);
+      });
+      statusUpdateTimeoutsRef.current.clear();
+    };
   }, []);
 
   const loadDeviceId = async () => {
@@ -146,6 +173,24 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
 
       // ELITE: Send via BLE Mesh with error handling
       try {
+        // ELITE: Ensure BLE mesh service is running before sending
+        if (!bleMeshService.getIsRunning()) {
+          try {
+            await bleMeshService.start();
+            if (__DEV__) {
+              logger.info('BLE Mesh service started before sending group message');
+            }
+          } catch (startError) {
+            logger.warn('BLE Mesh start failed before sending (non-critical):', startError);
+            // Continue - message will fail gracefully
+          }
+        }
+        
+        // ELITE: Validate BLE mesh service is running after start attempt
+        if (!bleMeshService.getIsRunning()) {
+          throw new Error('BLE Mesh servisi başlatılamadı');
+        }
+
         await bleMeshService.broadcastMessage({
           type: 'family_group',
           content: JSON.stringify(newMessage),
@@ -156,35 +201,50 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
           attempts: 0,
         });
 
-        // ELITE: Update status with delay
-        setTimeout(() => {
+        // ELITE: Update status with delay (store timeout for cleanup)
+        const statusUpdateTimeout = setTimeout(() => {
           try {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === newMessage.id ? { ...msg, status: 'sent' } : msg
               )
             );
+            statusUpdateTimeoutsRef.current.delete(newMessage.id);
           } catch (error) {
             logger.error('Error updating message status:', error);
+            statusUpdateTimeoutsRef.current.delete(newMessage.id);
           }
         }, 1000);
+        
+        // ELITE: Store timeout for cleanup
+        statusUpdateTimeoutsRef.current.set(newMessage.id, statusUpdateTimeout);
 
         logger.info('Group message sent:', messageId);
       } catch (error) {
         logger.error('Error sending group message:', error);
         Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
         // Remove failed message from UI
-        setMessages((prev) => prev.filter(msg => msg.id !== newMessage.id));
+        setMessages((prev) => {
+          const filtered = prev.filter(msg => msg.id !== newMessage.id);
+          // ELITE: Cleanup timeout if exists
+          const timeout = statusUpdateTimeoutsRef.current.get(newMessage.id);
+          if (timeout) {
+            clearTimeout(timeout);
+            statusUpdateTimeoutsRef.current.delete(newMessage.id);
+          }
+          return filtered;
+        });
       }
 
       // ELITE: Scroll to bottom with error handling
-      setTimeout(() => {
+      // CRITICAL: Use requestAnimationFrame for better performance and automatic cleanup
+      requestAnimationFrame(() => {
         try {
           flatListRef.current?.scrollToEnd({ animated: true });
         } catch (error) {
           logger.warn('Error scrolling to end:', error);
         }
-      }, 100);
+      });
     } catch (error) {
       logger.error('Error in handleSend:', error);
       Alert.alert('Hata', 'Mesaj gönderilirken bir hata oluştu.');

@@ -6,10 +6,22 @@
 
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
-import getFirebaseApp from '../../lib/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const logger = createLogger('FirebaseCrashlytics');
+
+// CRITICAL: Lazy load Firebase app to prevent module loading errors
+async function getFirebaseAppAsync() {
+  try {
+    const firebaseModule = await import('../../lib/firebase');
+    return firebaseModule.getFirebaseAppAsync ? await firebaseModule.getFirebaseAppAsync() : null;
+  } catch (error) {
+    if (__DEV__) {
+      logger.debug('Firebase app not available:', error);
+    }
+    return null;
+  }
+}
 
 // Crashlytics instance cache
 let crashlyticsInstance: any = null;
@@ -54,6 +66,13 @@ class FirebaseCrashlyticsService {
   private crashQueue: CrashReport[] = [];
   private errorCount = 0;
   private lastErrorTime = 0;
+  // CRITICAL: Store original console.error to prevent recursive calls from GlobalErrorHandler
+  private originalConsoleError: typeof console.error;
+  
+  constructor() {
+    // Store original console.error before GlobalErrorHandler overrides it
+    this.originalConsoleError = console.error.bind(console);
+  }
 
   async initialize() {
     if (this.isInitialized) return;
@@ -116,9 +135,17 @@ class FirebaseCrashlyticsService {
    */
   recordError(error: Error, context?: Record<string, string>) {
     if (!this.isEnabled || !this.isInitialized) {
+      // CRITICAL: Use original console.error to prevent recursive calls from GlobalErrorHandler
       // In dev mode, log to console
       if (__DEV__) {
-        console.error('Crashlytics (disabled):', error, context);
+        try {
+          this.originalConsoleError('Crashlytics (disabled):', error, context);
+        } catch (e) {
+          // Last resort - direct console access
+          if (typeof console !== 'undefined' && console.error) {
+            (console.error as any).call(console, 'Crashlytics (disabled):', error, context);
+          }
+        }
       }
       return;
     }

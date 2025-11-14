@@ -10,13 +10,16 @@ const path = require('path');
 
 // Valid product IDs
 const VALID_PRODUCTS = [
-  'org.afetapp.premium.monthly',
-  'org.afetapp.premium.yearly', 
-  'org.afetapp.premium.lifetime',
+  'org.afetapp.premium.monthly.v2',
+  'org.afetapp.premium.yearly.v2', 
+  'org.afetapp.premium.lifetime.v2',
 ];
 
 // Invalid/old product IDs to check for
 const INVALID_PRODUCTS = [
+  'org.afetapp.premium.monthly',
+  'org.afetapp.premium.yearly',
+  'org.afetapp.premium.lifetime',
   'afetnet_premium_monthly',
   'afetnet_premium_yearly',
 ];
@@ -183,11 +186,14 @@ try {
 // Check 6: Verify database schema
 console.log('\n🗄️ 6. Checking database schema...');
 try {
-  const migrationFile = fs.readFileSync('server/migrations/001_create_iap_tables.sql', 'utf8');
+  const migrationFile = fs.readFileSync('server/src/migrations/001_create_iap_tables.sql', 'utf8');
+  const migrationUpdateFile = fs.existsSync('server/src/migrations/004_update_iap_product_ids.sql')
+    ? fs.readFileSync('server/src/migrations/004_update_iap_product_ids.sql', 'utf8')
+    : '';
   
-  if (migrationFile.includes('org.afetapp.premium.monthly') && 
-      migrationFile.includes('org.afetapp.premium.yearly') && 
-      migrationFile.includes('org.afetapp.premium.lifetime')) {
+  if (migrationFile.includes('org.afetapp.premium.monthly.v2') && 
+      migrationFile.includes('org.afetapp.premium.yearly.v2') && 
+      migrationFile.includes('org.afetapp.premium.lifetime.v2')) {
     console.log('✅ Database schema includes all valid products');
   } else {
     console.log('❌ Database schema missing valid products');
@@ -199,6 +205,20 @@ try {
   } else {
     console.log('❌ Database missing product ID constraints');
     allChecksPassed = false;
+  }
+  
+  if (migrationUpdateFile) {
+    if (
+      migrationUpdateFile.includes('DROP CONSTRAINT IF EXISTS purchases_product_id_check') &&
+      migrationUpdateFile.includes('org.afetapp.premium.monthly.v2')
+    ) {
+      console.log('✅ Update migration covers existing databases');
+    } else {
+      console.log('❌ Update migration missing required constraint or IDs');
+      allChecksPassed = false;
+    }
+  } else {
+    console.log('⚠️  Update migration file (004_update_iap_product_ids.sql) not found');
   }
 } catch (error) {
   console.log('❌ Error checking database schema:', error.message);
@@ -212,10 +232,10 @@ try {
     console.log('✅ TestFlight testing plan exists');
     
     const planContent = fs.readFileSync('TESTFLIGHT_TESTING_PLAN.md', 'utf8');
-    if (planContent.includes('afetnet_premium_monthly1') && 
-        planContent.includes('afetnet_premium_yearly1') && 
-        planContent.includes('afetnet_premium_lifetime')) {
-      console.log('✅ TestFlight plan includes all valid products');
+    if (planContent.includes('org.afetapp.premium.monthly.v2') && 
+        planContent.includes('org.afetapp.premium.yearly.v2') && 
+        planContent.includes('org.afetapp.premium.lifetime.v2')) {
+      console.log('✅ TestFlight plan references correct IAP products');
     } else {
       console.log('❌ TestFlight plan missing valid products');
       allChecksPassed = false;

@@ -16,7 +16,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
-import { colors, typography, spacing, borderRadius } from '../../theme';
+// CRITICAL: Safe import with fallback to prevent "Cannot read property 'background' of undefined"
+import { colors as colorsImport, typography, spacing, borderRadius } from '../../theme';
+// ELITE: Ensure colors is always defined with safe fallback
+const colors = colorsImport || {
+  background: { primary: '#0a0e1a', secondary: '#0f1419', elevated: '#1a1f2e', card: '#141824', overlay: 'rgba(10, 14, 26, 0.95)', input: '#1a1f2e', tertiary: '#1a1f2e' },
+  text: { primary: '#ffffff', secondary: '#a0aec0', tertiary: '#718096', disabled: '#4a5568', muted: '#718096' },
+  accent: { primary: '#3b82f6', secondary: '#60a5fa', glow: 'rgba(59, 130, 246, 0.15)' },
+};
 import * as haptics from '../../utils/haptics';
 import PaginationIndicator from '../../components/onboarding/PaginationIndicator';
 import SkipButton from '../../components/onboarding/SkipButton';
@@ -177,7 +184,14 @@ export default function OnboardingScreen1({ navigation }: OnboardingScreen1Props
 
         {/* Subtitle */}
         <Animated.View entering={FadeInDown.delay(400).duration(600)}>
-          <Text style={styles.subtitle}>Hayat Kurtaran Teknoloji</Text>
+          <Text style={styles.subtitle}>Şebekesiz İletişim ile Hayat Kurtarın</Text>
+        </Animated.View>
+        
+        {/* Unique Badge */}
+        <Animated.View entering={FadeInDown.delay(500).duration(600)} style={{ marginTop: 12 }}>
+          <Text style={[styles.description, { color: '#10b981', fontWeight: '600', fontSize: 14 }]}>
+            🌐 Türkiye'nin İlk BLE Mesh Acil Durum Platformu
+          </Text>
         </Animated.View>
 
         {/* Description */}
@@ -198,11 +212,18 @@ export default function OnboardingScreen1({ navigation }: OnboardingScreen1Props
         <Animated.View entering={FadeInDown.delay(1000).duration(600)} style={styles.sloganContainer}>
           <Text style={styles.slogan}>Hazırlıklı ol, güvende kal.</Text>
         </Animated.View>
+
+        {/* Development Notice */}
+        <Animated.View entering={FadeInDown.delay(1200).duration(600)} style={styles.developmentNoticeContainer}>
+          <Text style={styles.developmentNotice}>
+            Uygulamayı geliştirmeye devam ediyoruz
+          </Text>
+        </Animated.View>
       </View>
 
       {/* Continue Button */}
       <Animated.View
-        entering={FadeInDown.delay(1200).duration(600)}
+        entering={FadeInDown.delay(1400).duration(600)}
         style={[styles.buttonContainer, { paddingBottom: insets.bottom + 24 }]}
       >
         <Pressable
@@ -342,6 +363,19 @@ const styles = StyleSheet.create({
     color: colors.accent.secondary,
     textAlign: 'center',
     fontWeight: '600',
+  },
+  developmentNoticeContainer: {
+    marginTop: spacing[4],
+    paddingHorizontal: spacing[4],
+  },
+  developmentNotice: {
+    ...typography.bodySmall,
+    fontSize: 13,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    lineHeight: 18,
+    fontStyle: 'italic',
+    opacity: 0.8,
   },
   buttonContainer: {
     paddingHorizontal: spacing[6],

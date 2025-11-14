@@ -18,6 +18,7 @@ const TRIAL_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 let trialMonitor: NodeJS.Timeout | null = null;
 let trialExpiryTimeout: NodeJS.Timeout | null = null;
+let trialExpiredCallback: (() => void) | null = null; // CRITICAL: Callback for trial expiry
 
 interface TrialState {
   trialStartTime: number | null;
@@ -33,6 +34,7 @@ interface TrialActions {
   getRemainingDays: () => number;
   getRemainingHours: () => number;
   endTrial: () => Promise<void>;
+  onTrialExpired: (callback: () => void) => void; // CRITICAL: Register callback for trial expiry
 }
 
 const initialState: TrialState = {
@@ -216,6 +218,15 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
 
         if (!isActive) {
           stopTrialMonitor();
+          // CRITICAL: Trial expired - trigger callback for automatic navigation to PaywallScreen
+          if (trialExpiredCallback) {
+            try {
+              logger.info('Trial expired - triggering callback for PaywallScreen navigation');
+              trialExpiredCallback();
+            } catch (callbackError) {
+              logger.error('Trial expired callback error:', callbackError);
+            }
+          }
         } else {
           // If trial will expire sooner than refresh interval, schedule immediate check
           if (remainingMs < TRIAL_REFRESH_INTERVAL) {
@@ -233,6 +244,15 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
               syncPremiumAccess(stillActive);
               if (!stillActive) {
                 stopTrialMonitor();
+                // CRITICAL: Trial expired - trigger callback for automatic navigation to PaywallScreen
+                if (trialExpiredCallback) {
+                  try {
+                    logger.info('Trial expired (timeout) - triggering callback for PaywallScreen navigation');
+                    trialExpiredCallback();
+                  } catch (callbackError) {
+                    logger.error('Trial expired callback error:', callbackError);
+                  }
+                }
               }
             }, remainingMs + 1000);
           }
@@ -298,6 +318,15 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       // ELITE: Clean up monitor if trial expired
       if (!isActive) {
         stopTrialMonitor();
+        // CRITICAL: Trial expired - trigger callback for automatic navigation to PaywallScreen
+        if (trialExpiredCallback) {
+          try {
+            logger.info('Trial expired (check) - triggering callback for PaywallScreen navigation');
+            trialExpiredCallback();
+          } catch (callbackError) {
+            logger.error('Trial expired callback error:', callbackError);
+          }
+        }
       }
 
       return isActive;
@@ -329,10 +358,25 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       });
       syncPremiumAccess(false);
       stopTrialMonitor();
+      // CRITICAL: Trial ended - trigger callback for automatic navigation to PaywallScreen
+      if (trialExpiredCallback) {
+        try {
+          logger.info('Trial ended manually - triggering callback for PaywallScreen navigation');
+          trialExpiredCallback();
+        } catch (callbackError) {
+          logger.error('Trial expired callback error:', callbackError);
+        }
+      }
     } catch (error) {
       // ELITE: Use logger for production safety
       logger.error('End trial error:', error);
     }
+  },
+
+  onTrialExpired: (callback: () => void) => {
+    // CRITICAL: Register callback for trial expiry
+    trialExpiredCallback = callback;
+    logger.info('Trial expired callback registered');
   },
 }));
 

@@ -36,6 +36,8 @@ const logger = createLogger('Init');
 
 let isInitialized = false;
 let isInitializing = false;
+// CRITICAL: Track intervals for cleanup to prevent memory leaks
+let seismicHealthCheckInterval: NodeJS.Timeout | null = null;
 
 export async function initializeApp() {
   // Prevent double initialization
@@ -53,27 +55,106 @@ export async function initializeApp() {
     try {
       // ELITE: Initialize Firebase app with async getter (ensures retry mechanism)
       const { getFirebaseAppAsync } = await import('../lib/firebase');
-      const firebaseApp = await getFirebaseAppAsync();
+      
+      // ELITE: Initialize Firebase with timeout protection
+      const initPromise = getFirebaseAppAsync();
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 10000) // 10 second timeout
+      );
+      
+      const firebaseApp = await Promise.race([initPromise, timeoutPromise]);
       
       if (!firebaseApp) {
-        logger.warn('Firebase app initialization failed - app continues with offline mode');
+        if (__DEV__) {
+          logger.debug('Firebase app initialization failed or timed out - app continues with offline mode');
+        }
       } else {
-        logger.info('✅ Firebase app initialized successfully');
+        if (__DEV__) {
+          logger.info('✅ Firebase app initialized successfully');
+        }
       }
       
-      // Initialize Firebase messaging service
-      await firebaseService.initialize();
+      // Initialize Firebase messaging service (non-blocking)
+      firebaseService.initialize().catch((error: any) => {
+        // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
+        const errorMessage = error?.message || String(error);
+        if (!errorMessage.includes('LoadBundleFromServerRequestError') && 
+            !errorMessage.includes('Could not load bundle')) {
+          if (__DEV__) {
+            logger.debug('Firebase messaging service initialization failed:', errorMessage);
+          }
+        }
+      });
       
       // Initialize Firebase Data Service (Firestore) - must be after Firebase app init
       await firebaseDataService.initialize();
       
       if (firebaseDataService.isInitialized) {
-        logger.info('✅ Firebase services initialized successfully');
+        if (__DEV__) {
+          logger.info('✅ Firebase services initialized successfully');
+        }
+        
+        // CRITICAL: Save device ID to Firebase immediately after initialization
+        // ELITE: This ensures every device has a unique ID in Firebase
+        // CRITICAL: Use lib/device.ts for consistency (afn- format)
+        // ELITE: Use dynamic import with better error handling to prevent Metro bundler issues
+        try {
+          // ELITE: Dynamic import with explicit path to prevent module resolution issues
+          const deviceModule = await import('../../lib/device');
+          
+          // ELITE: Validate module and function exist before calling
+          if (!deviceModule || typeof deviceModule.getDeviceId !== 'function') {
+            throw new Error('getDeviceId function not available in device module');
+          }
+          
+          const deviceId = await deviceModule.getDeviceId();
+          
+          if (deviceId && deviceId.length > 0) {
+            const saved = await firebaseDataService.saveDeviceId(deviceId);
+            if (saved) {
+              if (__DEV__) {
+                logger.info(`✅ Device ID saved to Firebase: ${deviceId}`);
+              }
+            } else {
+              if (__DEV__) {
+                logger.debug('Device ID save to Firebase failed (non-critical - app continues)');
+              }
+            }
+          }
+        } catch (deviceIdError: any) {
+          // ELITE: Device ID save is non-critical - app continues without it
+          const errorMessage = deviceIdError?.message || String(deviceIdError);
+          // ELITE: Better error handling - check for common Metro bundler errors
+          if (errorMessage.includes('is not a function') || 
+              errorMessage.includes('undefined') ||
+              errorMessage.includes('unknown module') ||
+              errorMessage.includes('Cannot find module')) {
+            if (__DEV__) {
+              logger.debug('Device ID save skipped: device module not available (non-critical - Metro bundler may need cache clear)');
+            }
+          } else {
+            if (__DEV__) {
+              logger.debug('Device ID save skipped:', errorMessage);
+            }
+          }
+        }
       } else {
-        logger.warn('Firebase Data Service not initialized - app continues with AsyncStorage');
+        if (__DEV__) {
+          logger.debug('Firebase Data Service not initialized - app continues with AsyncStorage');
+        }
       }
-    } catch (error) {
-      logger.error('Firebase initialization error:', error);
+    } catch (error: any) {
+      // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
+      const errorMessage = error?.message || String(error);
+      if (errorMessage.includes('LoadBundleFromServerRequestError') || 
+          errorMessage.includes('Could not load bundle')) {
+        // ELITE: Bundle errors are expected in some environments - don't log as error
+        if (__DEV__) {
+          logger.debug('Firebase initialization skipped (bundle error - expected in some environments)');
+        }
+      } else {
+        logger.error('Firebase initialization error:', error);
+      }
       // ELITE: Don't throw - app continues with offline mode
     }
 
@@ -108,12 +189,42 @@ export async function initializeApp() {
     // Step 7: EEW Service
     // Polling-only mode (WebSocket endpoints not available)
     // Uses AFAD API polling for earthquake data
+    // CRITICAL: Runs continuously for P and S wave monitoring
     try {
-      logger.info('Step 7: Starting EEW service (polling-only mode)...');
+      logger.info('Step 7: Starting EEW service (polling-only mode - continuous monitoring)...');
       await eewService.start();
+      logger.info('✅ EEW Service started - P and S wave monitoring active');
     } catch (error) {
       logger.error('EEW service failed to start:', error);
       // Continue without EEW - EarthquakeService handles AFAD data
+    }
+
+    // Step 7.1: Background Wave Monitoring Task
+    // CRITICAL: Continuous P and S wave monitoring in background
+    // This ensures users receive early warnings even when app is closed
+    try {
+      logger.info('Step 7.1: Registering background wave monitoring task...');
+      // CRITICAL: Import and register task - TaskManager.defineTask() runs at module load time
+      // This ensures the task is defined before registration
+      // CRITICAL: Use dynamic import with error handling
+      // Path is relative to src/core/init.ts -> src/jobs/bgWaveMonitoring.ts
+      // @ts-ignore - Dynamic import path may not resolve in TypeScript but works at runtime
+      const bgWaveModule = await import('../../jobs/bgWaveMonitoring').catch(() => null);
+      if (bgWaveModule && typeof bgWaveModule.registerBgWaveMonitoring === 'function') {
+        await bgWaveModule.registerBgWaveMonitoring();
+        logger.info('✅ Background wave monitoring registered - P and S wave alerts active 24/7');
+      } else {
+        logger.warn('Background wave monitoring module not available - skipping registration');
+      }
+    } catch (error: any) {
+      // ELITE: More detailed error logging for debugging
+      const errorMessage = error?.message || String(error);
+      if (errorMessage.includes('Cannot find module')) {
+        logger.debug('Background wave monitoring module not found - this is OK if running in Expo Go');
+      } else {
+        logger.warn('Background wave monitoring registration failed:', errorMessage);
+      }
+      // Continue without background monitoring - foreground monitoring still works
     }
 
     // Step 7.5: Global Earthquake Analysis Service
@@ -162,7 +273,20 @@ export async function initializeApp() {
     //   logger.error('Institutional integration failed:', error);
     // }
 
-    // Step 11: Public API Service
+    // Step 11: Backend Emergency Service
+    // CRITICAL: Sends emergency messages and family member data to backend for rescue coordination
+    try {
+      const { backendEmergencyService } = await import('./services/BackendEmergencyService');
+      await backendEmergencyService.initialize();
+      if (__DEV__) {
+        logger.info('✅ Backend Emergency Service initialized - rescue coordination active');
+      }
+    } catch (error) {
+      logger.error('Backend Emergency Service failed:', error);
+      // Continue - backend sync is optional but recommended
+    }
+
+    // Step 11.1: Public API Service
     try {
       await publicAPIService.initialize();
     } catch (error) {
@@ -194,9 +318,34 @@ export async function initializeApp() {
     // ELITE: Re-enabled with advanced P-wave detection and crowdsourcing verification
     // Now includes: P-wave detection, crowdsourcing, false positive filtering
     // CRITICAL: Service must stay active continuously - auto-restart if it stops
+    // CRITICAL: This is LIFE-SAVING - P/S wave detection provides earliest possible warning
+    // CRITICAL: AUTOMATIC START - No user interaction required, must run continuously
     try {
       logger.info('Step 15: Starting seismic sensor service (with P-wave detection and crowdsourcing)...');
+      logger.info('🚨 CRITICAL: P/S wave detection is LIFE-SAVING - ensures continuous monitoring for early warnings');
+      logger.info('📡 AUTOMATIC START: Service starts automatically - no user interaction required');
+      
+      // CRITICAL: Start service immediately
       await seismicSensorService.start();
+      
+      // CRITICAL: Verify service started immediately
+      const initialStatus = seismicSensorService.getRunningStatus();
+      if (!initialStatus) {
+        logger.warn('⚠️ Seismic sensor service did not start - retrying...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await seismicSensorService.start();
+        
+        // CRITICAL: Verify again after retry
+        const retryStatus = seismicSensorService.getRunningStatus();
+        if (!retryStatus) {
+          logger.error('❌ Seismic sensor service failed to start after retry - will retry periodically');
+          // Don't throw - service will retry automatically via health check
+        } else {
+          logger.info('✅ Seismic sensor service started successfully after retry');
+        }
+      } else {
+        logger.info('✅ Seismic sensor service started successfully');
+      }
       
       // ELITE: Verify service started and set up monitoring
       setTimeout(async () => {
@@ -215,21 +364,42 @@ export async function initializeApp() {
       }, 3000); // Check after 3 seconds
       
       // ELITE: Periodic health check - restart if stopped
-      setInterval(async () => {
+      // CRITICAL: More frequent checks for 7/24 continuous monitoring
+      // CRITICAL: Store interval ID for cleanup to prevent memory leaks
+      seismicHealthCheckInterval = setInterval(async () => {
         const isRunning = seismicSensorService.getRunningStatus();
-        if (!isRunning) {
+        const stats = seismicSensorService.getStatistics();
+        
+        // CRITICAL: Smart detection - service is active if running OR has recent readings
+        const isActuallyActive = isRunning || (stats.totalReadings > 0 && stats.timeSinceLastData < 60000);
+        
+        if (!isActuallyActive) {
           if (__DEV__) {
-            logger.warn('⚠️ Seismic sensor service stopped unexpectedly - auto-restarting...');
+            logger.warn('⚠️ Seismic sensor service stopped unexpectedly - auto-restarting for 7/24 continuous monitoring...');
           }
           try {
             await seismicSensorService.start();
+            if (__DEV__) {
+              logger.info('✅ Seismic sensor service auto-restarted successfully - 7/24 monitoring active');
+            }
           } catch (restartError) {
             if (__DEV__) {
               logger.debug('Auto-restart failed (will retry):', restartError);
             }
           }
+        } else {
+          // ELITE: Log statistics periodically to confirm continuous operation (only in DEV to reduce noise)
+          if (__DEV__ && stats.totalReadings > 0) {
+            const timeSinceLastData = isNaN(stats.timeSinceLastData) ? 0 : stats.timeSinceLastData;
+            const timeStr = timeSinceLastData < 1000 
+              ? 'Canlı' 
+              : timeSinceLastData < 60000 
+                ? `${Math.round(timeSinceLastData / 1000)}s önce`
+                : 'Veri yok';
+            logger.debug(`📊 Seismic monitoring active (7/24): ${stats.totalReadings} okuma, ${stats.confirmedEvents} tespit, son veri: ${timeStr}`);
+          }
         }
-      }, 60000); // Check every minute
+      }, 30000); // Check every 30 seconds for 7/24 continuous monitoring
       
     } catch (error) {
       logger.error('Seismic sensor failed:', error);
@@ -287,26 +457,43 @@ export async function initializeApp() {
       
       // ELITE: Pre-initialize in background (non-blocking)
       // This eliminates the delay on first notification while not blocking app startup
+      // CRITICAL: Increased delay to ensure native bridge is fully ready before loading notifications
       Promise.allSettled([
         (async () => {
-          // Wait for native bridge to be ready
-          await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds delay
+          // CRITICAL: Wait longer for native bridge to be fully ready
+          // This prevents NativeEventEmitter errors by ensuring all native modules are initialized
+          await new Promise(resolve => setTimeout(resolve, 8000)); // Increased from 5s to 8s
           
           // Initialize with timeout protection (non-blocking)
+          // CRITICAL: Each service initializes independently to prevent cascading errors
           await Promise.race([
             Promise.allSettled([
-              notificationService.initialize().catch(() => null),
-              multiChannelAlertService.initialize().catch(() => null),
+              notificationService.initialize().catch((error) => {
+                // ELITE: Silent fail - notifications are optional
+                if (__DEV__) {
+                  logger.debug('NotificationService pre-init failed (will initialize on-demand):', error?.message || error);
+                }
+                return null;
+              }),
+              multiChannelAlertService.initialize().catch((error) => {
+                // ELITE: Silent fail - multi-channel alerts are optional
+                if (__DEV__) {
+                  logger.debug('MultiChannelAlertService pre-init failed (will initialize on-demand):', error?.message || error);
+                }
+                return null;
+              }),
             ]),
             new Promise(resolve => setTimeout(resolve, 30000)), // 30s timeout
           ]);
           
-          logger.info('✅ Notification services pre-initialized (background)');
+          if (__DEV__) {
+            logger.info('✅ Notification services pre-initialized (background)');
+          }
         })(),
-      ]).catch(() => {
+      ]).catch((error) => {
         // Silent fail - will initialize on-demand if pre-init fails
         if (__DEV__) {
-          logger.debug('Notification services pre-initialization skipped - will initialize on-demand');
+          logger.debug('Notification services pre-initialization skipped - will initialize on-demand:', error?.message || error);
         }
       });
     } catch (error) {
@@ -325,6 +512,16 @@ export async function initializeApp() {
 }
 
 export function shutdownApp() {
+  if (!isInitialized) return;
+  
+  logger.info('Shutting down app...');
+  
+  // CRITICAL: Clear intervals to prevent memory leaks
+  if (seismicHealthCheckInterval) {
+    clearInterval(seismicHealthCheckInterval);
+    seismicHealthCheckInterval = null;
+  }
+  
   earthquakeService.stop();
   bleMeshService.stop();
   eewService.stop();
@@ -346,6 +543,14 @@ export function shutdownApp() {
     backendPushService.cleanup();
   } catch (error) {
     logger.error('BackendPushService cleanup error:', error);
+  }
+
+  // ELITE: Cleanup BackendEmergencyService
+  try {
+    const { backendEmergencyService } = require('./services/BackendEmergencyService');
+    backendEmergencyService.shutdown();
+  } catch (error) {
+    logger.error('BackendEmergencyService cleanup error:', error);
   }
   
   // ELITE: Cleanup Earthquake Event Watcher Client

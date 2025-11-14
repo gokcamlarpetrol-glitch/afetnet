@@ -83,6 +83,8 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
 
   // CRITICAL: Auto-activate if trapped - MUST work reliably
   useEffect(() => {
+    let alertTimeout: NodeJS.Timeout | null = null;
+    
     if (status === 'trapped') {
       // Enable battery saver
       try {
@@ -104,7 +106,7 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       });
       
       // Show alert after a short delay to ensure services started
-      setTimeout(() => {
+      alertTimeout = setTimeout(() => {
         Alert.alert(
           '🚨 Enkaz Algılandı',
           'Düdük ve fener otomatik başlatıldı. Pil tasarrufu aktif. Yardım gelene kadar bekleyin.',
@@ -115,6 +117,9 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     
     // Cleanup: Stop whistle and flashlight when status changes from trapped
     return () => {
+      if (alertTimeout) {
+        clearTimeout(alertTimeout);
+      }
       if (status !== 'trapped') {
         if (whistleActive) {
           whistleService.stop().catch((err) => logger.error('Whistle stop failed:', err));
@@ -181,6 +186,30 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       }),
     ]).start();
   };
+
+  // CRITICAL: Cleanup timer and animations on unmount
+  useEffect(() => {
+    return () => {
+      if (pressTimer.current) {
+        clearTimeout(pressTimer.current);
+        pressTimer.current = null;
+      }
+      pulseAnim.stopAnimation();
+      scaleAnim.stopAnimation();
+      progressAnim.stopAnimation();
+      pulseAnim.setValue(1);
+      scaleAnim.setValue(1);
+      progressAnim.setValue(0);
+      
+      // Stop services if active
+      if (whistleActive) {
+        whistleService.stop().catch((err) => logger.error('Whistle cleanup failed:', err));
+      }
+      if (flashActive) {
+        flashlightService.stop().catch((err) => logger.error('Flashlight cleanup failed:', err));
+      }
+    };
+  }, [whistleActive, flashActive]);
 
   const handleWhistle = useCallback(async () => {
     haptics.impactMedium();

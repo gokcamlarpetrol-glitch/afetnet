@@ -8,6 +8,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../../theme/colors';
 import { Earthquake } from '../../../stores/earthquakeStore';
+import { i18nService } from '../../../services/I18nService';
 
 interface EarthquakeListItemProps {
   item: Earthquake;
@@ -35,7 +36,7 @@ const EarthquakeListItem = memo<EarthquakeListItemProps>(({
       {/* Magnitude Badge */}
       <View style={[styles.magnitudeBadge, { backgroundColor: magnitudeColor }]}>
         <Text style={styles.magnitudeText}>{item.magnitude.toFixed(1)}</Text>
-        <Text style={styles.magnitudeLabel}>ML</Text>
+        <Text style={styles.magnitudeLabel}>{i18nService.t('earthquake.ml')}</Text>
       </View>
 
       {/* Info */}
@@ -51,12 +52,12 @@ const EarthquakeListItem = memo<EarthquakeListItemProps>(({
           <View style={styles.metaDot} />
           <View style={styles.metaItem}>
             <Ionicons name="arrow-down-outline" size={13} color={colors.text.secondary} />
-            <Text style={styles.metaText}>{item.depth.toFixed(1)} km</Text>
+            <Text style={styles.metaText}>{item.depth.toFixed(1)} {i18nService.t('earthquake.km')}</Text>
           </View>
           <View style={styles.metaDot} />
           <View style={styles.metaItem}>
             <Ionicons name="location-outline" size={13} color={colors.text.secondary} />
-            <Text style={styles.metaText}>{distance} km</Text>
+            <Text style={styles.metaText}>{distance} {i18nService.t('earthquake.km')}</Text>
           </View>
         </View>
       </View>

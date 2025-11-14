@@ -228,3 +228,11 @@ export class PatternRecognitionService {
 
 export const patternRecognitionService = new PatternRecognitionService();
 
+
+
+
+
+
+
+
+

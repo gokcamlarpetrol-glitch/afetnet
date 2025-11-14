@@ -6,9 +6,21 @@
 
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
-import getFirebaseApp from '../../lib/firebase';
 
 const logger = createLogger('FirebaseAnalytics');
+
+// CRITICAL: Lazy load Firebase app to prevent module loading errors
+async function getFirebaseAppAsync() {
+  try {
+    const firebaseModule = await import('../../lib/firebase');
+    return firebaseModule.getFirebaseAppAsync ? await firebaseModule.getFirebaseAppAsync() : null;
+  } catch (error) {
+    if (__DEV__) {
+      logger.debug('Firebase app not available:', error);
+    }
+    return null;
+  }
+}
 
 // Analytics instance cache
 let analyticsInstance: any = null;
@@ -22,7 +34,7 @@ async function initializeWebAnalytics() {
 
   try {
     const { getAnalytics, isSupported } = await import('firebase/analytics');
-    const app = getFirebaseApp();
+    const app = await getFirebaseAppAsync();
     
     if (!app) {
       logger.warn('Firebase app not available for Analytics');

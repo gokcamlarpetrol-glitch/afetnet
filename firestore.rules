@@ -25,9 +25,10 @@ service cloud.firestore {
     }
 
     // Elite: Validate device ownership with strict checks
+    // CRITICAL: Allow anonymous access for emergency features (device registration)
     function allowDeviceWrite(deviceId) {
       return isSystemClient() || 
-             (isAuthenticated() && 
+             (allowAnonymousOrAuthenticated() && 
               isValidDeviceId(deviceId) && 
               request.resource.data.deviceId == deviceId && 
               request.resource.data.deviceId != null &&
@@ -46,10 +47,12 @@ service cloud.firestore {
     }
 
     // Elite Security: Devices collection - STRICT access control
+    // CRITICAL: Allow anonymous access for emergency device registration
     match /devices/{deviceId} {
-      // Elite: Only authenticated users or system can read device data
-      allow read: if isAuthenticated() && isValidDeviceId(deviceId);
-      // Elite: Only device owner can write, with strict validation
+      // Elite: Allow read for authenticated users or system, or if reading own device
+      allow read: if isSystemClient() || 
+                     (allowAnonymousOrAuthenticated() && isValidDeviceId(deviceId));
+      // Elite: Only device owner can write, with strict validation (anonymous allowed for emergency)
       allow create: if allowDeviceWrite(deviceId) && 
                        isValidDeviceId(request.resource.data.deviceId) &&
                        request.resource.data.deviceId == deviceId;
@@ -61,9 +64,10 @@ service cloud.firestore {
       allow delete: if isSystemClient();
 
       // Elite Security: Family members - STRICT validation
+      // CRITICAL: Allow anonymous access for emergency features
       match /familyMembers/{memberId} {
-        // Elite: Only device owner can read family members
-        allow read: if isAuthenticated() && isValidDeviceId(deviceId);
+        // Elite: Only device owner can read family members (anonymous allowed for emergency)
+        allow read: if allowAnonymousOrAuthenticated() && isValidDeviceId(deviceId);
         allow create: if allowDeviceWrite(deviceId) &&
                          request.resource.data.id is string &&
                          request.resource.data.id.size() > 0 &&

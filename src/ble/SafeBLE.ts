@@ -1,5 +1,6 @@
 // Safe BLE wrapper to prevent crashes when native modules are not available
 import { logger } from '../utils/productionLogger';
+import { AFETNET_SERVICE_UUID, AFETNET_CHAR_MSG_UUID } from './constants';
 let BleManager: any = null;
 let BlePeripheral: any = null;
 
@@ -27,6 +28,56 @@ if (BleManager) {
   }
 }
 
+const SERVICE_UUID = AFETNET_SERVICE_UUID.toLowerCase();
+const CHARACTERISTIC_UUID = AFETNET_CHAR_MSG_UUID.toLowerCase();
+let peripheralConfigured = false;
+
+const getPermissionMask = () => {
+  const perms = BlePeripheral?.permissions || {};
+  const readable = perms.READABLE ?? 0x01;
+  const writeable = perms.WRITEABLE ?? 0x10;
+  return readable | writeable;
+};
+
+const getPropertyMask = () => {
+  const props = BlePeripheral?.properties || {};
+  const read = props.READ ?? 0x02;
+  const write = props.WRITE ?? 0x08;
+  const writeNoResponse = props.WRITE_NO_RESPONSE ?? 0x04;
+  const notify = props.NOTIFY ?? 0x10;
+  return read | write | writeNoResponse | notify;
+};
+
+const ensurePeripheralConfigured = async (): Promise<boolean> => {
+  if (!BlePeripheral) {
+    return false;
+  }
+  if (peripheralConfigured) {
+    return true;
+  }
+
+  try {
+    await BlePeripheral.setName('AfetNet');
+  } catch (error) {
+    logger.warn('Failed to set BLE peripheral name:', error);
+  }
+
+  try {
+    await BlePeripheral.addService(SERVICE_UUID, true);
+    await BlePeripheral.addCharacteristicToService(
+      SERVICE_UUID,
+      CHARACTERISTIC_UUID,
+      getPermissionMask(),
+      getPropertyMask(),
+    );
+    peripheralConfigured = true;
+    return true;
+  } catch (error) {
+    logger.warn('Failed to configure BLE peripheral service:', error);
+    return false;
+  }
+};
+
 export const SafeBLE = {
   isAvailable: () => BleManager !== null && BlePeripheral !== null,
   
@@ -37,13 +88,14 @@ export const SafeBLE = {
       return;
     }
     try {
-      manager.startDeviceScan(['0000ffff-0000-1000-8000-00805f9b34fb'], { allowDuplicates: true }, (_e: any, device: any) => {
+      manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: true }, (_e: any, device: any) => {
         if (!device) {return;}
-        const data = (device.serviceData && device.serviceData['0000ffff-0000-1000-8000-00805f9b34fb']) || device.manufacturerData;
+        const data =
+          (device.serviceData && device.serviceData[SERVICE_UUID]) ||
+          device.manufacturerData;
         if (!data) {return;}
         try {
           const buf = (globalThis as any).Buffer.from(data, 'base64');
-          // Simple frame decode - you can implement your own logic here
           const frame = { data: buf.toString() };
           if (frame) {onFrame(device.id, frame);}
         } catch {
@@ -70,16 +122,14 @@ export const SafeBLE = {
       return;
     }
     try {
-      await BlePeripheral.setName('AfetNet');
-      await BlePeripheral.addService('0000ffff-0000-1000-8000-00805f9b34fb', true);
-      await BlePeripheral.addCharacteristicToService(
-        '0000ffff-0000-1000-8000-00805f9b34fb', 'AF02',
-        BlePeripheral.properties.READ, BlePeripheral.permissions.READABLE, [],
-      );
-      await BlePeripheral.startAdvertising({
-        serviceUuids: ['0000ffff-0000-1000-8000-00805f9b34fb'],
-        manufacturerData: { companyId: 0xffff, bytes: Array.from(data) },
-      });
+      const configured = await ensurePeripheralConfigured();
+      if (!configured) {
+        return;
+      }
+      if (__DEV__ && data?.length) {
+        logger.debug('Starting BLE advertising with payload bytes:', Array.from(data).slice(0, 8));
+      }
+      await BlePeripheral.start();
     } catch (error) {
       logger.warn('BLE advertising failed:', error);
     }
@@ -88,12 +138,11 @@ export const SafeBLE = {
   stopAdvertise: async () => {
     if (!BlePeripheral) {return;}
     try {
-      await BlePeripheral.stopAdvertising();
+      await BlePeripheral.stop();
     } catch (error) {
       logger.warn('BLE stop advertising failed:', error);
     }
   },
 };
-
 
 

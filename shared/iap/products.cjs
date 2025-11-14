@@ -1,9 +1,9 @@
 'use strict';
 
 const IAP_PRODUCTS = {
-  monthly: 'org.afetapp.premium.monthly',
-  yearly: 'org.afetapp.premium.yearly',
-  lifetime: 'org.afetapp.premium.lifetime',
+  monthly: 'org.afetapp.premium.monthly.v2',
+  yearly: 'org.afetapp.premium.yearly.v2',
+  lifetime: 'org.afetapp.premium.lifetime.v2',
 };
 
 const IAP_PRODUCT_IDS = Object.values(IAP_PRODUCTS);

@@ -15,5 +15,11 @@ export interface FamilyMember {
     longitude: number;
   };
   deviceId?: string; // BLE mesh device ID
+  // ELITE: Extended fields for better member management
+  relationship?: string; // Relationship type (anne, baba, kardes, etc.)
+  phoneNumber?: string; // Phone number (optional)
+  notes?: string; // Additional notes (optional)
+  createdAt?: number; // Member creation timestamp
+  updatedAt?: number; // Last update timestamp
 }
 

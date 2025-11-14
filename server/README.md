@@ -15,9 +15,9 @@ Server-side IAP verification system for AfetNet app with Apple App Store receipt
 
 ### GET /api/iap/products
 Returns only the three valid product IDs:
-- `afetnet_premium_monthly1`
-- `afetnet_premium_yearly1` 
-- `afetnet_premium_lifetime`
+- `org.afetapp.premium.monthly.v2`
+- `org.afetapp.premium.yearly.v2` 
+- `org.afetapp.premium.lifetime.v2`
 
 ### POST /api/iap/verify
 Verifies Apple receipt and sets user entitlements.
@@ -27,7 +27,7 @@ Verifies Apple receipt and sets user entitlements.
 {
   "receiptData": "base64_receipt_data",
   "userId": "user_123",
-  "productId": "afetnet_premium_monthly1"
+  "productId": "org.afetapp.premium.monthly.v2"
 }
 ```
 
@@ -37,7 +37,7 @@ Verifies Apple receipt and sets user entitlements.
   "success": true,
   "entitlements": {
     "isPremium": true,
-    "productId": "afetnet_premium_monthly1",
+    "productId": "org.afetapp.premium.monthly.v2",
     "expiresAt": 1704067200000,
     "source": "monthly"
   }
@@ -135,7 +135,7 @@ curl "http://localhost:3001/api/user/entitlements?userId=test_user"
 # Verify receipt (with actual receipt data)
 curl -X POST http://localhost:3001/api/iap/verify \
   -H "Content-Type: application/json" \
-  -d '{"receiptData":"...","userId":"test_user","productId":"afetnet_premium_monthly1"}'
+  -d '{"receiptData":"...","userId":"test_user","productId":"org.afetapp.premium.monthly.v2"}'
 ```
 
 ## Production Deployment

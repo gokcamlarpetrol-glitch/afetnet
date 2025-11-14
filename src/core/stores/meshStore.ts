@@ -31,6 +31,8 @@ export interface MeshMessage {
   delivered: boolean;
   signature?: string; // optional cryptographic signature
   iv?: string; // optional initialization vector for encrypted payloads
+  nextAttempt?: number; // timestamp for next retry (offline queue)
+  lastError?: string; // last error message (diagnostics)
 }
 
 interface MeshState {
@@ -80,6 +82,7 @@ interface MeshActions {
     to?: string;
     priority?: MeshPriority;
     ackRequired?: boolean;
+    skipTransport?: boolean;
   }) => Promise<MeshMessage>;
   broadcastMessage: (content: string, type?: MeshMessage['type']) => Promise<void>;
   
@@ -219,7 +222,14 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       to,
       priority = 'normal',
       ackRequired = false,
-    } = options;
+      skipTransport = false,
+    } = options as {
+      type?: MeshMessage['type'];
+      to?: string;
+      priority?: MeshPriority;
+      ackRequired?: boolean;
+      skipTransport?: boolean;
+    };
 
     const sequence = get().nextSequence();
     const message: MeshMessage = {
@@ -238,13 +248,44 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       attempts: 0,
       delivered: false,
     };
+    
+    // CRITICAL: Add to store for tracking
     get().addMessage(message);
-    get().incrementStat('messagesSent');
+
+    if (!skipTransport) {
+      try {
+        const { bleMeshService } = await import('../services/BLEMeshService');
+        await bleMeshService.sendMessage(content, to);
+      } catch (error) {
+        const logger = require('../utils/logger').createLogger('MeshStore');
+        logger.error('Failed to send message via BLE Mesh Service:', error);
+      }
+    }
+    
     return message;
   },
   
   broadcastMessage: async (content, type = 'text') => {
-    await get().sendMessage(content, { type });
+    // CRITICAL: Send via BLE Mesh Service for actual broadcast
+    try {
+      const { bleMeshService } = await import('../services/BLEMeshService');
+      await bleMeshService.broadcastMessage({
+        content,
+        type,
+        priority: 'normal',
+        ackRequired: false,
+        ttl: 3600,
+        sequence: 0,
+        attempts: 0,
+      });
+    } catch (error) {
+      // CRITICAL: Log error but don't throw - still add to store
+      const logger = require('../utils/logger').createLogger('MeshStore');
+      logger.error('Failed to broadcast message via BLE Mesh Service:', error);
+    }
+    
+    // CRITICAL: Also add to store for tracking
+    await get().sendMessage(content, { type, skipTransport: true });
   },
   
   setScanning: (isScanning) => set({ isScanning }),
@@ -308,4 +349,3 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
 
   clear: () => set(initialState),
 }));
-

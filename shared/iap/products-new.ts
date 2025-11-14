@@ -1,11 +1,11 @@
-// SHARED IAP PRODUCTS MODULE - NEW BUNDLE ID (com.gokhancamci.afetnet1)
+// SHARED IAP PRODUCTS MODULE - UPDATED REVENUECAT IDS (org.afetapp.premium.*.v2)
 // Single source of truth for all IAP product IDs across client and server
 // IMPORTANT: These are NEW product IDs for the NEW App Store submission
 
 export const IAP_PRODUCTS = {
-  monthly: 'org.afetnet1.premium.monthly',
-  yearly: 'org.afetnet1.premium.yearly',
-  lifetime: 'org.afetnet1.premium.lifetime',
+  monthly: 'org.afetapp.premium.monthly.v2',
+  yearly: 'org.afetapp.premium.yearly.v2',
+  lifetime: 'org.afetapp.premium.lifetime.v2',
 } as const;
 
 export type ProductKey = keyof typeof IAP_PRODUCTS;

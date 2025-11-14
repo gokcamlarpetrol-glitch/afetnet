@@ -4,9 +4,9 @@ This app uses RevenueCat for subscription and lifetime purchases. The single pay
 
 ## Product IDs
 
-- monthly: `org.afetapp.premium.monthly`
-- yearly: `org.afetapp.premium.yearly`
-- lifetime: `org.afetapp.premium.lifetime`
+- monthly: `org.afetapp.premium.monthly.v2`
+- yearly: `org.afetapp.premium.yearly.v2`
+- lifetime: `org.afetapp.premium.lifetime.v2`
 
 Authoritative source: `shared/iap/products.ts`.
 
