@@ -144,8 +144,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     ORG_SECRET: process.env.ORG_SECRET || '',
     API_BASE_URL: process.env.API_BASE_URL || 'https://afetnet-backend.onrender.com',
-    privacyPolicyUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/docs/privacy-policy.html",
-    termsOfServiceUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/docs/terms-of-service.html",
+    privacyPolicyUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/privacy-policy.html",
+    termsOfServiceUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/terms-of-service.html",
     supportEmail: "support@afetnet.app",
   },
 });
