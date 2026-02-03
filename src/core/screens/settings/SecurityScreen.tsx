@@ -20,8 +20,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
-export default function SecurityScreen({ navigation }: any) {
+// ELITE: Properly typed navigation prop
+type SecurityScreenNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface SecurityScreenProps {
+  navigation: SecurityScreenNavigationProp;
+}
+
+export default function SecurityScreen({ navigation }: SecurityScreenProps) {
   const insets = useSafeAreaInsets();
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
@@ -29,7 +38,7 @@ export default function SecurityScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
       <LinearGradient
         colors={['#0f172a', '#1e293b']}
@@ -69,7 +78,7 @@ export default function SecurityScreen({ navigation }: any) {
         {/* Encryption */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Şifreleme</Text>
-          
+
           <SecurityFeature
             icon="lock-closed"
             title="End-to-End Şifreleme"
@@ -77,7 +86,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Aktif"
             statusColor="#10b981"
           />
-          
+
           <SecurityFeature
             icon="key"
             title="TLS/SSL Bağlantıları"
@@ -85,7 +94,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Aktif"
             statusColor="#10b981"
           />
-          
+
           <SecurityFeature
             icon="shield"
             title="Güvenli Depolama"
@@ -98,7 +107,7 @@ export default function SecurityScreen({ navigation }: any) {
         {/* Authentication */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Kimlik Doğrulama</Text>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={styles.settingIcon}>
@@ -120,14 +129,14 @@ export default function SecurityScreen({ navigation }: any) {
                   'Biyometrik Kimlik',
                   value
                     ? 'Biyometrik kimlik aktif edildi'
-                    : 'Biyometrik kimlik kapatıldı'
+                    : 'Biyometrik kimlik kapatıldı',
                 );
               }}
               trackColor={{ false: '#334155', true: '#3b82f6' }}
               thumbColor="#fff"
             />
           </View>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingLeft}>
               <View style={styles.settingIcon}>
@@ -146,7 +155,7 @@ export default function SecurityScreen({ navigation }: any) {
                 haptics.impactLight();
                 Alert.alert(
                   'İki Faktörlü Doğrulama',
-                  'Bu özellik yakında kullanıma sunulacak'
+                  'Bu özellik yakında kullanıma sunulacak',
                 );
               }}
               trackColor={{ false: '#334155', true: '#3b82f6' }}
@@ -159,7 +168,7 @@ export default function SecurityScreen({ navigation }: any) {
         {/* Data Protection */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Veri Koruması</Text>
-          
+
           <SecurityFeature
             icon="document-lock"
             title="GDPR Uyumlu"
@@ -167,7 +176,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Uyumlu"
             statusColor="#10b981"
           />
-          
+
           <SecurityFeature
             icon="document-text"
             title="KVKK Uyumlu"
@@ -175,7 +184,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Uyumlu"
             statusColor="#10b981"
           />
-          
+
           <SecurityFeature
             icon="trash"
             title="Veri Silme Hakkı"
@@ -188,7 +197,7 @@ export default function SecurityScreen({ navigation }: any) {
         {/* Privacy */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Gizlilik</Text>
-          
+
           <SecurityFeature
             icon="eye-off"
             title="Anonim Veri Toplama"
@@ -196,7 +205,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Aktif"
             statusColor="#10b981"
           />
-          
+
           <SecurityFeature
             icon="share"
             title="Veri Paylaşımı"
@@ -204,7 +213,7 @@ export default function SecurityScreen({ navigation }: any) {
             status="Kontrollü"
             statusColor="#f59e0b"
           />
-          
+
           <SecurityFeature
             icon="server"
             title="Yerel İşleme"
@@ -217,25 +226,25 @@ export default function SecurityScreen({ navigation }: any) {
         {/* Security Tips */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Güvenlik İpuçları</Text>
-          
+
           <TipItem
             icon="shield-checkmark"
             title="Güçlü Şifre Kullanın"
             description="Şifreniz en az 8 karakter ve karmaşık olmalı"
           />
-          
+
           <TipItem
             icon="refresh"
             title="Düzenli Güncellemeler"
             description="Uygulamayı her zaman güncel tutun"
           />
-          
+
           <TipItem
             icon="lock-closed"
             title="Cihazınızı Kilitleyin"
             description="Cihazınızda ekran kilidi kullanın"
           />
-          
+
           <TipItem
             icon="warning"
             title="Şüpheli Aktivite"

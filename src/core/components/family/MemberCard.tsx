@@ -18,7 +18,7 @@ interface MemberCardProps {
   onDelete?: (memberId: string) => void;
 }
 
-export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberCardProps) {
+export const MemberCard = React.memo(function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberCardProps) {
   const scale = useSharedValue(1);
   const { color, text } = getStatusRenderInfo(member.status);
   const [swipeableRef, setSwipeableRef] = useState<Swipeable | null>(null);
@@ -29,7 +29,7 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
 
   const handlePressIn = () => { scale.value = withSpring(0.98); };
   const handlePressOut = () => { scale.value = withSpring(1); };
-  
+
   const handlePress = () => {
     haptics.impactLight();
     onPress();
@@ -50,7 +50,7 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
           } else if (buttonIndex === 2 && onDelete) {
             handleDelete();
           }
-        }
+        },
       );
     } else {
       Alert.alert(
@@ -67,7 +67,7 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
             style: 'destructive',
             onPress: handleDelete,
           },
-        ]
+        ],
       );
     }
   };
@@ -87,13 +87,13 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
             swipeableRef?.close();
           },
         },
-      ]
+      ],
     );
   };
 
   const renderRightActions = () => {
     if (!onDelete) return null;
-    
+
     return (
       <View style={styles.rightActions}>
         <Pressable
@@ -109,7 +109,7 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
 
   const renderLeftActions = () => {
     if (!onEdit) return null;
-    
+
     return (
       <View style={styles.leftActions}>
         <Pressable
@@ -185,14 +185,14 @@ export function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberC
       )}
     </Animated.View>
   );
-}
+});
 
 function getStatusRenderInfo(status: FamilyMember['status']) {
   switch (status) {
-    case 'safe': return { color: colors.status.success, text: 'Güvende' };
-    case 'need-help': return { color: colors.status.warning, text: 'Yardım Gerekiyor' };
-    case 'critical': return { color: colors.status.danger, text: 'ACİL DURUM' };
-    default: return { color: colors.text.tertiary, text: 'Bilinmiyor' };
+  case 'safe': return { color: colors.status.success, text: 'Güvende' };
+  case 'need-help': return { color: colors.status.warning, text: 'Yardım Gerekiyor' };
+  case 'critical': return { color: colors.status.danger, text: 'ACİL DURUM' };
+  default: return { color: colors.text.tertiary, text: 'Bilinmiyor' };
   }
 }
 

@@ -28,21 +28,33 @@ export default function Card({ children, style, variant = 'default' }: CardProps
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.background.secondary,
+    backgroundColor: colors.background.card,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    shadowColor: colors.shadow.color,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   elevated: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowColor: colors.shadow.color,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 6,
+    borderColor: colors.border.light,
+    backgroundColor: colors.background.elevated,
   },
   outlined: {
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border.primary,
+    borderColor: colors.border.medium,
+    shadowColor: 'transparent',
+    elevation: 0,
   },
 });
 

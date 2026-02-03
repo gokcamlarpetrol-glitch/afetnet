@@ -6,6 +6,7 @@
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { multiChannelAlertService } from './MultiChannelAlertService';
+import { safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('CellBroadcastService');
 
@@ -34,7 +35,7 @@ class CellBroadcastService {
         // Android Cell Broadcast API integration
         // Note: Requires native module or expo module
         // For now, we'll simulate the integration
-        
+
         if (__DEV__) {
           logger.info('Cell Broadcast service initialized (Android)');
         }
@@ -42,7 +43,7 @@ class CellBroadcastService {
         // iOS Emergency Alerts
         // Note: iOS handles emergency alerts automatically
         // We can listen for UNNotification events
-        
+
         if (__DEV__) {
           logger.info('Cell Broadcast service initialized (iOS)');
         }
@@ -73,11 +74,11 @@ class CellBroadcastService {
   private async handleMessage(message: CellBroadcastMessage) {
     try {
       // Determine if this is an emergency alert
-      const isEmergency = message.priority === 'emergency' || 
-                         message.channel === '50' || // Emergency channel
-                         message.message.toLowerCase().includes('deprem') ||
-                         message.message.toLowerCase().includes('afet') ||
-                         message.message.toLowerCase().includes('acil');
+      const isEmergency = message.priority === 'emergency' ||
+        message.channel === '50' || // Emergency channel
+        safeIncludes(message.message, 'deprem') ||
+        safeIncludes(message.message, 'afet') ||
+        safeIncludes(message.message, 'acil');
 
       if (isEmergency) {
         // Trigger multi-channel alert
@@ -140,7 +141,7 @@ class CellBroadcastService {
         priority,
         language: 'tr',
       };
-      
+
       await this.handleMessage(simulatedMessage);
     }
   }
@@ -148,7 +149,7 @@ class CellBroadcastService {
   stop() {
     this.messageCallbacks = [];
     this.isInitialized = false;
-    
+
     if (__DEV__) {
       logger.info('Cell Broadcast service stopped');
     }

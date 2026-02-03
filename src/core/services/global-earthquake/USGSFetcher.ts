@@ -62,7 +62,7 @@ export async function fetchFromUSGS(): Promise<GlobalEarthquakeEvent[]> {
           },
           signal: controller.signal,
         },
-        'critical'
+        'critical',
       );
       clearTimeout(timeoutId);
     } catch (error) {
@@ -81,7 +81,7 @@ export async function fetchFromUSGS(): Promise<GlobalEarthquakeEvent[]> {
               'User-Agent': 'AfetNet/1.0',
             },
           },
-          'high'
+          'high',
         );
       } else {
         return [];
@@ -163,7 +163,7 @@ export async function fetchFromUSGS(): Promise<GlobalEarthquakeEvent[]> {
         e.latitude <= EXTENDED_REGION.maxLat &&
         e.longitude >= EXTENDED_REGION.minLon &&
         e.longitude <= EXTENDED_REGION.maxLon &&
-        e.magnitude >= 3.0
+        e.magnitude >= 3.0,
       );
     }
 

@@ -10,8 +10,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { createLogger } from '../../utils/logger';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('DisasterPreparednessScreen');
+
+// ELITE: Type-safe navigation prop
+type DisasterPreparednessNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface DisasterPreparednessScreenProps {
+  navigation: DisasterPreparednessNavigationProp;
+}
 
 type DisasterType = 'earthquake' | 'flood' | 'fire' | 'tsunami' | 'landslide';
 
@@ -246,11 +255,11 @@ const DISASTER_MODULES: PreparednessModule[] = [
   },
 ];
 
-export default function DisasterPreparednessScreen({ navigation }: any) {
+export default function DisasterPreparednessScreen({ navigation }: DisasterPreparednessScreenProps) {
   const [selectedType, setSelectedType] = useState<DisasterType | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<'before' | 'during' | 'after'>('before');
 
-  const selectedModule = selectedType 
+  const selectedModule = selectedType
     ? DISASTER_MODULES.find(m => m.type === selectedType)
     : null;
 
@@ -305,8 +314,8 @@ export default function DisasterPreparednessScreen({ navigation }: any) {
               <Ionicons name={selectedModule.icon} size={48} color="#fff" />
               <Text style={styles.instructionsTitle}>
                 {selectedPhase === 'before' ? 'Öncesi Hazırlık' :
-                 selectedPhase === 'during' ? 'Sırasında Ne Yapmalı' :
-                 'Sonrası Adımlar'}
+                  selectedPhase === 'during' ? 'Sırasında Ne Yapmalı' :
+                    'Sonrası Adımlar'}
               </Text>
             </LinearGradient>
           </Animated.View>
@@ -343,7 +352,7 @@ export default function DisasterPreparednessScreen({ navigation }: any) {
                 <Ionicons name="play-circle" size={64} color={colors.text.tertiary} />
                 <Text style={styles.videoPlaceholderText}>Eğitim Videosu</Text>
                 <Text style={styles.videoPlaceholderSubtext}>
-                  {selectedModule.type === 'earthquake' 
+                  {selectedModule.type === 'earthquake'
                     ? 'Drop-Cover-Hold animasyonu yakında eklenecek'
                     : 'İlgili eğitim videoları yakında eklenecek'}
                 </Text>

@@ -117,12 +117,12 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
               text: 'Ayarlara Git', 
               onPress: () => {
                 const { Linking } = require('react-native');
-                Linking.openSettings().catch((err: any) => {
+                Linking.openSettings().catch((err: unknown) => {
                   logger.error('Failed to open settings:', err);
                 });
-              }
-            }
-          ]
+              },
+            },
+          ],
         );
         setIsGettingLocation(false);
         return;
@@ -274,7 +274,7 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
       if (isEditing && route?.params?.editLocationId) {
         success = await offlineMapService.updateCustomLocation(
           route.params.editLocationId,
-          locationData
+          locationData,
         );
       } else {
         success = await offlineMapService.addCustomLocation(locationData);
@@ -297,7 +297,7 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
               navigation.goBack();
             },
           },
-        ]
+        ],
       );
     } catch (error) {
       logger.error('Error saving location:', error);
@@ -322,7 +322,7 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
       onLocationPicked: (loc: { latitude: number; longitude: number }) => {
         setLatitude(loc.latitude);
         setLongitude(loc.longitude);
-      }
+      },
     });
   }, [navigation]);
 
@@ -375,7 +375,7 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
                 >
                   <View style={[
                     styles.typeIconContainer,
-                    selectedType === type.id && { backgroundColor: type.color + '20' }
+                    selectedType === type.id && { backgroundColor: type.color + '20' },
                   ]}>
                     <Ionicons
                       name={type.icon}
@@ -439,7 +439,7 @@ export default function AddAssemblyPointScreen({ navigation, route }: AddAssembl
                 />
                 <Text style={[
                   styles.locationButtonText,
-                  isGettingLocation && styles.locationButtonTextDisabled
+                  isGettingLocation && styles.locationButtonTextDisabled,
                 ]}>
                   {isGettingLocation ? 'Alınıyor...' : 'Mevcut Konumum'}
                 </Text>

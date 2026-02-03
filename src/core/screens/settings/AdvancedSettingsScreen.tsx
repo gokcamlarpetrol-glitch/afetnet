@@ -12,19 +12,36 @@ import {
   Pressable,
   Switch,
   Alert,
+  ImageBackground,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { storageManagementService } from '../../services/StorageManagementService';
 import { useRescueStore } from '../../stores/rescueStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { ENV } from '../../config/env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-export default function AdvancedSettingsScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface AdvancedSettingsScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsScreenProps) {
   const [debugMode, setDebugMode] = useState(false);
   const [verboseLogging, setVerboseLogging] = useState(false);
   const { beaconInterval, setBeaconInterval } = useRescueStore();
+
+  // Store Settings
+  const sensorSensitivity = useSettingsStore((state) => state.sensorSensitivity);
+  const setSensorSensitivity = useSettingsStore((state) => state.setSensorSensitivity);
+  const sensorFalsePositiveFilter = useSettingsStore((state) => state.sensorFalsePositiveFilter);
+  const setSensorFalsePositiveFilter = useSettingsStore((state) => state.setSensorFalsePositiveFilter);
 
   const handleClearAICache = async () => {
     haptics.impactMedium();
@@ -40,11 +57,11 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
             const cleaned = await storageManagementService.cleanupLowPriorityData();
             Alert.alert(
               'Başarılı',
-              `${(cleaned / 1024 / 1024).toFixed(2)}MB temizlendi`
+              `${(cleaned / 1024 / 1024).toFixed(2)}MB temizlendi`,
             );
           },
         },
-      ]
+      ],
     );
   };
 
@@ -62,11 +79,11 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
             const cleaned = await storageManagementService.clearAllNonCriticalData();
             Alert.alert(
               'Başarılı',
-              `${(cleaned / 1024 / 1024).toFixed(2)}MB temizlendi`
+              `${(cleaned / 1024 / 1024).toFixed(2)}MB temizlendi`,
             );
           },
         },
-      ]
+      ],
     );
   };
 
@@ -85,7 +102,7 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
             Alert.alert('Başarılı', 'Uygulama sıfırlandı. Lütfen yeniden başlatın.');
           },
         },
-      ]
+      ],
     );
   };
 
@@ -96,138 +113,197 @@ export default function AdvancedSettingsScreen({ navigation }: any) {
     { label: '30 saniye', value: 30 },
   ];
 
+  const sensitivityOptions: { label: string; value: 'low' | 'medium' | 'high'; desc: string }[] = [
+    { label: 'Yüksek Hassasiyet', value: 'high', desc: 'En ufak sarsıntıda tetiklenir' },
+    { label: 'Orta (Önerilen)', value: 'medium', desc: 'Dengeli algılama' },
+    { label: 'Düşük Hassasiyet', value: 'low', desc: 'Sadece güçlü sarsıntılar' },
+  ];
+
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
-        </Pressable>
-        <Text style={styles.title}>Gelişmiş Ayarlar</Text>
-        <View style={styles.placeholder} />
-      </View>
+    <ImageBackground
+      source={require('../../../assets/images/premium/family_soft_bg.png')}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      <ScrollView style={styles.scrollView}>
-        {/* Storage Management */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Depolama Yönetimi</Text>
-          
-          <Pressable style={styles.settingRow} onPress={handleClearAICache}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>AI Önbelleğini Temizle</Text>
-              <Text style={styles.settingDescription}>
-                AI yanıtlarını sil, alan kazan
-              </Text>
-            </View>
-            <Ionicons name="trash-outline" size={20} color={colors.text.secondary} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable onPress={() => navigation?.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#334155" />
           </Pressable>
-
-          <Pressable style={styles.settingRow} onPress={handleClearAllCache}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Tüm Önbelleği Temizle</Text>
-              <Text style={styles.settingDescription}>
-                Haberler, AI, eski depremler
-              </Text>
-            </View>
-            <Ionicons name="trash-outline" size={20} color={colors.text.secondary} />
-          </Pressable>
+          <Text style={styles.title}>Gelişmiş Ayarlar</Text>
+          <View style={styles.placeholder} />
         </View>
 
-        {/* Rescue Beacon Settings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Kurtarma İşareti</Text>
-          
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>İşaret Aralığı</Text>
-              <Text style={styles.settingDescription}>
-                SOS sinyali yayın sıklığı
-              </Text>
-            </View>
-          </View>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
 
-          {beaconIntervals.map((interval) => (
-            <Pressable
-              key={interval.value}
-              style={styles.radioRow}
-              onPress={() => {
-                haptics.impactLight();
-                setBeaconInterval(interval.value);
-              }}
-            >
-              <View style={styles.radioCircle}>
-                {beaconInterval === interval.value && (
-                  <View style={styles.radioFill} />
-                )}
+          {/* Sensor Settings - ELITE FEATURES */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sensör & Algılama (Elite)</Text>
+
+            <View style={styles.settingCard}>
+              <Text style={styles.cardHeaderLabel}>Algılama Hassasiyeti</Text>
+              {sensitivityOptions.map((opt) => (
+                <Pressable
+                  key={opt.value}
+                  style={styles.radioRow}
+                  onPress={() => {
+                    haptics.impactLight();
+                    setSensorSensitivity(opt.value);
+                  }}
+                >
+                  <View style={styles.radioCircle}>
+                    {sensorSensitivity === opt.value && (
+                      <View style={styles.radioFill} />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.radioLabel}>{opt.label}</Text>
+                    <Text style={styles.radioDesc}>{opt.desc}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={[styles.settingRow, { marginTop: 8 }]}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Yapay Zeka Filtresi</Text>
+                <Text style={styles.settingDescription}>
+                  Yanlış alarmları (zıplama, düşme) engelle
+                </Text>
               </View>
-              <Text style={styles.radioLabel}>{interval.label}</Text>
+              <Switch
+                value={sensorFalsePositiveFilter}
+                onValueChange={(value) => {
+                  haptics.impactLight();
+                  setSensorFalsePositiveFilter(value);
+                }}
+                trackColor={{ false: '#cbd5e1', true: colors.brand.primary }}
+              />
+            </View>
+          </View>
+
+          {/* Storage Management */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Depolama Yönetimi</Text>
+
+            <Pressable style={styles.settingRow} onPress={handleClearAICache}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>AI Önbelleğini Temizle</Text>
+                <Text style={styles.settingDescription}>
+                  AI yanıtlarını sil, alan kazan
+                </Text>
+              </View>
+              <Ionicons name="trash-outline" size={20} color={colors.text.secondary} />
             </Pressable>
-          ))}
-        </View>
 
-        {/* Developer Options */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Geliştirici Seçenekleri</Text>
-          
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Debug Modu</Text>
-              <Text style={styles.settingDescription}>
-                Detaylı hata ayıklama bilgileri
-              </Text>
-            </View>
-            <Switch
-              value={debugMode}
-              onValueChange={(value) => {
-                haptics.impactLight();
-                setDebugMode(value);
-              }}
-              trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            <Pressable style={styles.settingRow} onPress={handleClearAllCache}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Tüm Önbelleği Temizle</Text>
+                <Text style={styles.settingDescription}>
+                  Haberler, AI, eski depremler
+                </Text>
+              </View>
+              <Ionicons name="trash-outline" size={20} color={colors.text.secondary} />
+            </Pressable>
           </View>
 
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Verbose Logging</Text>
-              <Text style={styles.settingDescription}>
-                Tüm logları kaydet
-              </Text>
+          {/* Rescue Beacon Settings */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Kurtarma İşareti</Text>
+
+            <View style={styles.settingCard}>
+              <Text style={[styles.cardHeaderLabel, { marginBottom: 8 }]}>Sinyal Aralığı (SOS)</Text>
+              {beaconIntervals.map((interval) => (
+                <Pressable
+                  key={interval.value}
+                  style={styles.radioRow}
+                  onPress={() => {
+                    haptics.impactLight();
+                    setBeaconInterval(interval.value);
+                  }}
+                >
+                  <View style={styles.radioCircle}>
+                    {beaconInterval === interval.value && (
+                      <View style={styles.radioFill} />
+                    )}
+                  </View>
+                  <Text style={styles.radioLabel}>{interval.label}</Text>
+                </Pressable>
+              ))}
             </View>
-            <Switch
-              value={verboseLogging}
-              onValueChange={(value) => {
-                haptics.impactLight();
-                setVerboseLogging(value);
-              }}
-              trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
           </View>
-        </View>
 
-        {/* Danger Zone */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: '#ef4444' }]}>Tehlikeli Bölge</Text>
-          
-          <Pressable style={styles.dangerButton} onPress={handleResetApp}>
-            <Ionicons name="warning" size={20} color="#ef4444" />
-            <Text style={styles.dangerButtonText}>Uygulamayı Sıfırla</Text>
-          </Pressable>
-        </View>
+          {/* Developer Options */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Geliştirici Seçenekleri</Text>
 
-        {/* App Info */}
-        <View style={styles.infoSection}>
-          <Text style={styles.infoText}>AfetNet v1.0.2</Text>
-          <Text style={styles.infoText}>Build 2025.11.05</Text>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Debug Modu</Text>
+                <Text style={styles.settingDescription}>
+                  Detaylı hata ayıklama bilgileri
+                </Text>
+              </View>
+              <Switch
+                value={debugMode}
+                onValueChange={(value) => {
+                  haptics.impactLight();
+                  setDebugMode(value);
+                }}
+                trackColor={{ false: '#cbd5e1', true: colors.brand.primary }}
+              />
+            </View>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Verbose Logging</Text>
+                <Text style={styles.settingDescription}>
+                  Tüm logları kaydet
+                </Text>
+              </View>
+              <Switch
+                value={verboseLogging}
+                onValueChange={(value) => {
+                  haptics.impactLight();
+                  setVerboseLogging(value);
+                }}
+                trackColor={{ false: '#cbd5e1', true: colors.brand.primary }}
+              />
+            </View>
+          </View>
+
+          {/* Danger Zone */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: '#ef4444' }]}>Tehlikeli Bölge</Text>
+
+            <Pressable style={styles.dangerButton} onPress={handleResetApp}>
+              <Ionicons name="warning" size={20} color="#ef4444" />
+              <Text style={styles.dangerButtonText}>Uygulamayı Sıfırla</Text>
+            </Pressable>
+          </View>
+
+          {/* App Info */}
+          <View style={styles.infoSection}>
+            <Text style={styles.infoText}>AfetNet v{ENV.APP_VERSION}</Text>
+          </View>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#f8fafc',
   },
   header: {
     flexDirection: 'row',
@@ -235,16 +311,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.light,
   },
   backButton: {
     padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.5)',
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text.primary,
+    color: '#334155',
   },
   placeholder: {
     width: 40,
@@ -258,22 +334,47 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 13,
-    fontWeight: '600',
-    color: colors.text.secondary,
+    fontWeight: '700',
+    color: '#64748b',
     textTransform: 'uppercase',
     marginBottom: 12,
+    marginLeft: 4,
+    letterSpacing: 0.5,
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: colors.background.card,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 16,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: colors.border.light,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  settingCard: {
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  cardHeaderLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 12,
   },
   settingInfo: {
     flex: 1,
@@ -281,30 +382,24 @@ const styles = StyleSheet.create({
   settingLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: '#334155',
     marginBottom: 2,
   },
   settingDescription: {
     fontSize: 13,
-    color: colors.text.secondary,
+    color: '#64748b',
   },
   radioRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: colors.background.card,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: colors.border.light,
   },
   radioCircle: {
     width: 20,
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: colors.brand.primary,
+    borderColor: '#3b82f6',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -313,19 +408,25 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: colors.brand.primary,
+    backgroundColor: '#3b82f6',
   },
   radioLabel: {
     fontSize: 15,
-    color: colors.text.primary,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  radioDesc: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
   },
   dangerButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
-    backgroundColor: colors.background.card,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 16,
     borderWidth: 2,
     borderColor: '#ef4444',
     gap: 8,
@@ -342,9 +443,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 12,
-    color: colors.text.tertiary,
+    color: '#94a3b8',
     marginBottom: 4,
   },
 });
-
-

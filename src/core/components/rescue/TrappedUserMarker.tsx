@@ -19,14 +19,14 @@ export default function TrappedUserMarker({ user, onPress }: Props) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'trapped':
-        return '#dc2626';
-      case 'injured':
-        return '#f59e0b';
-      case 'safe':
-        return '#10b981';
-      default:
-        return '#6b7280';
+    case 'trapped':
+      return '#dc2626';
+    case 'injured':
+      return '#f59e0b';
+    case 'safe':
+      return '#10b981';
+    default:
+      return '#6b7280';
     }
   };
 

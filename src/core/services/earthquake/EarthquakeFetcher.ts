@@ -13,6 +13,14 @@ import { processAFADEvents } from './EarthquakeDataProcessor';
 
 const logger = createLogger('EarthquakeFetcher');
 
+// ELITE: Type-safe error message extraction
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+function getErrorName(error: unknown): string {
+  return error instanceof Error ? getErrorName(error) : 'UnknownError';
+}
+
 export interface FetchResult {
   earthquakes: Earthquake[];
   sources: {
@@ -30,7 +38,7 @@ export interface FetchResult {
 export async function fetchAllEarthquakes(
   sourceAFAD: boolean,
   fetchFromAFAD: () => Promise<Earthquake[]>,
-  fetchFromKandilli: () => Promise<Earthquake[]>
+  fetchFromKandilli: () => Promise<Earthquake[]>,
 ): Promise<FetchResult> {
   const result: FetchResult = {
     earthquakes: [],
@@ -46,85 +54,53 @@ export async function fetchAllEarthquakes(
   // ELITE: Multi-tier strategy for fastest and most reliable AFAD data only
   // CRITICAL: Only fetch AFAD data - Kandilli removed per user request
   // Use Promise.allSettled with shorter timeouts for faster initial load
-  const [unifiedData, afadHTMLData, afadAPIData] = await Promise.allSettled([
-    unifiedEarthquakeAPI.fetchRecent(), // Tier 1: Unified API (fastest, may include AFAD)
-    sourceAFAD ? afadHTMLProvider.fetchRecent() : Promise.resolve([]), // Tier 2: AFAD HTML (MOST RELIABLE)
+  // ELITE: Multi-tier strategy for fastest and most reliable data
+  // Fetch from ALL sources in parallel for cross-verification
+  const [unifiedData, afadHTMLData, afadAPIData, kandilliAPIData] = await Promise.allSettled([
+    unifiedEarthquakeAPI.fetchRecent(), // Tier 1: Unified API
+    sourceAFAD ? afadHTMLProvider.fetchRecent() : Promise.resolve([]), // Tier 2: AFAD HTML
     sourceAFAD ? fetchFromAFAD() : Promise.resolve([]), // Tier 3: Direct AFAD API
+    fetchFromKandilli(), // Tier 4: Kandilli API (Now Enabled)
   ]);
 
-  // Process AFAD HTML first (MOST RELIABLE)
+  let afadList: Earthquake[] = [];
+  let kandilliList: Earthquake[] = [];
+
+  // --- 1. PROCESS AFAD DATA ---
+  // Priority: HTML > API > Unified(AFAD)
   if (afadHTMLData.status === 'fulfilled' && afadHTMLData.value.length > 0) {
-    result.earthquakes.push(...afadHTMLData.value);
+    afadList = afadHTMLData.value;
     result.sources.afadHTML = true;
-    if (__DEV__) {
-      const latest = afadHTMLData.value[0];
-      const latestTime = new Date(latest.time).toLocaleString('tr-TR', { 
-        timeZone: 'Europe/Istanbul',
-        hour12: false,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      logger.info(`✅ AFAD HTML: ${afadHTMLData.value.length} deprem verisi alındı - EN GÜVENİLİR (En son: ${latest.magnitude} ML - ${latestTime})`);
-    }
-  } else if (afadHTMLData.status === 'rejected' && __DEV__) {
-    logger.warn('⚠️ AFAD HTML başarısız:', afadHTMLData.reason?.message);
+    if (__DEV__) logger.info(`✅ AFAD (HTML): ${afadList.length} veri`);
   }
-
-  // Process unified API data (filter to only AFAD)
-  if (unifiedData.status === 'fulfilled' && unifiedData.value.length > 0) {
+  else if (afadAPIData.status === 'fulfilled' && afadAPIData.value.length > 0) {
+    // API fallback
     const now = Date.now();
     const oneDayAgo = now - 24 * 60 * 60 * 1000;
-    // CRITICAL: Only include AFAD earthquakes from unified API
-    const afadOnlyUnifiedData = unifiedData.value.filter(eq => eq.source === 'AFAD' && eq.time >= oneDayAgo);
-    
-    if (afadOnlyUnifiedData.length > 0) {
-      result.earthquakes.push(...afadOnlyUnifiedData);
-      result.sources.unified = true;
-      if (__DEV__) {
-        logger.info(`✅ Unified API: ${afadOnlyUnifiedData.length} güncel AFAD deprem verisi alındı - EN HIZLI`);
-      }
-    } else if (__DEV__) {
-      logger.debug(`⚠️ Unified API: ${unifiedData.value.length} deprem var ama AFAD verisi yok veya eski`);
-    }
-  } else if (unifiedData.status === 'rejected' && __DEV__) {
-    logger.debug('⚠️ Unified API başarısız:', unifiedData.reason?.message);
-  }
-
-  // Process AFAD API data
-  if (afadAPIData.status === 'fulfilled' && afadAPIData.value.length > 0) {
-    const now = Date.now();
-    const oneDayAgo = now - 24 * 60 * 60 * 1000;
-    const recentAPIData = afadAPIData.value.filter(eq => eq.time >= oneDayAgo);
-    
-    if (recentAPIData.length > 0) {
-      result.earthquakes.push(...recentAPIData);
+    const recent = afadAPIData.value.filter(eq => eq.time >= oneDayAgo);
+    if (recent.length > 0) {
+      afadList = recent;
       result.sources.afadAPI = true;
-      if (__DEV__) {
-        logger.info(`✅ AFAD API: ${recentAPIData.length} güncel deprem verisi alındı (son 24 saat)`);
-      }
-    } else if (__DEV__) {
-      // ELITE: Reduce log noise - this is expected behavior (HTML fallback is used)
-      // Only log at debug level to avoid production noise
-      const oldestTime = afadAPIData.value.length > 0 
-        ? new Date(afadAPIData.value[afadAPIData.value.length - 1].time).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
-        : 'N/A';
-      logger.debug(`ℹ️ AFAD API: ${afadAPIData.value.length} deprem var ama hepsi 24 saatten eski (HTML fallback kullanılıyor). En eski: ${oldestTime}`);
+      if (__DEV__) logger.info(`✅ AFAD (API): ${afadList.length} veri`);
     }
-  } else if (afadAPIData.status === 'rejected' && __DEV__) {
-    logger.debug('AFAD API fetch failed:', afadAPIData.reason?.message);
   }
 
-  // CRITICAL: Kandilli removed per user request - only AFAD data is shown
-  
-  // CRITICAL: Filter to only AFAD earthquakes
-  result.earthquakes = result.earthquakes.filter(eq => eq.source === 'AFAD');
-  
-  if (__DEV__ && result.earthquakes.length > 0) {
-    logger.info(`📊 Toplam ${result.earthquakes.length} AFAD deprem verisi alındı (sadece AFAD)`);
+  // --- 2. PROCESS KANDILLI DATA ---
+  if (kandilliAPIData.status === 'fulfilled' && kandilliAPIData.value.length > 0) {
+    kandilliList = kandilliAPIData.value;
+    result.sources.kandilliAPI = true;
+    if (__DEV__) logger.info(`✅ Kandilli: ${kandilliList.length} veri`);
+  }
+
+  // --- 3. FUSION & VERIFICATION ---
+  // Lazy import to avoid circular dependency issues if any
+  const { earthquakeFusionService } = require('./EarthquakeFusionService');
+
+  // Fuse the lists!
+  result.earthquakes = earthquakeFusionService.fuse(afadList, kandilliList);
+
+  if (__DEV__) {
+    logger.info(`🧬 FÜZYON SONUCU: ${afadList.length} AFAD + ${kandilliList.length} Kandilli -> ${result.earthquakes.length} Birleştirilmiş Deprem`);
   }
 
   return result;
@@ -140,15 +116,15 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
     const startDate = sevenDaysAgo.toISOString().split('T')[0];
     const endDate = new Date().toISOString().split('T')[0];
     const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1&limit=500`;
-    
+
     const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
-    
+
     if (__DEV__) {
       logger.debug('📡 AFAD API çağrılıyor:', url);
     }
 
     const endpoint = 'AFAD';
-    
+
     try {
       const data = await networkResilienceService.executeWithResilience<Earthquake[]>(
         endpoint,
@@ -156,7 +132,7 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
         async () => {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 20000);
-          
+
           try {
             const response = await fetch(url, {
               method: 'GET',
@@ -171,14 +147,14 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
             });
             clearTimeout(timeoutId);
             return response;
-          } catch (fetchError: any) {
+          } catch (fetchError: unknown) {
             clearTimeout(timeoutId);
-            if (fetchError?.name === 'AbortError') {
+            if (fetchError instanceof Error && fetchError.name === 'AbortError') {
               throw new Error('Request timeout');
             }
             throw fetchError;
           }
-        }
+        },
       );
 
       let events: any[] = Array.isArray(data) ? data : [];
@@ -196,78 +172,76 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
       }
 
       return processAFADEvents(events);
-    } catch (resilienceError: any) {
+    } catch (resilienceError: unknown) {
       if (__DEV__) {
         logger.warn('⚠️ Primary AFAD endpoint failed with resilience, trying fallback...');
       }
-      
-      // Try fallback endpoint
-      try {
-        const fallbackData = await networkResilienceService.executeWithResilience<Earthquake[]>(
-          endpoint,
-          fallbackUrl,
-          async () => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000);
-            
-            try {
-              const response = await fetch(fallbackUrl, {
-                method: 'GET',
-                headers: {
-                  'Accept': 'application/json',
-                  'Cache-Control': 'no-cache',
-                  'Pragma': 'no-cache',
-                  'User-Agent': 'AfetNet/1.0',
-                },
-                signal: controller.signal,
-                cache: 'no-store',
-              });
-              clearTimeout(timeoutId);
-              return response;
-            } catch (fetchError: any) {
-              clearTimeout(timeoutId);
-              if (fetchError?.name === 'AbortError') {
-                throw new Error('Request timeout');
-              }
-              throw fetchError;
+
+      const fallbackData = await networkResilienceService.executeWithResilience<Earthquake[]>(
+        endpoint,
+        fallbackUrl,
+        async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+          try {
+            const response = await fetch(fallbackUrl, {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'User-Agent': 'AfetNet/1.0',
+              },
+              signal: controller.signal,
+              cache: 'no-store',
+            });
+            clearTimeout(timeoutId);
+            return response;
+          } catch (fetchError: unknown) {
+            clearTimeout(timeoutId);
+            if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+              throw new Error('Request timeout');
             }
+            throw fetchError;
           }
-        );
+        },
+      );
 
-        let events: any[] = Array.isArray(fallbackData) ? fallbackData : [];
-        events = events.sort((a: any, b: any) => {
-          const dateA = a.eventDate || a.date || a.originTime || '';
-          const dateB = b.eventDate || b.date || b.originTime || '';
-          return dateB.localeCompare(dateA);
-        });
+      let events: any[] = Array.isArray(fallbackData) ? fallbackData : [];
+      events = events.sort((a: any, b: any) => {
+        const dateA = a.eventDate || a.date || a.originTime || '';
+        const dateB = b.eventDate || b.date || b.originTime || '';
+        return dateB.localeCompare(dateA);
+      });
 
-        if (events.length === 0) {
-          throw new Error('Both AFAD endpoints returned empty data');
-        }
-
-        return processAFADEvents(events);
-      } catch (fallbackError) {
-        throw fallbackError;
+      if (events.length === 0) {
+        throw new Error('Both AFAD endpoints returned empty data');
       }
+
+      return processAFADEvents(events);
     }
-  } catch (error: any) {
-    const isNetworkError = 
-      error?.message?.includes('Network request failed') ||
-      error?.message?.includes('network') ||
-      error?.name === 'TypeError' ||
-      error?.name === 'NetworkError';
-    
-    const isTimeout = 
-      error?.name === 'AbortError' || 
-      error?.message?.includes('aborted') ||
-      error?.message?.includes('timeout') ||
-      error?.message === 'Request timeout' ||
-      error?.message === 'Fallback request timeout';
-    
+  } catch (error: unknown) {
+    const errMsg = getErrorMessage(error);
+    const errName = getErrorName(error);
+
+    const isNetworkError =
+      errMsg.includes('Network request failed') ||
+      errMsg.includes('network') ||
+      errName === 'TypeError' ||
+      errName === 'NetworkError';
+
+    const isTimeout =
+      errName === 'AbortError' ||
+      errMsg.includes('aborted') ||
+      errMsg.includes('timeout') ||
+      errMsg === 'Request timeout' ||
+      errMsg === 'Fallback request timeout';
+
     if (__DEV__) {
       logger.warn('⚠️ AFAD API başarısız, HTML fallback deneniyor...');
     }
-    
+
     try {
       const htmlData = await afadHTMLProvider.fetchRecent();
       if (htmlData.length > 0) {
@@ -281,7 +255,7 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
         logger.debug('AFAD HTML fallback başarısız:', htmlError);
       }
     }
-    
+
     return [];
   }
 }
@@ -293,15 +267,15 @@ export async function fetchFromKandilliAPI(): Promise<Earthquake[]> {
   try {
     const { kandilliProvider } = await import('../providers/KandilliProvider');
     const earthquakes = await kandilliProvider.fetchRecent();
-    
+
     if (__DEV__ && earthquakes.length > 0) {
       logger.info(`✅ Kandilli'den ${earthquakes.length} deprem verisi alındı`);
     }
-    
+
     return earthquakes;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (__DEV__) {
-      logger.debug('Kandilli fetch error:', error?.message || String(error));
+      logger.debug('Kandilli fetch error:', getErrorMessage(error));
     }
     return [];
   }

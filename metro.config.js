@@ -23,16 +23,16 @@ config.resolver.assetExts.push('mp4', 'mov', 'avi', 'mkv');
 // ============================================================================
 const blockListPatterns = [
   // Block PushNotificationIOS module - deprecated in React Native
-  /.*\/PushNotificationIOS\/PushNotificationIOS$/,
-  /.*\/PushNotificationIOS\/NativePushNotificationManagerIOS$/,
-  /.*\/push-notification-ios\/.*/,
-  /.*\/@react-native-community\/push-notification-ios\/.*/,
+  /.*[/\\]PushNotificationIOS[/\\]\/PushNotificationIOS$/,
+  /.*[/\\]PushNotificationIOS[/\\]NativePushNotificationManagerIOS$/,
+  /.*[/\\]push-notification-ios[/\\].*/,
+  /.*[/\\]@react-native-community[/\\]push-notification-ios[/\\].*/,
   // More aggressive patterns to catch all variations
   /.*PushNotificationIOS.*/,
   /.*NativePushNotificationManagerIOS.*/,
   // Block any file path containing PushNotificationIOS
-  /.*[\/\\]PushNotificationIOS[\/\\].*/,
-  /.*[\/\\]NativePushNotificationManagerIOS[\/\\].*/,
+  /.*[/\\]PushNotificationIOS[/\\].*/,
+  /.*[/\\]NativePushNotificationManagerIOS[/\\].*/,
 ];
 
 if (!config.resolver.blockList) {
@@ -81,49 +81,49 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   // This is Metro's standard resolver - it should return valid resolution objects
   try {
     const resolution = defaultResolve(context, moduleName, platform);
-    
+
     // ELITE: Strict validation - Metro's _getFileResolvedModule expects:
     // - resolution must be an object (not null, not undefined)
     // - resolution.type must exist and be a string
     // - resolution.type must be one of: 'sourceFile', 'assetFiles', 'empty'
-    if (resolution && 
-        typeof resolution === 'object' && 
-        resolution !== null &&
-        resolution !== undefined &&
-        'type' in resolution &&
-        typeof resolution.type === 'string' &&
-        (resolution.type === 'sourceFile' || 
-         resolution.type === 'assetFiles' || 
-         resolution.type === 'empty')) {
+    if (resolution &&
+      typeof resolution === 'object' &&
+      resolution !== null &&
+      resolution !== undefined &&
+      'type' in resolution &&
+      typeof resolution.type === 'string' &&
+      (resolution.type === 'sourceFile' ||
+        resolution.type === 'assetFiles' ||
+        resolution.type === 'empty')) {
       // Valid resolution object - return as-is
       return resolution;
     }
-    
+
     // ELITE: Invalid resolution from metro-resolver
     // This should never happen, but if it does, we need to handle it gracefully
     // CRITICAL: We must NOT return undefined here - Metro's _getFileResolvedModule will fail
     // Instead, we delegate to original resolver or use Metro's default resolver
-    
+
     // Check if we have an original resolver and it's not our custom function
-    if (originalResolveRequest && 
-        typeof originalResolveRequest === 'function' &&
-        originalResolveRequest !== config.resolver.resolveRequest) {
+    if (originalResolveRequest &&
+      typeof originalResolveRequest === 'function' &&
+      originalResolveRequest !== config.resolver.resolveRequest) {
       try {
         const originalResolution = originalResolveRequest(context, moduleName, platform);
         // Validate original resolution before returning
-        if (originalResolution && 
-            typeof originalResolution === 'object' &&
-            originalResolution !== null &&
-            originalResolution !== undefined &&
-            'type' in originalResolution &&
-            typeof originalResolution.type === 'string') {
+        if (originalResolution &&
+          typeof originalResolution === 'object' &&
+          originalResolution !== null &&
+          originalResolution !== undefined &&
+          'type' in originalResolution &&
+          typeof originalResolution.type === 'string') {
           return originalResolution;
         }
       } catch (originalError) {
         // Original resolver failed - fall through to Metro's default resolver
       }
     }
-    
+
     // CRITICAL: If we reach here, we have an invalid resolution
     // Metro's _getFileResolvedModule will fail if we return undefined
     // Instead, we MUST NOT return undefined - we must return a valid resolution object
@@ -134,27 +134,27 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   } catch (error) {
     // ELITE: If resolver throws, delegate to Metro's default resolver
     // This is expected for modules that don't exist or can't be resolved
-    
+
     // Try original resolver first if available
-    if (originalResolveRequest && 
-        typeof originalResolveRequest === 'function' &&
-        originalResolveRequest !== config.resolver.resolveRequest) {
+    if (originalResolveRequest &&
+      typeof originalResolveRequest === 'function' &&
+      originalResolveRequest !== config.resolver.resolveRequest) {
       try {
         const originalResolution = originalResolveRequest(context, moduleName, platform);
         // Validate original resolution before returning
-        if (originalResolution && 
-            typeof originalResolution === 'object' &&
-            originalResolution !== null &&
-            originalResolution !== undefined &&
-            'type' in originalResolution &&
-            typeof originalResolution.type === 'string') {
+        if (originalResolution &&
+          typeof originalResolution === 'object' &&
+          originalResolution !== null &&
+          originalResolution !== undefined &&
+          'type' in originalResolution &&
+          typeof originalResolution.type === 'string') {
           return originalResolution;
         }
       } catch (originalError) {
         // Original resolver also failed - fall through to default Metro resolver
       }
     }
-    
+
     // CRITICAL: If resolver throws, return empty module instead of undefined
     // Metro's _getFileResolvedModule will fail if we return undefined
     // Return empty module as fallback to prevent Metro from crashing

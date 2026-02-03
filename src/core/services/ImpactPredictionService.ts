@@ -80,7 +80,7 @@ class ImpactPredictionService {
     epicenterLat: number,
     epicenterLng: number,
     magnitude: number,
-    depth: number = 10
+    depth: number = 10,
   ): Promise<ImpactZone> {
     try {
       // Calculate impact circles
@@ -88,7 +88,7 @@ class ImpactPredictionService {
         epicenterLat,
         epicenterLng,
         magnitude,
-        depth
+        depth,
       );
       
       // Calculate infrastructure risk
@@ -96,13 +96,13 @@ class ImpactPredictionService {
         epicenterLat,
         epicenterLng,
         magnitude,
-        impactCircles
+        impactCircles,
       );
       
       // Estimate casualties
       const estimatedCasualties = this.estimateCasualties(
         magnitude,
-        impactCircles
+        impactCircles,
       );
       
       // Estimate response time
@@ -137,7 +137,7 @@ class ImpactPredictionService {
     epicenterLat: number,
     epicenterLng: number,
     magnitude: number,
-    depth: number
+    depth: number,
   ): ImpactCircle[] {
     const circles: ImpactCircle[] = [];
     
@@ -202,7 +202,7 @@ class ImpactPredictionService {
     epicenterLat: number,
     epicenterLng: number,
     magnitude: number,
-    impactCircles: ImpactCircle[]
+    impactCircles: ImpactCircle[],
   ): Promise<ImpactZone['infrastructureRisk']> {
     // Get city name (simplified)
     const city = this.getCityName(epicenterLat, epicenterLng);
@@ -223,7 +223,7 @@ class ImpactPredictionService {
         epicenterLat,
         epicenterLng,
         item.lat,
-        item.lng
+        item.lng,
       );
       
       // Check if within impact radius
@@ -254,7 +254,7 @@ class ImpactPredictionService {
 
   private estimateCasualties(
     magnitude: number,
-    impactCircles: ImpactCircle[]
+    impactCircles: ImpactCircle[],
   ): { min: number; max: number; mostLikely: number } {
     // Simplified casualty estimation
     // Real models consider building types, population density, time of day
@@ -309,7 +309,7 @@ class ImpactPredictionService {
 
   private determineSeverity(
     magnitude: number,
-    impactCircles: ImpactCircle[]
+    impactCircles: ImpactCircle[],
   ): 'minimal' | 'light' | 'moderate' | 'severe' | 'catastrophic' {
     if (magnitude >= 7.5) {
       return 'catastrophic';
@@ -342,7 +342,7 @@ class ImpactPredictionService {
     epicenterLat: number,
     epicenterLng: number,
     magnitude: number,
-    depth: number
+    depth: number,
   ): ImpactZone {
     return {
       epicenter: { lat: epicenterLat, lng: epicenterLng },

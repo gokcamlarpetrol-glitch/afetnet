@@ -1,62 +1,32 @@
-/**
- * ADD FAMILY MEMBER SCREEN - Elite Premium Design
- * Production-grade member addition with comprehensive customization
- * Zero-error guarantee with full type safety
- * 
- * Features:
- * - QR Code scanning
- * - Manual ID entry
- * - Custom name input
- * - Quick role selection (Anne, Baba, Kardeş, etc.)
- * - Relationship type selection
- * - Phone number (optional)
- * - Notes (optional)
- * - Duplicate detection
- * - Comprehensive validation
- */
-import React, { useState, useCallback, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Pressable, 
-  TextInput, 
-  Alert, 
-  StatusBar, 
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, Alert, Pressable, ScrollView, TextInput, KeyboardAvoidingView, Platform, StatusBar, ImageBackground } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, typography, spacing, borderRadius } from '../../theme';
-import * as haptics from '../../utils/haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient'; // Still used for internal gradients if needed, or remove
 import { useFamilyStore } from '../../stores/familyStore';
-import { bleMeshService } from '../../services/BLEMeshService';
-import { isValidDeviceId } from '../../../lib/device';
 import { createLogger } from '../../utils/logger';
+import * as haptics from '../../utils/haptics';
+import { colors, typography } from '../../theme';
+import { identityService } from '../../services/IdentityService';
+import GlassButton from '../../components/buttons/GlassButton'; // Import GlassButton
 
 const logger = createLogger('AddFamilyMemberScreen');
 
-// ELITE: Predefined relationship types for quick selection
+// Relationship Types Constants
 const RELATIONSHIP_TYPES = [
   { id: 'anne', label: 'Anne', icon: 'woman' as const },
   { id: 'baba', label: 'Baba', icon: 'man' as const },
-  { id: 'kardes', label: 'Kardeş', icon: 'people' as const },
   { id: 'es', label: 'Eş', icon: 'heart' as const },
+  { id: 'kardes', label: 'Kardeş', icon: 'people' as const },
   { id: 'cocuk', label: 'Çocuk', icon: 'happy' as const },
-  { id: 'anneanne', label: 'Anneanne', icon: 'woman' as const },
-  { id: 'dede', label: 'Dede', icon: 'man' as const },
-  { id: 'amca', label: 'Amca', icon: 'man' as const },
-  { id: 'teyze', label: 'Teyze', icon: 'woman' as const },
-  { id: 'dayi', label: 'Dayı', icon: 'man' as const },
-  { id: 'hala', label: 'Hala', icon: 'woman' as const },
-  { id: 'diger', label: 'Diğer', icon: 'person' as const },
-] as const;
+  { id: 'akraba', label: 'Akraba', icon: 'nutrition' as const }, // generic icon
+  { id: 'arkadas', label: 'Arkadaş', icon: 'person' as const },
+  { id: 'diger', label: 'Diğer', icon: 'help-circle' as const },
+];
 
-// ELITE: Type-safe navigation props
+const isValidDeviceId = (id: string) => /^[a-zA-Z0-9-]+$/.test(id);
+
 interface AddFamilyMemberScreenProps {
   navigation: {
     navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -69,18 +39,24 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [manualId, setManualId] = useState('');
+  const [targetDeviceId, setTargetDeviceId] = useState(''); // Store actual device ID separate from ID
   const [memberName, setMemberName] = useState('');
   const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [addMethod, setAddMethod] = useState<'qr' | 'manual'>('qr');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const members = useFamilyStore((state) => state.members);
 
-  // ELITE: Check for duplicate device IDs
-  const checkDuplicate = useCallback((deviceId: string): boolean => {
-    return members.some(m => m.deviceId === deviceId);
+  // Initialize service
+  useEffect(() => {
+    identityService.initialize();
+  }, []);
+
+  // ELITE: Check for duplicate IDs or Device IDs
+  const checkDuplicate = useCallback((id: string): boolean => {
+    return members.some(m => m.id === id || m.deviceId === id);
   }, [members]);
 
   // ELITE: Validate phone number format (optional)
@@ -95,41 +71,44 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   const handleBarCodeScanned = useCallback(({ type, data }: { type: string; data: string }) => {
     try {
       if (scanned || isSubmitting) return;
-      
-      // ELITE: Validate input
-      if (!data || typeof data !== 'string' || data.trim().length === 0) {
+
+      const parsedData = identityService.parseQRPayload(data);
+
+      if (!parsedData) {
         logger.warn('Invalid QR code data:', data);
-        Alert.alert('Hata', 'QR kod okunamadı. Lütfen tekrar deneyin.');
-        return;
-      }
-      
-      setScanned(true);
-      haptics.notificationSuccess();
-      
-      // ELITE: Extract and validate device ID
-      const deviceId = data.trim();
-      
-      if (!isValidDeviceId(deviceId)) {
-        logger.warn('Invalid device ID from QR:', deviceId);
-        Alert.alert('Geçersiz QR Kod', 'QR kod geçerli bir device ID içermiyor. Lütfen geçerli bir QR kod tarayın.');
-        setScanned(false);
+        Alert.alert('Hata', 'Geçersiz AfetNet QR Kodu.');
+        // Don't set scanned=true so user can try again immediately? 
+        // Better to wait a bit
+        setScanned(true);
+        setTimeout(() => setScanned(false), 2000);
         return;
       }
 
+      setScanned(true);
+      haptics.notificationSuccess();
+
+      const { id, did, name } = parsedData;
+
       // ELITE: Check for duplicates
-      if (checkDuplicate(deviceId)) {
-        Alert.alert('Üye Zaten Mevcut', 'Bu ID\'ye sahip bir üye zaten listenizde bulunuyor.');
-        setScanned(false);
-        return;
+      if (checkDuplicate(id) || (did && checkDuplicate(did))) {
+        Alert.alert('Üye Zaten Mevcut', 'Bu kişi zaten listenizde bulunuyor.');
+        return; // Stay on screen
       }
-      
-      // Set device ID and switch to manual mode for name entry
-      setManualId(deviceId);
-      setAddMethod('manual');
+
+      // Auto-fill data from QR
+      setManualId(id);
+      if (did) setTargetDeviceId(did);
+      else setTargetDeviceId(id); // Fallback
+
+      if (name && name !== 'Unknown User') {
+        setMemberName(name);
+      }
+
+      setAddMethod('manual'); // Switch to confirm details
       haptics.impactMedium();
-      
-      // Note: Name input will be focused automatically when method changes to 'manual'
-      
+
+      Alert.alert('Kişi Bulundu', `"${name || id}" bulundu. Lütfen bilgileri onaylayın.`);
+
     } catch (error) {
       logger.error('Error in handleBarCodeScanned:', error);
       Alert.alert('Hata', 'QR kod işlenirken bir hata oluştu.');
@@ -157,7 +136,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     // Elite Security: Sanitize input - only allow alphanumeric and dash
     const sanitized = text.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 30);
     setManualId(sanitized);
-    
+
     // Auto-check for duplicates as user types
     if (sanitized.length > 0 && isValidDeviceId(sanitized)) {
       if (checkDuplicate(sanitized)) {
@@ -228,19 +207,23 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       haptics.impactMedium();
 
       // ELITE: Prepare member data
-      const deviceId = manualId.trim();
+      const idToSave = manualId.trim();
+      // Use targetDeviceId if available (from QR), otherwise fallback to manual ID as device ID
+      const deviceIdToSave = targetDeviceId || idToSave;
+
       const trimmedName = memberName.trim();
       const trimmedPhone = phoneNumber.trim();
       const trimmedNotes = notes.trim();
 
       // ELITE: Add member with comprehensive data
       await useFamilyStore.getState().addMember({
+        id: idToSave, // Use Identity ID
         name: trimmedName,
         status: 'unknown',
         lastSeen: Date.now(),
         latitude: 0,
         longitude: 0,
-        deviceId: deviceId,
+        deviceId: deviceIdToSave, // Use Physical ID for Mesh routing
         relationship: selectedRelationship || undefined,
         phoneNumber: trimmedPhone || undefined,
         notes: trimmedNotes || undefined,
@@ -249,7 +232,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       });
 
       haptics.notificationSuccess();
-      logger.info('Family member added successfully:', { deviceId, name: trimmedName });
+      logger.info('Family member added successfully:', { deviceId: deviceIdToSave, name: trimmedName });
 
       // ELITE: Show success message
       Alert.alert(
@@ -262,7 +245,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
               navigation.goBack();
             },
           },
-        ]
+        ],
       );
     } catch (error) {
       logger.error('Error adding family member:', error);
@@ -308,17 +291,25 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   }, []);
 
   return (
-    <LinearGradient colors={[colors.background.primary, '#0b1220']} style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      
+    <ImageBackground
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <StatusBar barStyle="dark-content" />
+
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
+          <Ionicons name="chevron-back" size={28} color="#334155" />
         </Pressable>
         <Text style={styles.headerTitle}>Aile Üyesi Ekle</Text>
         <Pressable onPress={handleReset} style={styles.resetButton}>
-          <Ionicons name="refresh" size={24} color={colors.text.secondary} />
+          <Ionicons name="refresh" size={24} color="#64748b" />
         </Pressable>
       </View>
 
@@ -327,7 +318,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         style={styles.keyboardView}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -341,10 +332,10 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 haptics.impactLight();
               }}
             >
-              <Ionicons 
-                name="qr-code-outline" 
-                size={20} 
-                color={addMethod === 'qr' ? '#fff' : colors.text.secondary} 
+              <Ionicons
+                name="qr-code-outline"
+                size={20}
+                color={addMethod === 'qr' ? '#0ea5e9' : '#64748b'}
               />
               <Text style={[styles.methodButtonText, addMethod === 'qr' && styles.methodButtonTextActive]}>
                 QR Kod
@@ -357,10 +348,10 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 haptics.impactLight();
               }}
             >
-              <Ionicons 
-                name="keypad-outline" 
-                size={20} 
-                color={addMethod === 'manual' ? '#fff' : colors.text.secondary} 
+              <Ionicons
+                name="keypad-outline"
+                size={20}
+                color={addMethod === 'manual' ? '#0ea5e9' : '#64748b'}
               />
               <Text style={[styles.methodButtonText, addMethod === 'manual' && styles.methodButtonTextActive]}>
                 Manuel
@@ -384,7 +375,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 )}
                 {permission && !permission.granted && (
                   <View style={styles.permissionContainer}>
-                    <Ionicons name="camera-outline" size={64} color={colors.text.tertiary} />
+                    <Ionicons name="camera-outline" size={64} color="#64748b" />
                     <Text style={styles.permissionDeniedText}>
                       Kamera izni gereklidir. Lütfen ayarlardan izin verin.
                     </Text>
@@ -426,7 +417,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 <TextInput
                   style={styles.input}
                   placeholder="afn-xxxxxxxx"
-                  placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor="#94a3b8"
                   value={manualId}
                   onChangeText={handleManualIdChange}
                   maxLength={30}
@@ -460,10 +451,10 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
               <Text style={styles.sectionSubtitle}>
                 Üyenin ismini veya ilişki türünü seçin
               </Text>
-              
+
               {/* Quick Relationship Selection */}
-              <ScrollView 
-                horizontal 
+              <ScrollView
+                horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.relationshipScroll}
                 contentContainerStyle={styles.relationshipContainer}
@@ -480,7 +471,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                     <Ionicons
                       name={relationship.icon}
                       size={20}
-                      color={selectedRelationship === relationship.id ? '#fff' : colors.text.secondary}
+                      color={selectedRelationship === relationship.id ? '#0ea5e9' : '#64748b'}
                     />
                     <Text
                       style={[
@@ -499,7 +490,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 <TextInput
                   style={styles.input}
                   placeholder="İsim girin (örn: Ahmet, Ayşe)"
-                  placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor="#94a3b8"
                   value={memberName}
                   onChangeText={(text) => {
                     const sanitized = text.substring(0, 50);
@@ -533,7 +524,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
               <TextInput
                 style={styles.input}
                 placeholder="05551234567 veya +905551234567"
-                placeholderTextColor={colors.text.tertiary}
+                placeholderTextColor="#94a3b8"
                 value={phoneNumber}
                 onChangeText={(text) => {
                   // Allow only digits, +, spaces
@@ -561,7 +552,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
               <TextInput
                 style={[styles.input, styles.textArea]}
                 placeholder="Ek bilgiler, özel notlar..."
-                placeholderTextColor={colors.text.tertiary}
+                placeholderTextColor="#94a3b8"
                 value={notes}
                 onChangeText={(text) => setNotes(text.substring(0, 500))}
                 maxLength={500}
@@ -579,41 +570,20 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
           {/* Add Button */}
           {(addMethod === 'manual' || scanned) && (
             <View style={styles.section}>
-              <Pressable
-                style={[
-                  styles.addButton,
-                  isSubmitting && styles.addButtonDisabled,
-                  (!manualId || !memberName || isSubmitting) && styles.addButtonDisabled,
-                ]}
+              <GlassButton
+                title={isSubmitting ? "Ekleniyor..." : "Üyeyi Ekle"}
                 onPress={handleAddMember}
+                variant="success"
+                icon={isSubmitting ? undefined : "checkmark-circle"}
+                loading={isSubmitting}
                 disabled={!manualId || !memberName || isSubmitting}
-              >
-                <LinearGradient
-                  colors={
-                    !manualId || !memberName || isSubmitting
-                      ? [colors.background.secondary, colors.background.secondary]
-                      : [colors.brand.primary, colors.brand.secondary]
-                  }
-                  style={styles.addButtonGradient}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Ionicons name="hourglass-outline" size={20} color={colors.text.secondary} />
-                      <Text style={styles.addButtonTextDisabled}>Ekleniyor...</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                      <Text style={styles.addButtonText}>Üyeyi Ekle</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </Pressable>
+                fullWidth
+              />
             </View>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </ImageBackground>
   );
 }
 
@@ -630,15 +600,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   backButton: {
-    padding: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   headerTitle: {
-    ...typography.h3,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#334155', // Dark Slate
     flex: 1,
     textAlign: 'center',
   },
   resetButton: {
-    padding: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   keyboardView: {
     flex: 1,
@@ -650,10 +636,12 @@ const styles = StyleSheet.create({
   },
   methodSelector: {
     flexDirection: 'row',
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
-    padding: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 16,
+    padding: 6,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
   },
   methodButton: {
     flex: 1,
@@ -662,52 +650,61 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     gap: 8,
   },
   methodButtonActive: {
-    backgroundColor: colors.brand.primary,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   methodButtonText: {
-    ...typography.body,
-    color: colors.text.secondary,
+    fontSize: 15,
+    color: '#64748b',
     fontWeight: '600',
   },
   methodButtonTextActive: {
-    color: '#fff',
+    color: '#0ea5e9', // Sky Blue
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    ...typography.h4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#334155',
     marginBottom: 4,
   },
   sectionSubtitle: {
-    ...typography.small,
-    color: colors.text.secondary,
+    fontSize: 13,
+    color: '#64748b',
     marginBottom: 12,
   },
   optionalText: {
-    ...typography.small,
-    color: colors.text.tertiary,
+    fontSize: 12,
+    color: '#94a3b8',
     fontWeight: '400',
   },
   scannerContainer: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 16,
+    borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: colors.background.secondary,
+    backgroundColor: '#f1f5f9',
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   permissionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.primary,
+    backgroundColor: '#0ea5e9',
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 12,
@@ -715,7 +712,7 @@ const styles = StyleSheet.create({
   },
   permissionButtonText: {
     color: '#fff',
-    ...typography.body,
+    fontSize: 16,
     fontWeight: '600',
   },
   permissionContainer: {
@@ -724,8 +721,8 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   permissionDeniedText: {
-    color: colors.text.secondary,
-    ...typography.body,
+    color: '#64748b',
+    fontSize: 14,
     textAlign: 'center',
     marginTop: 16,
     marginBottom: 20,
@@ -739,7 +736,7 @@ const styles = StyleSheet.create({
     width: '70%',
     aspectRatio: 1,
     borderWidth: 3,
-    borderColor: colors.brand.primary,
+    borderColor: '#0ea5e9',
     borderRadius: 16,
     backgroundColor: 'transparent',
   },
@@ -747,7 +744,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 40,
     color: '#fff',
-    ...typography.body,
+    fontSize: 14,
     fontWeight: '600',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
@@ -757,42 +754,42 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   input: {
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    ...typography.body,
-    color: colors.text.primary,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: '#1e293b',
     borderWidth: 1,
-    borderColor: colors.border.primary,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   textArea: {
     minHeight: 100,
-    paddingTop: 14,
+    paddingTop: 16,
   },
   validIndicator: {
     position: 'absolute',
     right: 12,
-    top: 14,
+    top: 16,
   },
   warningIndicator: {
     position: 'absolute',
     right: 12,
-    top: 14,
+    top: 16,
   },
   warningText: {
-    ...typography.small,
-    color: colors.status.warning,
+    fontSize: 12,
+    color: '#f59e0b',
     marginTop: 4,
   },
   errorText: {
-    ...typography.small,
-    color: colors.status.danger,
+    fontSize: 12,
+    color: '#ef4444',
     marginTop: 4,
   },
   charCount: {
-    ...typography.small,
-    color: colors.text.tertiary,
+    fontSize: 11,
+    color: '#94a3b8',
     textAlign: 'right',
     marginTop: 4,
   },
@@ -810,22 +807,24 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,
-    backgroundColor: colors.background.secondary,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
     borderWidth: 1,
-    borderColor: colors.border.primary,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
     gap: 6,
   },
   relationshipButtonActive: {
-    backgroundColor: colors.brand.primary,
-    borderColor: colors.brand.primary,
+    backgroundColor: '#eff6ff', // Light Blue bg
+    borderColor: '#0ea5e9',
+    borderWidth: 1,
   },
   relationshipButtonText: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
   },
   relationshipButtonTextActive: {
-    color: '#fff',
+    color: '#0ea5e9',
+    fontWeight: '600',
   },
   addButton: {
     borderRadius: 16,

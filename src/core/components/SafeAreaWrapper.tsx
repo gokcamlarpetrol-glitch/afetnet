@@ -10,23 +10,23 @@ import { colors } from '../theme';
 
 interface SafeAreaWrapperProps {
   children: React.ReactNode;
-  style?: any;
+  style?: import('react-native').ViewStyle;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
 }
 
-export default function SafeAreaWrapper({ 
-  children, 
+export default function SafeAreaWrapper({
+  children,
   style,
-  edges = ['top', 'left', 'right']
+  edges = ['top', 'left', 'right'],
 }: SafeAreaWrapperProps) {
   return (
     <>
-      <StatusBar 
-        barStyle="light-content" 
+      <StatusBar
+        barStyle="light-content"
         backgroundColor={colors.background.primary}
         translucent={false}
       />
-      <SafeAreaView 
+      <SafeAreaView
         style={[styles.container, style]}
         edges={edges}
       >

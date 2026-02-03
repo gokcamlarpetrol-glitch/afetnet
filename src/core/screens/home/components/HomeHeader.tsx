@@ -1,276 +1,215 @@
 /**
- * HOME HEADER - Premium 3D Globe Animation
- * 5-layer realistic Earth with lighting, shadows, and detailed continents
+ * HOME HEADER - ELITE EDITION
+ * Status indicators with subtle pulse animations.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode } from 'expo-av';
-import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
-import { colors, typography } from '../../../theme';
+import { BlurView } from '../../../components/SafeBlurView';
+import { useMeshStore } from '../../../stores/meshStore';
+import { bleMeshService } from '../../../services/BLEMeshService';
+import { useNavigation } from '@react-navigation/native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
-const logDebug = (...args: any[]) => {
-  if (__DEV__) {
-    // eslint-disable-next-line no-console
-    // ELITE: Use logger instead of console.log
-    if (__DEV__) {
-      const logger = require('../../../utils/logger').createLogger('HomeHeader');
-      logger.debug(...args);
-    }
-  }
-};
+import { colors } from '../../../theme';
 
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
-  const { isOnline } = useNetworkStatus();
-  const [videoLoaded, setVideoLoaded] = useState(false);
-  const videoRef = useRef<Video>(null);
-  
-  // Animations
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const badgePulse = useRef(new Animated.Value(1)).current;
+  const navigation = useNavigation<any>();
+
+  // Greeting Logic
+  const hour = new Date().getHours();
+  let greetingText = 'İyi Günler';
+  if (hour < 6) greetingText = 'İyi Geceler';
+  else if (hour < 12) greetingText = 'Günaydın';
+  else if (hour > 18) greetingText = 'İyi Akşamlar';
+
+  // Real Data
+  const meshPeers = useMeshStore((state) => state.peers);
+  const isMeshRunning = bleMeshService.getIsRunning();
+  const peerCount = Object.keys(meshPeers).length;
+
+  // Status Pulse Animation
+  const statusOpacity = useSharedValue(0.5);
 
   useEffect(() => {
-    // Subtle pulse animation
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.02,
-          duration: 2500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 2500,
-          useNativeDriver: true,
-        }),
-      ])
+    statusOpacity.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1500 }),
+        withTiming(0.5, { duration: 1500 }),
+      ),
+      -1,
+      true,
     );
-    pulseLoop.start();
-
-    // Badge pulse (only when online)
-    let badgeLoop: Animated.CompositeAnimation | null = null;
-    if (isOnline) {
-      badgeLoop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(badgePulse, {
-            toValue: 1.08,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(badgePulse, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      badgeLoop.start();
-    }
-
-    // CRITICAL: Cleanup animations on unmount
-    return () => {
-      pulseLoop.stop();
-      if (badgeLoop) {
-        badgeLoop.stop();
-      }
-      pulseAnim.setValue(1);
-      badgePulse.setValue(1);
-    };
-  }, [isOnline]);
-
-  // CRITICAL: Cleanup video on unmount
-  useEffect(() => {
-    return () => {
-      if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => {
-          // Ignore cleanup errors
-        });
-      }
-    };
   }, []);
 
+  const animatedStatusStyle = useAnimatedStyle(() => ({
+    opacity: statusOpacity.value,
+  }));
+
   return (
-    <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-      <View style={styles.left}>
-        {/* 3D Animated Globe Video */}
-        <Animated.View
-          style={[
-            styles.globeContainer,
-            {
-              transform: [{ scale: pulseAnim }],
-            },
-          ]}
-        >
-          <View style={styles.videoWrapper}>
-            <Video
-              ref={videoRef}
-              source={require('../../../../../assets/videos/globe.mp4')}
-              style={styles.video}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay
-              isLooping
-              isMuted
-              onLoadStart={() => {
-                logDebug('📹 Video yüklenmeye başladı');
-              }}
-              onLoad={() => {
-                setVideoLoaded(true);
-                logDebug('✅ Video yüklendi');
-              }}
-              onError={(error) => {
-                // CRITICAL: Video loading error - fallback to gradient
-                logDebug('⚠️ Video yükleme hatası:', error);
-                setVideoLoaded(false);
-                // Keep fallback gradient visible
-              }}
-              onPlaybackStatusUpdate={(status) => {
-                // CRITICAL: Handle video playback errors
-                if (status.isLoaded && 'error' in status && status.error) {
-                  logDebug('⚠️ Video playback hatası:', status.error);
-                  setVideoLoaded(false);
-                }
-              }}
-            />
-            {/* Fallback: Video yüklenene kadar gradient göster */}
-            {!videoLoaded && (
-              <View style={styles.videoFallback}>
-                <LinearGradient
-                  colors={['#3b82f6', '#1d4ed8', '#1e40af']}
-                  style={StyleSheet.absoluteFill}
-                />
-              </View>
-            )}
-          </View>
-        </Animated.View>
-        
+    <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+      <View style={styles.topRow}>
         <View>
-          <Text style={styles.title}>AfetNet</Text>
-          <Text style={styles.subtitle}>
-            🚀 Hayat Kurtaran Teknoloji • Gerçek Zamanlı
-          </Text>
+          <Text style={styles.greeting}>AFETNET</Text>
+          <Text style={styles.subtitle}>TRUSTED SURVIVAL SYSTEM</Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          {/* Mesh Status Icon */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MeshNetwork')}
+            style={styles.meshButton}
+          >
+            <Ionicons
+              name={isMeshRunning ? "radio" : "radio-outline"}
+              size={20}
+              color={isMeshRunning ? "#10B981" : colors.text.secondary}
+            />
+            {isMeshRunning && (
+              <View style={styles.activeDot} />
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.rightSide}>
+            <Text style={styles.welcomeText}>
+              {greetingText}, <Text style={styles.userName}>Gökhan</Text>
+            </Text>
+            <View style={styles.locationContainer}>
+              <Text style={styles.locationText}>
+                İstanbul • <Text style={styles.riskText}>Risk Düşük</Text>
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
-      
-      <Animated.View
-        style={[
-          styles.statusBadge,
-          {
-            backgroundColor: isOnline
-              ? 'rgba(16, 185, 129, 0.15)'
-              : 'rgba(100, 116, 139, 0.15)',
-            transform: [{ scale: isOnline ? badgePulse : 1 }],
-            borderColor: isOnline
-              ? colors.status.online
-              : colors.status.offline,
-          },
-        ]}
-      >
-        <Animated.View
-          style={[
-            styles.dot,
-            {
-              backgroundColor: isOnline ? colors.status.online : colors.status.offline,
-              transform: [{ scale: isOnline ? badgePulse : 1 }],
-            },
-          ]}
-        />
-        <Text
-          style={[
-            styles.statusText,
-            { color: isOnline ? colors.status.online : colors.status.offline },
-          ]}
-        >
-          {isOnline ? 'CANLI' : 'OFFLİNE'}
-        </Text>
-      </Animated.View>
+
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
+  container: {
+    marginBottom: 0,
+  },
+  topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingBottom: 20,
-    paddingHorizontal: 4,
-  },
-  left: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    flex: 1,
+    marginBottom: 8, // Reduced from 24
+    marginTop: -10, // Pull up closer to status bar
   },
-  globeContainer: {
-    width: 64,
-    height: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoWrapper: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    overflow: 'hidden', // Siyah kısımları kes
-    backgroundColor: 'transparent',
-    shadowColor: '#0ea5e9',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
-    position: 'relative', // For absolute positioned video
-  },
-  video: {
-    width: '200%', // Zoom in - sadece dünya görünsün
-    height: '200%', // Zoom in - sadece dünya görünsün
-    position: 'absolute',
-    left: '-50%', // Center the zoomed video
-    top: '-50%', // Center the zoomed video
-  },
-  title: {
-    ...typography.h1,
-    color: colors.text.primary,
+  greeting: {
+    fontSize: 32,
+    fontWeight: '300', // Slightly thicker than 200 for navy on cream
+    color: colors.text.primary, // Navy
+    letterSpacing: 2,
+    fontVariant: ['small-caps'],
+    // Removed shadows for cleaner look
   },
   subtitle: {
-    ...typography.caption,
-    color: colors.status.online,
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.text.secondary, // Slate 600
+    letterSpacing: 3,
+    marginTop: 6,
+    opacity: 0.8,
+  },
+  rightSide: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
     marginTop: 4,
   },
-  statusBadge: {
+  welcomeText: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  userName: {
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  locationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  },
+  locationText: {
+    fontSize: 11,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  riskText: {
+    color: '#10B981',
+    fontWeight: '600',
+  },
+  statusContainer: {
     borderRadius: 16,
-    gap: 8,
-    borderWidth: 1.5,
-    shadowColor: colors.status.online,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.05)', // Gentle border
+    backgroundColor: 'rgba(255, 255, 255, 0.4)', // Light glass
+    shadowColor: colors.shadow.color,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  statusBlur: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    shadowColor: colors.status.online,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    // Removed heavy shadows from dot
   },
   statusText: {
-    ...typography.caption,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.text.primary, // Navy
+    letterSpacing: 1,
   },
-  videoFallback: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 32,
-    overflow: 'hidden',
+  divider: {
+    marginHorizontal: 20,
+  },
+  meshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.05)',
+  },
+  activeDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    borderWidth: 1,
+    borderColor: '#fff',
   },
 });

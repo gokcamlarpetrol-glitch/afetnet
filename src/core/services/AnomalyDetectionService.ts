@@ -98,7 +98,7 @@ class AnomalyDetectionService {
     // Return the most significant anomaly
     const anomalies = [spikeAnomaly, gradualAnomaly, frequencyAnomaly, patternAnomaly];
     const bestAnomaly = anomalies.reduce((best, current) => 
-      current.confidence > best.confidence ? current : best
+      current.confidence > best.confidence ? current : best,
     );
 
     if (bestAnomaly.anomalyDetected && bestAnomaly.confidence > 60) {

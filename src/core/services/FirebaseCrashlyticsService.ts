@@ -7,6 +7,7 @@
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('FirebaseCrashlytics');
 
@@ -68,7 +69,7 @@ class FirebaseCrashlyticsService {
   private lastErrorTime = 0;
   // CRITICAL: Store original console.error to prevent recursive calls from GlobalErrorHandler
   private originalConsoleError: typeof console.error;
-  
+
   constructor() {
     // Store original console.error before GlobalErrorHandler overrides it
     this.originalConsoleError = console.error.bind(console);
@@ -206,14 +207,14 @@ class FirebaseCrashlyticsService {
   private setupGlobalErrorHandlers() {
     // Handle unhandled promise rejections
     const originalHandler = global.ErrorUtils?.getGlobalHandler?.();
-    
+
     if (global.ErrorUtils) {
       global.ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
         this.recordError(error, {
           isFatal: String(isFatal ?? false),
           source: 'global_error_handler',
         });
-        
+
         // Call original handler if exists
         if (originalHandler) {
           originalHandler(error, isFatal);
@@ -225,10 +226,10 @@ class FirebaseCrashlyticsService {
     if (typeof global !== 'undefined') {
       const originalRejectionHandler = (global as any).onunhandledrejection;
       (global as any).onunhandledrejection = (event: PromiseRejectionEvent) => {
-        const error = event.reason instanceof Error 
-          ? event.reason 
+        const error = event.reason instanceof Error
+          ? event.reason
           : new Error(String(event.reason));
-        
+
         this.recordError(error, {
           source: 'unhandled_promise_rejection',
         });
@@ -250,7 +251,7 @@ class FirebaseCrashlyticsService {
     const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth', 'credential'];
 
     for (const [key, value] of Object.entries(context)) {
-      if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      if (sensitiveKeys.some(sk => safeIncludes(key, sk))) {
         sanitized[key] = '***REDACTED***';
       } else {
         // Limit string length
@@ -280,7 +281,7 @@ class FirebaseCrashlyticsService {
     try {
       const Constants = require('expo-constants');
       const Device = require('expo-device');
-      
+
       return {
         platform: Platform.OS,
         version: Platform.Version,
@@ -407,7 +408,7 @@ class FirebaseCrashlyticsService {
   getCrashStats(): { totalCrashes: number; recentCrashes: number } {
     const now = Date.now();
     const recentCrashes = this.crashQueue.filter(
-      crash => now - crash.timestamp < 24 * 60 * 60 * 1000 // Last 24 hours
+      crash => now - crash.timestamp < 24 * 60 * 60 * 1000, // Last 24 hours
     ).length;
 
     return {

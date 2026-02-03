@@ -234,7 +234,7 @@ class StorageManagementService {
               await this.cleanupLowPriorityData();
             },
           },
-        ]
+        ],
       );
     }
   }
@@ -256,7 +256,7 @@ class StorageManagementService {
             await this.cleanupMediumPriorityData();
           },
         },
-      ]
+      ],
     );
   }
 

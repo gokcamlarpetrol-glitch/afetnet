@@ -23,7 +23,7 @@ export interface HealthProfile {
   gender?: string; // Erkek, Kadın, Diğer, Belirtmek istemiyorum
   height?: string; // cm
   weight?: string; // kg
-  
+
   // Medical Information
   bloodType: string; // A+, A-, B+, B-, AB+, AB-, O+, O-
   allergies: string[]; // e.g., ['Penisilin', 'Fıstık']
@@ -32,15 +32,15 @@ export interface HealthProfile {
   medications: string[]; // e.g., ['İnsülin', 'Aspirin']
   emergencyMedications?: string[]; // Alias for medications
   medicalHistory?: string; // Surgeries, accidents, etc.
-  
+
   // Insurance Information
   insuranceProvider?: string;
   insuranceNumber?: string;
   organDonorStatus?: string; // Evet, Hayır, Belirtmek istemiyorum
-  
+
   // Emergency Contacts
   emergencyContacts: EmergencyContact[];
-  
+
   // Additional Notes
   notes: string; // Additional medical notes
   lastUpdated: number;
@@ -49,7 +49,7 @@ export interface HealthProfile {
 interface HealthProfileState {
   profile: HealthProfile;
   isLoaded: boolean;
-  
+
   // Actions
   setBloodType: (bloodType: string) => void;
   addAllergy: (allergy: string) => void;
@@ -198,7 +198,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
       profile: {
         ...state.profile,
         emergencyContacts: state.profile.emergencyContacts.map((c) =>
-          c.id === contactId ? { ...c, ...updates } : c
+          c.id === contactId ? { ...c, ...updates } : c,
         ),
         lastUpdated: Date.now(),
       },
@@ -242,7 +242,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
 
       // Then try to sync from Firebase
       try {
-        const { getDeviceId } = await import('../../lib/device');
+        const { getDeviceId } = await import('../utils/device');
         const deviceId = await getDeviceId();
         if (deviceId) {
           const { firebaseDataService } = await import('../services/FirebaseDataService');
@@ -269,10 +269,10 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
     try {
       const { profile } = get();
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-      
+
       // Save to Firebase
       try {
-        const { getDeviceId } = await import('../../lib/device');
+        const { getDeviceId } = await import('../utils/device');
         const deviceId = await getDeviceId();
         if (deviceId) {
           const { firebaseDataService } = await import('../services/FirebaseDataService');
@@ -293,7 +293,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
             bloodType: profile.bloodType,
             allergies: profile.allergies,
             medications: profile.medications,
-            medicalConditions: profile.medicalConditions,
+            medicalConditions: profile.chronicConditions,
             emergencyContacts: profile.emergencyContacts,
             updatedAt: Date.now(),
           }).catch((error) => {
@@ -303,7 +303,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
       } catch (error) {
         logger.error('Failed to send health profile to backend:', error);
       }
-      
+
       logger.info('HealthProfile saved');
     } catch (error) {
       logger.error('HealthProfile save failed:', error);

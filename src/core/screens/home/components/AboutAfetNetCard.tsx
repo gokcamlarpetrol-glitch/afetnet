@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../../../theme';
 
@@ -14,14 +14,14 @@ const HIGHLIGHTS = [
 export default function AboutAfetNetCard() {
   return (
     <LinearGradient
-      colors={['#111a3a', '#0b1225']}
+      colors={['#FFFFFF', '#FDFBF7']} // Gentle Cream Gradient
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.container}
     >
       <View style={styles.headerRow}>
         <View style={styles.iconCircle}>
-          <Ionicons name="information" size={20} color={colors.accent.primary} />
+          <Ionicons name="information" size={20} color={colors.brand.primary} />
         </View>
         <Text style={styles.title}>AfetNet Nedir?</Text>
       </View>
@@ -48,12 +48,13 @@ const styles = StyleSheet.create({
     padding: spacing[6],
     marginTop: spacing[5],
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
-    shadowColor: '#1d4ed8',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    elevation: 12,
+    borderColor: 'rgba(15, 23, 42, 0.05)', // Gentle border
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // White glass
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
     gap: spacing[4],
   },
   headerRow: {
@@ -65,19 +66,22 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Gentle blue
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 0,
+    borderColor: 'rgba(37, 99, 235, 0.3)',
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary, // White
+    letterSpacing: 0.5,
   },
   description: {
     fontSize: 13,
     lineHeight: 20,
-    color: 'rgba(226, 232, 255, 0.85)',
+    color: colors.text.secondary, // Slate 400
   },
   highlights: {
     gap: spacing[3],
@@ -90,7 +94,8 @@ const styles = StyleSheet.create({
   highlightText: {
     flex: 1,
     fontSize: 12,
-    color: 'rgba(226, 232, 255, 0.8)',
+    color: colors.text.secondary, // Slate 400
+    fontWeight: '500',
   },
 });
 

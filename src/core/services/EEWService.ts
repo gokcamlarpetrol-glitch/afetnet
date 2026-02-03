@@ -86,7 +86,7 @@ class EEWService {
     // AFAD API only provides data AFTER earthquake occurs (late notification)
     try {
       const { seismicSensorService } = await import('./SeismicSensorService');
-      
+
       // Listen for P-wave detections (earliest possible warning)
       // NOTE: SeismicSensorService now handles EEW triggering directly via triggerEEW()
       // This listener is kept as fallback but with stricter validation
@@ -99,7 +99,7 @@ class EEWService {
           }
           return;
         }
-        
+
         // CRITICAL: Require HIGH confidence for %100 accuracy (reduce false positives)
         // Higher threshold ensures reliable warnings
         if (event.confidence < 75) {
@@ -108,7 +108,7 @@ class EEWService {
           }
           return;
         }
-        
+
         // CRITICAL: Minimum 10 seconds warning time guarantee for %100 accuracy
         // This ensures users have enough time to react safely
         const timeAdvance = event.timeAdvance || 10;
@@ -118,17 +118,17 @@ class EEWService {
           }
           return;
         }
-        
+
         // CRITICAL: P-wave detected - this is REAL early warning (before earthquake!)
         if (__DEV__) {
           logger.info(`🌊 REAL EARLY WARNING: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`);
         }
-        
+
         // NOTE: SeismicSensorService.triggerEEW() will handle the actual EEW notification
         // This listener is kept as fallback but should rarely trigger
         // (SeismicSensorService handles it directly)
       });
-      
+
       if (__DEV__) {
         logger.info('✅ SeismicSensorService listener registered - REAL early warnings active!');
       }
@@ -148,13 +148,13 @@ class EEWService {
     if (__DEV__) {
       logger.info('Stopping...');
     }
-    
+
     // Clear reconnect timeout
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
-    
+
     // Clean up WebSocket listeners
     if (this.ws) {
       this.ws.onopen = null;
@@ -236,7 +236,7 @@ class EEWService {
         if (__DEV__) {
           logger.info(`Connecting to: ${url}`);
         }
-        
+
         // Clean up existing WebSocket before creating new one
         if (this.ws) {
           this.ws.onopen = null;
@@ -246,7 +246,7 @@ class EEWService {
           this.ws.close();
           this.ws = null;
         }
-        
+
         this.ws = new WebSocket(url);
 
         this.ws.onopen = () => {
@@ -270,7 +270,7 @@ class EEWService {
 
             const data = JSON.parse(text);
             const eewEvent = this.normalizeEvent(data);
-            
+
             if (eewEvent && !this.seenEvents.has(eewEvent.id)) {
               this.seenEvents.add(eewEvent.id);
               this.notifyCallbacks(eewEvent).catch((error) => {
@@ -292,10 +292,10 @@ class EEWService {
           if (__DEV__) {
             logger.info('WebSocket closed');
           }
-          
+
           const currentWs = this.ws;
           this.ws = null;
-          
+
           // Clean up event listeners
           if (currentWs) {
             currentWs.onopen = null;
@@ -303,7 +303,7 @@ class EEWService {
             currentWs.onerror = null;
             currentWs.onclose = null;
           }
-          
+
           // Only reconnect if not manually stopped
           if (this.polling) {
             this.handleReconnect();
@@ -326,7 +326,7 @@ class EEWService {
         }
       }
     }
-    
+
     // If all URLs fail, just log (don't set error status) - polling will handle data
     if (__DEV__) {
       logger.warn(`All WebSocket connection attempts failed for region ${region}. Continuing with polling mode.`);
@@ -342,7 +342,7 @@ class EEWService {
           logger.warn(`Max reconnect attempts (${this.maxReconnectAttempts}) reached. Switching to polling-only mode.`);
         }
         this.maxAttemptsReachedLogged = true;
-        
+
         // Switch to polling-only mode - don't try WebSocket anymore
         useEEWStore.getState().setStatus('connected', 'Using polling mode (WebSocket unavailable)');
       }
@@ -396,16 +396,16 @@ class EEWService {
   private async pollLoop() {
     while (this.polling) {
       const netState = await NetInfo.fetch();
-      
+
       if (netState.isConnected) {
         try {
           // Use AFAD API (only real data source for Turkey)
           const url = this.getAfadPollUrl();
-          
+
           // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-          
+
           const response = await fetch(url, {
             headers: {
               'Accept': 'application/json',
@@ -413,7 +413,7 @@ class EEWService {
             },
             signal: controller.signal,
           });
-          
+
           clearTimeout(timeoutId);
 
           if (!response.ok) {
@@ -436,7 +436,7 @@ class EEWService {
           }
 
           const text = await response.text();
-          
+
           // Validate JSON before parsing
           if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
             if (__DEV__) {
@@ -447,10 +447,10 @@ class EEWService {
           }
 
           const data = JSON.parse(text);
-          
+
           // AFAD returns array of events
           const eventsArray = Array.isArray(data) ? data : (data.events || []);
-          
+
           for (const eventData of eventsArray) {
             const event = this.normalizeEvent(eventData);
             if (event && !this.seenEvents.has(event.id)) {
@@ -484,34 +484,34 @@ class EEWService {
       // AFAD API format support
       const eventDate = data.eventDate || data.date || data.originTime || data.time;
       const eventId = data.eventID || data.eventId || data.id || String(Date.now());
-      
+
       // Location parsing - AFAD uses geojson.coordinates or lat/lng
       const latitude = parseFloat(
-        data.geojson?.coordinates?.[1] || 
-        data.latitude || 
-        data.lat || 
-        '0'
+        data.geojson?.coordinates?.[1] ||
+        data.latitude ||
+        data.lat ||
+        '0',
       );
       const longitude = parseFloat(
-        data.geojson?.coordinates?.[0] || 
-        data.longitude || 
-        data.lng || 
-        '0'
+        data.geojson?.coordinates?.[0] ||
+        data.longitude ||
+        data.lng ||
+        '0',
       );
-      
+
       const magnitude = parseFloat(data.mag || data.magnitude || data.ml || '0');
       const depth = parseFloat(data.depth || data.derinlik || '10');
-      
+
       // Location string
       const locationParts = [
         data.location,
         data.ilce,
         data.sehir,
         data.title,
-        data.place
+        data.place,
       ].filter(Boolean);
-      const region = locationParts.length > 0 
-        ? locationParts.join(', ') 
+      const region = locationParts.length > 0
+        ? locationParts.join(', ')
         : 'Türkiye';
 
       if (isNaN(latitude) || isNaN(longitude) || latitude === 0 || longitude === 0) {
@@ -546,8 +546,8 @@ class EEWService {
     const arr = Array.isArray(data)
       ? data
       : data?.features
-      ? data.features
-      : data?.result || [];
+        ? data.features
+        : data?.result || [];
 
     for (const item of arr) {
       const event = this.normalizeEvent(item);
@@ -563,7 +563,7 @@ class EEWService {
     // CRITICAL: Check user preferences BEFORE sending notification
     const { useSettingsStore } = await import('../stores/settingsStore');
     const settings = useSettingsStore.getState();
-    
+
     // CRITICAL: Check if EEW is enabled
     if (!settings.eewEnabled) {
       if (__DEV__) {
@@ -571,7 +571,7 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: Check if notifications are enabled
     if (!settings.notificationPush) {
       if (__DEV__) {
@@ -579,7 +579,7 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: Check magnitude threshold (EEW minimum magnitude)
     const magnitude = event.magnitude || 0;
     if (magnitude < settings.eewMinMagnitude) {
@@ -590,7 +590,7 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: Check certainty threshold (confidence)
     if (event.certainty === 'low' && magnitude < 4.0) {
       // ELITE: Only log in dev mode and only for significant magnitudes (reduce log spam)
@@ -599,14 +599,14 @@ class EEWService {
       }
       return;
     }
-    
+
     // ELITE: Calculate P and S wave arrival times and warning time
-    let waveCalculation: EliteWaveCalculationResult | null = null;
+    let waveCalculation: EliteWaveCalculationResult | undefined;
     let warningTime = event.etaSec || 0;
     let distanceText = '';
     let intensityText = '';
     let personalizedMessage = '';
-    
+
     try {
       waveCalculation = await eliteWaveCalculationService.calculateWaves({
         latitude: event.latitude,
@@ -615,19 +615,19 @@ class EEWService {
         magnitude: magnitude,
         originTime: event.issuedAt,
         source: event.source,
-      });
+      }) ?? undefined; // ELITE: Convert null to undefined
 
       if (waveCalculation) {
         // Use calculated warning time (more accurate)
         warningTime = waveCalculation.warningTime;
-        
+
         // Format distance text
         distanceText = `${Math.round(waveCalculation.epicentralDistance)} km uzaklıkta`;
-        
+
         // ELITE: Format intensity text with uncertainty
         const intensityMin = waveCalculation.estimatedIntensity - waveCalculation.intensityUncertainty;
         const intensityMax = waveCalculation.estimatedIntensity + waveCalculation.intensityUncertainty;
-        
+
         if (waveCalculation.estimatedIntensity >= 7.0) {
           intensityText = `Şiddetli sarsıntı bekleniyor (MMI ${waveCalculation.estimatedIntensity.toFixed(1)} ±${waveCalculation.intensityUncertainty.toFixed(1)})`;
         } else if (waveCalculation.estimatedIntensity >= 5.0) {
@@ -639,7 +639,7 @@ class EEWService {
         // ELITE: Personalized warning message based on warning time, intensity, and uncertainty
         const warningTimeMin = Math.max(0, warningTime - waveCalculation.warningTimeUncertainty);
         const warningTimeMax = warningTime + waveCalculation.warningTimeUncertainty;
-        
+
         if (warningTimeMin < 5) {
           personalizedMessage = `🚨🚨🚨 DEPREM ÇOK YAKIN! ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak! Hemen güvenli yere geçin!`;
         } else if (warningTimeMin < 15) {
@@ -657,7 +657,7 @@ class EEWService {
           // Show even if lower bound is < 5.0 but estimate is >= 5.0
           personalizedMessage += ` ${intensityText}`;
         }
-        
+
         // Add quality indicator for elite calculations
         if (waveCalculation.quality === 'excellent' && waveCalculation.calculationMethod === 'elite') {
           personalizedMessage += ` [Yüksek doğruluk]`;
@@ -675,11 +675,11 @@ class EEWService {
       const etaText = event.etaSec ? `${Math.round(event.etaSec)} saniye içinde` : '';
       personalizedMessage = `${event.region || 'Bilinmeyen bölge'} - ${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. ${etaText}`.trim();
     }
-    
+
     // Trigger multi-channel alert
-    const priority = event.certainty === 'high' ? 'critical' : 
-                     event.certainty === 'medium' ? 'high' : 'normal';
-    
+    const priority = event.certainty === 'high' ? 'critical' :
+      event.certainty === 'medium' ? 'high' : 'normal';
+
     // CRITICAL: Respect user preferences for notification channels
     const channels = {
       pushNotification: settings.notificationPush,
@@ -688,7 +688,7 @@ class EEWService {
       vibration: settings.notificationVibration,
       tts: settings.notificationTTS,
     };
-    
+
     // CRITICAL: Don't send if all channels are disabled
     if (!channels.pushNotification && !channels.fullScreenAlert && !channels.alarmSound && !channels.vibration && !channels.tts) {
       if (__DEV__) {
@@ -701,7 +701,7 @@ class EEWService {
     let alertTitle: string;
     const minIntensity = waveCalculation ? (waveCalculation.estimatedIntensity - waveCalculation.intensityUncertainty) : 0;
     const minWarningTime = waveCalculation ? (waveCalculation.warningTime - waveCalculation.warningTimeUncertainty) : warningTime;
-    
+
     if (waveCalculation && minIntensity >= 7.0) {
       alertTitle = '🚨🚨🚨 KRİTİK DEPREM UYARISI 🚨🚨🚨';
     } else if (magnitude >= 6.0 || (waveCalculation && minIntensity >= 6.0)) {
@@ -711,12 +711,12 @@ class EEWService {
     } else {
       alertTitle = '📢 DEPREM UYARISI';
     }
-    
+
     // Add quality indicator to title for elite calculations
     if (waveCalculation && waveCalculation.quality === 'excellent' && waveCalculation.calculationMethod === 'elite') {
       alertTitle += ' [ELITE]';
     }
-    
+
     // CRITICAL: Minimum 10 seconds warning time guarantee for %100 accuracy
     // Only send EEW if we can guarantee at least 10 seconds warning
     // This ensures users have enough time to react safely
@@ -727,7 +727,7 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: For P-wave detection, ensure minimum 10 seconds for %100 accuracy
     if (event.source === 'P_WAVE_DETECTION' && guaranteedWarningTime < 10) {
       if (__DEV__) {
@@ -740,7 +740,7 @@ class EEWService {
     // %100 ACCURACY: Double-check all critical data before sending
     const now = Date.now();
     const eventAge = (now - event.issuedAt) / 1000;
-    
+
     // CRITICAL: Verify event is recent (not older than 5 minutes)
     if (eventAge > 300) {
       if (__DEV__) {
@@ -748,7 +748,7 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: Verify magnitude is reasonable (not NaN, within valid range)
     if (isNaN(magnitude) || magnitude < 0 || magnitude > 10) {
       if (__DEV__) {
@@ -756,28 +756,28 @@ class EEWService {
       }
       return;
     }
-    
+
     // CRITICAL: Verify coordinates are valid
     if (isNaN(event.latitude) || isNaN(event.longitude) ||
-        event.latitude < -90 || event.latitude > 90 ||
-        event.longitude < -180 || event.longitude > 180) {
+      event.latitude < -90 || event.latitude > 90 ||
+      event.longitude < -180 || event.longitude > 180) {
       if (__DEV__) {
         logger.debug(`EEW coordinates invalid: lat=${event.latitude}, lon=${event.longitude} - skipping notification (requires valid coordinates)`);
       }
       return;
     }
-    
+
     // CRITICAL: Verify wave calculation is valid (if provided)
     if (waveCalculation) {
       if (isNaN(waveCalculation.warningTime) || waveCalculation.warningTime < 0 ||
-          isNaN(waveCalculation.estimatedIntensity) || waveCalculation.estimatedIntensity < 0) {
+        isNaN(waveCalculation.estimatedIntensity) || waveCalculation.estimatedIntensity < 0) {
         if (__DEV__) {
           logger.debug(`EEW wave calculation invalid - skipping notification (requires valid wave calculation)`);
         }
         return;
       }
     }
-    
+
     // ELITE: Use NotificationFormatterService for professional EEW formatting
     const { notificationFormatterService } = await import('./NotificationFormatterService');
     const formatted = notificationFormatterService.formatEEWNotification(
@@ -785,7 +785,7 @@ class EEWService {
       event.region || 'Bilinmeyen bölge',
       Math.round(guaranteedWarningTime),
       waveCalculation?.pWaveArrivalTime,
-      waveCalculation?.sWaveArrivalTime
+      waveCalculation?.sWaveArrivalTime,
     );
 
     // ELITE: Use magnitude-based notification for EEW (with formatted data)
@@ -797,9 +797,9 @@ class EEWService {
         event.region || 'Bilinmeyen bölge',
         true, // Is EEW
         Math.round(guaranteedWarningTime), // Time advance
-        event.issuedAt // Timestamp
+        event.issuedAt, // Timestamp
       );
-      
+
       if (__DEV__) {
         logger.info(`✅ ELITE EEW notification sent: ${magnitude.toFixed(1)}M - ${event.region} (${Math.round(guaranteedWarningTime)}s advance)`);
       }

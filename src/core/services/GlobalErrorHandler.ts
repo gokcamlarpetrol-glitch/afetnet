@@ -70,8 +70,8 @@ class GlobalErrorHandlerService {
       const errorMessage = error instanceof Error 
         ? error.message 
         : typeof error === 'object' && error !== null && 'jsEngine' in error
-        ? `Hermes engine initialization note: ${JSON.stringify(error)}`
-        : String(error);
+          ? `Hermes engine initialization note: ${JSON.stringify(error)}`
+          : String(error);
       
       // Only log as warning if it's a Hermes engine note (not a real error)
       if (typeof error === 'object' && error !== null && 'jsEngine' in error) {
@@ -375,7 +375,7 @@ class GlobalErrorHandlerService {
    */
   wrapAsyncFunction<T extends (...args: any[]) => Promise<any>>(
     fn: T,
-    context?: Partial<ErrorContext>
+    context?: Partial<ErrorContext>,
   ): T {
     return (async (...args: Parameters<T>) => {
       try {
@@ -387,7 +387,7 @@ class GlobalErrorHandlerService {
             ...context,
             source: context?.source || 'async_function_wrapper',
             functionName: fn.name || 'anonymous',
-          }
+          },
         );
         throw error; // Re-throw to maintain original behavior
       }

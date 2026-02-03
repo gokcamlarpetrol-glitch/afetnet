@@ -146,7 +146,7 @@ export const REGIONAL_HAZARD_CLUSTERS: RegionalHazardCluster[] = [
  */
 export function distanceInKm(
   a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
+  b: { latitude: number; longitude: number },
 ): number {
   const R = 6371; // Earth radius in km
   const dLat = degreesToRadians(b.latitude - a.latitude);

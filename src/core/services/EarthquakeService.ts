@@ -13,9 +13,14 @@ import { loadFromCache, saveToCache } from './earthquake/EarthquakeCacheManager'
 import { fetchAllEarthquakes, fetchFromAFADAPI, fetchFromKandilliAPI } from './earthquake/EarthquakeFetcher';
 import { filterByTurkeyBounds } from './earthquake/EarthquakeDataProcessor';
 import { deduplicateEarthquakes } from './earthquake/EarthquakeDeduplicator';
-import { processEarthquakeNotifications } from './earthquake/EarthquakeNotificationHandler';
+// import { processEarthquakeNotifications } from './earthquake/EarthquakeNotificationHandler'; // Removed to break circular dependency
 
 const logger = createLogger('EarthquakeService');
+
+// ELITE: Type-safe error helpers
+const getErrorMessage = (e: unknown): string => e instanceof Error ? e.message : String(e);
+const getErrorName = (e: unknown): string => e instanceof Error ? e.name : 'UnknownError';
+const getErrorStack = (e: unknown): string | undefined => e instanceof Error ? e.stack : undefined;
 
 const POLL_INTERVAL = 5000; // 5 seconds - ELITE: Fast polling for real-time AFAD data
 // CRITICAL: Initial fetch happens immediately in start() - continuous real-time updates
@@ -28,44 +33,44 @@ class EarthquakeService {
 
   async start() {
     if (this.isRunning) return;
-    
+
     // Initialize AI validation service for real-time data validation
     await earthquakeValidationService.initialize();
-    
+
     this.isRunning = true;
-    
-        // ELITE: Load cache FIRST for instant display (0-1 second)
-        const store = useEarthquakeStore.getState();
-        const cached = await loadFromCache();
-        if (cached && cached.length > 0) {
-          store.setItems(cached);
-          store.setLoading(false);
-          if (__DEV__) {
-            logger.info(`⚡ Başlangıç: Cache'den ${cached.length} deprem verisi anlık yüklendi (0-1 saniye)`);
-          }
-        }
-        
-        // ELITE: Immediate fetch (no delay) - get fresh data ASAP
-        // CRITICAL: Fetch immediately without waiting - parallel execution
-        // Initial fetch with error handling (runs in background, updates when ready)
-        this.fetchEarthquakes().catch((error) => {
-          logger.error('Initial earthquake fetch failed:', error);
-          // Continue anyway - polling will retry
-        });
-        
-        // ELITE: Start polling immediately (every 5 seconds for real-time updates)
-        // CRITICAL: POLL_INTERVAL = 5000ms (5 seconds) - verified for real-time AFAD data
-        this.intervalId = setInterval(() => {
-          // CRITICAL: Handle async errors in interval callback
-          // CRITICAL: This runs every 5 seconds exactly - ensures continuous real-time updates
-          this.fetchEarthquakes().catch((error) => {
-            logger.error('Error in earthquake polling interval:', error);
-          });
-        }, POLL_INTERVAL);
-        
-        if (__DEV__) {
-          logger.info(`✅ Earthquake polling started: ${POLL_INTERVAL}ms interval (${POLL_INTERVAL / 1000}s)`);
-        }
+
+    // ELITE: Load cache FIRST for instant display (0-1 second)
+    const store = useEarthquakeStore.getState();
+    const cached = await loadFromCache();
+    if (cached && cached.length > 0) {
+      store.setItems(cached);
+      store.setLoading(false);
+      if (__DEV__) {
+        logger.info(`⚡ Başlangıç: Cache'den ${cached.length} deprem verisi anlık yüklendi (0-1 saniye)`);
+      }
+    }
+
+    // ELITE: Immediate fetch (no delay) - get fresh data ASAP
+    // CRITICAL: Fetch immediately without waiting - parallel execution
+    // Initial fetch with error handling (runs in background, updates when ready)
+    this.fetchEarthquakes().catch((error) => {
+      logger.error('Initial earthquake fetch failed:', error);
+      // Continue anyway - polling will retry
+    });
+
+    // ELITE: Start polling immediately (every 5 seconds for real-time updates)
+    // CRITICAL: POLL_INTERVAL = 5000ms (5 seconds) - verified for real-time AFAD data
+    this.intervalId = setInterval(() => {
+      // CRITICAL: Handle async errors in interval callback
+      // CRITICAL: This runs every 5 seconds exactly - ensures continuous real-time updates
+      this.fetchEarthquakes().catch((error) => {
+        logger.error('Error in earthquake polling interval:', error);
+      });
+    }, POLL_INTERVAL);
+
+    if (__DEV__) {
+      logger.info(`✅ Earthquake polling started: ${POLL_INTERVAL}ms interval (${POLL_INTERVAL / 1000}s)`);
+    }
   }
 
   stop() {
@@ -76,16 +81,23 @@ class EarthquakeService {
     this.isRunning = false;
   }
 
+  /**
+   * ELITE: Public getter for isRunning status (used by init.ts health check)
+   */
+  getIsRunning(): boolean {
+    return this.isRunning;
+  }
+
   async fetchEarthquakes() {
     const store = useEarthquakeStore.getState();
-    
+
     // ELITE: Don't load cache here - already loaded in start() for instant display
     // This prevents duplicate cache loading and ensures fresh data is fetched
     // Only set loading state if no data is currently displayed
     if (store.items.length === 0) {
       store.setLoading(true);
     }
-    
+
     store.setError(null); // Clear previous errors
 
     try {
@@ -97,7 +109,7 @@ class EarthquakeService {
       const fetchResult = await fetchAllEarthquakes(
         true, // Always fetch AFAD
         () => fetchFromAFADAPI(),
-        () => Promise.resolve([]) // Kandilli disabled
+        () => fetchFromKandilliAPI(), // Kandilli ENABLED for verification
       );
 
       let earthquakes = fetchResult.earthquakes;
@@ -131,7 +143,7 @@ class EarthquakeService {
 
         // CRITICAL: Only AFAD earthquakes - Kandilli removed per user request
         const afadEarthquakes = uniqueEarthquakes.filter(eq => eq.source === 'AFAD');
-        
+
         // Filter to only AFAD before validation
         const afadOnlyEarthquakes = uniqueEarthquakes.filter(eq => eq.source === 'AFAD');
 
@@ -141,7 +153,7 @@ class EarthquakeService {
           {
             afad: afadEarthquakes,
             kandilli: [], // Kandilli removed
-          }
+          },
         );
 
         if (__DEV__) {
@@ -178,10 +190,10 @@ class EarthquakeService {
         try {
           const { firebaseDataService } = await import('./FirebaseDataService');
           const { backendEmergencyService } = await import('./BackendEmergencyService');
-          
+
           // Save significant earthquakes (magnitude >= 4.0) to Firebase and Backend
           const significantEarthquakes = uniqueEarthquakes.filter(eq => eq.magnitude >= 4.0);
-          
+
           for (const earthquake of significantEarthquakes) {
             // Save to Firebase
             if (firebaseDataService.isInitialized) {
@@ -226,23 +238,23 @@ class EarthquakeService {
           }
         }
       }
-      
+
       // CRITICAL: Verify lastUpdate was set (happens in setItems)
       if (__DEV__) {
         const storeState = useEarthquakeStore.getState();
-        const updateTime = storeState.lastUpdate ? new Date(storeState.lastUpdate).toLocaleTimeString('tr-TR', { 
+        const updateTime = storeState.lastUpdate ? new Date(storeState.lastUpdate).toLocaleTimeString('tr-TR', {
           hour12: false,
           hour: '2-digit',
           minute: '2-digit',
-          second: '2-digit'
+          second: '2-digit',
         }) : 'N/A';
         logger.debug(`🔄 Store lastUpdate timestamp: ${updateTime} (${uniqueEarthquakes.length} deprem)`);
       }
-      
+
       // ELITE: Log latest earthquake for debugging
       if (__DEV__ && uniqueEarthquakes.length > 0) {
         const latest = uniqueEarthquakes[0];
-        const latestTime = new Date(latest.time).toLocaleString('tr-TR', { 
+        const latestTime = new Date(latest.time).toLocaleString('tr-TR', {
           timeZone: 'Europe/Istanbul',
           hour12: false,
           year: 'numeric',
@@ -250,20 +262,26 @@ class EarthquakeService {
           day: '2-digit',
           hour: '2-digit',
           minute: '2-digit',
-          second: '2-digit'
+          second: '2-digit',
         });
         logger.info(`🔄 Store updated: ${uniqueEarthquakes.length} deprem - En son: ${latest.magnitude} ${latest.magnitude >= 4.0 ? 'MW' : 'ML'} - ${latest.location} - ${latestTime}`);
       } else if (__DEV__) {
         logger.info(`🔄 Store updated: 0 deprem (veri yok veya filtrelendi)`);
       }
 
-      // ELITE: Process notifications using modular handler
+      // CRITICAL: Process notifications for new earthquakes
+      // ELITE: This handles push notifications, sound alerts, and emergency mode activation
       if (uniqueEarthquakes.length > 0) {
-        await processEarthquakeNotifications(uniqueEarthquakes, {
-          minMagnitudeForNotification: settings.minMagnitudeForNotification,
-          maxDistanceForNotification: settings.maxDistanceForNotification,
-          notificationPush: settings.notificationPush,
-        });
+        try {
+          const { processEarthquakeNotifications } = await import('./earthquake/EarthquakeNotificationHandler');
+          await processEarthquakeNotifications(uniqueEarthquakes, {
+            minMagnitudeForNotification: settings.minMagnitudeForNotification,
+            maxDistanceForNotification: settings.maxDistanceForNotification,
+            notificationPush: settings.notificationPush,
+          });
+        } catch (notificationError) {
+          logger.error('Failed to process earthquake notifications:', notificationError);
+        }
       } else {
         // No new data - try cache as fallback
         if (__DEV__) {
@@ -286,16 +304,20 @@ class EarthquakeService {
           store.setError('Deprem verisi alınamadı. İnternet bağlantınızı kontrol edin.');
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errMsg = getErrorMessage(error);
+      const errName = getErrorName(error);
+      const errStack = getErrorStack(error);
+
       // Silent fail for network errors - expected in offline scenarios
       if (__DEV__) {
         logger.debug('Earthquake fetch skipped (network error - expected):', {
-          error: error?.message,
-          name: error?.name,
-          stack: error?.stack
+          error: errMsg,
+          name: errName,
+          stack: errStack,
         });
       }
-      
+
       // CRITICAL: Try cache on error - OFFLINE MODE FALLBACK
       // This ensures app works WITHOUT internet connection
       const cached = await loadFromCache();
@@ -303,7 +325,8 @@ class EarthquakeService {
         store.setItems(cached);
         store.setLoading(false);
         const { getCacheAge } = await import('./earthquake/EarthquakeCacheManager');
-        const cacheAgeHours = (await getCacheAge()) ? (await getCacheAge()!) / 60 : null;
+        const cacheAge = await getCacheAge();
+        const cacheAgeHours = cacheAge !== null ? cacheAge / 60 : null;
         if (cacheAgeHours !== null && cacheAgeHours > 1) {
           // CRITICAL: Don't show error in offline mode - this is expected behavior
           // Only show warning if cache is very old (> 6 hours)
@@ -320,15 +343,15 @@ class EarthquakeService {
       } else {
         // ELITE: Provide specific error messages
         let errorMessage = 'Deprem verisi alınamadı. Lütfen tekrar deneyin.';
-        
-        if (error?.name === 'AbortError' || error?.message?.includes('timeout')) {
+
+        if (errName === 'AbortError' || errMsg.includes('timeout')) {
           errorMessage = 'Bağlantı zaman aşımına uğradı. İnternet bağlantınızı kontrol edin.';
-        } else if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
+        } else if (errMsg.includes('network') || errMsg.includes('fetch')) {
           errorMessage = 'İnternet bağlantısı sorunu. Lütfen bağlantınızı kontrol edin.';
-        } else if (error?.message?.includes('JSON') || error?.message?.includes('parse')) {
+        } else if (errMsg.includes('JSON') || errMsg.includes('parse')) {
           errorMessage = 'Veri işleme hatası. Lütfen tekrar deneyin.';
         }
-        
+
         store.setError(errorMessage);
       }
     } finally {

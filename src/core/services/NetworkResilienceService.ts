@@ -15,10 +15,10 @@ interface CircuitBreakerState {
   successCount: number;
 }
 
-interface RequestCache {
+interface RequestCache<T = unknown> {
   key: string;
   timestamp: number;
-  promise: Promise<any>;
+  promise: Promise<T>;
 }
 
 class NetworkResilienceService {
@@ -37,7 +37,7 @@ class NetworkResilienceService {
   private calculateBackoff(attempt: number): number {
     const exponential = Math.min(
       this.INITIAL_BACKOFF * Math.pow(2, attempt),
-      this.MAX_BACKOFF
+      this.MAX_BACKOFF,
     );
     // Add jitter (±20%)
     const jitter = exponential * 0.2 * (Math.random() * 2 - 1);
@@ -134,7 +134,7 @@ class NetworkResilienceService {
     endpoint: string,
     url: string,
     fetchFn: () => Promise<Response>,
-    options?: RequestInit
+    options?: RequestInit,
   ): Promise<T> {
     // Check circuit breaker
     if (!this.checkCircuitBreaker(endpoint)) {
@@ -156,12 +156,12 @@ class NetworkResilienceService {
     for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
       try {
         const response = await fetchFn();
-        
+
         if (response.ok) {
           // Success - record and return
           this.recordSuccess(endpoint);
           const data = await response.json();
-          
+
           // Cache promise for deduplication
           const promise = Promise.resolve(data);
           this.requestCache.set(requestKey, {
@@ -169,10 +169,10 @@ class NetworkResilienceService {
             timestamp: Date.now(),
             promise,
           });
-          
+
           // Clean up old cache entries
           this.cleanupRequestCache();
-          
+
           return data;
         } else {
           // HTTP error - might be retryable
@@ -187,14 +187,16 @@ class NetworkResilienceService {
             throw new Error(`HTTP ${response.status}`);
           }
         }
-      } catch (error: any) {
-        lastError = error;
-        
+      } catch (error: unknown) {
+        lastError = error as Error;
+
         // Network error - retry with backoff
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const errName = error instanceof Error ? error.name : '';
         if (
-          (error?.message?.includes('Network request failed') ||
-           error?.name === 'NetworkError' ||
-           error?.name === 'TypeError') &&
+          (errMsg?.includes('Network request failed') ||
+            errName === 'NetworkError' ||
+            errName === 'TypeError') &&
           attempt < this.MAX_RETRIES - 1
         ) {
           const backoff = this.calculateBackoff(attempt);
@@ -204,7 +206,7 @@ class NetworkResilienceService {
           await this.sleep(backoff);
           continue;
         }
-        
+
         // Non-retryable error or max retries reached
         this.recordFailure(endpoint);
         throw error;

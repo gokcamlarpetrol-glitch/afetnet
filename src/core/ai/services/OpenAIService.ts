@@ -6,6 +6,8 @@
 
 import { createLogger } from '../../utils/logger';
 import { costTracker, estimateCost } from '../utils/costCalculator';
+import { safeIncludes } from '../../utils/safeString';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 const logger = createLogger('OpenAIService');
 
@@ -46,75 +48,89 @@ class OpenAIService {
     // ELITE SECURITY: API key from multiple sources with validation
     // Priority: Parameter > ENV config > EAS secrets > process.env
     // NEVER hardcode API keys in source code
-    
-    // 1. Önce parametre olarak gelen key'i kontrol et
-    if (apiKey && apiKey.trim().length > 0) {
-      this.apiKey = apiKey.trim();
-    } else {
-      // 2. ENV config'den kontrol et (централизованный источник)
-      try {
-        const { ENV } = await import('../../config/env');
-        if (ENV.OPENAI_API_KEY && ENV.OPENAI_API_KEY.trim().length > 0) {
-          this.apiKey = ENV.OPENAI_API_KEY.trim();
-        }
-      } catch (envError) {
-        if (__DEV__) {
-          logger.debug('Could not load ENV config, trying direct sources:', envError);
-        }
+
+    logger.info('🔧 OpenAI initialization starting...');
+
+    const validateAndSetKey = (source: string, key: unknown): boolean => {
+      if (!key) {
+        logger.debug(`🔍 ${source}: undefined/null`);
+        return false;
       }
-      
-      // 3. Fallback: EAS secrets via Constants
-      if (!this.apiKey) {
-        try {
-          const Constants = await import('expo-constants');
-          const expoConfig = Constants.default?.expoConfig;
-          const keyFromExtra = expoConfig?.extra?.EXPO_PUBLIC_OPENAI_API_KEY;
-          
-          if (keyFromExtra && String(keyFromExtra).trim().length > 0) {
-            this.apiKey = String(keyFromExtra).trim();
-          }
-        } catch (error) {
-          if (__DEV__) {
-            logger.debug('Could not load Expo Constants:', error);
-          }
-        }
+
+      const keyStr = String(key).trim();
+      const len = keyStr.length;
+
+      logger.info(`🔍 ${source}: found (${len} chars)`);
+
+      if (len === 0) return false;
+
+      // ELITE VALIDATION:
+      // We warn but DO NOT BLOCK keys even if they look suspicious.
+      // The ultimate source of truth is the API response (401 Unauthorized).
+      const looksLikeKey = keyStr.startsWith('sk-');
+      const containsPlaceholder = keyStr.toLowerCase().includes('placeholder');
+
+      if (containsPlaceholder) {
+        logger.warn(`⚠️ ${source} potential issue: Key contains 'placeholder'. Attempting to use it anyway...`);
       }
-      
-      // 4. Final fallback: process.env
-      if (!this.apiKey) {
-        const keyFromProcess = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
-        if (keyFromProcess && String(keyFromProcess).trim().length > 0) {
-          this.apiKey = String(keyFromProcess).trim();
-        }
+
+      if (!looksLikeKey) {
+        logger.warn(`⚠️ ${source} potential issue: Key does not start with 'sk-'. Attempting to use it anyway...`);
       }
+
+      this.apiKey = keyStr;
+      logger.info(`✅ OpenAI key accepted from ${source} (Validation relaxed)`);
+      return true;
+    };
+
+    // 1. Check Parameter
+    if (validateAndSetKey('Parameter', apiKey)) return this.finishInit();
+
+    // 2. Check ENV config
+    try {
+      const { ENV } = await import('../../config/env');
+      if (validateAndSetKey('ENV.OPENAI_API_KEY', ENV?.OPENAI_API_KEY)) return this.finishInit();
+    } catch (envError) {
+      logger.debug('Could not load ENV config:', envError);
     }
 
-    // ELITE: Validate and log
+    // 3. Fallback: EAS secrets
+    try {
+      const Constants = await import('expo-constants');
+      const keyFromExtra = Constants.default?.expoConfig?.extra?.EXPO_PUBLIC_OPENAI_API_KEY;
+      if (validateAndSetKey('EAS Secrets', keyFromExtra)) return this.finishInit();
+    } catch (error) {
+      logger.debug('Could not load Expo Constants');
+    }
+
+    // 4. Final fallback: process.env
+    const keyFromProcess = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+    if (validateAndSetKey('process.env', keyFromProcess)) return this.finishInit();
+
+    // IF WE ARE HERE, NO KEY FOUND
+    this.finishInit();
+  }
+
+  private finishInit() {
+    // ELITE: Validate and log status
     if (!this.apiKey || this.apiKey.trim() === '') {
       logger.warn('⚠️ OpenAI API key not found - AI features will use fallback responses');
-      if (__DEV__) {
-        logger.warn('💡 Add to EAS secrets: eas secret:create --scope project --name EXPO_PUBLIC_OPENAI_API_KEY --value YOUR_KEY');
-        logger.warn('💡 Or add to .env: EXPO_PUBLIC_OPENAI_API_KEY=sk-...');
-      }
+      logger.warn('💡 Add to .env: EXPO_PUBLIC_OPENAI_API_KEY=sk-your-real-key');
       this.apiKey = null;
+      this.isInitialized = false; // Allow retry later
     } else {
-      // ELITE: Validate key format (OpenAI keys start with sk-)
       const isValidFormat = this.apiKey.startsWith('sk-');
-      if (!isValidFormat && __DEV__) {
+      if (!isValidFormat) {
         logger.warn('⚠️ OpenAI API key format may be invalid (expected sk- prefix)');
       }
-      
-      // Key'in ilk ve son 4 karakterini göster (güvenlik için)
-      const maskedKey = this.apiKey.length > 11 
+
+      const maskedKey = this.apiKey.length > 11
         ? this.apiKey.substring(0, 7) + '...' + this.apiKey.substring(this.apiKey.length - 4)
         : 'sk-****';
-      
-      if (__DEV__) {
-        logger.info(`✅ OpenAI API initialized with key: ${maskedKey}`);
-      }
-    }
 
-    this.isInitialized = true;
+      logger.info(`✅ OpenAI API initialized with key: ${maskedKey}`);
+      this.isInitialized = true;
+    }
   }
 
   /**
@@ -122,13 +138,13 @@ class OpenAIService {
    * Fallback: API key yoksa mock response döner
    */
   async generateText(
-    prompt: string, 
+    prompt: string,
     options: {
       maxTokens?: number;
       temperature?: number;
       systemPrompt?: string;
       serviceName?: string; // ELITE: Service name for cost tracking
-    } = {}
+    } = {},
   ): Promise<string> {
     const { maxTokens = 500, temperature = 0.7, systemPrompt, serviceName } = options;
 
@@ -140,13 +156,26 @@ class OpenAIService {
 
     // Mock mode: API key yoksa
     if (!this.apiKey) {
-      logger.warn('🤖 OpenAI dev fallback aktif');
-      return this.getFallbackResponse(prompt);
+      // ELITE ROBUSTNESS: Try to auto-initialize one last time
+      // This protects against race conditions or missing initialization
+      if (!this.isInitialized) {
+        logger.warn('⚠️ OpenAI not initialized, attempting lazy initialization...');
+        await this.initialize();
+
+        // If still no key after lazy init, then use fallback
+        if (!this.apiKey) {
+          logger.warn('🤖 OpenAI dev fallback aktif (Key not found after lazy init)');
+          return this.getFallbackResponse(prompt);
+        }
+      } else {
+        logger.warn('🤖 OpenAI dev fallback aktif (No API Key configured)');
+        return this.getFallbackResponse(prompt);
+      }
     }
 
     try {
       const messages: OpenAIMessage[] = [];
-      
+
       // System prompt varsa ekle
       if (systemPrompt) {
         messages.push({
@@ -157,7 +186,7 @@ class OpenAIService {
         // ELITE: Default Turkish system prompt for AI assistant
         messages.push({
           role: 'system',
-          content: 'Sen Türkçe konuşan bir afet yönetimi asistanısın. Tüm yanıtlarını Türkçe ver. Kullanıcılara deprem hazırlığı, acil durum yönetimi ve güvenlik konularında yardımcı ol.',
+          content: 'Sen Türkçe konuşan, Gemini seviyesinde gelişmiş bir afet yönetimi asistanısın. Tüm yanıtlarını Türkçe ver. Kullanıcılara deprem hazırlığı, acil durum yönetimi ve güvenlik konularında en üst düzeyde, profesyonel ve hayat kurtarıcı tavsiyelerle yardımcı ol.',
         });
       }
 
@@ -178,20 +207,21 @@ class OpenAIService {
         logger.error('❌ Invalid prompt provided to generateText');
         return this.getFallbackResponse('Invalid prompt');
       }
-      
+
       // CRITICAL: Validate messages array
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         logger.error('❌ Invalid messages array');
         return this.getFallbackResponse(prompt);
       }
-      
+
       // CRITICAL: Add timeout to fetch request with retry mechanism
+      // ELITE: Reduced to 20s for better user experience - fallback is better than waiting
       const controller = new AbortController();
-      const timeoutDuration = 45000; // 45 seconds timeout (increased from 30s for reliability)
+      const timeoutDuration = 20000; // 20 seconds timeout (reduced from 45s for UX)
       const timeoutId = setTimeout(() => {
         controller.abort();
       }, timeoutDuration);
-      
+
       let response: Response;
       try {
         response = await fetch(this.apiUrl, {
@@ -210,16 +240,17 @@ class OpenAIService {
           }),
           signal: controller.signal,
         });
-        
+
         // CRITICAL: Clear timeout on success
         clearTimeout(timeoutId);
-      } catch (fetchError: any) {
+      } catch (fetchError: unknown) {
         // CRITICAL: Clear timeout on error
         clearTimeout(timeoutId);
 
-        const errorMessage = fetchError?.message || fetchError?.toString?.() || 'Unknown network error';
+        const errorMessage = getErrorMessage(fetchError);
+        const errorName = fetchError instanceof Error ? fetchError.name : 'UnknownError';
         const isTimeout =
-          fetchError?.name === 'AbortError' ||
+          errorName === 'AbortError' ||
           errorMessage.includes('timeout') ||
           errorMessage.includes('network request failed');
 
@@ -238,7 +269,7 @@ class OpenAIService {
         if (__DEV__) {
           logger.warn('⚠️ OpenAI API network error - using fallback response', {
             error: errorMessage,
-            name: fetchError?.name,
+            name: errorName,
           });
         } else {
           logger.debug('OpenAI API network error - using fallback response');
@@ -253,26 +284,26 @@ class OpenAIService {
           statusText: response.statusText,
           error: errorText,
         });
-        
+
         // Hata durumunda fallback döndür
         logger.warn('⚠️ Falling back to safe response');
         return this.getFallbackResponse(prompt);
       }
 
       const data: OpenAIResponse = await response.json();
-      
+
       // CRITICAL: Validate API response structure
       if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
         logger.warn('⚠️ Invalid OpenAI API response structure, using fallback:', data);
         return this.getFallbackResponse(prompt);
       }
-      
+
       const firstChoice = data.choices[0];
       if (!firstChoice || !firstChoice.message || typeof firstChoice.message.content !== 'string') {
         logger.warn('⚠️ Invalid OpenAI API response content, using fallback:', firstChoice);
         return this.getFallbackResponse(prompt);
       }
-      
+
       const generatedText = firstChoice.message.content.trim();
 
       // CRITICAL: Validate generated text is not empty
@@ -288,7 +319,7 @@ class OpenAIService {
         trackingServiceName,
         usage.prompt_tokens,
         usage.completion_tokens,
-        this.model
+        this.model,
       );
 
       logger.info('✅ OpenAI API response:', {
@@ -302,7 +333,7 @@ class OpenAIService {
     } catch (error) {
       logger.warn('⚠️ OpenAI API exception (fallback response will be used):', {
         error: error instanceof Error ? error.message : String(error),
-        name: (error as any)?.name,
+        name: error instanceof Error ? error.name : 'UnknownError',
       });
       // Hata durumunda fallback döndür
       return this.getFallbackResponse(prompt);
@@ -317,7 +348,7 @@ class OpenAIService {
     options: {
       maxTokens?: number;
       temperature?: number;
-    } = {}
+    } = {},
   ): Promise<string> {
     const { maxTokens = 500, temperature = 0.7 } = options;
 
@@ -328,12 +359,13 @@ class OpenAIService {
 
     try {
       // CRITICAL: Add timeout to chat request as well
+      // ELITE: Reduced to 20s for better user experience
       const controller = new AbortController();
-      const timeoutDuration = 45000; // 45 seconds timeout
+      const timeoutDuration = 20000; // 20 seconds timeout (reduced from 45s for UX)
       const timeoutId = setTimeout(() => {
         controller.abort();
       }, timeoutDuration);
-      
+
       let response: Response;
       try {
         response = await fetch(this.apiUrl, {
@@ -352,14 +384,16 @@ class OpenAIService {
           }),
           signal: controller.signal,
         });
-        
+
         // CRITICAL: Clear timeout on success
         clearTimeout(timeoutId);
-      } catch (fetchError: any) {
+      } catch (fetchError: unknown) {
         // CRITICAL: Clear timeout on error
         clearTimeout(timeoutId);
-        
-        if (fetchError?.name === 'AbortError' || fetchError?.message?.includes('timeout')) {
+
+        const errorName = fetchError instanceof Error ? fetchError.name : 'UnknownError';
+        const errorMessage = getErrorMessage(fetchError);
+        if (errorName === 'AbortError' || errorMessage.includes('timeout')) {
           if (__DEV__) {
             logger.warn(`⚠️ OpenAI API chat timeout after ${timeoutDuration}ms`);
           }
@@ -373,13 +407,13 @@ class OpenAIService {
       }
 
       const data: OpenAIResponse = await response.json();
-      
+
       // CRITICAL: Validate API response structure
       if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
         logger.error('❌ Invalid OpenAI API response structure (chat):', data);
         throw new Error('Invalid API response structure');
       }
-      
+
       const firstChoice = data.choices[0];
       if (!firstChoice || !firstChoice.message || typeof firstChoice.message.content !== 'string') {
         logger.error('❌ Invalid OpenAI API response content (chat):', firstChoice);
@@ -392,17 +426,17 @@ class OpenAIService {
         'chat',
         usage.prompt_tokens,
         usage.completion_tokens,
-        this.model
+        this.model,
       );
-      
+
       const generatedText = firstChoice.message.content.trim();
-      
+
       // CRITICAL: Validate generated text is not empty
       if (!generatedText || generatedText.length === 0) {
         logger.warn('⚠️ OpenAI returned empty text (chat), throwing error');
         throw new Error('Empty response from API');
       }
-      
+
       return generatedText;
     } catch (error) {
       logger.error('OpenAI chat error:', error);
@@ -415,15 +449,15 @@ class OpenAIService {
    */
   private getFallbackResponse(prompt: string): string {
     // Prompt'a göre bilgilendirici fallback yanıtları
-    if (prompt.toLowerCase().includes('risk')) {
+    if (safeIncludes(prompt, 'risk')) {
       return 'Risk analizi: Orta seviye risk. Deprem hazırlığı yapmanız önerilir. Acil durum çantası hazırlayın ve toplanma noktanızı belirleyin.';
     }
-    
-    if (prompt.toLowerCase().includes('hazırlık') || prompt.toLowerCase().includes('plan')) {
+
+    if (safeIncludes(prompt, 'hazırlık') || safeIncludes(prompt, 'plan')) {
       return '1. Acil durum çantası hazırlayın\n2. Aile toplanma noktası belirleyin\n3. Deprem tatbikatı yapın\n4. Mobilyaları sabitleyin\n5. Acil durum numaralarını kaydedin';
     }
-    
-    if (prompt.toLowerCase().includes('deprem') || prompt.toLowerCase().includes('sarsıntı')) {
+
+    if (safeIncludes(prompt, 'deprem') || safeIncludes(prompt, 'sarsıntı')) {
       return 'Deprem anında: ÇÖK-KAPAN-TUTUN. Masanın altına girin, başınızı koruyun. Sarsıntı durduktan sonra sakin bir şekilde binayı terk edin.';
     }
 

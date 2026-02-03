@@ -1,0 +1,121 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "North Anatolian Fault",
+                "risk_level": "critical"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [
+                        26.5,
+                        40.5
+                    ],
+                    [
+                        27.5,
+                        40.7
+                    ],
+                    [
+                        29.0,
+                        40.8
+                    ],
+                    [
+                        30.5,
+                        40.9
+                    ],
+                    [
+                        32.0,
+                        41.0
+                    ],
+                    [
+                        33.5,
+                        41.1
+                    ],
+                    [
+                        35.0,
+                        40.8
+                    ],
+                    [
+                        36.5,
+                        40.4
+                    ],
+                    [
+                        38.0,
+                        40.0
+                    ],
+                    [
+                        39.5,
+                        39.7
+                    ],
+                    [
+                        41.0,
+                        39.4
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "East Anatolian Fault",
+                "risk_level": "critical"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [
+                        36.0,
+                        36.3
+                    ],
+                    [
+                        37.0,
+                        37.0
+                    ],
+                    [
+                        38.0,
+                        37.8
+                    ],
+                    [
+                        39.0,
+                        38.4
+                    ],
+                    [
+                        40.0,
+                        38.8
+                    ],
+                    [
+                        41.0,
+                        39.4
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Aegean Graben System",
+                "risk_level": "high"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [
+                        27.0,
+                        37.0
+                    ],
+                    [
+                        28.5,
+                        37.2
+                    ],
+                    [
+                        29.0,
+                        37.5
+                    ]
+                ]
+            }
+        }
+    ]
+}

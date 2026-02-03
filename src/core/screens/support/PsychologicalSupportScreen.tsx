@@ -8,10 +8,14 @@ import { View, Text, ScrollView, StyleSheet, Pressable, Linking } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('PsychologicalSupportScreen');
+
+// ELITE: Typed navigation
+type PsychologicalSupportNavigationProp = StackNavigationProp<Record<string, object>>;
 
 interface SupportResource {
   id: string;
@@ -119,7 +123,7 @@ const COPING_STRATEGIES: CopingStrategy[] = [
   },
 ];
 
-export default function PsychologicalSupportScreen({ navigation }: any) {
+export default function PsychologicalSupportScreen({ navigation }: { navigation: PsychologicalSupportNavigationProp }) {
   const [selectedStrategy, setSelectedStrategy] = useState<CopingStrategy | null>(null);
 
   const handleCall = (phone: string) => {

@@ -71,7 +71,7 @@ interface MeshActions {
   removePeer: (peerId: string) => void;
   updatePeer: (peerId: string, updates: Partial<MeshPeer>) => void;
   setConnected: (isConnected: boolean) => void;
-  
+
   addMessage: (message: MeshMessage) => void;
   markMessageDelivered: (messageId: string) => void;
   markSequenceDelivered: (sourceId: string, sequence: number) => void;
@@ -85,12 +85,12 @@ interface MeshActions {
     skipTransport?: boolean;
   }) => Promise<MeshMessage>;
   broadcastMessage: (content: string, type?: MeshMessage['type']) => Promise<void>;
-  
+
   setScanning: (isScanning: boolean) => void;
   setAdvertising: (isAdvertising: boolean) => void;
   setMyDeviceId: (id: string) => void;
   nextSequence: () => number;
-  
+
   incrementStat: (stat: 'messagesSent' | 'messagesReceived' | 'peersDiscovered') => void;
   recordRetry: () => void;
   recordDrop: () => void;
@@ -133,9 +133,9 @@ const initialState: MeshState = {
 
 export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
   ...initialState,
-  
+
   setPeers: (peers) => set({ peers }),
-  
+
   addPeer: (peer) => {
     const { peers } = get();
     if (!peers[peer.id]) {
@@ -145,25 +145,25 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       get().updatePeer(peer.id, peer);
     }
   },
-  
+
   removePeer: (peerId) => {
     const { peers } = get();
     const newPeers = { ...peers };
     delete newPeers[peerId];
     set({ peers: newPeers });
   },
-  
+
   updatePeer: (peerId, updates) => {
     const { peers } = get();
     if (peers[peerId]) {
       set({
-        peers: { ...peers, [peerId]: { ...peers[peerId], ...updates } }
+        peers: { ...peers, [peerId]: { ...peers[peerId], ...updates } },
       });
     }
   },
-  
+
   setConnected: (isConnected) => set({ isConnected }),
-  
+
   addMessage: (message) => {
     const { messages } = get();
     // Prevent duplicates
@@ -172,11 +172,11 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
     }
     set({ messages: [...messages, message] });
   },
-  
+
   markMessageDelivered: (messageId) => {
     const { messages } = get();
     set({
-      messages: messages.map(m => m.id === messageId ? { ...m, delivered: true } : m)
+      messages: messages.map(m => m.id === messageId ? { ...m, delivered: true } : m),
     });
   },
 
@@ -197,14 +197,14 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
     set({ receiptLog: { ...receiptLog, [key]: Date.now() } });
     return true;
   },
-  
+
   clearOldMessages: (olderThan) => {
     const { messages } = get();
     set({
-      messages: messages.filter(m => m.timestamp > olderThan)
+      messages: messages.filter(m => m.timestamp > olderThan),
     });
   },
-  
+
   nextSequence: () => {
     const next = get().sequenceCounter + 1;
     set({ sequenceCounter: next });
@@ -248,23 +248,23 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       attempts: 0,
       delivered: false,
     };
-    
+
     // CRITICAL: Add to store for tracking
     get().addMessage(message);
 
     if (!skipTransport) {
       try {
         const { bleMeshService } = await import('../services/BLEMeshService');
-        await bleMeshService.sendMessage(content, to);
+        await bleMeshService.sendMessage(content, to ?? '*'); // ELITE: Default to broadcast if no target
       } catch (error) {
         const logger = require('../utils/logger').createLogger('MeshStore');
         logger.error('Failed to send message via BLE Mesh Service:', error);
       }
     }
-    
+
     return message;
   },
-  
+
   broadcastMessage: async (content, type = 'text') => {
     // CRITICAL: Send via BLE Mesh Service for actual broadcast
     try {
@@ -272,36 +272,33 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       await bleMeshService.broadcastMessage({
         content,
         type,
+        ttl: 3,
         priority: 'normal',
-        ackRequired: false,
-        ttl: 3600,
-        sequence: 0,
-        attempts: 0,
       });
     } catch (error) {
       // CRITICAL: Log error but don't throw - still add to store
       const logger = require('../utils/logger').createLogger('MeshStore');
       logger.error('Failed to broadcast message via BLE Mesh Service:', error);
     }
-    
+
     // CRITICAL: Also add to store for tracking
     await get().sendMessage(content, { type, skipTransport: true });
   },
-  
+
   setScanning: (isScanning) => set({ isScanning }),
   setAdvertising: (isAdvertising) => set({ isAdvertising }),
   setMyDeviceId: (id) => set({ myDeviceId: id }),
-  
+
   incrementStat: (stat) => {
     const { stats } = get();
     set({ stats: { ...stats, [stat]: stats[stat] + 1 } });
   },
-  
+
   recordRetry: () => {
     const { stats } = get();
     set({ stats: { ...stats, retries: stats.retries + 1 } });
   },
-  
+
   recordDrop: () => {
     const { stats } = get();
     set({ stats: { ...stats, dropped: stats.dropped + 1 } });
@@ -311,7 +308,7 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
     const { stats } = get();
     set({ stats: { ...stats, hopsForwarded: stats.hopsForwarded + 1 } });
   },
-  
+
   updateNetworkHealth: (update) => {
     const { networkHealth, peers, stats } = get();
     const nodeCount = Object.keys(peers).length + 1; // include self
@@ -333,12 +330,12 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
 
     set({ networkHealth: updated });
   },
-  
+
   trackPendingAck: (message) => {
     const { pendingAcks } = get();
     set({ pendingAcks: { ...pendingAcks, [message.id]: message } });
   },
-  
+
   resolvePendingAck: (messageId) => {
     const { pendingAcks } = get();
     if (!pendingAcks[messageId]) return;

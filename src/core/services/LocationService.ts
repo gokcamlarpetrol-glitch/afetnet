@@ -28,7 +28,7 @@ class LocationService {
     try {
       // Request foreground permission
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      
+
       if (foregroundStatus !== 'granted') {
         if (__DEV__) logger.warn('Foreground permission not granted');
         return;
@@ -93,7 +93,7 @@ class LocationService {
       try {
         const { firebaseDataService } = await import('./FirebaseDataService');
         const { getDeviceId } = await import('../../lib/device');
-        
+
         if (firebaseDataService?.isInitialized) {
           const deviceId = await getDeviceId();
           if (deviceId) {
@@ -148,6 +148,30 @@ class LocationService {
         }
       }
 
+      // -----------------------------------------------------------------------
+      // ELITE HYBRID: Broadcast Location to Mesh Network (Offline Support)
+      // -----------------------------------------------------------------------
+      try {
+        const { connectionManager } = await import('./ConnectionManager');
+        const { meshNetworkService } = await import('./mesh/MeshNetworkService');
+
+        // Strategy: Always broadcast to Mesh for nearby peers (even if online)
+        // This ensures local situational awareness without round-trip to server
+        const locationPayload = JSON.stringify({
+          type: 'LOC',
+          lat: this.currentLocation.latitude,
+          lng: this.currentLocation.longitude,
+          acc: Math.floor(this.currentLocation.accuracy || 0),
+          t: this.currentLocation.timestamp,
+        });
+
+        // Use broadcastMessage with the new LOCATION type
+        const { MeshMessageType } = await import('./mesh/MeshProtocol');
+        meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION);
+      } catch (meshError) {
+        if (__DEV__) logger.warn('Mesh location broadcast failed:', meshError);
+      }
+
       if (__DEV__) logger.info('Location updated:', this.currentLocation);
       return this.currentLocation;
 
@@ -165,6 +189,10 @@ class LocationService {
     return await this.updateLocation();
   }
 
+  /**
+   * ELITE: Adaptive Location Tracking
+   * Dynamically adjusts update frequency based on movement and status.
+   */
   async startWatchingLocation(callback: (location: LocationCoords) => void) {
     if (!this.hasPermission) {
       if (__DEV__) logger.warn('No permission');
@@ -172,11 +200,35 @@ class LocationService {
     }
 
     try {
+      // Adaptive Configuration
+      let timeInterval = 10000; // Default: 10s
+      let distanceInterval = 50; // Default: 50m
+
+      // Check User Status (Emergency = Faster updates)
+      const { useUserStatusStore } = await import('../stores/userStatusStore');
+      const status = useUserStatusStore.getState().status;
+
+      // ELITE: MATCHING STATUS VALUES FROM STORE (sos = critical, needs_help = need-help)
+      if (status === 'sos' || status === 'needs_help') {
+        timeInterval = 2000; // Emergency: 2s (High precision)
+        distanceInterval = 5; // Emergency: 5m
+      } else {
+        // Check Battery (Low power = Slower updates)
+        const Battery = await import('expo-battery');
+        const batteryLevel = await Battery.getBatteryLevelAsync();
+        if (batteryLevel < 0.2) {
+          timeInterval = 30000; // Low Battery: 30s
+          distanceInterval = 100; // Low Battery: 100m
+        }
+      }
+
+      logger.info(`Starting Adaptive Tracking. Interval: ${timeInterval}ms, Dist: ${distanceInterval}m`);
+
       const subscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 10000, // 10 seconds
-          distanceInterval: 50, // 50 meters
+          timeInterval,
+          distanceInterval,
         },
         async (location) => {
           try {
@@ -201,13 +253,13 @@ class LocationService {
 
             this.currentLocation = coords;
             callback(coords);
-            
+
             // CRITICAL: Save location update to Firebase in real-time
             // ELITE: This ensures location is synced to Firebase for emergency services
             try {
               const { firebaseDataService } = await import('./FirebaseDataService');
               const { getDeviceId } = await import('../../lib/device');
-              
+
               if (firebaseDataService?.isInitialized) {
                 const deviceId = await getDeviceId();
                 if (deviceId) {
@@ -261,10 +313,35 @@ class LocationService {
                 logger.debug('Firebase location save skipped:', firebaseError);
               }
             }
+
+            // -----------------------------------------------------------------------
+            // ELITE HYBRID: Broadcast Location to Mesh Network (Offline Support)
+            // -----------------------------------------------------------------------
+            try {
+              const { connectionManager } = await import('./ConnectionManager');
+              const { meshNetworkService } = await import('./mesh/MeshNetworkService');
+
+              // Strategy: Always broadcast to Mesh for nearby peers (even if online)
+              // This ensures local situational awareness without round-trip to server
+              const locationPayload = JSON.stringify({
+                type: 'LOC',
+                lat: this.currentLocation.latitude,
+                lng: this.currentLocation.longitude,
+                acc: Math.floor(this.currentLocation.accuracy || 0),
+                t: this.currentLocation.timestamp,
+              });
+
+              // Use broadcastMessage with the new LOCATION type
+              const { MeshMessageType } = await import('./mesh/MeshProtocol');
+              meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION);
+            } catch (meshError) {
+              if (__DEV__) logger.warn('Mesh location broadcast failed:', meshError);
+            }
+
           } catch (error) {
             logger.error('Error processing location update:', error);
           }
-        }
+        },
       );
 
       return subscription;

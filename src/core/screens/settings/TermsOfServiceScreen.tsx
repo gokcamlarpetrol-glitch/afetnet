@@ -17,14 +17,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-export default function TermsOfServiceScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface TermsOfServiceScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
       <LinearGradient
         colors={['#0f172a', '#1e293b']}
@@ -33,7 +39,7 @@ export default function TermsOfServiceScreen({ navigation }: any) {
         <Pressable
           onPress={() => {
             haptics.impactLight();
-            navigation.goBack();
+            navigation?.goBack();
           }}
           style={styles.backButton}
         >
@@ -52,17 +58,17 @@ export default function TermsOfServiceScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. KABUL</Text>
           <Text style={styles.paragraph}>
-            AfetNet uygulamasını ("Uygulama") kullanarak, bu Kullanım Koşullarını kabul etmiş olursunuz. 
+            AfetNet uygulamasını ("Uygulama") kullanarak, bu Kullanım Koşullarını kabul etmiş olursunuz.
             Bu koşulları kabul etmiyorsanız, lütfen uygulamayı kullanmayın.
           </Text>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. UYGULAMA KULLANIMI</Text>
-          
+
           <Text style={styles.subsectionTitle}>2.1. Lisans</Text>
           <Text style={styles.paragraph}>
-            Size kişisel, ticari olmayan, devredilemez ve münhasır olmayan bir lisans veriyoruz. 
+            Size kişisel, ticari olmayan, devredilemez ve münhasır olmayan bir lisans veriyoruz.
             Bu lisans sadece uygulamayı kişisel kullanımınız için kullanmanıza izin verir.
           </Text>
 
@@ -120,7 +126,7 @@ export default function TermsOfServiceScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>7. SINIRLAMA</Text>
           <Text style={styles.paragraph}>
-            Yasal olarak izin verilen maksimum ölçüde, hiçbir durumda zararlardan sorumlu olmayacağız. 
+            Yasal olarak izin verilen maksimum ölçüde, hiçbir durumda zararlardan sorumlu olmayacağız.
             Bu, doğrudan, dolaylı, özel, örnek veya sonuçsal zararları içerir.
           </Text>
         </View>
@@ -138,7 +144,7 @@ export default function TermsOfServiceScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>9. DEĞİŞİKLİKLER</Text>
           <Text style={styles.paragraph}>
-            Bu Kullanım Koşullarını zaman zaman güncelleyebiliriz. Önemli değişikliklerde size bildirim 
+            Bu Kullanım Koşullarını zaman zaman güncelleyebiliriz. Önemli değişikliklerde size bildirim
             gönderilecektir. Değişiklikleri kabul etmek için uygulamayı kullanmaya devam edebilirsiniz.
           </Text>
         </View>
@@ -146,7 +152,7 @@ export default function TermsOfServiceScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>10. UYGULANACAK HUKUK</Text>
           <Text style={styles.paragraph}>
-            Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir. Herhangi bir anlaşmazlık Türkiye 
+            Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir. Herhangi bir anlaşmazlık Türkiye
             mahkemelerinde çözülecektir.
           </Text>
         </View>

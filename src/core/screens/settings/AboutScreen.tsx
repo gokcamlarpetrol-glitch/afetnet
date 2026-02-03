@@ -19,8 +19,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import Constants from 'expo-constants';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
-export default function AboutScreen({ navigation }: any) {
+// ELITE: Properly typed navigation prop
+type AboutScreenNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface AboutScreenProps {
+  navigation: AboutScreenNavigationProp;
+}
+
+export default function AboutScreen({ navigation }: AboutScreenProps) {
   const insets = useSafeAreaInsets();
   const appVersion = Constants.expoConfig?.version || '1.0.0';
   const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';
@@ -28,7 +37,7 @@ export default function AboutScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
       <LinearGradient
         colors={['#0f172a', '#1e293b']}
@@ -66,8 +75,8 @@ export default function AboutScreen({ navigation }: any) {
         {/* Description */}
         <View style={styles.section}>
           <Text style={styles.description}>
-            AfetNet, acil durumlarda offline iletişim için tasarlanmış profesyonel bir acil durum 
-            uygulamasıdır. Deprem, sel, yangın ve diğer afet durumlarında hayat kurtaran teknolojiler 
+            AfetNet, acil durumlarda offline iletişim için tasarlanmış profesyonel bir acil durum
+            uygulamasıdır. Deprem, sel, yangın ve diğer afet durumlarında hayat kurtaran teknolojiler
             sunar.
           </Text>
         </View>
@@ -100,7 +109,7 @@ export default function AboutScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Geliştirici</Text>
           <Text style={styles.paragraph}>
-            AfetNet, acil durum yönetimi ve hayat kurtarma teknolojileri konusunda uzman bir ekip 
+            AfetNet, acil durum yönetimi ve hayat kurtarma teknolojileri konusunda uzman bir ekip
             tarafından geliştirilmiştir.
           </Text>
         </View>

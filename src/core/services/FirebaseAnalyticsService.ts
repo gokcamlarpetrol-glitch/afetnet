@@ -6,13 +6,14 @@
 
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
+import { safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('FirebaseAnalytics');
 
 // CRITICAL: Lazy load Firebase app to prevent module loading errors
 async function getFirebaseAppAsync() {
   try {
-    const firebaseModule = await import('../../lib/firebase');
+    const firebaseModule = await import('../config/firebase');
     return firebaseModule.getFirebaseAppAsync ? await firebaseModule.getFirebaseAppAsync() : null;
   } catch (error) {
     if (__DEV__) {
@@ -35,7 +36,7 @@ async function initializeWebAnalytics() {
   try {
     const { getAnalytics, isSupported } = await import('firebase/analytics');
     const app = await getFirebaseAppAsync();
-    
+
     if (!app) {
       logger.warn('Firebase app not available for Analytics');
       return null;
@@ -154,7 +155,7 @@ class FirebaseAnalyticsService {
         try {
           const { logEvent } = await import('firebase/analytics');
           await logEvent(analyticsInstance, eventName, sanitizedParams);
-          
+
           if (__DEV__) {
             logger.info(`✅ Analytics event (web): ${eventName}`, sanitizedParams);
           }
@@ -262,7 +263,7 @@ class FirebaseAnalyticsService {
 
     for (const [key, value] of Object.entries(parameters)) {
       // Skip sensitive keys
-      if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      if (sensitiveKeys.some(sk => safeIncludes(key, sk))) {
         continue;
       }
 
@@ -296,7 +297,7 @@ class FirebaseAnalyticsService {
       const delays = this.performanceMetrics.get(key)!;
       delays.push(delay);
       if (delays.length > 100) delays.shift(); // Keep last 100 measurements
-      
+
       // Calculate average
       const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
       this.customMetrics.set(`${key}_avg`, avgDelay);
@@ -314,7 +315,7 @@ class FirebaseAnalyticsService {
       const delays = this.performanceMetrics.get(key)!;
       delays.push(delay);
       if (delays.length > 100) delays.shift();
-      
+
       const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
       this.customMetrics.set(`${key}_avg`, avgDelay);
       this.customMetrics.set(`${key}_max`, Math.max(...delays));

@@ -113,7 +113,7 @@ class CrowdsourcingVerificationService {
   async checkConsensus(
     latitude: number,
     longitude: number,
-    timestamp: number
+    timestamp: number,
   ): Promise<ConsensusResult | null> {
     if (!this.isInitialized) {
       return null;
@@ -131,7 +131,7 @@ class CrowdsourcingVerificationService {
         latitude,
         longitude,
         packet.latitude,
-        packet.longitude
+        packet.longitude,
       );
       return distance <= this.DISTANCE_THRESHOLD_KM;
     });
@@ -159,11 +159,11 @@ class CrowdsourcingVerificationService {
     const totalConfidence = eventDetections.reduce((sum, d) => sum + d.confidence, 0);
     const weightedLat = eventDetections.reduce(
       (sum, d) => sum + d.latitude * d.confidence,
-      0
+      0,
     ) / totalConfidence;
     const weightedLon = eventDetections.reduce(
       (sum, d) => sum + d.longitude * d.confidence,
-      0
+      0,
     ) / totalConfidence;
 
     // Calculate confidence
@@ -209,25 +209,20 @@ class CrowdsourcingVerificationService {
    * ELITE: Send sensor data to backend for global consensus
    */
   private async sendToBackend(packet: SensorDataPacket): Promise<void> {
-    try {
-      // ELITE: Get API base URL from ENV config (centralized)
-      const { ENV } = await import('../config/env');
-      const apiBase = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
-      
-      const response = await fetch(`${apiBase}/api/sensor-data`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(packet),
-      });
+    // ELITE: Get API base URL from ENV config (centralized)
+    const { ENV } = await import('../config/env');
+    const apiBase = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
 
-      if (!response.ok) {
-        throw new Error(`Backend sync failed: ${response.status}`);
-      }
-    } catch (error) {
-      // Will retry on next sync
-      throw error;
+    const response = await fetch(`${apiBase}/api/sensor-data`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(packet),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend sync failed: ${response.status}`);
     }
   }
 
@@ -267,7 +262,7 @@ class CrowdsourcingVerificationService {
     lat1: number,
     lon1: number,
     lat2: number,
-    lon2: number
+    lon2: number,
   ): number {
     const R = 6371; // Earth radius in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -285,7 +280,7 @@ class CrowdsourcingVerificationService {
    */
   stop(): void {
     this.isInitialized = false;
-    
+
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;

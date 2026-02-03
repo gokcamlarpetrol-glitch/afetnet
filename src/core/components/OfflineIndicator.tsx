@@ -10,14 +10,19 @@ import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { colors } from '../theme';
 
+import { useMeshStore } from '../services/mesh/MeshStore';
+
 export default function OfflineIndicator() {
   const [isOffline, setIsOffline] = useState(false);
   const slideAnim = useState(new Animated.Value(-100))[0];
+  const peerCount = useMeshStore(state => state.peers.length);
 
   useEffect(() => {
     // Subscribe to network state
     const unsubscribe = NetInfo.addEventListener((state) => {
       const offline = !state.isConnected || !state.isInternetReachable;
+      // Force offline for dev if needed
+      // setIsOffline(true); 
       setIsOffline(offline);
 
       if (offline) {
@@ -58,7 +63,11 @@ export default function OfflineIndicator() {
         <Ionicons name="cloud-offline" size={20} color={colors.text.primary} />
         <View style={styles.textContainer}>
           <Text style={styles.title}>Çevrimdışı Mod</Text>
-          <Text style={styles.subtitle}>BLE Mesh Aktif • Yakındaki cihazlara mesaj gönderebilirsiniz</Text>
+          <Text style={styles.subtitle}>
+            {peerCount > 0
+              ? `BLE Mesh Aktif • ${peerCount} cihaz ile bağlantı kuruldu`
+              : 'BLE Mesh Aktif • Etrafta cihaz aranıyor...'}
+          </Text>
         </View>
         <View style={styles.bleIndicator}>
           <View style={styles.blePulse} />

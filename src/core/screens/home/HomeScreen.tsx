@@ -1,121 +1,68 @@
 /**
- * HOME SCREEN - Unicorn Premium Design
- * Midnight Professional theme
+ * HOME SCREEN - ELITE V2 (Modern Calm Trust)
+ * "Living Interface" with Bespoke Design System
  */
 
-import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl, StatusBar, Animated, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl, StatusBar, Animated } from 'react-native';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
 import HomeHeader from './components/HomeHeader';
-import MeshNetworkPanel from './components/MeshNetworkPanel';
-import EarthquakeMonitorCard from './components/EarthquakeMonitorCard';
 import EmergencyButton from './components/EmergencyButton';
 import FeatureGrid from './components/FeatureGrid';
 import AIAssistantCard from './components/AIAssistantCard';
 import NewsCard from './components/NewsCard';
 import AboutAfetNetCard from './components/AboutAfetNetCard';
+
+import { PaperBackground } from '../../components/design-system/PaperBackground';
+import { SeismicAlertBanner } from '../../components/design-system/SeismicAlertBanner';
+import { FamilyCheckInModule } from '../../components/design-system/FamilyCheckInModule';
+
 import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
-import { colors, spacing } from '../../theme';
-import { getSOSService } from '../../services/SOSService';
-import * as Location from 'expo-location';
-import { Alert, Linking } from 'react-native';
-import { aiFeatureToggle } from '../../ai/services/AIFeatureToggle';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useFamilyStore } from '../../stores/familyStore';
 import { createLogger } from '../../utils/logger';
-import { useMeshStore } from '../../stores/meshStore';
-import { bleMeshService } from '../../services/BLEMeshService';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('HomeScreen');
 
-export default function HomeScreen({ navigation }: any) {
+// ELITE: Properly typed navigation prop
+type HomeScreenNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface HomeScreenProps {
+  navigation: HomeScreenNavigationProp;
+}
+
+export default function HomeScreen({ navigation }: HomeScreenProps) {
   const { earthquakes, loading, error, refresh } = useEarthquakes();
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
-  const [aiFeaturesEnabled] = useState(true); // AI Asistan her zaman aktif
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
-  
-  // UNIQUE FEATURE: BLE Mesh status
-  const meshPeers = useMeshStore((state) => state.peers);
-  const isMeshRunning = bleMeshService.getIsRunning();
 
-  // Elite-level entrance animations with staggered delays
+  const familyMembers = useFamilyStore((state) => state.members);
+
+  // Animation Values
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  // Elite staggered animation values for each card
-  // Create animation refs for all possible cards (max 9 cards)
-  const cardAnimations = useRef(
-    Array.from({ length: 9 }, () => ({
-      opacity: new Animated.Value(0),
-      translateY: new Animated.Value(20),
-    }))
-  ).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
-    // Initial load
-    refresh().catch((error) => {
-      logger.error('Failed to refresh earthquakes on mount:', error);
-    });
-    
-    // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
-    // Elite entrance animation with staggered cards
+    refresh().catch((err) => logger.error('Refresh failed', err));
+
+    // Elite Entrance Animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 500,
+        duration: 800,
         useNativeDriver: true,
       }),
-      Animated.timing(slideAnim, {
+      Animated.spring(slideAnim, {
         toValue: 0,
-        duration: 500,
+        friction: 8,
+        tension: 40,
         useNativeDriver: true,
       }),
-      // Staggered card animations - Elite sequential entrance
-      ...cardAnimations.map((card, index) =>
-        Animated.parallel([
-          Animated.timing(card.opacity, {
-            toValue: 1,
-            duration: 400,
-            delay: index * 50,
-            useNativeDriver: true,
-          }),
-          Animated.timing(card.translateY, {
-            toValue: 0,
-            duration: 400,
-            delay: index * 50,
-            useNativeDriver: true,
-          }),
-        ])
-      ),
     ]).start();
-    
-    // ELITE: Proper cleanup to prevent memory leaks
-    return () => {
-      // Stop all animations
-      fadeAnim.stopAnimation();
-      slideAnim.stopAnimation();
-      scrollY.stopAnimation();
-      
-      // Stop all card animations
-      cardAnimations.forEach(card => {
-        card.opacity.stopAnimation();
-        card.translateY.stopAnimation();
-      });
-      
-      // Reset animation values
-      fadeAnim.setValue(0);
-      slideAnim.setValue(30);
-      scrollY.setValue(0);
-      cardAnimations.forEach(card => {
-        card.opacity.setValue(0);
-        card.translateY.setValue(20);
-      });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onRefresh = useCallback(async () => {
@@ -123,367 +70,100 @@ export default function HomeScreen({ navigation }: any) {
     haptics.impactLight();
     try {
       await refresh();
-    } catch (error) {
-      logger.error('Failed to refresh on pull:', error);
     } finally {
       setRefreshing(false);
     }
   }, [refresh]);
-
-  const handleViewAllEarthquakes = useCallback(() => {
-    haptics.impactLight();
-    navigation?.navigate?.('AllEarthquakes');
-  }, [navigation]);
 
   const handleSOSPress = useCallback(() => {
     haptics.impactHeavy();
     setShowSOSModal(true);
   }, []);
 
-  const handleSOSConfirm = useCallback(async () => {
-    // CRITICAL: This is life-saving - MUST work reliably
-    try {
-      haptics.impactHeavy();
-      
-      // CRITICAL: Get current location with timeout and fallback
-      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
-      let locationStatus = 'unknown';
-      
-      try {
-        // Ensure Location module is available
-        if (!Location || typeof Location.requestForegroundPermissionsAsync !== 'function') {
-          throw new Error('Location module not available');
-        }
-        
-        // Request permission with timeout
-        const permissionPromise = Location.requestForegroundPermissionsAsync();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Permission timeout')), 5000)
-        );
-        
-        const { status } = await Promise.race([permissionPromise, timeoutPromise]) as any;
-        
-        if (status === 'granted') {
-          // Get position with timeout
-          const positionPromise = Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
-          const positionTimeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Position timeout')), 10000)
-          );
-          
-          try {
-            const position = await Promise.race([positionPromise, positionTimeoutPromise]) as any;
-            location = {
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-              accuracy: position.coords.accuracy || 10,
-            };
-            locationStatus = 'success';
-          } catch (posError) {
-            // Try with lower accuracy
-            try {
-              const position = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-              });
-              location = {
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                accuracy: position.coords.accuracy || 50,
-              };
-              locationStatus = 'low-accuracy';
-            } catch (fallbackError) {
-              locationStatus = 'failed';
-              logger.warn('Location error (all methods failed):', fallbackError);
-            }
-          }
-        } else {
-          locationStatus = 'denied';
-          logger.warn('Location permission denied');
-        }
-      } catch (locError) {
-        locationStatus = 'error';
-        logger.warn('Location error:', locError);
-        // Continue without location - SOS will still work
-      }
+  const latestEarthquake = earthquakes[0];
 
-      // CRITICAL: Send SOS signal with retry mechanism
-      const sosService = getSOSService();
-      let sosSent = false;
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      while (!sosSent && retryCount < maxRetries) {
-        try {
-          await sosService.sendSOSSignal(
-            location,
-            locationStatus === 'success' || locationStatus === 'low-accuracy'
-              ? 'Acil yardım gerekiyor! Konum paylaşıldı.'
-              : 'Acil yardım gerekiyor!'
-          );
-          sosSent = true;
-        } catch (sosError) {
-          retryCount++;
-          logger.error(`SOS send attempt ${retryCount} failed:`, sosError);
-          
-          if (retryCount < maxRetries) {
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-          } else {
-            // All retries failed - still show success to user (signal may have been sent)
-            // In emergency, it's better to assume success than panic user
-            logger.error('All SOS retry attempts failed');
-          }
-        }
-      }
+  // Map Family Members to Component Props
+  const mappedFamilyMembers = familyMembers.map(m => ({
+    id: m.id,
+    name: m.name,
+    status: m.status as 'safe' | 'warning' | 'danger' | 'unknown',
+    lastSeen: new Date(m.lastSeen || Date.now()).toLocaleTimeString(),
+    isOnline: (Date.now() - (m.lastSeen || 0)) < 1000 * 60 * 5, // Online if seen in last 5 mins
+  }));
 
-      // Close modal
-      setShowSOSModal(false);
 
-      // Show success message with location status
-      const locationMessage = locationStatus === 'success' 
-        ? 'Konumunuz yüksek doğrulukla paylaşıldı.'
-        : locationStatus === 'low-accuracy'
-        ? 'Konumunuz paylaşıldı (düşük doğruluk).'
-        : 'Konum alınamadı ancak SOS sinyali gönderildi.';
-
-      Alert.alert(
-        '🆘 SOS Gönderildi',
-        `Yardım çağrınız yakındaki kişilere ve yetkililere iletildi. ${locationMessage}`,
-        [
-          { text: 'Tamam', style: 'default' },
-          { 
-            text: '112 Ara', 
-            style: 'destructive',
-            onPress: () => {
-              Linking.openURL('tel:112').catch((err) => {
-                logger.error('112 call failed:', err);
-                Alert.alert('Hata', '112 aranırken bir hata oluştu.');
-              });
-            }
-          }
-        ]
-      );
-
-      haptics.notificationSuccess();
-    } catch (error) {
-      logger.error('CRITICAL: SOS send error:', error);
-      
-      // CRITICAL: Even on error, show user options
-      Alert.alert(
-        '⚠️ SOS Gönderilemedi',
-        'SOS gönderilirken bir hata oluştu. Lütfen manuel olarak yardım çağırın.',
-        [
-          { text: 'Tekrar Dene', onPress: handleSOSConfirm },
-          { 
-            text: '112 Ara', 
-            style: 'destructive',
-            onPress: () => {
-              Linking.openURL('tel:112').catch((err) => {
-                logger.error('112 call failed:', err);
-                Alert.alert('Hata', '112 aranırken bir hata oluştu.');
-              });
-            }
-          },
-          { text: 'İptal', style: 'cancel' }
-        ]
-      );
-      haptics.notificationError();
-    }
-  }, []);
-
-  const handleSOSClose = useCallback(() => {
-    setShowSOSModal(false);
-  }, []);
 
   return (
-    <View style={styles.container}>
-      <StatusBar 
-        barStyle="light-content" 
-        backgroundColor={colors.background.primary}
-        translucent={false}
-      />
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        }}
+    <PaperBackground>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+
+      <Animated.ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing || loading}
+            onRefresh={onRefresh}
+            tintColor="#1F4E79"
+            colors={['#1F4E79']}
+          />
+        }
+        style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
       >
-        <Animated.ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false }
-          )}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing || loading}
-              onRefresh={onRefresh}
-              tintColor={colors.accent.primary}
-              colors={[colors.accent.primary]}
-              progressBackgroundColor={colors.background.secondary}
-            />
-          }
-        >
-          <HomeHeader />
-          
-          {/* UNIQUE FEATURE: BLE Mesh Offline Status Banner */}
-          {isMeshRunning && (
-            <Animated.View
-              style={{
-                opacity: cardAnimations[0].opacity,
-                transform: [{ translateY: cardAnimations[0].translateY }],
-              }}
-            >
-              <View style={styles.meshBanner}>
-                <View style={styles.meshBannerContent}>
-                  <Ionicons name="wifi-off" size={20} color="#10b981" />
-                  <View style={styles.meshBannerText}>
-                    <Text style={styles.meshBannerTitle}>
-                      Şebekesiz Mesajlaşma Aktif
-                    </Text>
-                    <Text style={styles.meshBannerSubtitle}>
-                      {meshPeers.length > 0 
-                        ? `${meshPeers.length} kişi yakınınızda` 
-                        : 'İnternet olmadan çalışıyor'}
-                    </Text>
-                  </View>
-                  <View style={styles.meshBadge}>
-                    <Text style={styles.meshBadgeText}>BENZERSIZ</Text>
-                  </View>
-                </View>
-              </View>
-            </Animated.View>
-          )}
-          
-          {/* Elite staggered entrance animations - Cards appear sequentially with smooth fade-in */}
-          {newsEnabled && (
-            <Animated.View
-              style={{
-                opacity: cardAnimations[0].opacity,
-                transform: [{ translateY: cardAnimations[0].translateY }],
-              }}
-            >
-              <NewsCard />
-            </Animated.View>
-          )}
-          {aiFeaturesEnabled && (
-            <Animated.View
-              style={{
-                opacity: cardAnimations[newsEnabled ? 1 : 0].opacity,
-                transform: [{ translateY: cardAnimations[newsEnabled ? 1 : 0].translateY }],
-              }}
-            >
-              <AIAssistantCard navigation={navigation} />
-            </Animated.View>
-          )}
-          
-          <Animated.View
-            style={{
-              opacity: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0)].opacity,
-              transform: [{ translateY: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0)].translateY }],
-            }}
-          >
-            <MeshNetworkPanel />
-          </Animated.View>
-          <Animated.View
-            style={{
-              opacity: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 1].opacity,
-              transform: [{ translateY: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 1].translateY }],
-            }}
-          >
-            <EarthquakeMonitorCard onViewAll={handleViewAllEarthquakes} navigation={navigation} />
-          </Animated.View>
-          <Animated.View
-            style={{
-              opacity: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 2].opacity,
-              transform: [{ translateY: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 2].translateY }],
-            }}
-          >
-            <EmergencyButton onPress={handleSOSPress} />
-          </Animated.View>
-          <Animated.View
-            style={{
-              opacity: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 3].opacity,
-              transform: [{ translateY: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 3].translateY }],
-            }}
-          >
-            <FeatureGrid navigation={navigation} />
-          </Animated.View>
-          <Animated.View
-            style={{
-              opacity: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 4].opacity,
-              transform: [{ translateY: cardAnimations[(newsEnabled ? 1 : 0) + (aiFeaturesEnabled ? 1 : 0) + 4].translateY }],
-            }}
-          >
-            <AboutAfetNetCard />
-          </Animated.View>
-        </Animated.ScrollView>
-      </Animated.View>
+        {/* 1. Header - Identity & Status */}
+        <HomeHeader />
+
+        {/* 2. Signature: Seismic Alert Banner */}
+        {latestEarthquake && (
+          <SeismicAlertBanner
+            magnitude={latestEarthquake.magnitude}
+            location={latestEarthquake.location}
+            time={new Date(latestEarthquake.time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+            depth={latestEarthquake.depth}
+            onPress={() => navigation.navigate('AllEarthquakes')}
+          />
+        )}
+
+        {/* 3. Signature: Family Check-In */}
+        <FamilyCheckInModule members={mappedFamilyMembers} />
+
+        {/* 4. Editorial News Carousel */}
+        {newsEnabled && <NewsCard />}
+
+        {/* 5. AI Guardian - Premium Feature */}
+        <AIAssistantCard navigation={navigation} />
+
+        {/* 6. REMOVED: Preparedness Checklist (Redundant with AI Assistant) */}
+
+        {/* 7. Emergency Action - The "Red Button" */}
+        <EmergencyButton onPress={handleSOSPress} />
+
+        {/* 8. Tools & Features Grid */}
+        <FeatureGrid navigation={navigation} />
+
+        {/* 9. Footer */}
+        <AboutAfetNetCard />
+
+        <View style={styles.bottomSpacer} />
+      </Animated.ScrollView>
 
       <SOSModal
         visible={showSOSModal}
-        onClose={handleSOSClose}
-        onConfirm={handleSOSConfirm}
+        onClose={() => setShowSOSModal(false)}
+        onConfirm={() => setShowSOSModal(false)}
       />
-    </View>
+    </PaperBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.primary,
-  },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 120,
-    // Elite spacing: Better visual hierarchy
-    gap: 0, // Cards handle their own spacing
+    paddingTop: 10,
+    paddingBottom: 40,
+    gap: 16, // Consistent premium spacing
   },
-  // UNIQUE FEATURE: BLE Mesh Banner Styles
-  meshBanner: {
-    marginHorizontal: spacing[4],
-    marginVertical: spacing[2],
-    backgroundColor: colors.background.elevated,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#10b981',
-    overflow: 'hidden',
+  bottomSpacer: {
+    height: 80,
   },
-  meshBannerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing[4],
-    gap: spacing[3],
-  },
-  meshBannerText: {
-    flex: 1,
-  },
-  meshBannerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: 2,
-  },
-  meshBannerSubtitle: {
-    fontSize: 12,
-    color: colors.text.secondary,
-  },
-  meshBadge: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  meshBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 0.5,
-  },
-  // Voice command button removed - Apple review compliance
 });

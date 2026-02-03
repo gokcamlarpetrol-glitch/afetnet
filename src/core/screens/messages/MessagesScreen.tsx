@@ -16,6 +16,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ImageBackground,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,11 +29,12 @@ import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
 import { useMeshStore } from '../../stores/meshStore';
 import { bleMeshService } from '../../services/BLEMeshService';
-import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
+import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
 import QRCode from 'react-native-qrcode-svg';
 import { Modal, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { createLogger } from '../../utils/logger';
+import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 
 const logger = createLogger('MessagesScreen');
 
@@ -50,7 +52,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
   const conversations = useMessageStore((state) => state.conversations);
   const messages = useMessageStore((state) => state.messages);
-  
+
   // ELITE: Debounce search query to prevent excessive filtering and re-renders
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -62,26 +64,26 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   // ELITE: Generate search suggestions as user types
   useEffect(() => {
     try {
-      const normalizedQuery = searchQuery.trim().toLowerCase();
+      const normalizedQuery = safeLowerCase(searchQuery).trim();
       if (normalizedQuery.length === 0) {
         setSearchSuggestions([]);
         return;
       }
 
       const suggestions = new Set<string>();
-      
+
       // Extract unique user names that match
       conversations.forEach((conv) => {
-        const name = conv.userName?.toLowerCase() ?? '';
-        if (name.includes(normalizedQuery) && name !== normalizedQuery) {
+        const name = safeLowerCase(conv.userName);
+        if (safeIncludes(name, normalizedQuery) && name !== normalizedQuery) {
           suggestions.add(conv.userName);
         }
       });
 
       // Extract unique message snippets that match
       messages.forEach((msg) => {
-        const content = msg.content?.toLowerCase() ?? '';
-        if (content.includes(normalizedQuery) && content.length > normalizedQuery.length) {
+        const content = safeLowerCase(msg.content);
+        if (safeIncludes(content, normalizedQuery) && content.length > normalizedQuery.length) {
           const snippet = msg.content.substring(0, 50).trim();
           if (snippet.length > normalizedQuery.length) {
             suggestions.add(snippet);
@@ -111,7 +113,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       try {
         // ELITE: Initialize message store (loads from AsyncStorage and Firebase)
         await useMessageStore.getState().initialize();
-        
+
         // ELITE: Ensure BLE Mesh service is started
         if (!bleMeshService.getIsRunning()) {
           try {
@@ -153,7 +155,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   // Enhanced search: searches in user names, last messages, and all message content
   const filteredConversations = useMemo(() => {
     try {
-      const normalizedQuery = debouncedSearchQuery.trim().toLowerCase();
+      const normalizedQuery = safeLowerCase(debouncedSearchQuery).trim();
       if (normalizedQuery.length === 0) {
         return conversations;
       }
@@ -170,19 +172,19 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
       return conversations.filter((conv) => {
         try {
-          const name = conv.userName?.toLowerCase?.() ?? '';
-          const last = conv.lastMessage?.toLowerCase?.() ?? '';
-          
+          const name = safeLowerCase(conv.userName);
+          const last = safeLowerCase(conv.lastMessage);
+
           // Check user name and last message
-          if (name.includes(normalizedQuery) || last.includes(normalizedQuery)) {
+          if (safeIncludes(name, normalizedQuery) || safeIncludes(last, normalizedQuery)) {
             return true;
           }
 
           // Check all messages in this conversation
           const convMessages = conversationMessages.get(conv.userId) ?? [];
           const foundInMessages = convMessages.some((msg) => {
-            const content = msg.content?.toLowerCase() ?? '';
-            return content.includes(normalizedQuery);
+            const content = safeLowerCase(msg.content);
+            return safeIncludes(content, normalizedQuery);
           });
 
           return foundInMessages;
@@ -239,13 +241,13 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             },
             style: 'destructive',
           },
-        ]
+        ],
       );
     } catch (error) {
       logger.error('Error in handleDeleteConversation:', error);
     }
   }, []);
-  
+
   const handleNewMessage = useCallback(() => {
     try {
       haptics.impactMedium();
@@ -259,7 +261,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     try {
       // ELITE: Try to get device ID from multiple sources
       let id = myDeviceId || useMeshStore.getState().myDeviceId || bleMeshService.getMyDeviceId();
-      
+
       // ELITE: If still no ID, try to get from lib/device
       if (!id || typeof id !== 'string' || id.trim().length === 0) {
         try {
@@ -275,7 +277,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       if (!id || typeof id !== 'string' || id.trim().length === 0) {
         Alert.alert(
           'Cihaz ID hazır değil',
-          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın. Uygulama yeniden başlatılıyor...'
+          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın. Uygulama yeniden başlatılıyor...',
         );
         // ELITE: Try to start BLE Mesh service
         try {
@@ -293,7 +295,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
         }
         return;
       }
-      
+
       setQrValue(id);
       setQrModalVisible(true);
     } catch (error) {
@@ -395,282 +397,278 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const searchInputRef = useRef<TextInput>(null);
 
   return (
-    <KeyboardAvoidingView 
+    <ImageBackground
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      resizeMode="cover"
     >
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-
-      <Modal
-        visible={qrModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={handleCloseQr}
+      <LinearGradient
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Benim AfetNet ID’m</Text>
-            {qrValue && (
-              <View style={styles.modalQrWrapper}>
-                <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
-                <Text style={styles.modalIdText}>{qrValue}</Text>
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+
+        <Modal
+          visible={qrModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={handleCloseQr}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Benim AfetNet ID’m</Text>
+              {qrValue && (
+                <View style={styles.modalQrWrapper}>
+                  <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
+                  <Text style={styles.modalIdText}>{qrValue}</Text>
+                </View>
+              )}
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalSecondary}
+                  onPress={handleCloseQr}
+                  accessibilityRole="button"
+                  accessibilityLabel="Kapat"
+                  accessibilityHint="QR kod ekranını kapatır"
+                >
+                  <Text style={styles.modalSecondaryText}>Kapat</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalPrimary}
+                  onPress={async () => {
+                    try {
+                      if (qrValue && typeof qrValue === 'string') {
+                        await Clipboard.setStringAsync(qrValue);
+                        haptics.notificationSuccess();
+                        logger.info('QR value copied to clipboard');
+                      }
+                    } catch (error) {
+                      logger.error('Error copying QR value:', error);
+                      Alert.alert('Hata', 'Kimlik kopyalanırken bir hata oluştu.');
+                    } finally {
+                      handleCloseQr();
+                    }
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Kimliği kopyala"
+                  accessibilityHint="Cihaz kimliğini panoya kopyalar"
+                >
+                  <Ionicons name="copy-outline" size={16} color="#0f172a" />
+                  <Text style={styles.modalPrimaryText}>Kimliği Kopyala</Text>
+                </TouchableOpacity>
               </View>
-            )}
-            <View style={styles.modalActions}>
-            <TouchableOpacity 
-              style={styles.modalSecondary} 
-              onPress={handleCloseQr}
-              accessibilityRole="button"
-              accessibilityLabel="Kapat"
-              accessibilityHint="QR kod ekranını kapatır"
-            >
-              <Text style={styles.modalSecondaryText}>Kapat</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalPrimary}
-              onPress={async () => {
-                try {
-                  if (qrValue && typeof qrValue === 'string') {
-                    await Clipboard.setStringAsync(qrValue);
-                    haptics.notificationSuccess();
-                    logger.info('QR value copied to clipboard');
-                  }
-                } catch (error) {
-                  logger.error('Error copying QR value:', error);
-                  Alert.alert('Hata', 'Kimlik kopyalanırken bir hata oluştu.');
-                } finally {
-                  handleCloseQr();
+            </View>
+          </View>
+        </Modal>
+
+        {/* UNIQUE FEATURE: Offline Messaging Banner */}
+
+
+        {/* Header - Fixed Position */}
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle} numberOfLines={1}>Mesajlar</Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {filteredConversations.length} konuşma • {isMeshConnected ? 'Online' : 'Offline'}
+            </Text>
+            <View style={styles.meshRow}>
+              <View
+                style={[
+                  styles.meshStatusBadge,
+                  { backgroundColor: isMeshConnected ? 'rgba(74, 222, 128, 0.2)' : 'rgba(251, 146, 60, 0.2)' },
+                ]}
+              >
+                <View style={[styles.statusDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#f97316' }]} />
+                <Text
+                  style={[
+                    styles.meshStatusText,
+                    { color: isMeshConnected ? '#15803d' : '#c2410c' },
+                  ]}
+                >
+                  Mesh {isMeshConnected ? 'aktif' : 'pasif'}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.meshQrButton}
+                onPress={handleShowQr}
+                accessibilityRole="button"
+                accessibilityLabel="QR kod göster"
+                accessibilityHint="Cihaz kimliğinizi QR kod olarak gösterir"
+              >
+                <Ionicons name="qr-code-outline" size={16} color="#475569" />
+                <Text style={styles.meshQrText}>QR</Text>
+              </Pressable>
+            </View>
+            <View style={styles.telemetryCard}>
+              <View style={styles.telemetryColumn}>
+                <Text style={styles.telemetryLabel}>Cihaz</Text>
+                <Text style={styles.telemetryValue}>{networkStats.peerCount}</Text>
+              </View>
+              <View style={styles.telemetryDivider} />
+              <View style={styles.telemetryColumn}>
+                <Text style={styles.telemetryLabel}>Teslim</Text>
+                <Text style={styles.telemetryValue}>{networkStats.deliveryPercent}%</Text>
+              </View>
+              <View style={styles.telemetryDivider} />
+              <View style={styles.telemetryColumn}>
+                <Text style={styles.telemetryLabel}>Hops</Text>
+                <Text style={styles.telemetryValue}>{networkStats.avgHop}</Text>
+              </View>
+            </View>
+          </View>
+          <Pressable
+            style={styles.headerButton}
+            onPress={handleNewMessage}
+            accessibilityRole="button"
+            accessibilityLabel="Yeni mesaj"
+            accessibilityHint="Yeni bir mesaj başlatır"
+          >
+            <View style={styles.glassButtonInner}>
+              <Ionicons name="add" size={28} color="#334155" />
+            </View>
+          </Pressable>
+        </View>
+
+        {/* Search Bar - Fixed outside FlatList to prevent re-mounting */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color="#64748b" />
+            <TextInput
+              ref={searchInputRef}
+              style={styles.searchInput}
+              placeholder="Kişi veya mesaj ara..."
+              placeholderTextColor="#94a3b8"
+              value={searchQuery}
+              onChangeText={handleSearchChange}
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
+              returnKeyType="search"
+              editable={true}
+              keyboardType="default"
+              textContentType="none"
+              accessibilityLabel="Mesajlarda ara"
+              accessibilityHint="Kişi veya mesaj içeriğinde arama yapar"
+              onFocus={() => {
+                if (searchInputRef.current) {
+                  searchInputRef.current.focus();
                 }
               }}
-              accessibilityRole="button"
-              accessibilityLabel="Kimliği kopyala"
-              accessibilityHint="Cihaz kimliğini panoya kopyalar"
-            >
-                <Ionicons name="copy-outline" size={16} color="#0f172a" />
-                <Text style={styles.modalPrimaryText}>Kimliği Kopyala</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* UNIQUE FEATURE: Offline Messaging Banner */}
-      <View style={styles.offlineBanner}>
-        <Ionicons name="bluetooth" size={24} color="#3b82f6" />
-        <View style={styles.offlineBannerText}>
-          <Text style={styles.offlineBannerTitle}>
-            İnternet Olmadan Çalışıyor
-          </Text>
-          <Text style={styles.offlineBannerSubtitle}>
-            BLE Mesh • {peers.length} cihaz bağlı • Şebekesiz iletişim
-          </Text>
-        </View>
-        <View style={styles.uniqueBadge}>
-          <Text style={styles.uniqueBadgeText}>BENZERSIZ</Text>
-        </View>
-      </View>
-
-      {/* Header - Fixed Position */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle} numberOfLines={1}>Mesajlar</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>
-            {filteredConversations.length} konuşma • {isMeshConnected ? 'Online' : 'Offline'}
-          </Text>
-          <View style={styles.meshRow}>
-            <Text
-              style={[
-                styles.meshStatus,
-                { color: isMeshConnected ? '#4ade80' : '#f97316' },
-              ]}
-            >
-              Mesh {isMeshConnected ? 'aktif' : 'pasif'}
-            </Text>
-            <Pressable 
-              style={styles.meshQrButton} 
-              onPress={handleShowQr}
-              accessibilityRole="button"
-              accessibilityLabel="QR kod göster"
-              accessibilityHint="Cihaz kimliğinizi QR kod olarak gösterir"
-            >
-              <Ionicons name="qr-code-outline" size={18} color="#60a5fa" />
-              <Text style={styles.meshQrText}>QR</Text>
-            </Pressable>
-          </View>
-          <View style={styles.telemetryCard}>
-            <View style={styles.telemetryColumn}>
-              <Text style={styles.telemetryLabel}>Cihaz</Text>
-              <Text style={styles.telemetryValue}>{networkStats.peerCount}</Text>
-            </View>
-            <View style={styles.telemetryDivider} />
-            <View style={styles.telemetryColumn}>
-              <Text style={styles.telemetryLabel}>Teslim</Text>
-              <Text style={styles.telemetryValue}>{networkStats.deliveryPercent}%</Text>
-            </View>
-            <View style={styles.telemetryDivider} />
-            <View style={styles.telemetryColumn}>
-              <Text style={styles.telemetryLabel}>Hops</Text>
-              <Text style={styles.telemetryValue}>{networkStats.avgHop}</Text>
-            </View>
-          </View>
-        </View>
-        <Pressable 
-          style={styles.headerButton}
-          onPress={handleNewMessage}
-          accessibilityRole="button"
-          accessibilityLabel="Yeni mesaj"
-          accessibilityHint="Yeni bir mesaj başlatır"
-        >
-          <Ionicons name="add-circle" size={34} color={colors.brand.primary} />
-        </Pressable>
-      </View>
-
-      {/* Search Bar - Fixed outside FlatList to prevent re-mounting */}
-      <View style={styles.searchContainer}>
-        <LinearGradient
-          colors={['#1e293b', '#0f172a']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.searchBar}
-        >
-          <Ionicons name="search" size={20} color={colors.text.tertiary} />
-          <TextInput
-            ref={searchInputRef}
-            style={styles.searchInput}
-            placeholder="Kişi veya mesaj ara..."
-            placeholderTextColor={colors.text.tertiary}
-            value={searchQuery}
-            onChangeText={handleSearchChange}
-            autoCorrect={false}
-            autoCapitalize="none"
-            blurOnSubmit={false}
-            returnKeyType="search"
-            editable={true}
-            keyboardType="default"
-            textContentType="none"
-            accessibilityLabel="Mesajlarda ara"
-            accessibilityHint="Kişi veya mesaj içeriğinde arama yapar"
-            onFocus={() => {
-              // ELITE: Ensure focus is maintained
-              if (searchInputRef.current) {
-                searchInputRef.current.focus();
-              }
-            }}
-            onBlur={() => {
-              // ELITE: Prevent accidental blur
-              // No-op handler to prevent default blur behavior
-            }}
-          />
-          {searchQuery.length > 0 && (
-            <Pressable 
-              onPress={handleClearSearch}
-              accessibilityRole="button"
-              accessibilityLabel="Aramayı temizle"
-              accessibilityHint="Arama metnini temizler"
-            >
-              <Ionicons name="close-circle" size={20} color={colors.text.tertiary} />
-            </Pressable>
-          )}
-        </LinearGradient>
-
-        {/* ELITE: Search Suggestions */}
-        {searchSuggestions.length > 0 && searchQuery.length > 0 && (
-          <View style={styles.suggestionsContainer}>
-            {searchSuggestions.map((suggestion, index) => (
+            />
+            {searchQuery.length > 0 && (
               <Pressable
-                key={`suggestion-${index}`}
-                style={styles.suggestionItem}
-                onPress={() => {
-                  setSearchQuery(suggestion);
-                  if (searchInputRef.current) {
-                    searchInputRef.current.blur();
-                  }
-                }}
+                onPress={handleClearSearch}
                 accessibilityRole="button"
-                accessibilityLabel={`Arama önerisi: ${suggestion}`}
-                accessibilityHint="Bu öneriyi seçer ve arama yapar"
+                accessibilityLabel="Aramayı temizle"
+                accessibilityHint="Arama metnini temizler"
               >
-                <Ionicons name="arrow-forward" size={16} color={colors.text.tertiary} />
-                <Text style={styles.suggestionText} numberOfLines={1}>
-                  {suggestion}
-                </Text>
+                <Ionicons name="close-circle" size={20} color="#94a3b8" />
               </Pressable>
-            ))}
+            )}
           </View>
-        )}
-      </View>
 
-      {/* Scrollable Content - FlatList with header */}
-      <FlatList
-        data={filteredConversations}
-        renderItem={renderConversation}
-        keyExtractor={(item) => item.userId}
-        ListHeaderComponent={ListHeaderComponent}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        showsVerticalScrollIndicator={true}
-        keyboardShouldPersistTaps="always"
-        keyboardDismissMode="none"
-        removeClippedSubviews={false}
-        nestedScrollEnabled={false}
-        scrollEventThrottle={16}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <LinearGradient
-              colors={['#1e293b', '#0f172a']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.emptyIcon}
-            >
-              <Ionicons name="chatbubbles-outline" size={64} color={colors.brand.primary} />
-            </LinearGradient>
-            <Text style={styles.emptyText}>Henüz mesaj yok</Text>
-            <Text style={styles.emptySubtext}>
-              Yakındaki cihazlarla BLE mesh ağı üzerinden mesajlaşabilirsiniz
-            </Text>
-            <Pressable 
-              style={styles.emptyButton} 
-              onPress={handleNewMessage}
-              accessibilityRole="button"
-              accessibilityLabel="İlk mesajı gönder"
-              accessibilityHint="Yeni bir mesaj başlatır"
-            >
-              <LinearGradient
-                colors={['#3b82f6', '#2563eb', '#1e40af']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.emptyButtonGradient}
+          {/* ELITE: Search Suggestions */}
+          {searchSuggestions.length > 0 && searchQuery.length > 0 && (
+            <View style={styles.suggestionsContainer}>
+              {searchSuggestions.map((suggestion, index) => (
+                <Pressable
+                  key={`suggestion-${index}`}
+                  style={styles.suggestionItem}
+                  onPress={() => {
+                    setSearchQuery(suggestion);
+                    if (searchInputRef.current) {
+                      searchInputRef.current.blur();
+                    }
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Arama önerisi: ${suggestion}`}
+                  accessibilityHint="Bu öneriyi seçer ve arama yapar"
+                >
+                  <Ionicons name="arrow-forward" size={16} color={colors.text.tertiary} />
+                  <Text style={styles.suggestionText} numberOfLines={1}>
+                    {suggestion}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Scrollable Content - FlatList with header */}
+        <FlatList
+          data={filteredConversations}
+          renderItem={renderConversation}
+          keyExtractor={(item) => item.userId}
+          ListHeaderComponent={ListHeaderComponent}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
+          removeClippedSubviews={false}
+          nestedScrollEnabled={false}
+          scrollEventThrottle={16}
+          // ELITE: Performance optimizations
+          initialNumToRender={10}
+          maxToRenderPerBatch={5}
+          windowSize={7}
+          getItemLayout={(data, index) => ({
+            length: 100, // Approximate conversation card height + separator
+            offset: 112 * index,
+            index,
+          })}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="chatbubbles-outline" size={80} color="#cbd5e1" />
+              </View>
+              <Text style={styles.emptyText}>Henüz mesaj yok</Text>
+              <Text style={styles.emptySubtext}>
+                Yakındaki cihazlarla şebekesiz BLE mesh ağı üzerinden güvenle mesajlaşabilirsiniz
+              </Text>
+              <Pressable
+                style={styles.emptyButton}
+                onPress={handleNewMessage}
+                accessibilityRole="button"
+                accessibilityLabel="İlk mesajı gönder"
+                accessibilityHint="Yeni bir mesaj başlatır"
               >
-                <Ionicons name="add-circle" size={20} color="#fff" />
-                <Text style={styles.emptyButtonText}>İlk Mesajı Gönder</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
-        }
-      />
+                <View style={styles.emptyButtonInner}>
+                  <Ionicons name="add" size={20} color="#334155" />
+                  <Text style={styles.emptyButtonText}>İlk Mesajı Gönder</Text>
+                </View>
+              </Pressable>
+            </View>
+          }
+        />
 
-      {/* FAB KALDIRILDI - Header'daki + butonu kullanılıyor */}
+        {/* FAB KALDIRILDI - Header'daki + butonu kullanılıyor */}
 
-      {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
-    </KeyboardAvoidingView>
+        {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
+      </KeyboardAvoidingView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#f8fafc',
   },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e3a8a',
+    backgroundColor: 'rgba(59, 130, 246, 0.9)',
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#3b82f6',
+    borderBottomColor: 'rgba(59, 130, 246, 0.2)',
   },
   offlineBannerText: {
     flex: 1,
@@ -703,45 +701,66 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: 20,
     paddingBottom: 20,
-    backgroundColor: colors.background.primary,
     zIndex: 10,
-    elevation: 4,
   },
   headerContent: {
     flex: 1,
-    minHeight: 60, // Ensure minimum height for title visibility
+    minHeight: 60,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '800',
-    color: '#fff',
+    color: '#334155',
     letterSpacing: -0.5,
-    minHeight: 38, // Ensure title always has space
   },
   headerSubtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#64748b',
     marginTop: 2,
   },
   headerButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    overflow: 'hidden',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  glassButtonInner: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(59,130,246,0.12)',
-    marginTop: 0,
-  },
-  meshStatus: {
-    marginTop: 6,
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   meshRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 10,
+  },
+  meshStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  meshStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   meshQrButton: {
     flexDirection: 'row',
@@ -750,51 +769,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
-    backgroundColor: 'rgba(96,165,250,0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   meshQrText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#60a5fa',
+    color: '#475569',
   },
   telemetryCard: {
-    marginTop: 12,
+    marginTop: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(15,23,42,0.8)',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
     borderWidth: 1,
-    borderColor: 'rgba(94,234,212,0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   telemetryColumn: {
     flex: 1,
     alignItems: 'center',
   },
   telemetryLabel: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: 10,
+    color: '#64748b',
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 4,
+    letterSpacing: 0.8,
+    fontWeight: '700',
+    marginBottom: 2,
   },
   telemetryValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#e2e8f0',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#334155',
   },
   telemetryDivider: {
     width: 1,
-    height: 28,
-    backgroundColor: 'rgba(94,234,212,0.18)',
+    height: 20,
+    backgroundColor: 'rgba(148, 163, 184, 0.2)',
   },
   searchContainer: {
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 12,
-    backgroundColor: colors.background.primary,
     zIndex: 1,
   },
   searchBar: {
@@ -802,29 +828,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.5)',
     gap: 8,
-    shadowColor: '#000',
+    shadowColor: '#64748b',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   searchInput: {
     flex: 1,
     fontSize: 15,
-    color: '#fff',
-    paddingVertical: 4,
+    color: '#1e293b',
+    paddingVertical: Platform.OS === 'ios' ? 4 : 0,
   },
   suggestionsContainer: {
     marginTop: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderWidth: 1,
     borderColor: 'rgba(148, 163, 184, 0.2)',
     overflow: 'hidden',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   suggestionItem: {
     flexDirection: 'row',
@@ -839,7 +871,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text.secondary,
+    color: '#334155',
   },
   conversationsHeader: {
     flexDirection: 'row',
@@ -866,18 +898,18 @@ const styles = StyleSheet.create({
   conversationCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 24,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   avatarGradient: {
     width: 56,
@@ -899,8 +931,8 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#334155',
   },
   time: {
     fontSize: 13,
@@ -937,57 +969,57 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 32 * 2,
+    paddingVertical: 60,
   },
-  emptyIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  emptyIconContainer: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: colors.brand.primary + '30',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   emptyText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#334155',
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 15,
-    color: '#94a3b8',
+    color: '#64748b',
     textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 20,
+    marginBottom: 30,
+    paddingHorizontal: 40,
     lineHeight: 22,
   },
   emptyButton: {
-    borderRadius: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     overflow: 'hidden',
-    shadowColor: '#3b82f6',
+    shadowColor: '#64748b',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  emptyButtonGradient: {
+  emptyButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   emptyButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: '#334155',
   },
   modalOverlay: {
     flex: 1,
@@ -999,32 +1031,45 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 360,
-    borderRadius: 24,
+    borderRadius: 32,
     padding: 24,
-    backgroundColor: 'rgba(15,23,42,0.96)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.25)',
+    borderColor: 'rgba(255, 255, 255, 1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#334155',
     textAlign: 'center',
-    marginBottom: 18,
+    marginBottom: 20,
+    letterSpacing: -0.5,
   },
   modalQrWrapper: {
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 18,
-    backgroundColor: '#1f2a44',
+    padding: 24,
+    borderRadius: 24,
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.2)',
-    marginBottom: 20,
+    borderColor: 'rgba(148, 163, 184, 0.1)',
+    marginBottom: 24,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   modalIdText: {
-    marginTop: 12,
-    fontSize: 12,
-    color: '#cbd5f5',
+    marginTop: 16,
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   modalActions: {
     flexDirection: 'row',
@@ -1033,27 +1078,29 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   modalSecondary: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(148,163,184,0.18)',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#f1f5f9',
   },
   modalSecondaryText: {
-    color: '#e2e8f0',
-    fontWeight: '600',
+    color: '#64748b',
+    fontWeight: '700',
   },
   modalPrimary: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: '#38bdf8',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#e0f2fe',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
   },
   modalPrimaryText: {
-    fontWeight: '700',
-    color: '#0f172a',
+    fontWeight: '800',
+    color: '#0369a1',
   },
   // FAB styles removed - using header button instead
 });

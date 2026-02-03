@@ -42,7 +42,7 @@ class UltraLowLatencyOptimizer {
   async optimizedFetch(
     url: string,
     options: RequestInit = {},
-    priority: 'low' | 'medium' | 'high' | 'critical' = 'medium'
+    priority: 'low' | 'medium' | 'high' | 'critical' = 'medium',
   ): Promise<Response> {
     if (!this.isInitialized) {
       return fetch(url, options);
@@ -138,7 +138,7 @@ class UltraLowLatencyOptimizer {
   private updateConnectionMetrics(
     url: string,
     latency: number,
-    success: boolean = true
+    success: boolean = true,
   ): void {
     const domain = this.extractDomain(url);
     const existing = this.connectionMetrics.get(domain) || {
@@ -183,7 +183,7 @@ class UltraLowLatencyOptimizer {
     const promises = urls.map(url =>
       this.optimizedFetch(url, {}, 'low').catch(() => {
         // Ignore prefetch errors
-      })
+      }),
     );
 
     await Promise.allSettled(promises);

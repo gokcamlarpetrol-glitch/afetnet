@@ -38,7 +38,7 @@ export function getViewportBounds(region: ViewportRegion): ViewportBounds {
  */
 export function isPointInViewport(
   point: { latitude: number; longitude: number },
-  bounds: ViewportBounds
+  bounds: ViewportBounds,
 ): boolean {
   return (
     point.latitude >= bounds.southWest.latitude &&
@@ -53,7 +53,7 @@ export function isPointInViewport(
  */
 export function filterByViewport<T extends { latitude: number; longitude: number }>(
   items: T[],
-  bounds: ViewportBounds
+  bounds: ViewportBounds,
 ): T[] {
   return items.filter(item => isPointInViewport(item, bounds));
 }

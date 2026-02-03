@@ -90,7 +90,7 @@ class PrecursorDetectionService {
     // Return the best result
     const results = [electromagneticResult, seismicResult, pressureResult];
     const bestResult = results.reduce((best, current) => 
-      current.confidence > best.confidence ? current : best
+      current.confidence > best.confidence ? current : best,
     );
 
     if (bestResult.precursorDetected && bestResult.confidence > 60) {
@@ -112,7 +112,7 @@ class PrecursorDetectionService {
     // Check for very low frequency signals (0.01-0.1 Hz)
     const lowFreqCount = frequencies.filter(f => 
       f >= this.ELECTROMAGNETIC_PATTERN.frequency[0] && 
-      f <= this.ELECTROMAGNETIC_PATTERN.frequency[1]
+      f <= this.ELECTROMAGNETIC_PATTERN.frequency[1],
     ).length;
 
     const hasLowFrequency = lowFreqCount > frequencies.length * 0.3; // 30% of frequencies
@@ -147,7 +147,7 @@ class PrecursorDetectionService {
     // Check for low frequency seismic signals (0.05-0.5 Hz)
     const seismicFreqCount = frequencies.filter(f => 
       f >= this.SEISMIC_PATTERN.frequency[0] && 
-      f <= this.SEISMIC_PATTERN.frequency[1]
+      f <= this.SEISMIC_PATTERN.frequency[1],
     ).length;
 
     const hasSeismicFrequency = seismicFreqCount > frequencies.length * 0.4; // 40% of frequencies

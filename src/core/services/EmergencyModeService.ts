@@ -6,7 +6,7 @@
 
 import { Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
-import { notificationService } from './NotificationService';
+// import { notificationService } from './NotificationService'; // Removed to break circular dependency
 import { bleMeshService } from './BLEMeshService';
 import { locationService } from './LocationService';
 import { useFamilyStore } from '../stores/familyStore';
@@ -66,7 +66,7 @@ class EmergencyModeService {
     // ELITE: Determine emergency mode priority based on magnitude
     const isCritical = earthquake.magnitude >= 6.0;
     const priority = isCritical ? 'CRITICAL' : 'HIGH';
-    
+
     logger.info(`🚨 ACTIVATING ${priority} EMERGENCY MODE - Magnitude ${earthquake.magnitude} earthquake detected`);
     this.isEmergencyMode = true;
     this.lastTriggerTime = Date.now();
@@ -124,14 +124,15 @@ class EmergencyModeService {
         earthquake.location,
         false, // Not EEW
         undefined, // No time advance
-        earthquake.time // Timestamp
+        earthquake.time, // Timestamp
       ).catch(async (error) => {
         logger.error('Failed to show magnitude-based critical notification:', error);
         // Fallback to standard notification
+        const { notificationService } = await import('./NotificationService');
         await notificationService.showEarthquakeNotification(
           earthquake.magnitude,
           earthquake.location,
-          new Date(earthquake.time)
+          new Date(earthquake.time),
         );
       });
     } catch (error) {
@@ -147,12 +148,12 @@ class EmergencyModeService {
       // Location service will continuously update position
       // This ensures rescue teams can find the user
       logger.info('Starting continuous location tracking');
-      
+
       // Get current location and broadcast
       const location = await locationService.getCurrentPosition();
       if (location) {
         logger.info(`Current location: ${location.latitude}, ${location.longitude}`);
-        
+
         // Update user status with location
         useUserStatusStore.getState().updateStatus('needs_help', {
           latitude: location.latitude,
@@ -171,19 +172,19 @@ class EmergencyModeService {
   private async activateBLEMesh() {
     try {
       logger.info('Activating BLE mesh for offline communication');
-      
+
       // BLE mesh should already be running from init.ts
       // This ensures it's broadcasting emergency status
       if (!bleMeshService.getIsRunning()) {
         await bleMeshService.start();
       }
-      
+
       // Broadcast emergency SOS via BLE
-      await bleMeshService.broadcastEmergency({
+      await bleMeshService.broadcastEmergency(JSON.stringify({
         type: 'EARTHQUAKE_EMERGENCY',
         magnitude: 0, // Will be set by caller
         timestamp: Date.now(),
-      });
+      }));
     } catch (error) {
       logger.error('BLE mesh activation error:', error);
     }
@@ -195,14 +196,14 @@ class EmergencyModeService {
   private async notifyFamilyMembers(earthquake: Earthquake) {
     try {
       const familyMembers = useFamilyStore.getState().members;
-      
+
       if (familyMembers.length === 0) {
         logger.info('No family members to notify');
         return;
       }
 
       logger.info(`Notifying ${familyMembers.length} family members`);
-      
+
       // Send status update to all family members
       // This will use BLE mesh + Firebase
       for (const member of familyMembers) {
@@ -226,10 +227,10 @@ class EmergencyModeService {
     const isCritical = earthquake.magnitude >= 6.0;
     const priority = isCritical ? 'CRITICAL' : 'HIGH';
     const title = isCritical ? '🚨 ACİL DURUM MODU AKTİF' : '⚠️ ACİL DURUM MODU AKTİF';
-    const magnitudeText = isCritical 
+    const magnitudeText = isCritical
       ? `Büyüklük ${earthquake.magnitude} BÜYÜK DEPREM algılandı!`
       : `Büyüklük ${earthquake.magnitude} ÖNEMLİ DEPREM algılandı!`;
-    
+
     Alert.alert(
       title,
       `${magnitudeText}\n\n` +
@@ -269,7 +270,7 @@ class EmergencyModeService {
       ],
       {
         cancelable: false, // Must respond
-      }
+      },
     );
   }
 
@@ -279,11 +280,11 @@ class EmergencyModeService {
   deactivateEmergencyMode() {
     logger.info('Deactivating emergency mode');
     this.isEmergencyMode = false;
-    
+
     Alert.alert(
       'Acil Durum Modu Kapatıldı',
       'Normal mod aktif. İhtiyaç durumunda SOS butonunu kullanabilirsiniz.',
-      [{ text: 'Tamam' }]
+      [{ text: 'Tamam' }],
     );
   }
 

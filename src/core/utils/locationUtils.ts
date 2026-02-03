@@ -16,7 +16,7 @@ export function calculateDistance(
   lat1: number,
   lon1: number,
   lat2: number,
-  lon2: number
+  lon2: number,
 ): number {
   const R = 6371; // Earth radius in km
   const dLat = toRadians(lat2 - lat1);
@@ -49,7 +49,7 @@ export function filterByDistance<T extends { latitude: number; longitude: number
   items: T[],
   centerLat: number,
   centerLon: number,
-  radiusKm: number
+  radiusKm: number,
 ): T[] {
   return items.filter((item) => {
     const distance = calculateDistance(centerLat, centerLon, item.latitude, item.longitude);
@@ -63,7 +63,7 @@ export function filterByDistance<T extends { latitude: number; longitude: number
 export function sortByDistance<T extends { latitude: number; longitude: number }>(
   items: T[],
   centerLat: number,
-  centerLon: number
+  centerLon: number,
 ): T[] {
   return [...items].sort((a, b) => {
     const distA = calculateDistance(centerLat, centerLon, a.latitude, a.longitude);

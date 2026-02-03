@@ -11,8 +11,17 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
 import { createLogger } from '../../utils/logger';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('DrillModeScreen');
+
+// ELITE: Type-safe navigation prop
+type DrillModeScreenNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface DrillModeScreenProps {
+  navigation: DrillModeScreenNavigationProp;
+}
 
 interface DrillScenario {
   id: string;
@@ -77,7 +86,7 @@ const DRILL_SCENARIOS: DrillScenario[] = [
 ];
 
 
-export default function DrillModeScreen({ navigation }: any) {
+export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
   const [activeDrill, setActiveDrill] = useState<DrillScenario | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(0);
@@ -86,7 +95,7 @@ export default function DrillModeScreen({ navigation }: any) {
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    
+
     if (isDrillActive && timeRemaining > 0) {
       interval = setInterval(() => {
         setTimeRemaining((prev) => {
@@ -112,7 +121,7 @@ export default function DrillModeScreen({ navigation }: any) {
         [
           { text: 'İptal', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Başlat', onPress: () => resolve(true) },
-        ]
+        ],
       );
     });
 
@@ -148,7 +157,7 @@ export default function DrillModeScreen({ navigation }: any) {
     if (!completedSteps.includes(stepIndex)) {
       setCompletedSteps([...completedSteps, stepIndex]);
     }
-    
+
     if (stepIndex < (activeDrill?.steps.length || 0) - 1) {
       setCurrentStep(stepIndex + 1);
     }
@@ -174,7 +183,7 @@ export default function DrillModeScreen({ navigation }: any) {
             setCompletedSteps([]);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -195,7 +204,7 @@ export default function DrillModeScreen({ navigation }: any) {
             setTimeRemaining(0);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -327,9 +336,9 @@ export default function DrillModeScreen({ navigation }: any) {
               <LinearGradient
                 colors={[
                   scenario.magnitude >= 7.0 ? '#ef4444' :
-                  scenario.magnitude >= 5.5 ? '#f59e0b' : '#10b981',
+                    scenario.magnitude >= 5.5 ? '#f59e0b' : '#10b981',
                   scenario.magnitude >= 7.0 ? '#dc2626' :
-                  scenario.magnitude >= 5.5 ? '#d97706' : '#059669',
+                    scenario.magnitude >= 5.5 ? '#d97706' : '#059669',
                 ] as [string, string]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
@@ -342,7 +351,7 @@ export default function DrillModeScreen({ navigation }: any) {
                   </View>
                   <Ionicons name="play-circle" size={32} color="#fff" />
                 </View>
-                
+
                 <View style={styles.scenarioFooter}>
                   <View style={styles.scenarioInfo}>
                     <Ionicons name="time-outline" size={16} color="#fff" />

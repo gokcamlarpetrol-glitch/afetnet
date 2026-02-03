@@ -29,12 +29,13 @@ const logger = createLogger('EliteCountdownOverlay');
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function EliteCountdownOverlay() {
-  const active = useEEWStore((state) => state.active);
+  const activeAlert = useEEWStore((state) => state.activeAlert);
+  const active = !!activeAlert;
   const [countdown, setCountdown] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const videoRef = useRef<Video>(null);
-  
+
   // ELITE: Premium animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -42,23 +43,28 @@ export default function EliteCountdownOverlay() {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const numberScale = useRef(new Animated.Value(1)).current;
   const videoOpacityAnim = useRef(new Animated.Value(1)).current; // Video hemen görünsün
-  
+
   // Haptic feedback interval
   const hapticIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (active && active.etaSec && active.etaSec > 0) {
+    if (active && activeAlert) {
+      // Calculate remaining time
+      const now = Date.now();
+      const arrivalTime = activeAlert.estimatedArrivalTime || (activeAlert.timestamp + 30000); // Default 30s if missing
+      const remaining = Math.max(0, Math.ceil((arrivalTime - now) / 1000));
+
       setIsVisible(true);
-      setCountdown(Math.max(0, Math.floor(active.etaSec)));
-      
+      setCountdown(remaining);
+
       // ELITE: Video hemen görünsün - animasyon kaldırıldı
       videoOpacityAnim.setValue(1);
-      
+
       // ELITE: Play video when overlay opens
       if (videoRef.current) {
-        videoRef.current.playAsync().catch(() => {});
+        videoRef.current.playAsync().catch(() => { });
       }
-      
+
       // ELITE: Entrance animation
       Animated.parallel([
         Animated.spring(slideAnim, {
@@ -88,7 +94,7 @@ export default function EliteCountdownOverlay() {
             duration: 1000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       ).start();
 
       // ELITE: Glow animation
@@ -104,7 +110,7 @@ export default function EliteCountdownOverlay() {
             duration: 2000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       ).start();
 
       // ELITE: Rotate animation removed - cleaner design
@@ -113,17 +119,17 @@ export default function EliteCountdownOverlay() {
       const interval = setInterval(() => {
         setCountdown((prev) => {
           const next = Math.max(0, prev - 1);
-          
+
           // ELITE: Haptic feedback on countdown change
           if (next !== prev && next > 0) {
             if (next <= 5) {
-              haptics.impactHeavy().catch(() => {});
+              haptics.impactHeavy().catch(() => { });
             } else if (next <= 10) {
-              haptics.impactMedium().catch(() => {});
+              haptics.impactMedium().catch(() => { });
             } else {
-              haptics.impactLight().catch(() => {});
+              haptics.impactLight().catch(() => { });
             }
-            
+
             // ELITE: Number scale animation on change
             Animated.sequence([
               Animated.timing(numberScale, {
@@ -138,7 +144,7 @@ export default function EliteCountdownOverlay() {
               }),
             ]).start();
           }
-          
+
           return next;
         });
       }, 1000);
@@ -156,7 +162,7 @@ export default function EliteCountdownOverlay() {
       setVideoLoaded(false);
       // Stop video when overlay closes
       if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => {});
+        videoRef.current.pauseAsync().catch(() => { });
       }
       // Exit animation
       Animated.parallel([
@@ -172,19 +178,19 @@ export default function EliteCountdownOverlay() {
         }),
       ]).start();
     }
-  }, [active]);
+  }, [active, activeAlert]);
 
   if (!isVisible || !active) {
     return null;
   }
 
-  const magnitude = active.mag || 0;
-  const region = active.region || 'Bilinmeyen bölge';
-  const source = active.source || 'AFAD';
+  const magnitude = activeAlert?.magnitude || 0;
+  const region = activeAlert?.location || 'Bilinmeyen bölge';
+  const source = activeAlert?.source || 'AFAD';
 
   // Determine alert level
   const alertLevel = countdown <= 5 ? 'imminent' : countdown <= 15 ? 'action' : 'caution';
-  
+
   // Colors based on alert level
   const colors = {
     imminent: ['#ef4444', '#dc2626', '#991b1b'],
@@ -222,18 +228,18 @@ export default function EliteCountdownOverlay() {
       onRequestClose={() => {
         // Don't allow dismiss on critical alerts
         if (alertLevel !== 'imminent') {
-          useEEWStore.getState().clear();
+          useEEWStore.getState().clearActiveAlert();
         }
       }}
     >
       <StatusBar hidden={false} barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* ELITE: World video background */}
       <View style={styles.videoContainer}>
         <Animated.View
           style={[
             StyleSheet.absoluteFill,
-            { opacity: videoOpacityAnim }
+            { opacity: videoOpacityAnim },
           ]}
         >
           <Video
@@ -251,7 +257,7 @@ export default function EliteCountdownOverlay() {
               setVideoLoaded(true);
               logger.info('World video loaded in EliteCountdownOverlay');
               if (videoRef.current) {
-                videoRef.current.playAsync().catch(() => {});
+                videoRef.current.playAsync().catch(() => { });
               }
             }}
             onError={(error) => {
@@ -260,15 +266,17 @@ export default function EliteCountdownOverlay() {
             }}
           />
         </Animated.View>
-        
+
         {/* ELITE: Minimal overlay - dünya videosu tamamen görünsün */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.videoOverlay,
-            { opacity: videoOpacityAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 0.2] // Minimal overlay - dünya videosu tamamen görünsün
-            }) }
+            {
+              opacity: videoOpacityAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.2], // Minimal overlay - dünya videosu tamamen görünsün
+              }),
+            },
           ]}
         >
           <LinearGradient
@@ -276,14 +284,14 @@ export default function EliteCountdownOverlay() {
               alertLevel === 'imminent'
                 ? ['rgba(0, 0, 0, 0.30)', 'rgba(26, 0, 0, 0.25)', 'rgba(0, 0, 0, 0.30)']
                 : alertLevel === 'action'
-                ? ['rgba(15, 10, 0, 0.25)', 'rgba(26, 15, 0, 0.20)', 'rgba(15, 10, 0, 0.25)']
-                : ['rgba(5, 8, 18, 0.20)', 'rgba(10, 14, 26, 0.15)', 'rgba(5, 8, 18, 0.20)']
+                  ? ['rgba(15, 10, 0, 0.25)', 'rgba(26, 15, 0, 0.20)', 'rgba(15, 10, 0, 0.25)']
+                  : ['rgba(5, 8, 18, 0.20)', 'rgba(10, 14, 26, 0.15)', 'rgba(5, 8, 18, 0.20)']
             }
             locations={[0, 0.5, 1]}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>
-        
+
         {/* ELITE: Fallback gradient if video fails */}
         {!videoLoaded && (
           <LinearGradient
@@ -293,7 +301,7 @@ export default function EliteCountdownOverlay() {
           />
         )}
       </View>
-      
+
       {/* ELITE: Animated glow overlay */}
       <Animated.View
         style={[
@@ -342,11 +350,11 @@ export default function EliteCountdownOverlay() {
                   textShadowColor: `${currentColors[0]}90`,
                   textShadowOffset: { width: 0, height: 0 },
                   textShadowRadius: 15,
-                }
+                },
               ]}>
                 {alertLevel === 'imminent' ? '🚨 ÇOK YAKIN!' :
-                 alertLevel === 'action' ? '⚠️ HAREKETE GEÇ!' :
-                 '⚠️ HAZIRLAN!'}
+                  alertLevel === 'action' ? '⚠️ HAREKETE GEÇ!' :
+                    '⚠️ HAZIRLAN!'}
               </Text>
             </LinearGradient>
           </View>
@@ -390,8 +398,8 @@ export default function EliteCountdownOverlay() {
               {countdown <= 5
                 ? '🚨 HEMEN GÜVENLİ YERE GEÇİN!'
                 : countdown <= 15
-                ? '⚠️ Güvenli yere geçin ve çök-kapan-tutun pozisyonu alın'
-                : '⚠️ Güvenli yere geçmeye hazırlanın'}
+                  ? '⚠️ Güvenli yere geçin ve çök-kapan-tutun pozisyonu alın'
+                  : '⚠️ Güvenli yere geçmeye hazırlanın'}
             </Text>
           </View>
 
@@ -403,7 +411,7 @@ export default function EliteCountdownOverlay() {
               onPress={() => {
                 haptics.impactLight();
                 logger.info('Kapat butonu tıklandı');
-                useEEWStore.getState().clear();
+                useEEWStore.getState().clearActiveAlert();
                 setIsVisible(false);
               }}
             >

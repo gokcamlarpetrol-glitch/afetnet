@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   Modal,
   TouchableOpacity,
+  ImageBackground,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -30,6 +31,8 @@ import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
+import { contactService } from '../../services/ContactService';
+import { identityService } from '../../services/IdentityService';
 
 const logger = createLogger('NewMessageScreen');
 
@@ -72,7 +75,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
       { key: 'id', label: 'ID ile Ekle', icon: 'key-outline' },
       { key: 'scan', label: 'Tarama', icon: 'bluetooth' },
     ],
-    []
+    [],
   );
 
   const displayDeviceId = myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...';
@@ -80,22 +83,14 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   const handleHelp = useCallback(() => {
     Alert.alert(
       'Mesh Mesajlaşma',
-      'AfetNet cihazları Bluetooth mesh ağı üzerinden haberleşir. Bluetooth ve konum izinleri kapalıysa mesajlar iletilmez. Erişim sorununda her iki izni de kontrol edin.'
+      'AfetNet cihazları Bluetooth mesh ağı üzerinden haberleşir. Bluetooth ve konum izinleri kapalıysa mesajlar iletilmez. Erişim sorununda her iki izni de kontrol edin.',
     );
   }, []);
 
   const handleShowMyQrInfo = useCallback(() => {
-    const id = myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
-    if (!id) {
-      Alert.alert(
-        'Cihaz ID hazır değil',
-        'Önce Bluetooth ve konum izinlerini açarak mesh ağını başlatın.'
-      );
-      return;
-    }
-    setQrValue(id);
-    setQrModalVisible(true);
-  }, []);
+    // Navigate to dedicated MyQR screen
+    navigation.navigate('MyQR');
+  }, [navigation]);
 
   const handleCloseQrModal = () => {
     setQrModalVisible(false);
@@ -145,7 +140,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     if (!id) {
       Alert.alert(
         'Mesh Ağı Aktif Değil',
-        'Bluetooth açık değil veya gerekli izinler verilmedi. Lütfen Bluetoothu etkinleştirip tekrar deneyin.'
+        'Bluetooth açık değil veya gerekli izinler verilmedi. Lütfen Bluetoothu etkinleştirip tekrar deneyin.',
       );
       return null;
     }
@@ -228,36 +223,36 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
             logger.warn('Discovery message content too large, skipping');
             return;
           }
-          
+
           try {
             // ELITE: Use safe JSON parsing
             const { sanitizeJSON } = await import('../../utils/inputSanitizer');
             const { sanitizeDeviceId } = await import('../../utils/validation');
             const { sanitizeString } = await import('../../utils/validation');
             const data = sanitizeJSON(content);
-            
+
             if (data && typeof data === 'object' && data !== null) {
               // ELITE: Validate data structure
               const messageType = typeof data.type === 'string' ? data.type : null;
-              
+
               if (messageType === 'discovery' || messageType === 'beacon' || messageType === 'discovery_request') {
                 // ELITE: Sanitize device ID
                 const discoveredId = sanitizeDeviceId(
-                  data.deviceId || data.senderId || message.from || ''
+                  data.deviceId || data.senderId || message.from || '',
                 );
-                
+
                 // ELITE: Validate device ID format
                 if (discoveredId && discoveredId.length >= 4 && discoveredId !== id) {
                   // ELITE: Sanitize name
-                  const deviceName = typeof data.name === 'string' 
-                    ? sanitizeString(data.name, 50) 
+                  const deviceName = typeof data.name === 'string'
+                    ? sanitizeString(data.name, 50)
                     : undefined;
-                  
+
                   // ELITE: Validate RSSI (must be number)
                   const rssi = typeof data.rssi === 'number' && !isNaN(data.rssi)
                     ? Math.max(-200, Math.min(0, data.rssi))
                     : undefined;
-                  
+
                   setScannedDevices(prev => {
                     const exists = prev.find(d => d.deviceId === discoveredId);
                     if (!exists) {
@@ -294,20 +289,17 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         type: 'discovery_request',
         deviceId: id,
       });
-      
+
       // CRITICAL: Send via BLE Mesh Service for actual broadcast
       bleMeshService.broadcastMessage({
         content: discoveryPayload,
         type: 'text',
         priority: 'normal',
-        ackRequired: false,
-        ttl: 3600,
-        sequence: 0,
-        attempts: 0,
+        ttl: 3,
       }).catch((error) => {
         logger.error('Failed to broadcast discovery request:', error);
       });
-      
+
       // CRITICAL: Also add to mesh store for tracking
       useMeshStore.getState().broadcastMessage(discoveryPayload, 'text').catch((error) => {
         logger.error('Failed to add discovery request to store:', error);
@@ -345,7 +337,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   useEffect(() => {
     if (!initRequestedRef.current) {
       initRequestedRef.current = true;
-      
+
       // ELITE: Initialize message store
       const initStore = async () => {
         try {
@@ -355,7 +347,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         }
       };
       initStore();
-      
+
       void ensureMeshReady();
     }
 
@@ -376,18 +368,35 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     };
   }, [activeTab, startBLEScan, stopBLEScan]);
 
-  const handleQRScan = ({ data }: { data: string }) => {
+  const handleQRScan = async ({ data }: { data: string }) => {
     try {
-      const parsed = JSON.parse(data);
-      const scannedId = parsed.deviceId || parsed.id || data;
-      
-      if (isValidDeviceId(scannedId)) {
+      // ELITE: Use IdentityService to parse QR and ContactService to save
+      const payload = identityService.parseQRPayload(data);
+
+      if (payload && payload.id) {
+        // Save contact to Firebase via ContactService
+        await contactService.addContactFromQR(data);
+
         haptics.notificationSuccess();
-        startConversation(scannedId);
+        startConversation(payload.id);
+
+        Alert.alert(
+          'Kişi Eklendi ✅',
+          `${payload.name || 'Yeni kişi'} başarıyla kaydedildi.`
+        );
       } else {
-        Alert.alert('Geçersiz QR Kod', 'Bu QR kod geçerli bir cihaz ID\'si içermiyor.');
+        // Fallback: try legacy format
+        const parsed = JSON.parse(data);
+        const scannedId = parsed.deviceId || parsed.id || data;
+
+        if (isValidDeviceId(scannedId)) {
+          haptics.notificationSuccess();
+          startConversation(scannedId);
+        } else {
+          Alert.alert('Geçersiz QR Kod', 'Bu QR kod geçerli bir cihaz ID\'si içermiyor.');
+        }
       }
-    } catch {
+    } catch (error) {
       // Try direct device ID
       if (isValidDeviceId(data)) {
         haptics.notificationSuccess();
@@ -459,7 +468,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     try {
       // Check if conversation already exists
       const existing = useMessageStore.getState().conversations.find(
-        c => c.userId === targetDeviceId
+        c => c.userId === targetDeviceId,
       );
 
       if (existing) {
@@ -474,7 +483,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
           lastMessageTime: Date.now(),
           unreadCount: 0,
         };
-        
+
         // ELITE: Await async addConversation to ensure proper state update
         await useMessageStore.getState().addConversation(newConversation);
         navigation.navigate('Conversation', { userId: targetDeviceId });
@@ -631,7 +640,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     <SafeAreaView style={styles.permissionScreen}>
       <StatusBar barStyle="light-content" backgroundColor="#060b1b" />
       <LinearGradient colors={['#060b1b', '#0b1228']} style={styles.gradientOverlay} />
-      <View style={[styles.container, styles.permissionContainer, { paddingTop: insets.top + 24 }] }>
+      <View style={[styles.container, styles.permissionContainer, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.permissionText}>{message}</Text>
         <Pressable style={styles.permissionButton} onPress={requestPermission}>
           <Text style={styles.permissionButtonText}>{actionLabel}</Text>
@@ -649,28 +658,36 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar barStyle="light-content" backgroundColor="#060b1b" />
-
-      <LinearGradient colors={['#060b1b', '#0b1228']} style={styles.gradientOverlay} />
+    <ImageBackground
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      style={styles.screen}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
       <View
         style={[
           styles.container,
           {
+            paddingTop: insets.top + 10,
             paddingBottom: Math.max(insets.bottom, 24),
           },
         ]}
       >
         <View style={styles.headerRow}>
           <Pressable style={styles.navButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={22} color="#fff" />
+            <Ionicons name="chevron-back" size={24} color="#334155" />
           </Pressable>
           <View style={styles.headerTextContainer}>
+            <Text style={styles.headerTitle}>Yeni Mesaj</Text>
             <Text style={styles.headerSubtitle}>Çevrimdışı mesh ağında güvenli bağlantı kur</Text>
           </View>
           <Pressable style={styles.infoButton} onPress={handleHelp}>
-            <Ionicons name="information-circle-outline" size={20} color="#cbd5f5" />
+            <Ionicons name="information-circle-outline" size={22} color="#475569" />
           </Pressable>
         </View>
 
@@ -680,89 +697,89 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-            <View style={styles.connectionCard}>
-              <View style={styles.connectionHeader}>
-                <View>
-                  <Text style={styles.connectionTitle}>Bağlantı Özeti</Text>
-                  <Text style={styles.connectionSubtitle}>
-                    {isMeshConnected
-                      ? 'Mesh ağı hazır. Bluetooth açık.'
-                      : 'Mesh ağı kapalı. Bluetooth ve konumu etkinleştirin.'}
-                  </Text>
-                </View>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.connectionAction,
-                    (!myDeviceId && !meshStoreDeviceId) && styles.connectionActionDisabled,
-                    pressed && styles.connectionActionPressed,
-                  ]}
-                  onPress={() => handleCopyId()}
-                  disabled={!myDeviceId && !meshStoreDeviceId}
-                >
-                  <Ionicons name="copy-outline" size={16} color="#0ea5e9" />
-                  <Text style={styles.connectionActionText}>Kimliği Kopyala</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <View style={[styles.statIcon, { backgroundColor: 'rgba(14,165,233,0.18)' }]}> 
-                    <Ionicons name="finger-print" size={16} color="#38bdf8" />
-                  </View>
-                  <Text style={styles.statLabel}>Cihaz ID</Text>
-                  <Text style={styles.statValue} numberOfLines={1}>{displayDeviceId}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <View style={[styles.statIcon, { backgroundColor: isMeshConnected ? 'rgba(74,222,128,0.18)' : 'rgba(248,113,113,0.18)' }]}> 
-                    <Ionicons name={isMeshConnected ? 'radio' : 'radio-outline'} size={16} color={isMeshConnected ? '#4ade80' : '#f87171'} />
-                  </View>
-                  <Text style={styles.statLabel}>Mesh Durumu</Text>
-                  <Text style={styles.statValue}>{isMeshConnected ? 'Aktif' : 'Pasif'}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <View style={[styles.statIcon, { backgroundColor: 'rgba(139,92,246,0.18)' }]}> 
-                    <Ionicons name="people-outline" size={16} color="#8b5cf6" />
-                  </View>
-                  <Text style={styles.statLabel}>Taranan Cihaz</Text>
-                  <Text style={styles.statValue}>{scannedDevices.length}</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.tipBanner}>
-              <Ionicons name="shield-checkmark" size={20} color="#4ade80" />
-              <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Çevrimdışı güvenli bağlantı</Text>
-                <Text style={styles.tipSubtitle}>
-                  Bluetooth ve konum açık olduğunda mesajlar ağdaki tüm cihazlara ulaştırılır.
+          <View style={styles.connectionCard}>
+            <View style={styles.connectionHeader}>
+              <View>
+                <Text style={styles.connectionTitle}>Bağlantı Özeti</Text>
+                <Text style={styles.connectionSubtitle}>
+                  {isMeshConnected
+                    ? 'Mesh ağı hazır. Bluetooth açık.'
+                    : 'Mesh ağı kapalı. Bluetooth ve konumu etkinleştirin.'}
                 </Text>
               </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.connectionAction,
+                  (!myDeviceId && !meshStoreDeviceId) && styles.connectionActionDisabled,
+                  pressed && styles.connectionActionPressed,
+                ]}
+                onPress={() => handleCopyId()}
+                disabled={!myDeviceId && !meshStoreDeviceId}
+              >
+                <Ionicons name="copy-outline" size={16} color="#0ea5e9" />
+                <Text style={styles.connectionActionText}>Kimliği Kopyala</Text>
+              </Pressable>
             </View>
 
-            <View style={styles.segmentContainer}>
-              {tabOptions.map((option) => (
-                <Pressable
-                  key={option.key}
-                  style={[styles.segmentButton, activeTab === option.key && styles.segmentButtonActive]}
-                  onPress={() => setActiveTab(option.key)}
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
+                  <Ionicons name="finger-print" size={16} color="#38bdf8" />
+                </View>
+                <Text style={styles.statLabel}>Cihaz ID</Text>
+                <Text style={styles.statValue} numberOfLines={1}>{displayDeviceId}</Text>
+              </View>
+              <View style={styles.statItem}>
+                <View style={[styles.statIcon, { backgroundColor: isMeshConnected ? 'rgba(74,222,128,0.18)' : 'rgba(248,113,113,0.18)' }]}>
+                  <Ionicons name={isMeshConnected ? 'radio' : 'radio-outline'} size={16} color={isMeshConnected ? '#4ade80' : '#f87171'} />
+                </View>
+                <Text style={styles.statLabel}>Mesh Durumu</Text>
+                <Text style={styles.statValue}>{isMeshConnected ? 'Aktif' : 'Pasif'}</Text>
+              </View>
+              <View style={styles.statItem}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(139,92,246,0.18)' }]}>
+                  <Ionicons name="people-outline" size={16} color="#8b5cf6" />
+                </View>
+                <Text style={styles.statLabel}>Taranan Cihaz</Text>
+                <Text style={styles.statValue}>{scannedDevices.length}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.tipBanner}>
+            <Ionicons name="shield-checkmark" size={20} color="#4ade80" />
+            <View style={styles.tipContent}>
+              <Text style={styles.tipTitle}>Çevrimdışı güvenli bağlantı</Text>
+              <Text style={styles.tipSubtitle}>
+                Bluetooth ve konum açık olduğunda mesajlar ağdaki tüm cihazlara ulaştırılır.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.segmentContainer}>
+            {tabOptions.map((option) => (
+              <Pressable
+                key={option.key}
+                style={[styles.segmentButton, activeTab === option.key && styles.segmentButtonActive]}
+                onPress={() => setActiveTab(option.key)}
+              >
+                <Ionicons
+                  name={option.icon}
+                  size={16}
+                  color={activeTab === option.key ? '#0ea5e9' : '#94a3b8'}
+                />
+                <Text
+                  style={[styles.segmentLabel, activeTab === option.key && styles.segmentLabelActive]}
                 >
-                  <Ionicons
-                    name={option.icon}
-                    size={16}
-                    color={activeTab === option.key ? '#0ea5e9' : '#94a3b8'}
-                  />
-                  <Text
-                    style={[styles.segmentLabel, activeTab === option.key && styles.segmentLabelActive]}
-                  >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
-            {activeTab === 'qr' && renderQRCard()}
-            {activeTab === 'id' && renderIDCard()}
-            {activeTab === 'scan' && renderScanCard()}
+          {activeTab === 'qr' && renderQRCard()}
+          {activeTab === 'id' && renderIDCard()}
+          {activeTab === 'scan' && renderScanCard()}
         </ScrollView>
 
         <Modal
@@ -806,18 +823,18 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
           </View>
         </Modal>
       </View>
-    </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#060b1b',
+    backgroundColor: '#f8fafc',
   },
   permissionScreen: {
     flex: 1,
-    backgroundColor: '#060b1b',
+    backgroundColor: '#f8fafc',
   },
   gradientOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -834,7 +851,7 @@ const styles = StyleSheet.create({
   },
   permissionText: {
     fontSize: 15,
-    color: '#cbd5f5',
+    color: '#64748b',
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
@@ -848,43 +865,50 @@ const styles = StyleSheet.create({
   permissionButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0f172a',
+    color: '#fff',
   },
   headerRow: {
-    paddingHorizontal: 20,
     paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 10,
   },
   navButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(148,163,184,0.18)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   headerTextContainer: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 16,
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    color: '#fff',
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    color: '#334155',
   },
   headerSubtitle: {
-    marginTop: 4,
-    fontSize: 12,
-    color: 'rgba(226,232,240,0.65)',
+    marginTop: 2,
+    fontSize: 13,
+    color: '#64748b',
   },
   infoButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(148,163,184,0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -892,16 +916,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
     paddingBottom: 40,
   },
   connectionCard: {
     borderRadius: 22,
     padding: 20,
-    backgroundColor: 'rgba(15,23,42,0.92)',
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 18,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   connectionHeader: {
     flexDirection: 'row',
@@ -912,11 +940,11 @@ const styles = StyleSheet.create({
   connectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: '#334155',
   },
   connectionSubtitle: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: '#64748b',
     marginTop: 6,
   },
   connectionAction: {
@@ -926,11 +954,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.45)',
-    backgroundColor: 'rgba(14,165,233,0.12)',
+    borderColor: 'rgba(14,165,233,0.3)',
+    backgroundColor: 'rgba(14,165,233,0.1)',
   },
   connectionActionDisabled: {
-    opacity: 0.35,
+    opacity: 0.5,
   },
   connectionActionPressed: {
     opacity: 0.8,
@@ -939,7 +967,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 12,
     fontWeight: '600',
-    color: '#0ea5e9',
+    color: '#0284c7',
   },
   statsRow: {
     flexDirection: 'row',
@@ -950,7 +978,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     borderRadius: 16,
     padding: 16,
-    backgroundColor: 'rgba(30,41,59,0.72)',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
   },
   statIcon: {
     width: 32,
@@ -962,14 +990,15 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 11,
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: 4,
     letterSpacing: 0.3,
+    fontWeight: '600',
   },
   statValue: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#e2e8f0',
+    fontWeight: '700',
+    color: '#334155',
   },
   tipBanner: {
     flexDirection: 'row',
@@ -977,9 +1006,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 16,
-    backgroundColor: 'rgba(34,197,94,0.10)',
+    backgroundColor: 'rgba(34,197,94,0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    borderColor: 'rgba(34,197,94,0.2)',
     marginBottom: 20,
   },
   tipContent: {
@@ -989,23 +1018,28 @@ const styles = StyleSheet.create({
   tipTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#bef264',
+    color: '#15803d',
     marginBottom: 2,
   },
   tipSubtitle: {
     fontSize: 12,
-    color: '#a3e635',
+    color: '#166534',
     lineHeight: 18,
   },
   segmentContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15,23,42,0.85)',
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     padding: 6,
     marginBottom: 22,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   segmentButton: {
     flex: 1,
@@ -1016,7 +1050,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   segmentButtonActive: {
-    backgroundColor: 'rgba(14,165,233,0.18)',
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   segmentLabel: {
     marginLeft: 8,
@@ -1025,15 +1064,20 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
   },
   segmentLabelActive: {
-    color: '#0ea5e9',
+    color: '#0284c7',
   },
   card: {
     borderRadius: 24,
     padding: 22,
-    backgroundColor: 'rgba(15,23,42,0.94)',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.14)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 26,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   cardHeaderRow: {
     flexDirection: 'row',
@@ -1049,19 +1093,19 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: 'rgba(14,165,233,0.18)',
+    backgroundColor: 'rgba(14,165,233,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: '#334155',
     marginBottom: 6,
   },
   cardSubtitle: {
     fontSize: 13,
-    color: '#9aa6c2',
+    color: '#64748b',
     lineHeight: 20,
   },
   cardHint: {
@@ -1075,7 +1119,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.35)',
+    borderColor: 'rgba(59,130,246,0.3)',
   },
   cameraView: {
     flex: 1,
@@ -1084,24 +1128,24 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(8,15,35,0.35)',
+    backgroundColor: 'rgba(15, 23, 42, 0.3)',
   },
   cameraFrame: {
     width: 220,
     height: 220,
     borderRadius: 28,
     borderWidth: 3,
-    borderColor: 'rgba(59,130,246,0.8)',
+    borderColor: '#3b82f6',
   },
   input: {
     width: '100%',
-    backgroundColor: 'rgba(10,17,33,0.9)',
+    backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.2)',
+    borderColor: '#e2e8f0',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: '#fff',
+    color: '#1e293b',
     fontSize: 15,
     marginTop: 6,
   },
@@ -1112,9 +1156,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     marginTop: 16,
+    backgroundColor: colors.brand.primary,
+    paddingVertical: 16,
   },
   primaryButtonDisabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
   primaryButtonGradient: {
     flexDirection: 'row',
@@ -1127,7 +1173,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 14,
     fontWeight: '700',
-    color: '#0f172a',
+    color: '#fff',
   },
   helperText: {
     marginTop: 12,
@@ -1146,22 +1192,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 14,
-    backgroundColor: 'rgba(14,165,233,0.12)',
+    backgroundColor: 'rgba(14,165,233,0.1)',
   },
   scanStatusBadgeActive: {
-    backgroundColor: 'rgba(74,222,128,0.18)',
+    backgroundColor: 'rgba(34,197,94,0.1)',
   },
   scanStatusBadgeInactive: {
-    backgroundColor: 'rgba(148,163,184,0.12)',
+    backgroundColor: '#f1f5f9',
   },
   scanStatusText: {
     marginLeft: 8,
     fontSize: 12,
     fontWeight: '600',
-    color: '#38bdf8',
+    color: '#0284c7',
   },
   scanStatusTextActive: {
-    color: '#0f172a',
+    color: '#15803d',
   },
   secondaryButton: {
     flexDirection: 'row',
@@ -1170,14 +1216,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.35)',
-    backgroundColor: 'rgba(14,165,233,0.12)',
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
   },
   secondaryButtonText: {
     marginLeft: 6,
     fontSize: 12,
     fontWeight: '600',
-    color: '#0ea5e9',
+    color: '#334155',
   },
   secondaryButtonGhost: {
     marginTop: 18,
@@ -1185,13 +1231,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.25)',
-    backgroundColor: 'rgba(148,163,184,0.08)',
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
   },
   secondaryButtonGhostText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#e2e8f0',
+    color: '#334155',
     textAlign: 'center',
   },
   deviceRow: {
@@ -1199,13 +1245,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(148,163,184,0.12)',
+    borderBottomColor: 'rgba(148,163,184,0.1)',
   },
   deviceAvatar: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(14,165,233,0.15)',
+    backgroundColor: 'rgba(14,165,233,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -1215,18 +1261,19 @@ const styles = StyleSheet.create({
   },
   deviceName: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#334155',
   },
   deviceIdText: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     marginTop: 2,
   },
   deviceSignal: {
     marginTop: 4,
     fontSize: 12,
-    color: '#38bdf8',
+    color: '#0ea5e9',
+    fontWeight: '500',
   },
   scanLoading: {
     flexDirection: 'row',
@@ -1236,7 +1283,7 @@ const styles = StyleSheet.create({
   scanLoadingText: {
     marginLeft: 12,
     fontSize: 13,
-    color: '#cbd5f5',
+    color: '#64748b',
   },
   emptyState: {
     alignItems: 'center',
@@ -1245,13 +1292,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     marginTop: 12,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#e2e8f0',
+    fontWeight: '700',
+    color: '#334155',
   },
   emptySubtitle: {
     marginTop: 6,
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     textAlign: 'center',
     lineHeight: 18,
     paddingHorizontal: 16,
@@ -1265,13 +1312,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: 'rgba(249,115,22,0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.35)',
+    borderColor: 'rgba(249,115,22,0.2)',
   },
   warningText: {
     marginLeft: 8,
     fontSize: 12,
     color: '#f97316',
     flex: 1,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -1285,38 +1333,49 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     borderRadius: 24,
     padding: 24,
-    backgroundColor: 'rgba(15,23,42,0.96)',
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.25)',
+    borderColor: '#e2e8f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1e293b',
     textAlign: 'center',
     marginBottom: 16,
   },
   qrWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    padding: 20,
     borderRadius: 18,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.2)',
+    borderColor: '#e2e8f0',
     marginBottom: 20,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   modalIdText: {
-    marginTop: 12,
-    fontSize: 12,
-    color: '#cbd5f5',
+    marginTop: 16,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
   },
   modalHint: {
-    fontSize: 12,
-    color: '#cbd5f5',
-    lineHeight: 18,
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 20,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   modalActions: {
     flexDirection: 'row',
@@ -1328,24 +1387,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(148,163,184,0.18)',
+    backgroundColor: '#f1f5f9',
   },
   modalActionSecondaryText: {
-    color: '#e2e8f0',
-    fontWeight: '600',
+    color: '#64748b',
+    fontWeight: '700',
   },
   modalActionPrimary: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: '#38bdf8',
+    backgroundColor: colors.brand.primary,
   },
   modalActionPrimaryText: {
     fontWeight: '700',
-    color: '#0f172a',
+    color: '#fff',
   },
 });
 

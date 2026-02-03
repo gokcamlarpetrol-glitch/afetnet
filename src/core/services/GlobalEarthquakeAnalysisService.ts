@@ -179,7 +179,7 @@ class GlobalEarthquakeAnalysisService {
 
       // ELITE: Store recent events with memory management
       const relevantEvents = allEvents.filter(event => 
-        event && isRelevantForTurkey(event)
+        event && isRelevantForTurkey(event),
       );
       
       // ELITE: Prevent memory leak - limit array size

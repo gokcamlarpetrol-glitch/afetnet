@@ -11,7 +11,7 @@ export function calculateDistance(
   lat1: number,
   lng1: number,
   lat2: number,
-  lng2: number
+  lng2: number,
 ): number {
   const R = 6371; // Earth's radius in km
   const dLat = toRad(lat2 - lat1);
@@ -20,9 +20,9 @@ export function calculateDistance(
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
+    Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -42,11 +42,11 @@ export function isInTurkey(lat: number, lng: number): boolean {
 /**
  * Get closest earthquake to user location
  */
-export function getClosestEarthquake(
+export function getClosestEarthquake<T extends { latitude: number; longitude: number; magnitude: number; id: string }>(
   userLat: number,
   userLng: number,
-  earthquakes: Array<{ latitude: number; longitude: number; magnitude: number; id: string }>
-): { earthquake: any; distance: number } | null {
+  earthquakes: T[],
+): { earthquake: T; distance: number } | null {
   if (earthquakes.length === 0) return null;
 
   let closest = earthquakes[0];
@@ -57,7 +57,7 @@ export function getClosestEarthquake(
       userLat,
       userLng,
       earthquakes[i].latitude,
-      earthquakes[i].longitude
+      earthquakes[i].longitude,
     );
 
     if (distance < minDistance) {
@@ -120,7 +120,7 @@ export function getMagnitudeSize(magnitude: number): number {
  * Calculate bounds for map region
  */
 export function calculateMapBounds(
-  points: Array<{ latitude: number; longitude: number }>
+  points: Array<{ latitude: number; longitude: number }>,
 ): {
   latitude: number;
   longitude: number;
@@ -152,6 +152,26 @@ export function calculateMapBounds(
     latitudeDelta: Math.max(latitudeDelta, 0.1), // Minimum delta
     longitudeDelta: Math.max(longitudeDelta, 0.1),
   };
+}
+
+/**
+ * Calculate bearing between two coordinates
+ * Returns bearing in degrees (0-360) 
+ */
+export function calculateBearing(startLat: number, startLng: number, destLat: number, destLng: number): number {
+  const startLatRad = toRad(startLat);
+  const startLngRad = toRad(startLng);
+  const destLatRad = toRad(destLat);
+  const destLngRad = toRad(destLng);
+
+  const y = Math.sin(destLngRad - startLngRad) * Math.cos(destLatRad);
+  const x = Math.cos(startLatRad) * Math.sin(destLatRad) -
+    Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
+
+  let brng = Math.atan2(y, x);
+  brng = (brng * 180 / Math.PI);
+
+  return (brng + 360) % 360;
 }
 
 

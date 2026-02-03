@@ -1,119 +1,99 @@
 /**
  * MARKER CLUSTERING UTILITY
- * Simple and efficient marker clustering for map performance
+ * Efficient clustering using Supercluster (O(N log N))
  */
+
+import Supercluster from 'supercluster';
+import { createLogger } from './logger';
+
+const logger = createLogger('MarkerClustering');
 
 export interface ClusterableMarker {
   id: string;
   latitude: number;
   longitude: number;
-  [key: string]: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any; // Required for dynamic marker properties from supercluster
 }
 
 export interface Cluster {
   id: string;
   latitude: number;
   longitude: number;
-  markers: ClusterableMarker[];
-  count: number;
+  point_count: number;
+  count: number; // Backward compatibility
+  // markers array is removed for performance as supercluster doesn't provide it cheaply
 }
 
 /**
- * Calculate distance between two coordinates (Haversine formula)
- */
-function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371; // Earth radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-/**
- * Cluster markers based on distance and zoom level
+ * Cluster markers using Supercluster
  */
 export function clusterMarkers(
   markers: ClusterableMarker[],
   zoomLevel: number,
-  minDistance: number = 0.05 // km
+  minDistance: number = 40, // pixels approx, supercluster uses 40 default
 ): (ClusterableMarker | Cluster)[] {
-  // Don't cluster if zoom level is high (user is zoomed in)
-  if (zoomLevel > 12) {
-    return markers;
-  }
 
-  // Adjust cluster distance based on zoom level
-  const clusterDistance = minDistance * (13 - zoomLevel);
-
-  const clusters: Cluster[] = [];
-  const processed = new Set<string>();
-
-  markers.forEach((marker) => {
-    if (processed.has(marker.id)) return;
-
-    // Find nearby markers
-    const nearbyMarkers = markers.filter((m) => {
-      if (m.id === marker.id || processed.has(m.id)) return false;
-
-      const distance = calculateDistance(
-        marker.latitude,
-        marker.longitude,
-        m.latitude,
-        m.longitude
-      );
-
-      return distance < clusterDistance;
-    });
-
-    if (nearbyMarkers.length > 0) {
-      // Create cluster
-      const clusterMarkers = [marker, ...nearbyMarkers];
-      
-      // Calculate cluster center (average position)
-      const avgLat =
-        clusterMarkers.reduce((sum, m) => sum + m.latitude, 0) /
-        clusterMarkers.length;
-      const avgLon =
-        clusterMarkers.reduce((sum, m) => sum + m.longitude, 0) /
-        clusterMarkers.length;
-
-      clusters.push({
-        id: `cluster-${marker.id}`,
-        latitude: avgLat,
-        longitude: avgLon,
-        markers: clusterMarkers,
-        count: clusterMarkers.length,
-      });
-
-      // Mark as processed
-      clusterMarkers.forEach((m) => processed.add(m.id));
-    } else {
-      // Single marker, no clustering needed
-      processed.add(marker.id);
-    }
+  // Supercluster instance
+  const index = new Supercluster({
+    radius: minDistance,
+    maxZoom: 16,
   });
 
-  // Return clusters + unclustered markers
-  const unclustered = markers.filter((m) => !processed.has(m.id));
-  return [...clusters, ...unclustered];
+  // Convert to GeoJSON
+  const points = markers.map(m => ({
+    type: 'Feature' as const,
+    properties: { cluster: false, ...m },
+    geometry: {
+      type: 'Point' as const,
+      coordinates: [m.longitude, m.latitude],
+    },
+  }));
+
+  try {
+    index.load(points);
+
+    // Get clusters for the whole world
+    // In a real app with millions of points, we would pass the current BBox
+    // But for < 10k points, clustering all is fine and simplifies state
+    const clusters = index.getClusters([-180, -90, 180, 90], Math.floor(zoomLevel));
+
+    // Map back to our flat structure
+    return clusters.map(c => {
+      const props = c.properties;
+
+      if (props.cluster) {
+        return {
+          id: `cluster-${c.id}`,
+          latitude: c.geometry.coordinates[1],
+          longitude: c.geometry.coordinates[0],
+          point_count: props.point_count,
+          count: props.point_count,
+          // expansionZoom: index.getClusterExpansionZoom(c.id as number),
+        } as Cluster;
+      }
+
+      // Return original marker with its properties
+      return {
+        ...props,
+        latitude: c.geometry.coordinates[1],
+        longitude: c.geometry.coordinates[0],
+      } as ClusterableMarker;
+    });
+
+  } catch (error) {
+    logger.error('Clustering error:', error);
+    return markers; // Fallback
+  }
 }
 
 /**
  * Check if item is a cluster
  */
-export function isCluster(item: any): item is Cluster {
-  return 'count' in item && 'markers' in item;
+export function isCluster(item: unknown): item is Cluster {
+  if (!item || typeof item !== 'object') return false;
+  const obj = item as Record<string, unknown>;
+  return (!!obj.point_count || !!obj.count || (typeof obj.id === 'string' && obj.id.startsWith('cluster-')));
 }
 
 /**
@@ -123,5 +103,3 @@ export function getZoomLevel(latitudeDelta: number): number {
   // Approximate zoom level calculation
   return Math.round(Math.log(360 / latitudeDelta) / Math.LN2);
 }
-
-

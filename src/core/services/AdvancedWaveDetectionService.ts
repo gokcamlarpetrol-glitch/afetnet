@@ -151,7 +151,7 @@ class AdvancedWaveDetectionService {
    */
   private detectPWave(
     readings: SensorReading[],
-    features: ReturnType<typeof this.extractWaveFeatures>
+    features: ReturnType<typeof this.extractWaveFeatures>,
   ): { detected: boolean; arrivalTime?: number; confidence: number } {
     // P-wave characteristics:
     // 1. First arrival (sudden onset)
@@ -203,7 +203,7 @@ class AdvancedWaveDetectionService {
   private detectSWave(
     readings: SensorReading[],
     features: ReturnType<typeof this.extractWaveFeatures>,
-    pWaveArrivalTime?: number
+    pWaveArrivalTime?: number,
   ): { detected: boolean; arrivalTime?: number; confidence: number } {
     // S-wave characteristics:
     // 1. Second arrival (after P-wave)
@@ -225,7 +225,7 @@ class AdvancedWaveDetectionService {
     const onsetIndex = this.findOnset(
       features.magnitudes.slice(startIndex),
       sWaveThreshold,
-      startIndex
+      startIndex,
     );
 
     if (onsetIndex === -1) {
@@ -272,7 +272,7 @@ class AdvancedWaveDetectionService {
   private findOnset(
     magnitudes: number[],
     threshold: number,
-    offset: number = 0
+    offset: number = 0,
   ): number {
     if (magnitudes.length < 20) return -1;
 
@@ -395,7 +395,7 @@ class AdvancedWaveDetectionService {
   private determineWaveType(
     pWave: { detected: boolean; confidence: number },
     sWave: { detected: boolean; confidence: number },
-    features: ReturnType<typeof this.extractWaveFeatures>
+    features: ReturnType<typeof this.extractWaveFeatures>,
   ): 'p_wave' | 's_wave' | 'surface_wave' | 'none' {
     if (pWave.detected && pWave.confidence > 70) {
       return 'p_wave';
@@ -421,7 +421,7 @@ class AdvancedWaveDetectionService {
   private calculateOverallConfidence(
     pWave: { detected: boolean; confidence: number },
     sWave: { detected: boolean; confidence: number },
-    features: ReturnType<typeof this.extractWaveFeatures>
+    features: ReturnType<typeof this.extractWaveFeatures>,
   ): number {
     let confidence = 0;
 
@@ -447,7 +447,7 @@ class AdvancedWaveDetectionService {
   private estimateMagnitudeFromWaves(
     pWave: { detected: boolean; confidence: number },
     sWave: { detected: boolean; confidence: number },
-    features: ReturnType<typeof this.extractWaveFeatures>
+    features: ReturnType<typeof this.extractWaveFeatures>,
   ): number {
     // Use energy and amplitude to estimate magnitude
     const maxAmplitude = Math.max(...features.amplitudes);

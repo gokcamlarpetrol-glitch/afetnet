@@ -17,6 +17,7 @@ export interface Earthquake {
   latitude: number;
   longitude: number;
   source: 'AFAD' | 'USGS' | 'KANDILLI' | 'EMSC' | 'KOERI' | 'SEISMIC_SENSOR';
+  date?: string; // ISO String
 }
 
 interface EarthquakeState {
@@ -42,7 +43,7 @@ const initialState: EarthquakeState = {
 
 export const useEarthquakeStore = create<EarthquakeState & EarthquakeActions>((set) => ({
   ...initialState,
-  
+
   // ELITE: Force update mechanism - always create new array reference
   // This ensures Zustand subscribers always detect changes, even if items are identical
   setItems: (items) => {
@@ -50,19 +51,19 @@ export const useEarthquakeStore = create<EarthquakeState & EarthquakeActions>((s
     // This guarantees Zustand's shallow equality check will detect the change
     const newItems = Array.isArray(items) ? [...items] : items;
     const updateTimestamp = Date.now(); // CRITICAL: Always use current timestamp for real-time updates
-    set({ 
-      items: newItems, 
+    set({
+      items: newItems,
       lastUpdate: updateTimestamp, // CRITICAL: Always update timestamp when data changes - ensures UI shows real-time update time
-      error: null 
+      error: null,
     });
-    
+
     // CRITICAL: Verify timestamp was set correctly
     if (__DEV__) {
-      const updateTime = new Date(updateTimestamp).toLocaleTimeString('tr-TR', { 
+      const updateTime = new Date(updateTimestamp).toLocaleTimeString('tr-TR', {
         hour12: false,
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit'
+        second: '2-digit',
       });
       // Only log if significant data change (avoid spam)
       if (newItems.length > 0) {

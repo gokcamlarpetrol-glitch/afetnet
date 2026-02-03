@@ -19,10 +19,13 @@ import {
 } from '../types/ai.types';
 import { createLogger } from '../../utils/logger';
 import { openAIService } from './OpenAIService';
+import { getFirestoreInstanceAsync } from '../../services/firebase/FirebaseInstanceManager';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 const logger = createLogger('PreparednessPlanService');
 
-class PreparednessPlanService {
+export class PreparednessPlanService {
   private isInitialized = false;
   private cache = new Map<string, { data: PreparednessPlan; timestamp: number }>();
   private readonly CACHE_DURATION = 60 * 60 * 1000; // 1 hour
@@ -49,12 +52,25 @@ class PreparednessPlanService {
     residenceType?: string;
   }): Promise<PreparednessPlan> {
     logger.info('[PreparednessPlan] generatePlan called with params:', params);
-    
-    // Fallback: Local cache kontrolü (öncelik ver)
+
     const cacheKey = JSON.stringify(params);
+
+    // ELITE: Check Firestore first (Persistent Cloud Storage)
+    try {
+      const firestorePlan = await this.loadPlan(params);
+      if (firestorePlan) {
+        logger.info('✅ Loaded plan from Firestore');
+        this.cache.set(cacheKey, { data: firestorePlan, timestamp: Date.now() });
+        return firestorePlan;
+      }
+    } catch (e) {
+      logger.warn('Failed to load from Firestore, checking local cache...', e);
+    }
+
+    // Fallback: Local cache kontrolü (öncelik ver)
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
-      logger.info('✅ Returning cached preparedness plan');
+      logger.info('✅ Returning cached preparedness plan (Local Memory)');
       // Validate cached plan
       if (cached.data && cached.data.sections && cached.data.sections.length > 0) {
         return cached.data;
@@ -64,35 +80,57 @@ class PreparednessPlanService {
       }
     }
 
-    // ELITE: Skip backend API for now - use local rule-based plan directly
-    // Backend API sometimes returns empty plans, so we use local generation for reliability
-    // TODO: Fix backend API to return proper plans with all items
-    if (__DEV__) {
-      logger.debug('Using local rule-based plan generation (backend API skipped for reliability)');
+    // ELITE: Attempt AI Generation (Backend API)
+    // We try to use the AI power first. If it fails (timeout, empty, invalid), we fallback to rules.
+    try {
+      // Only skip if explicitly disabled via flag or critical error mode
+      // Note: OpenAI might take 5-10s. For better UX, we could race or show loading.
+      // But since this is a background service call usually, we wait.
+
+      // ELITE: Race AI against a timeout (e.g., 15s)
+      const aiPromise = this.generateWithAI(params);
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000));
+
+      const aiPlan = await Promise.race([aiPromise, timeoutPromise]);
+
+      if (aiPlan && this.validatePlan(aiPlan)) {
+        logger.info('✅ Generated plan via OpenAI (Backend API)');
+
+        // Cache result
+        this.cache.set(cacheKey, { data: aiPlan, timestamp: Date.now() });
+        // Save to Firestore asynchronously
+        this.savePlan(aiPlan, params).catch(err => logger.warn('Failed to save AI plan to Firestore', err));
+        return aiPlan;
+      } else {
+        logger.warn('AI Plan generation returned null or timeout - Falling back to Rules');
+      }
+    } catch (e) {
+      logger.warn('AI Plan generation failed - Falling back to Rules', e);
     }
 
-    // ELITE: Use rule-based plan directly (most reliable, always works)
-    // Skip OpenAI generation for now - rule-based plan has 88+ items and is comprehensive
-    logger.info('[PreparednessPlan] Using rule-based plan (comprehensive, 88+ items)');
-    
+    // ELITE: Fallback to Rule-based plan (most reliable, always works)
+    logger.info('[PreparednessPlan] Using rule-based plan (Fallback)');
+
     let rulePlan: PreparednessPlan;
     try {
       rulePlan = this.generateWithRules(params);
-    } catch (ruleError: any) {
-      logger.error('❌ Rule-based plan generation threw error:', {
-        error: ruleError?.message || ruleError,
-        errorType: ruleError?.name || typeof ruleError,
-        stack: ruleError?.stack,
-      });
-      throw new Error('Failed to generate preparedness plan: ' + (ruleError?.message || 'Unknown error'));
+    } catch (ruleError: unknown) {
+      const errorMessage = getErrorMessage(ruleError);
+      const errorInfo = ruleError instanceof Error ? {
+        error: errorMessage,
+        errorType: ruleError.name,
+        stack: ruleError.stack,
+      } : { error: String(ruleError) };
+      logger.error('❌ Rule-based plan generation threw error:', errorInfo);
+      throw new Error('Failed to generate preparedness plan: ' + errorMessage);
     }
-    
+
     // ELITE: Comprehensive validation
     if (!rulePlan) {
       logger.error('❌ Rule-based plan generation returned null/undefined!');
       throw new Error('Failed to generate preparedness plan: Plan is null');
     }
-    
+
     if (!rulePlan.sections || !Array.isArray(rulePlan.sections)) {
       logger.error('❌ Rule-based plan has invalid sections:', {
         sections: rulePlan.sections,
@@ -101,7 +139,7 @@ class PreparednessPlanService {
       });
       throw new Error('Failed to generate preparedness plan: Invalid sections array');
     }
-    
+
     if (rulePlan.sections.length === 0) {
       logger.error('❌ Rule-based plan has no sections!', {
         planId: rulePlan.id,
@@ -110,7 +148,7 @@ class PreparednessPlanService {
       });
       throw new Error('Failed to generate preparedness plan: No sections');
     }
-    
+
     // Validate each section has items
     const sectionsWithItems = rulePlan.sections.filter(s => s.items && Array.isArray(s.items) && s.items.length > 0);
     if (sectionsWithItems.length === 0) {
@@ -123,20 +161,126 @@ class PreparednessPlanService {
       });
       throw new Error('Failed to generate preparedness plan: No items in sections');
     }
-    
+
     // Calculate total items if missing
     if (!rulePlan.totalItems || rulePlan.totalItems === 0) {
       const calculatedTotal = rulePlan.sections.reduce((sum, s) => sum + (s.items?.length || 0), 0);
       rulePlan.totalItems = calculatedTotal;
       logger.warn('Plan totalItems was missing, calculated:', calculatedTotal);
     }
-    
+
     logger.info(`✅ [PreparednessPlan] Generated rule-based plan with ${rulePlan.sections.length} sections and ${rulePlan.totalItems || 0} items`);
-    
+
     // Cache'e kaydet
     this.cache.set(cacheKey, { data: rulePlan, timestamp: Date.now() });
-    
+
+    // Save to Firestore asynchronously
+    this.savePlan(rulePlan, params).catch(err => logger.warn('Failed to save Rule plan to Firestore', err));
+
     return rulePlan;
+  }
+
+  /**
+   * Save plan to Firestore
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async savePlan(plan: PreparednessPlan, params: any): Promise<void> {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) {
+        logger.warn('Firestore is not available, cannot save plan');
+        return;
+      }
+
+      // Use a consistent ID based on user params or a single 'current' plan per user if auth is available
+      // For now, we use the plan ID or a consistent key if possible.
+      // Ideally, this should be linked to the authenticated user ID.
+      // Since we don't have direct access to auth state here, we'll use the plan ID.
+      // But to be retrievable by params, we need a deterministic ID or query.
+      // For simplicity in this iteration:
+      // We will assume 1 active plan per user/device context.
+      // Using a fixed ID for the "current" plan would be best if we want to retrieve it easily on reload.
+      // Let's use a hashed version of params or just 'current_plan' if we assume one per user context.
+      // Given the requirements, let's use a deterministic ID based on params to allow multiple scenarios,
+      // OR just save it under the plan.id.
+
+      // Better approach for "My Plan": logic usually implies one main plan.
+      // Let's save with the ID.
+
+      // NOTE: In a real app with Auth, we would use `users/{userId}/preparedness/current`.
+      // Here we will use `preparedness_plans/{planId}`. 
+      // To make it retrievable across sessions without auth, we'd need to store the planId locally (AsyncStorage).
+      // However, the requested change implies "backend API" - so Firestore IS the backend.
+
+      await setDoc(doc(db, 'preparedness_plans', plan.id), {
+        ...plan,
+        params,
+        updatedAt: Date.now(),
+        // Ensure strictly serializable data
+      }, { merge: true });
+
+      logger.info(`✅ Plan saved to Firestore: ${plan.id}`);
+    } catch (error) {
+      logger.error('Error saving plan to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load plan from Firestore
+   * We need a strategy to find the *correct* plan.
+   * For now, we'll try to find a plan that matches the parameters OR the last created one.
+   * Without Auth, querying is hard.
+   * ELITE SOLUTION: We will rely on the `preparednessStore` to keep track of the ID of the current plan.
+   * But `generatePlan` is called with params. 
+   * Let's defer strict loading logic to `generatePlan` which checks cache. 
+   * If we really want persistent state across RELOADS, the Store should persist the plan ID.
+   *
+   * For this "API" fix, we simply provide the capability.
+   * The Store will call generate, get a plan, and persist it locally (zustand persist).
+   * But if the User clears local data, they might lose it unless they are logged in.
+   * 
+   * Let's implement a 'loadPlanById' for the Store to use.
+   */
+  async loadPlanById(planId: string): Promise<PreparednessPlan | null> {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return null;
+
+      const docRef = doc(db, 'preparedness_plans', planId);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        return docSnap.data() as PreparednessPlan;
+      }
+      return null;
+    } catch (error) {
+      logger.warn('Error loading plan from Firestore:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Helper to attempt loading a plan if we had a way to identify it from params (unlikely without auth).
+   * So we return null here, expecting the Client (Store) to manage the ID.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async loadPlan(params: any): Promise<PreparednessPlan | null> {
+    // Without a user ID, we can't deterministically find the "user's" plan from just params.
+    // So we skip this unless we had a device ID or user ID.
+    // For now, return null to rely on generation/local cache.
+    // IMPROVEMENT: If we had a User Context, we would query `users/{uid}/plan`.
+    return null;
+  }
+
+  /**
+   * Validate a plan structure
+   */
+  private validatePlan(plan: PreparednessPlan): boolean {
+    if (!plan || !plan.sections || !Array.isArray(plan.sections) || plan.sections.length === 0) return false;
+    // Check if sections have items
+    const hasItems = plan.sections.some(s => s.items && s.items.length > 0);
+    return hasItems;
   }
 
   /**
@@ -215,9 +359,11 @@ JSON formatında döndür (sadece JSON):
 
     // JSON parse et
     const parsed = this.parseAIResponse(aiResponse);
-    
+
     // Section'ları enrich et (completion rate, sub-tasks, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const enrichedSections = parsed.sections.map((section: any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const completedItems = section.items?.filter((item: any) => item.completed).length || 0;
       const totalItems = section.items?.length || 0;
       const sectionCompletionRate = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
@@ -231,6 +377,7 @@ JSON formatında döndür (sadece JSON):
         estimatedCost: this.getSectionCost(section.id),
         difficulty: this.getSectionDifficulty(section.id),
         frequency: section.phase === 'tatbikat' ? 'monthly' : 'once' as const,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         items: (section.items || []).map((item: any) => this.enrichPlanItem(item, params)),
       };
     });
@@ -240,11 +387,11 @@ JSON formatında döndür (sadece JSON):
     const totalItems = allItems.length;
     const completedItems = allItems.filter((item) => item.completed).length;
     const criticalItemsRemaining = allItems.filter(
-      (item) => !item.completed && item.importance === 'critical'
+      (item) => !item.completed && item.importance === 'critical',
     ).length;
     const estimatedTotalDuration = enrichedSections.reduce(
       (sum, s) => sum + (s.estimatedDurationMinutes || 0),
-      0
+      0,
     );
 
     // Sonraki yapılacaklar
@@ -274,7 +421,7 @@ JSON formatında döndür (sadece JSON):
         notificationEnabled: true,
       },
     };
-    
+
     return {
       id: 'plan_' + Date.now(),
       title: parsed.title || 'Kişisel Afet Hazırlık Planı',
@@ -298,18 +445,19 @@ JSON formatında döndür (sadece JSON):
   /**
    * AI yanıtını parse et ve validate et
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private parseAIResponse(response: string): any {
     try {
       // ELITE: Clean response - remove markdown code blocks if present
       let cleanedResponse = response.trim();
-      
+
       // Remove markdown code blocks (```json ... ```)
       cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
       cleanedResponse = cleanedResponse.replace(/```\s*/g, '');
-      
+
       // ELITE: Find JSON object - try multiple patterns
       let jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
-      
+
       // If no match, try to find JSON after "{" or before "}"
       if (!jsonMatch) {
         const firstBrace = cleanedResponse.indexOf('{');
@@ -318,7 +466,7 @@ JSON formatında döndür (sadece JSON):
           jsonMatch = [cleanedResponse.substring(firstBrace, lastBrace + 1)];
         }
       }
-      
+
       if (!jsonMatch || jsonMatch[0].length < 10) {
         logger.error('JSON bulunamadı veya çok kısa:', { responseLength: response.length, cleanedLength: cleanedResponse.length });
         throw new Error('JSON bulunamadı veya geçersiz');
@@ -326,45 +474,47 @@ JSON formatında döndür (sadece JSON):
 
       // ELITE: Try to fix common JSON issues before parsing
       let jsonString = jsonMatch[0];
-      
+
       // Remove trailing commas before closing braces/brackets
       jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
-      
+
       // ELITE: Check if JSON string is complete (ends with })
       // If truncated, try to fix it
       if (!jsonString.trim().endsWith('}')) {
         logger.warn('JSON string appears incomplete (does not end with }), attempting fix');
-        
+
         // Try to close incomplete JSON
         let fixedJson = jsonString.trim();
-        
+
         // Count open/close braces
         const openBraces = (fixedJson.match(/\{/g) || []).length;
         const closeBraces = (fixedJson.match(/\}/g) || []).length;
         const openBrackets = (fixedJson.match(/\[/g) || []).length;
         const closeBrackets = (fixedJson.match(/\]/g) || []).length;
-        
+
         // Close missing brackets first
         if (openBrackets > closeBrackets) {
           fixedJson += ']'.repeat(openBrackets - closeBrackets);
         }
-        
+
         // Close missing braces
         if (openBraces > closeBraces) {
           fixedJson += '}'.repeat(openBraces - closeBraces);
         }
-        
+
         jsonString = fixedJson;
       }
 
       // Try parsing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsed: any;
       try {
         parsed = JSON.parse(jsonString);
-      } catch (parseError: any) {
+      } catch (parseError: unknown) {
         // ELITE: If parsing fails, try to extract and fix common issues
-        logger.warn('Initial JSON parse failed, attempting fixes:', parseError?.message || parseError);
-        
+        const parseErrMsg = getErrorMessage(parseError);
+        logger.warn('Initial JSON parse failed, attempting fixes:', parseErrMsg);
+
         // Try to find and extract just the sections array if full JSON fails
         const sectionsMatch = jsonString.match(/"sections"\s*:\s*\[[\s\S]*\]/);
         if (sectionsMatch) {
@@ -372,17 +522,17 @@ JSON formatında döndür (sadece JSON):
             // Try to parse sections array
             const sectionsStr = sectionsMatch[0].replace(/"sections"\s*:\s*/, '');
             const sections = JSON.parse(sectionsStr);
-            
+
             // Create a minimal valid JSON structure
             const titleMatch = jsonString.match(/"title"\s*:\s*"([^"]+)"/);
             const personaMatch = jsonString.match(/"personaSummary"\s*:\s*"([^"]+)"/);
-            
+
             parsed = {
               title: titleMatch ? titleMatch[1] : 'Kişisel Afet Hazırlık Planı',
               personaSummary: personaMatch ? personaMatch[1] : '',
               sections: Array.isArray(sections) ? sections : [],
             };
-            
+
             logger.info('✅ Successfully extracted sections from partial JSON');
           } catch (sectionsParseError) {
             logger.error('Failed to parse sections array:', sectionsParseError);
@@ -391,7 +541,7 @@ JSON formatında döndür (sadece JSON):
         } else {
           // No sections found - throw original error
           logger.error('JSON parse failed and no sections found:', {
-            error: parseError?.message,
+            error: parseErrMsg,
             jsonLength: jsonString.length,
             jsonPreview: jsonString.substring(0, 200),
           });
@@ -411,6 +561,7 @@ JSON formatında döndür (sadece JSON):
       }
 
       // Her section'ı validate et
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       parsed.sections = parsed.sections.map((section: any, idx: number) => ({
         id: section.id || `section_${idx}`,
         title: section.title || 'Başlıksız Bölüm',
@@ -428,18 +579,19 @@ JSON formatında döndür (sadece JSON):
           ? section.resources.filter((resource: unknown): resource is string => typeof resource === 'string')
           : [],
         items: Array.isArray(section.items)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? section.items.map((item: any, itemIdx: number) => ({
-              id: item.id || `item_${idx}_${itemIdx}`,
-              text: item.text || 'Yapılacak iş',
-              completed: false,
-              importance: ['critical', 'high', 'medium', 'low'].includes(item.importance)
-                ? item.importance
-                : 'medium',
-              instructions: item.instructions || undefined,
-              dueDate: typeof item.dueInHours === 'number'
-                ? Date.now() + item.dueInHours * 60 * 60 * 1000
-                : undefined,
-            }))
+            id: item.id || `item_${idx}_${itemIdx}`,
+            text: item.text || 'Yapılacak iş',
+            completed: false,
+            importance: ['critical', 'high', 'medium', 'low'].includes(item.importance)
+              ? item.importance
+              : 'medium',
+            instructions: item.instructions || undefined,
+            dueDate: typeof item.dueInHours === 'number'
+              ? Date.now() + item.dueInHours * 60 * 60 * 1000
+              : undefined,
+          }))
           : [],
       }));
 
@@ -476,7 +628,7 @@ JSON formatında döndür (sadece JSON):
         items: [
           {
             id: 'kit_water',
-            text: `Su (kişi başı 3 günlük, ${(params.familySize || 4) * 3} litre)` ,
+            text: `Su (kişi başı 3 günlük, ${(params.familySize || 4) * 3} litre)`,
             completed: false,
             importance: 'critical',
             instructions: 'Kapalı şişelerde su stoklayın, 6 ayda bir yenileyin. Her aile üyesi için günlük 3 litre su hesaplayın.',
@@ -1194,33 +1346,33 @@ JSON formatında döndür (sadece JSON):
         estimatedDurationMinutes: 180,
         resources: ['AFAD Çocuk Güvenliği Rehberi', 'UNICEF Çocuk Psikolojisi Rehberi'],
         items: [
-          { 
-            id: 'child_supplies', 
-            text: 'Çocuk bezi ve mama stoğu (1 haftalık)', 
-            completed: false, 
-            importance: 'critical', 
+          {
+            id: 'child_supplies',
+            text: 'Çocuk bezi ve mama stoğu (1 haftalık)',
+            completed: false,
+            importance: 'critical',
             instructions: 'Rutin tüketimi takip ederek stokları güncelleyin. Bebek maması, biberon, emzik, bebek bezi, ıslak mendil hazırlayın.',
             dueDate: Date.now() + 7 * 24 * 60 * 60 * 1000,
           },
-          { 
-            id: 'child_drill', 
-            text: 'Çocuklara deprem tatbikatı yaptır', 
-            completed: false, 
-            importance: 'high', 
+          {
+            id: 'child_drill',
+            text: 'Çocuklara deprem tatbikatı yaptır',
+            completed: false,
+            importance: 'high',
             instructions: 'Eğlenceli senaryolar ile korkuyu azaltın. Çök-kapan-tutun pozisyonunu oyunlaştırın. Yaşlarına uygun açıklamalar yapın.',
           },
-          { 
-            id: 'child_med', 
-            text: 'Çocukların ilaçları ve sağlık kayıtları', 
-            completed: false, 
-            importance: 'critical', 
+          {
+            id: 'child_med',
+            text: 'Çocukların ilaçları ve sağlık kayıtları',
+            completed: false,
+            importance: 'critical',
             instructions: 'Alerji ve kronik durum bilgilerini çantada bulundurun. Çocuk ilaçları, ateş düşürücü, vitaminler hazırlayın.',
           },
-          { 
-            id: 'child_comfort', 
-            text: 'Oyuncak ve rahatlatıcı eşyalar', 
-            completed: false, 
-            importance: 'medium', 
+          {
+            id: 'child_comfort',
+            text: 'Oyuncak ve rahatlatıcı eşyalar',
+            completed: false,
+            importance: 'medium',
             instructions: 'Stres anında sakinleştirici objeler hazırlayın. Sevdiği oyuncak, kitap, battaniye, fotoğraf albümü ekleyin.',
           },
           {
@@ -1251,32 +1403,32 @@ JSON formatında döndür (sadece JSON):
         estimatedDurationMinutes: 180,
         resources: ['AFAD Yaşlı Bakımı Rehberi', 'Türk Geriatri Derneği', 'Yerel Sağlık Müdürlüğü'],
         items: [
-          { 
-            id: 'elderly_med', 
-            text: 'Düzenli kullanılan ilaçlar (1 aylık)', 
-            completed: false, 
+          {
+            id: 'elderly_med',
+            text: 'Düzenli kullanılan ilaçlar (1 aylık)',
+            completed: false,
             importance: 'critical',
             instructions: 'Tüm reçeteli ilaçları 1 aylık stoklayın. İlaç listesi, dozaj bilgileri, yan etkileri kaydedin. İlaçları soğuk zincirde saklayın.',
             dueDate: Date.now() + 7 * 24 * 60 * 60 * 1000,
           },
-          { 
-            id: 'elderly_device', 
-            text: 'Yedek gözlük/işitme cihazı ve yardımcı cihazlar', 
-            completed: false, 
+          {
+            id: 'elderly_device',
+            text: 'Yedek gözlük/işitme cihazı ve yardımcı cihazlar',
+            completed: false,
             importance: 'critical',
             instructions: 'Yedek gözlük, işitme cihazı, yürüteç, baston, tekerlekli sandalye hazırlayın. Pilleri kontrol edin.',
           },
-          { 
-            id: 'elderly_docs', 
-            text: 'Sağlık raporları ve reçeteler', 
-            completed: false, 
+          {
+            id: 'elderly_docs',
+            text: 'Sağlık raporları ve reçeteler',
+            completed: false,
             importance: 'critical',
             instructions: 'Kronik hastalık raporları, reçeteler, aşı kartı, tahlil sonuçları, doktor iletişim bilgileri hazırlayın.',
           },
-          { 
-            id: 'elderly_mobility', 
-            text: 'Yürüteç/tekerlekli sandalye kontrolü ve tahliye planı', 
-            completed: false, 
+          {
+            id: 'elderly_mobility',
+            text: 'Yürüteç/tekerlekli sandalye kontrolü ve tahliye planı',
+            completed: false,
             importance: 'high',
             instructions: 'Mobilite cihazlarını kontrol edin. Tahliye sırasında nasıl taşınacağını planlayın. Komşularla yardım anlaşması yapın.',
           },
@@ -1315,31 +1467,31 @@ JSON formatında döndür (sadece JSON):
         estimatedDurationMinutes: 120,
         resources: ['AFAD Evcil Hayvan Hazırlık Rehberi', 'Veteriner Hekimler Birliği', 'Hayvan Barınakları'],
         items: [
-          { 
-            id: 'pet_food', 
-            text: 'Evcil hayvan maması ve su (1 haftalık)', 
-            completed: false, 
+          {
+            id: 'pet_food',
+            text: 'Evcil hayvan maması ve su (1 haftalık)',
+            completed: false,
             importance: 'high',
             instructions: 'Kuru mama, konserve mama, su stoklayın. Özel diyet ihtiyaçlarını göz önünde bulundurun.',
           },
-          { 
-            id: 'pet_carrier', 
-            text: 'Taşıma çantası ve su kabı', 
-            completed: false, 
+          {
+            id: 'pet_carrier',
+            text: 'Taşıma çantası ve su kabı',
+            completed: false,
             importance: 'high',
             instructions: 'Hayvanın boyutuna uygun taşıma çantası, su kabı, mama kabı hazırlayın. Çanta içine tanıdık oyuncak ekleyin.',
           },
-          { 
-            id: 'pet_records', 
-            text: 'Veteriner kayıtları ve aşı kartı', 
-            completed: false, 
+          {
+            id: 'pet_records',
+            text: 'Veteriner kayıtları ve aşı kartı',
+            completed: false,
             importance: 'high',
             instructions: 'Aşı kartı, veteriner iletişim bilgileri, sağlık kayıtları, ilaç listesi hazırlayın.',
           },
-          { 
-            id: 'pet_tag', 
-            text: 'Tasma, kimlik etiketi ve mikroçip kontrolü', 
-            completed: false, 
+          {
+            id: 'pet_tag',
+            text: 'Tasma, kimlik etiketi ve mikroçip kontrolü',
+            completed: false,
             importance: 'critical',
             instructions: 'Kimlik etiketi, tasma, mikroçip bilgilerini kontrol edin. Acil durumda kaybolma riskine karşı önlem alın.',
           },
@@ -1376,14 +1528,14 @@ JSON formatında döndür (sadece JSON):
         logger.warn(`⚠️ Section ${section.id} has no items, skipping enrichment`);
         return null;
       }
-      
+
       const completedItems = section.items.filter((item) => item.completed).length;
       const totalItems = section.items.length;
       const sectionCompletionRate = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
 
       // CRITICAL: Map items and ensure they are preserved
       const enrichedItems = section.items.map((item) => this.enrichPlanItem(item, params));
-      
+
       // CRITICAL: Validate enriched items are not empty
       if (!enrichedItems || enrichedItems.length === 0) {
         logger.error(`❌ Section ${section.id} items were lost during enrichment!`, {
@@ -1426,19 +1578,19 @@ JSON formatında döndür (sadece JSON):
       return s.items;
     });
     const totalItems = allItems.length;
-    
+
     // CRITICAL: Log total items for debugging
     if (__DEV__) {
       logger.info(`📊 Preparedness plan statistics: ${enrichedSections.length} sections, ${totalItems} total items`);
     }
-    
+
     const completedItems = allItems.filter((item) => item.completed).length;
     const criticalItemsRemaining = allItems.filter(
-      (item) => !item.completed && item.importance === 'critical'
+      (item) => !item.completed && item.importance === 'critical',
     ).length;
     const estimatedTotalDuration = enrichedSections.reduce(
       (sum, s) => sum + (s.estimatedDurationMinutes || 0),
-      0
+      0,
     );
 
     // Sonraki yapılacaklar (due date'e göre sıralı)
@@ -1481,7 +1633,7 @@ JSON formatında döndür (sadece JSON):
       });
       throw new Error('Failed to enrich plan sections');
     }
-    
+
     // Validate sections have items
     const validSections = enrichedSections.filter(s => s.items && Array.isArray(s.items) && s.items.length > 0);
     if (validSections.length === 0) {
@@ -1494,30 +1646,30 @@ JSON formatında döndür (sadece JSON):
       });
       throw new Error('Failed to create plan: No sections with items');
     }
-    
+
     // Use valid sections (filter out empty ones)
     const finalSections = validSections.length < enrichedSections.length ? validSections : enrichedSections;
-    
+
     // Recalculate totals with final sections
     const finalAllItems = finalSections.flatMap((s) => s.items);
     const finalTotalItems = finalAllItems.length;
     const finalCompletedItems = finalAllItems.filter((item) => item.completed).length;
     const finalCriticalItemsRemaining = finalAllItems.filter(
-      (item) => !item.completed && item.importance === 'critical'
+      (item) => !item.completed && item.importance === 'critical',
     ).length;
     const finalEstimatedTotalDuration = finalSections.reduce(
       (sum, s) => sum + (s.estimatedDurationMinutes || 0),
-      0
+      0,
     );
-    
+
     const finalNextDueItems = finalAllItems
       .filter((item) => !item.completed && item.dueDate)
       .sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0))
       .slice(0, 5);
-    
+
     const finalTimeline = this.buildTimeline(finalSections, finalAllItems);
     const finalMilestones = this.buildMilestones(finalSections, finalAllItems);
-    
+
     const plan: PreparednessPlan = {
       id: 'plan_' + Date.now(),
       title: 'Kapsamlı Afet Hazırlık Planı',
@@ -1545,7 +1697,7 @@ JSON formatında döndür (sadece JSON):
       });
       throw new Error('Failed to create plan: No sections in final plan');
     }
-    
+
     if (!plan.totalItems || plan.totalItems === 0) {
       logger.error('❌ Final plan has no items!', {
         sections: plan.sections.length,
@@ -1567,6 +1719,7 @@ JSON formatında döndür (sadece JSON):
     return plan;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private enrichPlanItem(item: PlanItem, params: any): PlanItem {
     const enriched: PlanItem = {
       ...item,
@@ -1585,6 +1738,7 @@ JSON formatında döndür (sadece JSON):
     return enriched;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getSubTasksForItem(itemId: string, params: any): PlanSubTask[] {
     const subTasksMap: Record<string, PlanSubTask[]> = {
       kit_water: [
@@ -1778,6 +1932,7 @@ JSON formatında döndür (sadece JSON):
     return durationMap[itemId] || 30;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getEstimatedCost(itemId: string, params: any): number {
     const familySize = params.familySize || 4;
     const costMap: Record<string, number> = {
@@ -2153,6 +2308,7 @@ JSON formatında döndür (sadece JSON):
     ];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private buildEmergencyContacts(params: any): EmergencyContact[] {
     return [
       {

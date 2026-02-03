@@ -8,7 +8,7 @@ import { createLogger } from '../utils/logger';
 import { firebaseDataService } from './FirebaseDataService';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDeviceId } from '../../lib/device';
+import { getDeviceId } from '../utils/device';
 
 const logger = createLogger('UserFeedbackService');
 
@@ -46,7 +46,7 @@ class UserFeedbackService {
     intensity: FeltEarthquakeReport['intensity'],
     feltDuration: number,
     effects: string[] = [],
-    comments?: string
+    comments?: string,
   ): Promise<boolean> {
     try {
       // Check cooldown to prevent spam
@@ -116,9 +116,19 @@ class UserFeedbackService {
       try {
         const { backendEmergencyService } = await import('./BackendEmergencyService');
         if (backendEmergencyService.initialized) {
+          // Map intensity string to number (1-10 scale)
+          const intensityMap: Record<string, number> = {
+            'weak': 2,
+            'moderate': 4,
+            'strong': 6,
+            'very_strong': 8,
+            'severe': 10,
+          };
+          const intensityValue = intensityMap[intensity] || 1;
+
           await backendEmergencyService.sendFeltEarthquakeReport({
             earthquakeId,
-            intensity,
+            intensity: intensityValue,
             feltDuration,
             effects,
             comments,
@@ -179,12 +189,12 @@ class UserFeedbackService {
       const existingReports: FeltEarthquakeReport[] = existingReportsJson
         ? JSON.parse(existingReportsJson)
         : [];
-      
+
       existingReports.push(report);
-      
+
       // Keep only last 100 reports
       const recentReports = existingReports.slice(-100);
-      
+
       await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(recentReports));
     } catch (error) {
       logger.error('Failed to save report locally:', error);

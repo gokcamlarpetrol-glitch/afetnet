@@ -7,6 +7,7 @@
 import { createLogger } from '../../utils/logger';
 import { openAIService } from './OpenAIService';
 import { Earthquake } from '../../stores/earthquakeStore';
+import { safeIncludes } from '../../utils/safeString';
 
 const logger = createLogger('EarthquakeAnalysisService');
 
@@ -47,7 +48,7 @@ class EarthquakeAnalysisService {
    */
   async analyzeEarthquake(
     earthquake: Earthquake,
-    userLocation?: { latitude: number; longitude: number }
+    userLocation?: { latitude: number; longitude: number },
   ): Promise<EarthquakeAnalysis | null> {
     try {
       // 5.0+ depremler için çoklu kaynak doğrulaması
@@ -57,7 +58,7 @@ class EarthquakeAnalysisService {
 
       if (earthquake.magnitude >= 5.0) {
         logger.info(`🔍 Büyük deprem tespit edildi (${earthquake.magnitude}), çoklu kaynak doğrulaması yapılıyor...`);
-        
+
         const verificationResult = await this.verifyFromMultipleSources(earthquake);
         verified = verificationResult.verified;
         sources = verificationResult.sources;
@@ -78,7 +79,7 @@ class EarthquakeAnalysisService {
           userLocation.latitude,
           userLocation.longitude,
           earthquake.latitude,
-          earthquake.longitude
+          earthquake.longitude,
         );
       }
 
@@ -117,7 +118,7 @@ class EarthquakeAnalysisService {
    * Çoklu kaynak doğrulaması
    */
   private async verifyFromMultipleSources(
-    earthquake: Earthquake
+    earthquake: Earthquake,
   ): Promise<{ verified: boolean; sources: string[]; confidence: number }> {
     const verifications = await Promise.allSettled([
       this.checkAFAD(earthquake),
@@ -156,7 +157,7 @@ class EarthquakeAnalysisService {
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -207,7 +208,7 @@ class EarthquakeAnalysisService {
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -254,7 +255,7 @@ class EarthquakeAnalysisService {
     try {
       // Kandilli API (HTTP endpoint React Native'de çalışmıyor, fallback)
       // Şimdilik AFAD'dan geliyorsa Kandilli onayı olarak kabul et
-      if (earthquake.source.toLowerCase().includes('kandilli')) {
+      if (safeIncludes(earthquake.source, 'kandilli')) {
         logger.info('✅ Kandilli kaynağından doğrulandı (source match)');
         return {
           source: 'Kandilli',
@@ -278,7 +279,7 @@ class EarthquakeAnalysisService {
    */
   private isSimilarEarthquake(
     eq1: { magnitude: number; latitude: number; longitude: number; time: number },
-    eq2: { magnitude: number; latitude: number; longitude: number; time: number }
+    eq2: { magnitude: number; latitude: number; longitude: number; time: number },
   ): boolean {
     // Büyüklük kontrolü
     const magDiff = Math.abs(eq1.magnitude - eq2.magnitude);
@@ -293,7 +294,7 @@ class EarthquakeAnalysisService {
       eq1.latitude,
       eq1.longitude,
       eq2.latitude,
-      eq2.longitude
+      eq2.longitude,
     );
     if (distance > this.DISTANCE_TOLERANCE) return false;
 
@@ -320,9 +321,9 @@ class EarthquakeAnalysisService {
   private async generateAIAnalysis(
     earthquake: Earthquake,
     distance: number | undefined,
-    riskLevel: RiskLevel
+    riskLevel: RiskLevel,
   ): Promise<{ message: string; recommendations: string[] }> {
-    const distanceText = distance 
+    const distanceText = distance
       ? `Sizin konumunuza ${Math.round(distance)} km uzaklıkta.`
       : '';
 
@@ -366,8 +367,8 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
         const parsed = JSON.parse(jsonMatch[0]);
         return {
           message: parsed.message || this.generateFallbackAnalysis(earthquake, distance, riskLevel).message,
-          recommendations: Array.isArray(parsed.recommendations) 
-            ? parsed.recommendations 
+          recommendations: Array.isArray(parsed.recommendations)
+            ? parsed.recommendations
             : this.generateFallbackAnalysis(earthquake, distance, riskLevel).recommendations,
         };
       }
@@ -385,7 +386,7 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
   private generateFallbackAnalysis(
     earthquake: Earthquake,
     distance: number | undefined,
-    riskLevel: RiskLevel
+    riskLevel: RiskLevel,
   ): { message: string; recommendations: string[] } {
     const { magnitude, location, depth } = earthquake;
     const distanceText = distance ? ` Sizin konumunuza ${Math.round(distance)} km uzaklıkta.` : '';
@@ -435,7 +436,7 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
     lat1: number,
     lon1: number,
     lat2: number,
-    lon2: number
+    lon2: number,
   ): number {
     const R = 6371; // Dünya yarıçapı (km)
     const dLat = this.toRad(lat2 - lat1);
@@ -443,9 +444,9 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRad(lat1)) *
-        Math.cos(this.toRad(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos(this.toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }

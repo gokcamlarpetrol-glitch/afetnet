@@ -3,35 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AfetNet - Privacy Policy</title>
+    <title>Gizlilik Politikası - AfetNet</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
-        h1 { color: #C62828; }
-        h2 { color: #333; margin-top: 2em; }
-        p { color: #666; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #fff; min-height: 100vh; }
+        h1 { color: #C62828; margin-bottom: 10px; font-size: 28px; }
+        .date { color: #666; margin-bottom: 30px; font-size: 14px; }
+        h2 { color: #1a1a1a; margin: 30px 0 15px; font-size: 20px; border-bottom: 2px solid #C62828; padding-bottom: 8px; }
+        p { margin-bottom: 15px; }
+        ul { margin: 15px 0 15px 30px; }
+        li { margin-bottom: 8px; }
+        .highlight { background: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #C62828; }
+        .contact { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 30px; }
+        a { color: #C62828; }
     </style>
 </head>
 <body>
-    <h1>AfetNet Gizlilik Politikası</h1>
-    <p>Son güncelleme: 29 Ocak 2025</p>
-    
-    <h2>1. Veri Toplama</h2>
-    <p>AfetNet, acil durumlarda hayat kurtarmak için sınırlı miktarda kişisel veri toplar:</p>
-    <ul>
-        <li>Konum bilgisi: Afet durumlarında yakınlarınıza konumunuzu paylaşmak için</li>
-        <li>Cihaz kimliği: Mesajlarınızın doğru kişiye ulaşması için</li>
-        <li>Kişi bilgileri: Acil durum kişilerinize erişim için</li>
-    </ul>
-    
-    <h2>2. Veri Kullanımı</h2>
-    <p>Toplanan veriler sadece afet durumunda iletişim ve kurtarma amaçlı kullanılır.</p>
-    
-    <h2>3. Veri Paylaşımı</h2>
-    <p>Verileriniz sadece afet durumlarında kurtarma ekiplerine ve acil durum kişilerinize paylaşılır.</p>
-    
-    <h2>4. Güvenlik</h2>
-    <p>Verileriniz end-to-end şifreleme ile korunur.</p>
-    
-    <p><strong>İletişim:</strong> support@afetnet.app</p>
+    <div class="container">
+        <h1>🛡️ Gizlilik Politikası</h1>
+        <p class="date">Son güncelleme: 3 Şubat 2026</p>
+
+        <div class="highlight">
+            <strong>AfetNet</strong>, kullanıcılarının gizliliğine saygı gösterir. Bu politika, uygulamayı kullanırken hangi bilgilerin toplandığını ve nasıl kullanıldığını açıklar.
+        </div>
+
+        <h2>1. Toplanan Bilgiler</h2>
+        <p>AfetNet aşağıdaki bilgileri toplar:</p>
+        <ul>
+            <li><strong>Hesap Bilgileri:</strong> E-posta adresi, görünen ad (Google/Apple ile giriş yapıldığında)</li>
+            <li><strong>Konum Bilgileri:</strong> GPS koordinatları (yalnızca izin verildiğinde)</li>
+            <li><strong>Cihaz Bilgileri:</strong> Cihaz modeli, işletim sistemi sürümü</li>
+            <li><strong>Kullanım Verileri:</strong> Uygulama kullanım istatistikleri (anonim)</li>
+        </ul>
+
+        <h2>2. Bilgilerin Kullanımı</h2>
+        <p>Toplanan bilgiler şu amaçlarla kullanılır:</p>
+        <ul>
+            <li>Acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek</li>
+            <li>Aile üyelerinizin güvenlik durumunu takip etmenizi sağlamak</li>
+            <li>Deprem erken uyarı sistemi için bölgesel bildirimler göndermek</li>
+            <li>Uygulama performansını iyileştirmek</li>
+        </ul>
+
+        <h2>3. Bluetooth ve Mesh Ağı</h2>
+        <p>AfetNet, şebeke bağlantısı olmadığında bile iletişim kurabilmeniz için Bluetooth mesh ağı teknolojisini kullanır. Bluetooth üzerinden:</p>
+        <ul>
+            <li>Yakındaki AfetNet kullanıcılarıyla anonim olarak bağlantı kurulur</li>
+            <li>SOS mesajları ve güvenlik durumu bilgileri iletilir</li>
+            <li>Hiçbir kişisel veri Bluetooth üzerinden paylaşılmaz</li>
+        </ul>
+
+        <h2>4. Veri Güvenliği</h2>
+        <p>Verileriniz:</p>
+        <ul>
+            <li>Firebase altyapısında şifreli olarak saklanır</li>
+            <li>SSL/TLS protokolleriyle iletilir</li>
+            <li>Yalnızca yetkili personel tarafından erişilebilir</li>
+        </ul>
+
+        <h2>5. Üçüncü Taraf Hizmetler</h2>
+        <p>AfetNet aşağıdaki üçüncü taraf hizmetleri kullanır:</p>
+        <ul>
+            <li><strong>Firebase (Google):</strong> Kimlik doğrulama, veritabanı, analitik</li>
+            <li><strong>Apple Sign-In:</strong> Kimlik doğrulama</li>
+            <li><strong>Google Sign-In:</strong> Kimlik doğrulama</li>
+        </ul>
+
+        <h2>6. Çocukların Gizliliği</h2>
+        <p>AfetNet, 13 yaşın altındaki çocuklardan bilerek kişisel bilgi toplamaz. Bir çocuğun bilgi sağladığını fark ederseniz, lütfen bizimle iletişime geçin.</p>
+
+        <h2>7. Haklarınız</h2>
+        <p>Şu haklara sahipsiniz:</p>
+        <ul>
+            <li>Verilerinize erişim talep etme</li>
+            <li>Verilerinizin düzeltilmesini isteme</li>
+            <li>Hesabınızı ve tüm verilerinizi silme (Ayarlar > Hesabı Sil)</li>
+        </ul>
+
+        <h2>8. Politika Değişiklikleri</h2>
+        <p>Bu gizlilik politikası zaman zaman güncellenebilir. Önemli değişiklikler uygulama içi bildirimle duyurulacaktır.</p>
+
+        <div class="contact">
+            <h2 style="margin-top: 0; border: none;">📧 İletişim</h2>
+            <p>Gizlilik ile ilgili sorularınız için:</p>
+            <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+            <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
+        </div>
+    </div>
 </body>
 </html>

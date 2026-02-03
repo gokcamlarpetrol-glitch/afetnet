@@ -91,7 +91,7 @@ class CostTracker {
     service: string,
     inputTokens: number,
     outputTokens: number,
-    model: string = 'gpt-4o-mini'
+    model: string = 'gpt-4o-mini',
   ): Promise<number> {
     const totalTokens = inputTokens + outputTokens;
     const cost = calculateCost(inputTokens, outputTokens);
@@ -140,22 +140,22 @@ class CostTracker {
     service: string,
     inputTokens: number,
     outputTokens: number,
-    cost: number
+    cost: number,
   ): Promise<void> {
     try {
       const statsJson = await AsyncStorage.getItem(STORAGE_KEY_COST_STATS);
       let stats: CostStats = statsJson
         ? JSON.parse(statsJson)
         : {
-            totalCost: 0,
-            totalCalls: 0,
-            totalInputTokens: 0,
-            totalOutputTokens: 0,
-            totalTokens: 0,
-            dailyCost: 0,
-            lastResetDate: new Date().toISOString().split('T')[0],
-            serviceBreakdown: {},
-          };
+          totalCost: 0,
+          totalCalls: 0,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          totalTokens: 0,
+          dailyCost: 0,
+          lastResetDate: new Date().toISOString().split('T')[0],
+          serviceBreakdown: {},
+        };
 
       const today = new Date().toISOString().split('T')[0];
       
@@ -234,7 +234,7 @@ export const costTracker = new CostTracker();
 export function estimateCost(
   prompt: string,
   systemPrompt?: string,
-  maxOutputTokens: number = 500
+  maxOutputTokens: number = 500,
 ): number {
   const inputTokens = estimateTokens(prompt) + (systemPrompt ? estimateTokens(systemPrompt) : 0);
   const outputTokens = maxOutputTokens; // Estimate max output

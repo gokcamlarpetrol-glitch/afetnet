@@ -12,11 +12,12 @@ interface SettingItemProps {
   subtitle?: string;
   type?: 'switch' | 'arrow' | 'text';
   value?: string | boolean;
-  onPress?: (value?: any) => void;
+  onPress?: (value?: string | boolean) => void;
   index: number;
+  isLast?: boolean; // New prop to hide border for last item
 }
 
-export function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPress, index }: SettingItemProps) {
+export function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPress, index, isLast }: SettingItemProps) {
   const handlePress = () => {
     haptics.impactLight();
     if (onPress) {
@@ -50,11 +51,12 @@ export function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPr
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 30).springify()}>
-      <Pressable 
+      <Pressable
         onPress={type !== 'switch' ? handlePress : undefined}
         style={({ pressed }) => [
           styles.container,
           pressed && styles.pressed,
+          isLast && styles.noBorder,
         ]}
       >
         <LinearGradient
@@ -83,20 +85,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: 'rgba(148, 163, 184, 0.1)', // Soft border
+    backgroundColor: 'rgba(255, 255, 255, 0.4)', // Light glass
+  },
+  noBorder: {
+    borderBottomWidth: 0,
   },
   pressed: {
-    backgroundColor: colors.brand.primary + '10',
+    backgroundColor: 'rgba(14, 165, 233, 0.1)', // Soft blue press
   },
   iconGradient: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 14, // Softer radius
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
     borderWidth: 1,
-    borderColor: colors.brand.primary + '30',
+    borderColor: 'rgba(14, 165, 233, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
   },
   content: {
     flex: 1,
@@ -104,12 +111,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#334155', // Dark Slate
     marginBottom: 2,
+    letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: '#64748b', // Slate
+    lineHeight: 18,
   },
   settingValue: {
     fontSize: 14,

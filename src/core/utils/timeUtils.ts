@@ -212,7 +212,7 @@ export function parseAFADDate(dateString: string): number {
           logger.debug(`AFAD date parsed (${diffHours.toFixed(1)}h diff):`, {
             input: normalizedDate,
             parsed: formatToTurkishDateTime(parsedTime),
-            now: formatToTurkishDateTime(now)
+            now: formatToTurkishDateTime(now),
           });
         }
       }
@@ -239,7 +239,7 @@ export function parseAFADDate(dateString: string): number {
               input: dateString,
               parsed: formatToTurkishDateTime(parsedTime),
               now: formatToTurkishDateTime(now),
-              diffDays: (parsedTime - now) / (24 * 60 * 60 * 1000)
+              diffDays: (parsedTime - now) / (24 * 60 * 60 * 1000),
             });
           }
           // Keep original parsed time - might be correct if API has future data
@@ -257,7 +257,7 @@ export function parseAFADDate(dateString: string): number {
             input: dateString,
             parsed: formatToTurkishDateTime(parsedTime),
             now: formatToTurkishDateTime(now),
-            diffHours: (now - parsedTime) / (60 * 60 * 1000)
+            diffHours: (now - parsedTime) / (60 * 60 * 1000),
           });
         }
         // Still return the parsed date - validation is just a safety check
@@ -283,7 +283,7 @@ export function parseAFADDate(dateString: string): number {
       if (__DEV__) {
         logger.debug('Used fallback timezone adjustment for AFAD date:', {
           input: dateString,
-          adjusted: formatToTurkishDateTime(adjustedTime)
+          adjusted: formatToTurkishDateTime(adjustedTime),
         });
       }
       return adjustedTime;

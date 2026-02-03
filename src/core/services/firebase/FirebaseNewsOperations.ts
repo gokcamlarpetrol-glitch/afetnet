@@ -10,17 +10,22 @@ import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 const logger = createLogger('FirebaseNewsOperations');
 const TIMEOUT_MS = 10000; // 10 seconds
 
+// ELITE: Type-safe error helpers
+const getErrorMessage = (e: unknown): string => e instanceof Error ? e.message : String(e);
+const getErrorCode = (e: unknown): string | undefined =>
+  e && typeof e === 'object' && 'code' in e ? (e as { code: string }).code : undefined;
+
 /**
  * Execute Firestore operation with timeout protection
  */
 async function withTimeout<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
 ): Promise<T> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS)
+    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
-  
+
   return Promise.race([operation(), timeoutPromise]);
 }
 
@@ -42,7 +47,7 @@ export interface NewsSummaryRecord {
  */
 export async function saveNewsSummary(
   summary: NewsSummaryRecord,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveNewsSummary');
@@ -62,15 +67,17 @@ export async function saveNewsSummary(
         ...summary,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'News summary save'
+      'News summary save',
     );
 
     if (__DEV__) {
       logger.info(`✅ Shared news summary saved to Firestore (articleId: ${summary.id}) - all users will use this`);
     }
     return true;
-  } catch (error: any) {
-    if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+  } catch (error: unknown) {
+    const errCode = getErrorCode(error);
+    const errMsg = getErrorMessage(error);
+    if (errCode === 'permission-denied' || errMsg.includes('permission')) {
       if (__DEV__) {
         logger.debug('News summary skipped (permission denied - this is OK)');
       }
@@ -86,7 +93,7 @@ export async function saveNewsSummary(
  */
 export async function getNewsSummary(
   articleId: string,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<NewsSummaryRecord | null> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, cannot get news summary');
@@ -101,19 +108,21 @@ export async function getNewsSummary(
     }
 
     const q = query(collection(db, 'news_summaries'), where('articleId', '==', articleId));
-    
+
     const snapshot = await withTimeout(
       () => getDocs(q),
-      'News summary load'
+      'News summary load',
     );
-    
+
     if (snapshot.empty) {
       return null;
     }
 
     return snapshot.docs[0].data() as NewsSummaryRecord;
-  } catch (error: any) {
-    if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+  } catch (error: unknown) {
+    const errCode = getErrorCode(error);
+    const errMsg = getErrorMessage(error);
+    if (errCode === 'permission-denied' || errMsg.includes('permission')) {
       if (__DEV__) {
         logger.debug('News summary read skipped (permission denied - this is OK)');
       }

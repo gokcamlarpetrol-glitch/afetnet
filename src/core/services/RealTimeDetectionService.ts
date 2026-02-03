@@ -238,7 +238,7 @@ class RealTimeDetectionService {
   private fuseSensors(
     accelerometer: { isEarthquake: boolean; confidence: number; magnitude: number },
     gyroscope: { isEarthquake: boolean; confidence: number } | null,
-    barometer: { isEarthquake: boolean; confidence: number } | null
+    barometer: { isEarthquake: boolean; confidence: number } | null,
   ): {
     isEarthquake: boolean;
     confidence: number;

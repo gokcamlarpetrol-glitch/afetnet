@@ -14,19 +14,28 @@ const logger = createLogger('NativeModuleCheck');
  */
 export async function isNativeModuleAvailableAsync(moduleName: string): Promise<boolean> {
   try {
-    // ELITE: Use eval to prevent static analysis for expo-notifications
-    // CRITICAL: Never use string literal 'expo-notifications' - Metro bundler detects it
-    const expoPart = 'expo';
-    const notificationsPart = 'notifications';
-    const expoNotificationsName = expoPart + '-' + notificationsPart;
-    
-    if (moduleName === expoNotificationsName || moduleName.includes('notification')) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      // ELITE: Build module name dynamically to prevent Metro static analysis
-      const moduleNameEval = expoPart + '-' + notificationsPart;
-      const module = eval(`require('${moduleNameEval}')`);
+    // ELITE: Use safe dynamic imports for all Expo modules
+    // Map module names to dynamic imports (eliminates eval security risk)
+    const moduleLoaders: Record<string, () => Promise<unknown>> = {
+      'expo-notifications': () => import('expo-notifications'),
+      'expo-sensors': () => import('expo-sensors'),
+      'expo-location': () => import('expo-location'),
+      'expo-haptics': () => import('expo-haptics'),
+      'expo-battery': () => import('expo-battery'),
+      'expo-device': () => import('expo-device'),
+      'expo-crypto': () => import('expo-crypto'),
+      'expo-secure-store': () => import('expo-secure-store'),
+      'expo-file-system': () => import('expo-file-system'),
+      'react-native-ble-plx': () => import('react-native-ble-plx'),
+    };
+
+    const loader = moduleLoaders[moduleName];
+    if (loader) {
+      const module = await loader();
       return module !== null && module !== undefined;
     }
+
+    // Fallback for other modules (require is still needed for some npm modules)
     const module = require(moduleName);
     return module !== null && module !== undefined;
   } catch (error) {
@@ -59,7 +68,7 @@ export const NATIVE_MODULES = {
 let modulesInitialized = false;
 export async function initializeNativeModules() {
   if (modulesInitialized) return;
-  
+
   try {
     NATIVE_MODULES.BLE = await isNativeModuleAvailableAsync('react-native-ble-plx');
     NATIVE_MODULES.SENSORS = await isNativeModuleAvailableAsync('expo-sensors');
@@ -75,7 +84,7 @@ export async function initializeNativeModules() {
     NATIVE_MODULES.CRYPTO = await isNativeModuleAvailableAsync('expo-crypto');
     NATIVE_MODULES.SECURE_STORE = await isNativeModuleAvailableAsync('expo-secure-store');
     NATIVE_MODULES.FILE_SYSTEM = await isNativeModuleAvailableAsync('expo-file-system');
-    
+
     modulesInitialized = true;
   } catch (error) {
     logger.error('Failed to initialize native modules:', error);
@@ -105,13 +114,13 @@ export async function areCriticalModulesAvailable(): Promise<boolean> {
     NATIVE_MODULES.LOCATION,
     NATIVE_MODULES.CRYPTO,
   ];
-  
+
   const allAvailable = critical.every(available => available);
-  
+
   if (!allAvailable && __DEV__) {
     logger.warn('Some critical native modules are not available');
   }
-  
+
   return allAvailable;
 }
 

@@ -29,7 +29,7 @@ export function getAccessibilityHint(action: string, disabled?: boolean): string
 export function getButtonAccessibilityProps(
   label: string,
   hint?: string,
-  disabled?: boolean
+  disabled?: boolean,
 ): {
   accessibilityRole: 'button';
   accessibilityLabel: string;
@@ -50,7 +50,7 @@ export function getButtonAccessibilityProps(
 export function getInputAccessibilityProps(
   label: string,
   hint?: string,
-  required?: boolean
+  required?: boolean,
 ): {
   accessibilityRole: 'text';
   accessibilityLabel: string;
@@ -70,7 +70,7 @@ export function getInputAccessibilityProps(
  */
 export function getImageAccessibilityProps(
   description: string,
-  decorative?: boolean
+  decorative?: boolean,
 ): {
   accessibilityRole: 'image';
   accessibilityLabel: string | undefined;

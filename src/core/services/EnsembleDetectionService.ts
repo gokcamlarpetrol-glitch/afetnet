@@ -76,7 +76,7 @@ class EnsembleDetectionService {
   detect(
     readings: SensorReading[],
     multiSensorReadings?: any[],
-    communityConsensus?: number
+    communityConsensus?: number,
   ): EnsembleResult {
     if (!this.isInitialized) {
       logger.warn('EnsembleDetectionService not initialized');
@@ -154,7 +154,7 @@ class EnsembleDetectionService {
             // High confidence it's NOT an earthquake - reduce overall confidence
             weightedConfidence -= realTimeResult.confidence * this.WEIGHTS.realTimeDetection * 0.5;
           }
-        } catch (innerError: any) {
+        } catch (innerError: unknown) {
           // ELITE: Completely silent error handling for Hermes engine
           // Hermes engine has known issues with complex array operations
           // This is a React Native limitation, not our code issue
@@ -162,7 +162,7 @@ class EnsembleDetectionService {
           // Continue silently - other detection methods will handle it
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // ELITE: Completely silent error handling for Hermes engine
       // Hermes engine has known limitations with complex operations
       // No logging - these errors are expected and handled gracefully
@@ -222,7 +222,7 @@ class EnsembleDetectionService {
   private determineUrgency(
     confidence: number,
     magnitude: number,
-    timeAdvance: number
+    timeAdvance: number,
   ): 'low' | 'medium' | 'high' | 'critical' {
     if (confidence > 90 && magnitude >= 6.0) {
       return 'critical';
@@ -251,7 +251,7 @@ class EnsembleDetectionService {
   private getRecommendedAction(
     urgency: 'low' | 'medium' | 'high' | 'critical',
     magnitude: number,
-    timeAdvance: number
+    timeAdvance: number,
   ): string {
     if (urgency === 'critical') {
       return `🚨 KRİTİK! ${magnitude.toFixed(1)} büyüklüğünde deprem yaklaşıyor! ${Math.round(timeAdvance)} saniye içinde ulaşabilir. HEMEN güvenli yere geçin!`;

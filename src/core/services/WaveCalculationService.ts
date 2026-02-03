@@ -242,13 +242,13 @@ class WaveCalculationService {
    */
   private calculateEpicentralDistance(
     epicenter: { latitude: number; longitude: number },
-    userLocation: UserLocation
+    userLocation: UserLocation,
   ): number {
     return calculateDistance(
       epicenter.latitude,
       epicenter.longitude,
       userLocation.latitude,
-      userLocation.longitude
+      userLocation.longitude,
     );
   }
 
@@ -257,7 +257,7 @@ class WaveCalculationService {
    */
   private calculateHypocentralDistance(
     epicentralDistance: number,
-    depth: number
+    depth: number,
   ): number {
     // Hypocentral distance = sqrt(epicentralDistance² + depth²)
     return Math.sqrt(epicentralDistance * epicentralDistance + depth * depth);
@@ -269,7 +269,7 @@ class WaveCalculationService {
   private getRegionalVelocities(
     latitude: number,
     longitude: number,
-    depth: number
+    depth: number,
   ): { pWaveVelocity: number; sWaveVelocity: number; depthCorrection: number } {
     const region = detectRegion(latitude, longitude);
     const model = REGIONAL_VELOCITY_MODELS[region] || REGIONAL_VELOCITY_MODELS.default;
@@ -288,7 +288,7 @@ class WaveCalculationService {
    */
   private estimateIntensity(
     magnitude: number,
-    hypocentralDistance: number
+    hypocentralDistance: number,
   ): number {
     // Simplified MMI estimation based on magnitude and distance
     // Based on empirical relationships (Wald et al., 1999)
@@ -324,7 +324,7 @@ class WaveCalculationService {
    */
   private estimatePGA(
     magnitude: number,
-    hypocentralDistance: number
+    hypocentralDistance: number,
   ): number {
     // Simplified PGA estimation (g units)
     // Based on empirical attenuation relationships
@@ -346,7 +346,7 @@ class WaveCalculationService {
     epicentralDistance: number,
     depth: number,
     magnitude: number,
-    hasUserLocation: boolean
+    hasUserLocation: boolean,
   ): number {
     let confidence = 100;
 
@@ -379,7 +379,7 @@ class WaveCalculationService {
    */
   async calculateWaves(
     earthquake: EarthquakeSource,
-    userLocation?: UserLocation
+    userLocation?: UserLocation,
   ): Promise<WaveCalculationResult | null> {
     try {
       // Get user location if not provided
@@ -394,20 +394,20 @@ class WaveCalculationService {
       // Calculate epicentral distance (surface distance)
       const epicentralDistance = this.calculateEpicentralDistance(
         { latitude: earthquake.latitude, longitude: earthquake.longitude },
-        location
+        location,
       );
 
       // Calculate hypocentral distance (3D distance)
       const hypocentralDistance = this.calculateHypocentralDistance(
         epicentralDistance,
-        earthquake.depth
+        earthquake.depth,
       );
 
       // Get regional velocities (adjusted for depth and geology)
       const velocities = this.getRegionalVelocities(
         earthquake.latitude,
         earthquake.longitude,
-        earthquake.depth
+        earthquake.depth,
       );
 
       // Calculate arrival times (using hypocentral distance for accuracy)
@@ -420,12 +420,12 @@ class WaveCalculationService {
       // Estimate intensity and PGA
       const estimatedIntensity = this.estimateIntensity(
         earthquake.magnitude,
-        hypocentralDistance
+        hypocentralDistance,
       );
 
       const estimatedPGA = this.estimatePGA(
         earthquake.magnitude,
-        hypocentralDistance
+        hypocentralDistance,
       );
 
       // Calculate confidence
@@ -433,7 +433,7 @@ class WaveCalculationService {
         epicentralDistance,
         earthquake.depth,
         earthquake.magnitude,
-        true
+        true,
       );
 
       // Determine calculation method
@@ -487,7 +487,7 @@ class WaveCalculationService {
    */
   async calculateMultipleWaves(
     earthquakes: EarthquakeSource[],
-    userLocation?: UserLocation
+    userLocation?: UserLocation,
   ): Promise<Array<WaveCalculationResult & { earthquake: EarthquakeSource }>> {
     const results: Array<WaveCalculationResult & { earthquake: EarthquakeSource }> = [];
 
@@ -512,7 +512,7 @@ class WaveCalculationService {
    */
   async getTimeUntilSWave(
     earthquake: EarthquakeSource,
-    userLocation?: UserLocation
+    userLocation?: UserLocation,
   ): Promise<number | null> {
     const calculation = await this.calculateWaves(earthquake, userLocation);
     if (!calculation) {
@@ -534,7 +534,7 @@ class WaveCalculationService {
   async isInDangerZone(
     earthquake: EarthquakeSource,
     userLocation?: UserLocation,
-    intensityThreshold: number = 5.0 // MMI 5.0 (moderate shaking)
+    intensityThreshold: number = 5.0, // MMI 5.0 (moderate shaking)
   ): Promise<boolean> {
     const calculation = await this.calculateWaves(earthquake, userLocation);
     if (!calculation) {

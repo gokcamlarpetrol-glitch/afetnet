@@ -29,7 +29,7 @@ class HTTPCacheService {
     url: string,
     data: any,
     ttl: number = DEFAULT_TTL,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
   ): Promise<void> {
     try {
       const key = this.getCacheKey(url);

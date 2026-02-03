@@ -3,6 +3,7 @@
  * All app features and services settings
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -17,15 +18,16 @@ import {
   Platform,
   BackHandler,
   Modal,
+  ImageBackground,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { usePremiumStore } from '../../stores/premiumStore';
+
 import { useMeshStore } from '../../stores/meshStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { premiumService } from '../../services/PremiumService';
+
 import { i18nService } from '../../services/I18nService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SettingItem as SettingItemRow } from '../../components/settings/SettingItem';
@@ -51,14 +53,23 @@ interface SettingOption {
 }
 
 import type { ReactElement } from 'react';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
-export default function SettingsScreen({ navigation }: any) {
+// ELITE: Properly typed navigation prop for Settings screen
+type SettingsScreenNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface SettingsScreenProps {
+  navigation: SettingsScreenNavigationProp;
+}
+
+export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
-  const [isPremium, setIsPremium] = useState(false);
+
   const [meshStats, setMeshStats] = useState({ messagesSent: 0, messagesReceived: 0, peersDiscovered: 0 });
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deletionProgress, setDeletionProgress] = useState<{ step: string; progress: number; total: number } | null>(null);
-  
+
   // Use settings store for persistent settings
   const notificationsEnabled = useSettingsStore((state) => state.notificationsEnabled);
   const locationEnabled = useSettingsStore((state) => state.locationEnabled);
@@ -69,11 +80,11 @@ export default function SettingsScreen({ navigation }: any) {
   const vibrationEnabled = useSettingsStore((state) => state.vibrationEnabled);
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
-  
+
   // AI Features State - Her zaman aktif
   const [aiFeaturesEnabled] = useState(true);
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
-  
+
   const setNotificationsEnabled = useSettingsStore((state) => state.setNotifications);
   const setLocationEnabled = useSettingsStore((state) => state.setLocation);
   const setBleMeshEnabled = useSettingsStore((state) => state.setBleMesh);
@@ -87,7 +98,6 @@ export default function SettingsScreen({ navigation }: any) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setIsPremium(usePremiumStore.getState().isPremium);
       setMeshStats(useMeshStore.getState().stats);
     }, 500);
 
@@ -95,17 +105,6 @@ export default function SettingsScreen({ navigation }: any) {
 
     return () => clearInterval(interval);
   }, []);
-
-  const handleRestorePurchases = async () => {
-    haptics.impactMedium();
-    Alert.alert(i18nService.t('premium.actions.restore'), i18nService.t('premium.restoring'));
-    const restored = await premiumService.restorePurchases();
-    if (restored) {
-      Alert.alert(i18nService.t('common.success'), i18nService.t('premium.restored'));
-    } else {
-      Alert.alert(i18nService.t('common.info'), i18nService.t('premium.noPurchases'));
-    }
-  };
 
   const handleLanguageChange = () => {
     haptics.impactMedium();
@@ -118,13 +117,13 @@ export default function SettingsScreen({ navigation }: any) {
         { text: i18nService.getLocaleDisplayName('ar'), onPress: () => { i18nService.setLocale('ar'); setLanguage('ar'); } },
         { text: i18nService.getLocaleDisplayName('ru'), onPress: () => { i18nService.setLocale('ru'); setLanguage('ru'); } },
         { text: i18nService.t('common.cancel'), style: 'cancel' },
-      ]
+      ],
     );
   };
 
   const handleDeleteAccount = async () => {
     haptics.impactMedium();
-    
+
     Alert.alert(
       'Hesabı Sil',
       'Hesabınızı silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve şunlar silinecektir:\n\n• Tüm kişisel verileriniz\n• Aile üyeleri bilgileri\n• Mesajlar ve konuşmalar\n• Konum geçmişi\n• Sağlık profili\n• Tüm ayarlar\n\nBu işlem kalıcıdır ve geri alınamaz!',
@@ -153,17 +152,17 @@ export default function SettingsScreen({ navigation }: any) {
                     try {
                       setIsDeletingAccount(true);
                       const deviceId = await getDeviceId();
-                      
+
                       const result = await accountDeletionService.deleteAccount(
                         deviceId,
                         (progress) => {
                           setDeletionProgress(progress);
-                        }
+                        },
                       );
-                      
+
                       setIsDeletingAccount(false);
                       setDeletionProgress(null);
-                      
+
                       if (result.success) {
                         Alert.alert(
                           'Hesap Silindi',
@@ -181,35 +180,35 @@ export default function SettingsScreen({ navigation }: any) {
                                 }
                               },
                             },
-                          ]
+                          ],
                         );
                       } else {
                         Alert.alert(
                           'Hesap Silme Hatası',
                           `Hesap silinirken bazı hatalar oluştu:\n\n${result.errors.join('\n')}\n\nLütfen tekrar deneyin veya destek ekibiyle iletişime geçin.`,
-                          [{ text: 'Tamam' }]
+                          [{ text: 'Tamam' }],
                         );
                       }
-                    } catch (error: any) {
+                    } catch (error: unknown) {
                       setIsDeletingAccount(false);
                       setDeletionProgress(null);
                       logger.error('Account deletion error:', error);
                       Alert.alert(
                         'Hata',
-                        `Hesap silinirken bir hata oluştu: ${error.message || 'Bilinmeyen hata'}`,
-                        [{ text: 'Tamam' }]
+                        `Hesap silinirken bir hata oluştu: ${getErrorMessage(error) || 'Bilinmeyen hata'}`,
+                        [{ text: 'Tamam' }],
                       );
                     }
                   },
                 },
-              ]
+              ],
             );
           },
         },
-      ]
+      ],
     );
   };
-  
+
   const renderSection = (title: string, items: SettingOption[], sectionIndex: number) => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -224,38 +223,14 @@ export default function SettingsScreen({ navigation }: any) {
             type={item.type}
             value={item.value}
             onPress={item.onPress}
+            isLast={itemIndex === items.length - 1} // Hide border for last item
           />
         ))}
       </View>
     </View>
   );
 
-  const premiumSettings: SettingOption[] = [
-    {
-      icon: 'star',
-      title: 'Premium Üyelik',
-      subtitle: isPremium ? 'Aktif' : 'Ücretsiz Plan',
-      type: 'arrow',
-      onPress: () => navigation.navigate('Paywall'),
-    },
-    {
-      icon: 'refresh',
-      title: 'Satın Alımları Geri Yükle',
-      subtitle: 'Önceki satın alımlarınızı geri yükleyin',
-      type: 'arrow',
-      onPress: handleRestorePurchases,
-    },
-    {
-      icon: 'settings',
-      title: 'Abonelik Yönetimi',
-      subtitle: 'Aboneliklerinizi yönetin',
-      type: 'arrow',
-      onPress: () => {
-        haptics.impactLight();
-        navigation.navigate('SubscriptionManagement');
-      },
-    },
-  ];
+
 
   const notificationSettings: SettingOption[] = [
     {
@@ -338,10 +313,10 @@ export default function SettingsScreen({ navigation }: any) {
         setNewsEnabled(newValue);
         Alert.alert(
           'Haber Sistemi',
-          newValue 
+          newValue
             ? 'Haber sistemi aktif edildi. Ana ekranda haber kartları görünecek.'
             : 'Haber sistemi kapatıldı.',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
       },
     },
@@ -391,7 +366,7 @@ export default function SettingsScreen({ navigation }: any) {
         haptics.impactLight();
         const newValue = !bleMeshEnabled;
         setBleMeshEnabled(newValue);
-        
+
         // Start/stop BLE Mesh service based on setting
         const { bleMeshService } = await import('../../services/BLEMeshService');
         if (newValue) {
@@ -421,31 +396,17 @@ export default function SettingsScreen({ navigation }: any) {
       icon: 'navigate',
       title: 'PDR Konum Takibi',
       subtitle: 'GPS olmadan adım sayarak konum belirleme',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'PDR Konum Takibi',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
+      type: 'text',
+      value: 'Yakında',
+      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
     },
     {
       icon: 'location',
       title: 'Yakınlık Uyarıları',
       subtitle: 'Yakındaki acil durumlar için otomatik bildirim',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'Yakınlık Uyarıları',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
+      type: 'text',
+      value: 'Yakında',
+      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
     },
     {
       icon: 'battery-charging',
@@ -477,7 +438,7 @@ export default function SettingsScreen({ navigation }: any) {
         Alert.alert(
           'Deprem İzleme',
           'Deprem izleme sistemi her zaman aktif durumda. AFAD ve Kandilli verileri otomatik olarak çekiliyor.',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
       },
     },
@@ -491,7 +452,7 @@ export default function SettingsScreen({ navigation }: any) {
         haptics.impactLight();
         const newValue = !eewEnabled;
         setEewEnabled(newValue);
-        
+
         // Start/stop EEW service based on setting
         const { eewService } = await import('../../services/EEWService');
         if (newValue) {
@@ -515,16 +476,9 @@ export default function SettingsScreen({ navigation }: any) {
       icon: 'alert-circle',
       title: 'Tehlike Çıkarımı',
       subtitle: 'AI ile otomatik tehlike bölgesi tespiti',
-      type: 'switch',
-      value: false,
-      onPress: () => {
-        haptics.impactLight();
-        Alert.alert(
-          'Tehlike Çıkarımı',
-          'Bu özellik geliştirme aşamasındadır. Yakında kullanıma sunulacak.',
-          [{ text: 'Tamam' }]
-        );
-      },
+      type: 'text',
+      value: 'Yakında',
+      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
     },
     {
       icon: 'settings',
@@ -685,7 +639,7 @@ export default function SettingsScreen({ navigation }: any) {
                   Alert.alert('Başarılı', 'Ayarlar varsayılan değerlere döndürüldü.');
                 },
               },
-            ]
+            ],
           );
         },
       },
@@ -702,10 +656,11 @@ export default function SettingsScreen({ navigation }: any) {
             Alert.alert(
               'Yazı Boyutu',
               'Bu özellik geliştirme modunda test ediliyor.',
-              [{ text: 'Tamam' }]
+              [{ text: 'Tamam' }],
             );
           },
         },
+
         {
           icon: 'contrast',
           title: 'Yüksek Kontrast',
@@ -716,10 +671,10 @@ export default function SettingsScreen({ navigation }: any) {
             Alert.alert(
               'Yüksek Kontrast',
               'Bu özellik geliştirme modunda test ediliyor.',
-              [{ text: 'Tamam' }]
+              [{ text: 'Tamam' }],
             );
           },
-        }
+        },
       );
     }
 
@@ -792,146 +747,172 @@ export default function SettingsScreen({ navigation }: any) {
   ];
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]} />
+    <ImageBackground
+      source={require('../../../assets/images/premium/family_soft_bg.png')}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      <ScrollView 
-        contentContainerStyle={styles.content}
+      <View style={[styles.headerContainer, { paddingTop: insets.top + 16 }]}>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="chevron-back" size={24} color="#334155" />
+        </Pressable>
+        <Text style={styles.headerTitle}>{i18nService.t('settings.title')}</Text>
+        <View style={styles.placeholderButton} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
         showsVerticalScrollIndicator={false}
       >
-        {renderSection('Premium Durum', premiumSettings, 0)}
-        
-        {/* BLE Mesh Stats Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>BLE Mesh İstatistikleri</Text>
-          <View style={styles.statsCard}>
-            <View style={styles.statRow}>
-              <Ionicons name="send" size={20} color={colors.text.tertiary} />
-              <Text style={styles.statLabel}>Gönderilen Mesajlar</Text>
-              <Text style={styles.statValue}>{meshStats.messagesSent}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statRow}>
-              <Ionicons name="download" size={20} color={colors.text.tertiary} />
-              <Text style={styles.statLabel}>Alınan Mesajlar</Text>
-              <Text style={styles.statValue}>{meshStats.messagesReceived}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statRow}>
-              <Ionicons name="radio" size={20} color={colors.text.tertiary} />
-              <Text style={styles.statLabel}>Keşfedilen Cihazlar</Text>
-              <Text style={styles.statValue}>{meshStats.peersDiscovered}</Text>
-            </View>
-          </View>
-        </View>
+        {/* Premium Upgrade Banner */}
 
-        {renderSection('AI Özellikleri', aiSettings, 1)}
-        {renderSection('Bildirimler ve Uyarılar', notificationSettings, 2)}
-        {renderSection('Konum ve Harita', locationSettings, 3)}
-        {renderSection('Mesh Ağı ve İletişim', meshSettings, 4)}
-        {renderSection('Deprem İzleme', earthquakeSettings, 5)}
-        {renderSection('Sağlık ve Tıbbi', medicalSettings, 6)}
-        {renderSection('Kurtarma ve Operasyon', rescueSettings, 7)}
-        {renderSection('Genel', generalSettings, 8)}
-        {renderSection('Hakkında', aboutSettings, 9)}
-        
-        {/* App Version */}
-        <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>AfetNet v1.0.0</Text>
-          <Text style={styles.versionSubtext}>
-            Afet durumlarında offline iletişim için tasarlanmış acil durum uygulaması
-          </Text>
-        </View>
+
+        {/* Sections */}
+        {renderSection('Bildirimler', notificationSettings, 0)}
+        {renderSection('Konum & Harita', locationSettings, 1)}
+        {renderSection('AI & Güvenlik', aiSettings, 2)}
+        {renderSection('Mesh Ağı & İletişim', meshSettings, 3)}
+        {renderSection('Deprem & Sensörler', earthquakeSettings, 4)}
+        {renderSection('Medikal & Acil Durum', medicalSettings, 5)}
+        {renderSection('Arama Kurtarma (SAR)', rescueSettings, 6)}
+        {renderSection('Genel Ayarlar', generalSettings, 7)}
+        {renderSection('Hakkında & Destek', aboutSettings, 8)}
+
+        <Text style={styles.versionText}>v{ENV.APP_VERSION}</Text>
+        <Text style={styles.userIdText}>ID: {getDeviceId().then(id => id ? id.substring(0, 8) : 'Loading...')}</Text>
       </ScrollView>
-
-      {/* Account Deletion Progress Modal */}
-      <Modal
-        visible={isDeletingAccount}
-        transparent
-        animationType="fade"
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ActivityIndicator size="large" color="#3b82f6" />
-            <Text style={styles.modalTitle}>Hesap Siliniyor...</Text>
-            {deletionProgress && (
-              <>
-                <Text style={styles.modalStep}>{deletionProgress.step}</Text>
-                <View style={styles.progressBar}>
-                  <View 
-                    style={[
-                      styles.progressFill,
-                      { width: `${(deletionProgress.progress / deletionProgress.total) * 100}%` }
-                    ]} 
-                  />
-                </View>
-                <Text style={styles.modalProgress}>
-                  {deletionProgress.progress} / {deletionProgress.total}
-                </Text>
-              </>
-            )}
-            <Text style={styles.modalNote}>
-              Lütfen bekleyin, bu işlem birkaç dakika sürebilir...
-            </Text>
-          </View>
-        </View>
-      </Modal>
-    </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#f8fafc',
   },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: colors.background.primary,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: -0.5,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#94a3b8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-  },
-  sectionContent: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-    overflow: 'hidden',
-  },
-  settingItem: {
+  headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    zIndex: 10,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  placeholderButton: {
+    width: 40,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748b',
+    marginBottom: 12,
+    marginLeft: 8,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  sectionContent: {
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
     elevation: 2,
+  },
+  premiumBanner: {
+    marginBottom: 24,
+    borderRadius: 24,
+    shadowColor: '#0ea5e9',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  premiumGradient: {
+    borderRadius: 24,
+    padding: 2,
+  },
+  premiumContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: 'transparent',
+  },
+  premiumIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  premiumTextContainer: {
+    flex: 1,
+  },
+  premiumTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  premiumSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  versionText: {
+    textAlign: 'center',
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  userIdText: {
+    textAlign: 'center',
+    color: '#cbd5e1',
+    fontSize: 10,
+    marginTop: 4,
+    marginBottom: 20,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  // Saved for complex stats card if needed later, but removing mostly for now
+  statsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
   },
   settingIconGradient: {
     width: 44,
@@ -962,18 +943,6 @@ const styles = StyleSheet.create({
     color: colors.brand.primary,
     marginRight: 8,
   },
-  statsCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-  },
   statRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -999,12 +968,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 20,
     marginTop: 16,
-  },
-  versionText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
   },
   versionSubtext: {
     fontSize: 13,

@@ -18,13 +18,13 @@ export interface PublicAPIConfig {
 export interface PublicAPIRequest {
   endpoint: string;
   method: 'GET' | 'POST';
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
   headers?: Record<string, string>;
 }
 
 export interface PublicAPIResponse {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
   timestamp: number;
 }
@@ -55,7 +55,7 @@ class PublicAPIService {
       this.startRateLimitCleanup();
 
       this.isInitialized = true;
-      
+
       if (__DEV__) {
         logger.info('Public API service initialized');
       }
@@ -86,7 +86,7 @@ class PublicAPIService {
    */
   async handleRequest(
     request: PublicAPIRequest,
-    clientIP?: string
+    clientIP?: string,
   ): Promise<PublicAPIResponse> {
     try {
       // Check if API is enabled
@@ -140,10 +140,10 @@ class PublicAPIService {
   private checkRateLimit(clientIP: string): boolean {
     const now = Date.now();
     const timestamps = this.requestTimestamps.get(clientIP) || [];
-    
+
     // Remove timestamps older than 1 minute
     const recentTimestamps = timestamps.filter(ts => now - ts < 60000);
-    
+
     if (recentTimestamps.length >= this.config.rateLimit) {
       return false;
     }
@@ -173,26 +173,26 @@ class PublicAPIService {
   /**
    * Process request
    */
-  private async processRequest(request: PublicAPIRequest): Promise<any> {
+  private async processRequest(request: PublicAPIRequest): Promise<unknown> {
     switch (request.endpoint) {
       case '/api/v1/earthquakes/latest':
         return await this.getLatestEarthquakes();
-      
+
       case '/api/v1/earthquakes/recent':
         return await this.getRecentEarthquakes(request.params);
-      
+
       case '/api/v1/disasters/active':
         return await this.getActiveDisasters();
-      
+
       case '/api/v1/eew/latest':
         return await this.getLatestEEW();
-      
+
       case '/api/v1/mesh/stats':
         return await this.getMeshStats();
-      
+
       case '/api/v1/health':
         return await this.getHealthStatus();
-      
+
       default:
         throw new Error('Unknown endpoint');
     }
@@ -204,7 +204,7 @@ class PublicAPIService {
   private async getLatestEarthquakes() {
     try {
       // In production, fetch from backend
-      const response = await apiClient.get('/public/earthquakes/latest') as { data: any };
+      const response = await apiClient.get('/public/earthquakes/latest') as { data: unknown };
       return response.data;
     } catch (error) {
       logger.error('Get latest earthquakes error:', error);
@@ -215,10 +215,10 @@ class PublicAPIService {
   /**
    * Get recent earthquakes
    */
-  private async getRecentEarthquakes(params?: Record<string, any>) {
+  private async getRecentEarthquakes(params?: Record<string, unknown>) {
     try {
-      const limit = params?.limit || 10;
-      const response = await apiClient.get(`/public/earthquakes/recent?limit=${limit}`) as { data: any };
+      const limit = (params?.limit as number) || 10;
+      const response = await apiClient.get(`/public/earthquakes/recent?limit=${limit}`) as { data: unknown };
       return response.data;
     } catch (error) {
       logger.error('Get recent earthquakes error:', error);
@@ -231,7 +231,7 @@ class PublicAPIService {
    */
   private async getActiveDisasters() {
     try {
-      const response = await apiClient.get('/public/disasters/active') as { data: any };
+      const response = await apiClient.get('/public/disasters/active') as { data: unknown };
       return response.data;
     } catch (error) {
       logger.error('Get active disasters error:', error);
@@ -244,7 +244,7 @@ class PublicAPIService {
    */
   private async getLatestEEW() {
     try {
-      const response = await apiClient.get('/public/eew/latest') as { data: any };
+      const response = await apiClient.get('/public/eew/latest') as { data: unknown };
       return response.data;
     } catch (error) {
       logger.error('Get latest EEW error:', error);
@@ -303,7 +303,7 @@ class PublicAPIService {
    */
   async updateConfig(config: Partial<PublicAPIConfig>) {
     this.config = { ...this.config, ...config };
-    
+
     if (__DEV__) {
       logger.info('Public API config updated:', this.config);
     }
@@ -326,7 +326,7 @@ class PublicAPIService {
     this.requestTimestamps.clear();
     this.requestCounts.clear();
     this.isInitialized = false;
-    
+
     if (__DEV__) {
       logger.info('Public API service stopped');
     }

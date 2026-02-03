@@ -3,11 +3,12 @@
  * Filtreleme, konum bazlı, FlatList optimizations
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Platform, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { colors } from '../../theme/colors';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
 import * as Location from 'expo-location';
@@ -20,16 +21,22 @@ import { i18nService } from '../../services/I18nService';
 
 const logger = createLogger('AllEarthquakesScreen');
 
+// ELITE: Typed navigation
+type AllEarthquakesNavigationProp = StackNavigationProp<Record<string, object>>;
+
 // ELITE: Lazy load WebBrowser module
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let webBrowserModuleCache: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getWebBrowserModule = async (): Promise<any> => {
   if (webBrowserModuleCache) return webBrowserModuleCache;
   try {
     const module = await import('expo-web-browser');
     webBrowserModuleCache = module?.default || module || null;
     return webBrowserModuleCache;
-  } catch (error: any) {
-    logger.warn('⚠️ expo-web-browser module load failed:', error?.message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.warn('⚠️ expo-web-browser module load failed:', errorMessage);
     return null;
   }
 };
@@ -46,7 +53,7 @@ const formatTimestamp = (timestamp: number): string => {
   if (within48h) {
     return formatToTurkishTimeOnly(timestamp);
   }
-  
+
   // Daha eskiyse tam tarih göster
   return formatToTurkishDateTime(timestamp);
 };
@@ -56,10 +63,10 @@ type LocationFilter = 25 | 50 | 100 | 999999; // 999999 = all Turkey
 type MagnitudeFilter = 0 | 3 | 4 | 5;
 type SourceFilter = 'AFAD' | null; // null = all sources (only AFAD now)
 
-export default function AllEarthquakesScreen({ navigation }: any) {
+export default function AllEarthquakesScreen({ navigation }: { navigation: AllEarthquakesNavigationProp }) {
   const insets = useSafeAreaInsets();
   const { earthquakes, loading, refresh, lastUpdate } = useEarthquakes(); // CRITICAL: Get lastUpdate from hook
-  
+
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all'); // Show all time by default
   const [locationFilter, setLocationFilter] = useState<LocationFilter>(999999); // Show all Turkey by default
   const [magnitudeFilter, setMagnitudeFilter] = useState<MagnitudeFilter>(0); // Show all magnitudes by default
@@ -107,7 +114,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
   // CRITICAL: Open original source website in Safari View Controller
   const openOriginalSource = async (source: 'AFAD') => {
     haptics.impactLight();
-    
+
     const url = 'https://deprem.afad.gov.tr/last-earthquakes.html';
 
     try {
@@ -189,25 +196,25 @@ export default function AllEarthquakesScreen({ navigation }: any) {
   const renderItem = ({ item }: { item: Earthquake }) => {
     const distance = userLocation
       ? Math.round(
-          calculateDistance(
-            userLocation.latitude,
-            userLocation.longitude,
-            item.latitude,
-            item.longitude
-          )
+        calculateDistance(
+          userLocation.latitude,
+          userLocation.longitude,
+          item.latitude,
+          item.longitude
         )
+      )
       : null;
 
     // Source badge color
-  const getSourceColor = (source: string) => {
-    // Only AFAD is shown now
-    return '#3b82f6'; // Blue
-  };
+    const getSourceColor = (source: string) => {
+      // Only AFAD is shown now
+      return '#3b82f6'; // Blue
+    };
 
-  const getSourceLabel = (source: string) => {
-    // Only AFAD is shown now
-    return 'AFAD';
-  };
+    const getSourceLabel = (source: string) => {
+      // Only AFAD is shown now
+      return 'AFAD';
+    };
 
     return (
       <TouchableOpacity
@@ -273,12 +280,12 @@ export default function AllEarthquakesScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
-        <LinearGradient
-          colors={['#1e293b', '#334155']}
-          style={[styles.header, { paddingTop: insets.top + 16 }]}
-        >
+      <LinearGradient
+        colors={['#1e293b', '#334155']}
+        style={[styles.header, { paddingTop: insets.top + 16 }]}
+      >
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => {
@@ -288,12 +295,12 @@ export default function AllEarthquakesScreen({ navigation }: any) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </TouchableOpacity>
-        
+
         {/* Title */}
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>{i18nService.t('earthquake.title') || 'Depremler'}</Text>
         </View>
-        
+
         {/* ELITE: Premium Filter Button */}
         <TouchableOpacity
           style={[styles.filterButton, showFilters && styles.filterButtonActive]}
@@ -302,10 +309,10 @@ export default function AllEarthquakesScreen({ navigation }: any) {
             setShowFilters(!showFilters);
           }}
         >
-          <Ionicons 
-            name={showFilters ? "close" : "options"} 
-            size={22} 
-            color={showFilters ? colors.text.primary : colors.text.secondary} 
+          <Ionicons
+            name={showFilters ? "close" : "options"}
+            size={22}
+            color={showFilters ? colors.text.primary : colors.text.secondary}
           />
           {showFilters && (
             <View style={styles.filterButtonBadge}>
@@ -391,8 +398,8 @@ export default function AllEarthquakesScreen({ navigation }: any) {
             {locationStatus === 'denied'
               ? 'Mesafe filtresi için konum izni gerekiyor.'
               : locationStatus === 'requesting'
-              ? 'Konum bilgisi alınıyor...'
-              : 'Konum belirlenemedi; mesafe bilgisi devre dışı.'}
+                ? 'Konum bilgisi alınıyor...'
+                : 'Konum belirlenemedi; mesafe bilgisi devre dışı.'}
           </Text>
           {locationStatus !== 'requesting' && (
             <TouchableOpacity style={styles.locationNoticeButton} onPress={requestLocationPermission}>
@@ -443,7 +450,7 @@ export default function AllEarthquakesScreen({ navigation }: any) {
                 <Ionicons name="pulse-outline" size={64} color={colors.earthquake.moderate} />
               </LinearGradient>
               <Text style={styles.emptyText}>
-                {earthquakes.length === 0 
+                {earthquakes.length === 0
                   ? i18nService.t('earthquake.noDataYet')
                   : i18nService.t('earthquake.noFilterResults')}
               </Text>

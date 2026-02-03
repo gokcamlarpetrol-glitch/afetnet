@@ -25,7 +25,7 @@ interface CrossValidationData {
 
 class EarthquakeValidationService {
   private isInitialized = false;
-  
+
   // Validation thresholds
   private readonly MIN_CONFIDENCE = 60; // Minimum confidence to accept data
   private readonly MAGNITUDE_TOLERANCE = 0.5; // Max magnitude difference between sources
@@ -36,6 +36,11 @@ class EarthquakeValidationService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+
+    // ELITE: Ensure OpenAI service is initialized with API key
+    // This fixes the issue where AI connection drops if News service wasn't visited
+    await openAIService.initialize();
+
     logger.info('EarthquakeValidationService initialized');
     this.isInitialized = true;
   }
@@ -47,7 +52,7 @@ class EarthquakeValidationService {
   async validateEarthquake(
     earthquake: Earthquake,
     allEarthquakes: Earthquake[],
-    crossValidation?: CrossValidationData
+    crossValidation?: CrossValidationData,
   ): Promise<ValidationResult> {
     try {
       const anomalies: string[] = [];
@@ -167,10 +172,10 @@ class EarthquakeValidationService {
       if (earthquake.source === 'AFAD') {
         // For AFAD: Accept if confidence is reasonable (>=50) and no critical errors
         // Only reject if there are critical errors (invalid coordinates, invalid magnitude, etc.)
-        const hasCriticalErrors = anomalies.some(a => 
-          a.includes('Koordinatlar geçersiz') || 
+        const hasCriticalErrors = anomalies.some(a =>
+          a.includes('Koordinatlar geçersiz') ||
           a.includes('Büyüklük geçersiz') ||
-          a.includes('Zaman geçersiz')
+          a.includes('Zaman geçersiz'),
         );
         isValid = confidence >= 50 && !hasCriticalErrors;
       } else {
@@ -232,13 +237,13 @@ class EarthquakeValidationService {
     if (earthquake.source !== 'AFAD') {
       // For non-AFAD sources, apply Turkey bounds filter
       if (earthquake.latitude < 35 || earthquake.latitude > 43 ||
-          earthquake.longitude < 25 || earthquake.longitude > 45) {
+        earthquake.longitude < 25 || earthquake.longitude > 45) {
         return { isValid: false, reason: 'Türkiye sınırları dışında' };
       }
     } else {
       // For AFAD sources, only validate that coordinates are reasonable
       if (earthquake.latitude < -90 || earthquake.latitude > 90 ||
-          earthquake.longitude < -180 || earthquake.longitude > 180) {
+        earthquake.longitude < -180 || earthquake.longitude > 180) {
         return { isValid: false, reason: 'Koordinatlar geçersiz aralıkta' };
       }
     }
@@ -286,7 +291,7 @@ class EarthquakeValidationService {
    */
   private crossValidate(
     earthquake: Earthquake,
-    crossValidation: CrossValidationData
+    crossValidation: CrossValidationData,
   ): { matches: number; sources: string[]; confidenceBoost: number; anomalies: string[]; confidencePenalty: number } {
     const matches: string[] = [];
     const anomalies: string[] = [];
@@ -346,7 +351,7 @@ class EarthquakeValidationService {
         target.latitude,
         target.longitude,
         eq.latitude,
-        eq.longitude
+        eq.longitude,
       );
       if (distance > this.DISTANCE_TOLERANCE) continue;
 
@@ -372,7 +377,7 @@ class EarthquakeValidationService {
         earthquake.latitude,
         earthquake.longitude,
         eq.latitude,
-        eq.longitude
+        eq.longitude,
       );
       const magDiff = Math.abs(earthquake.magnitude - eq.magnitude);
 
@@ -389,7 +394,7 @@ class EarthquakeValidationService {
    */
   private async aiAnomalyDetection(
     earthquake: Earthquake,
-    allEarthquakes: Earthquake[]
+    allEarthquakes: Earthquake[],
   ): Promise<{ anomalies: string[]; confidencePenalty: number }> {
     try {
       // Get recent earthquakes for context
@@ -456,7 +461,7 @@ Sadece JSON formatında yanıt ver:
   private statisticalValidation(
     earthquake: Earthquake,
     allEarthquakes: Earthquake[],
-    isAFAD: boolean = false
+    isAFAD: boolean = false,
   ): { anomalies: string[]; confidencePenalty: number } {
     const anomalies: string[] = [];
     let confidencePenalty = 0;
@@ -471,7 +476,7 @@ Sadece JSON formatında yanıt ver:
 
     // Get recent earthquakes (last 24 hours)
     const recent = allEarthquakes.filter(
-      eq => eq.time > earthquake.time - 24 * 60 * 60 * 1000 && eq.time < earthquake.time
+      eq => eq.time > earthquake.time - 24 * 60 * 60 * 1000 && eq.time < earthquake.time,
     );
 
     if (recent.length > 0) {
@@ -507,9 +512,9 @@ Sadece JSON formatında yanıt ver:
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRad(lat1)) *
-        Math.cos(this.toRad(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos(this.toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
@@ -523,7 +528,7 @@ Sadece JSON formatında yanıt ver:
    */
   async validateBatch(
     earthquakes: Earthquake[],
-    crossValidation?: CrossValidationData
+    crossValidation?: CrossValidationData,
   ): Promise<{ valid: Earthquake[]; invalid: Earthquake[] }> {
     const valid: Earthquake[] = [];
     const invalid: Earthquake[] = [];
@@ -533,7 +538,7 @@ Sadece JSON formatında yanıt ver:
     for (let i = 0; i < earthquakes.length; i += batchSize) {
       const batch = earthquakes.slice(i, i + batchSize);
       const results = await Promise.all(
-        batch.map(eq => this.validateEarthquake(eq, earthquakes, crossValidation))
+        batch.map(eq => this.validateEarthquake(eq, earthquakes, crossValidation)),
       );
 
       batch.forEach((eq, idx) => {

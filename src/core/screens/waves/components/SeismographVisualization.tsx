@@ -103,8 +103,8 @@ export default function SeismographVisualization({
         let sum = 0;
         let count = 0;
         for (let j = Math.max(0, i - Math.floor(SMOOTHING_WINDOW / 2)); 
-             j <= Math.min(normalizedData.length - 1, i + Math.floor(SMOOTHING_WINDOW / 2)); 
-             j++) {
+          j <= Math.min(normalizedData.length - 1, i + Math.floor(SMOOTHING_WINDOW / 2)); 
+          j++) {
           sum += normalizedData[j];
           count++;
         }

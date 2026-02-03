@@ -5,7 +5,8 @@
 
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import { usePremiumStore } from './premiumStore';
+// CRITICAL: Don't import usePremiumStore at top level to avoid circular dependency
+// Use dynamic require() inside syncPremiumAccess instead
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('TrialStore');
@@ -62,9 +63,9 @@ const computeTrialStatus = (startTime: number): {
         remainingMs: 0,
       };
     }
-    
+
     const now = Date.now();
-    
+
     // ELITE: Validate time values
     if (isNaN(now) || now <= 0) {
       return {
@@ -74,11 +75,11 @@ const computeTrialStatus = (startTime: number): {
         remainingMs: 0,
       };
     }
-    
+
     const elapsed = Math.max(0, now - startTime); // ELITE: Prevent negative elapsed time
     const remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsed);
     const isActive = remainingMs > 0;
-    
+
     // ELITE: Calculate remaining time with proper rounding
     const daysRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / MS_PER_DAY)) : 0;
     const hoursRemaining = isActive ? Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))) : 0;
@@ -101,21 +102,45 @@ const computeTrialStatus = (startTime: number): {
   }
 };
 
+let isInitializing = false; // CRITICAL: Guard against circular dependency during initialization
+
 const syncPremiumAccess = (isTrialActive: boolean) => {
+  // CRITICAL: Don't sync during initialization to avoid circular dependency
+  if (isInitializing) {
+    if (__DEV__) {
+      logger.debug('Skipping premium sync during initialization');
+    }
+    return;
+  }
+
   try {
-    const premiumState = usePremiumStore.getState();
-    
+    // ELITE: Dynamic require prevents circular dependency between trialStore and premiumStore
+    // Static imports would cause infinite loop during module initialization
+     
+    const premiumStoreModule = require('./premiumStore') as {
+      usePremiumStore: {
+        getState: () => {
+          subscriptionType: string | null;
+          expiresAt: number | null;
+          isPremium: boolean;
+          isLifetime?: boolean;
+          setPremium: (isPremium: boolean, subscriptionType: string | null, expiresAt: number | null, isLifetime: boolean) => void;
+        }
+      }
+    };
+    const premiumState = premiumStoreModule.usePremiumStore.getState();
+
     // ELITE: Type-safe access to isLifetime
     const premiumStateWithLifetime = premiumState as typeof premiumState & { isLifetime?: boolean };
-    
+
     // CRITICAL: Check if user has paid subscription
     // Paid subscriptions have:
     //   - Regular: subscriptionType: 'monthly' | 'yearly', expiresAt: number
     //   - Lifetime: subscriptionType: null, expiresAt: null, isLifetime: true
     // Trial users have: subscriptionType: null, expiresAt: null, isLifetime: false, isPremium: true/false (trial dependent)
-    
+
     // ELITE: Comprehensive paid subscription check
-    const hasPaidSubscription = 
+    const hasPaidSubscription =
       premiumState.subscriptionType !== null || // Monthly/Yearly subscription
       (premiumState.expiresAt !== null && premiumState.expiresAt > 0 && premiumState.isPremium) || // Has valid expiration = paid subscription
       (premiumStateWithLifetime.isLifetime === true); // Lifetime purchase
@@ -165,6 +190,7 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
 
   initializeTrial: async () => {
     try {
+      isInitializing = true; // CRITICAL: Prevent circular dependency during initialization
       set({ isLoading: true });
 
       // ELITE: Check if trial already started with error handling
@@ -266,6 +292,8 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       if (active) {
         startTrialMonitor(applyState);
       }
+
+      isInitializing = false; // CRITICAL: Initialization complete, allow sync
     } catch (error) {
       // ELITE: Use logger for production safety
       logger.error('Initialize error:', error);
@@ -291,6 +319,7 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
         }
         return isActive;
       });
+      isInitializing = false; // CRITICAL: Initialization complete (error path), allow sync
     }
   },
 
@@ -304,17 +333,17 @@ export const useTrialStore = create<TrialState & TrialActions>((set, get) => ({
       }
 
       const { isActive, daysRemaining, hoursRemaining } = computeTrialStatus(trialStartTime);
-      
+
       // ELITE: Update state atomically
       set({
         isTrialActive: isActive,
         daysRemaining,
         hoursRemaining,
       });
-      
+
       // ELITE: Sync premium access safely
       syncPremiumAccess(isActive);
-      
+
       // ELITE: Clean up monitor if trial expired
       if (!isActive) {
         stopTrialMonitor();

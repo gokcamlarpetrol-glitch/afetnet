@@ -12,11 +12,29 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('FamilyStore');
 
-// FIXED: Lazy import to break circular dependency
-let firebaseDataService: any = null;
-const getFirebaseDataService = () => {
+// ELITE: Type definition for lazy imported FirebaseDataService
+interface FirebaseDataServiceType {
+  isInitialized: boolean;
+  saveDeviceId: (deviceId: string) => Promise<boolean>;
+  loadFamilyMembers: (deviceId: string) => Promise<FamilyMember[]>;
+  saveFamilyMember: (deviceId: string, member: FamilyMember) => Promise<boolean>;
+  deleteFamilyMember: (deviceId: string, memberId: string) => Promise<boolean>;
+  subscribeToFamilyMembers?: (
+    deviceId: string,
+    callback: (members: FamilyMember[]) => void,
+    onError?: (error: Error) => void
+  ) => Promise<(() => void) | null>;
+}
+
+// ELITE: Lazy import to break circular dependency
+let firebaseDataService: FirebaseDataServiceType | null = null;
+const getFirebaseDataService = (): FirebaseDataServiceType | null => {
   if (!firebaseDataService) {
-    firebaseDataService = require('../services/FirebaseDataService').firebaseDataService;
+    try {
+      firebaseDataService = require('../services/FirebaseDataService').firebaseDataService;
+    } catch {
+      return null;
+    }
   }
   return firebaseDataService;
 };
@@ -32,7 +50,7 @@ interface FamilyState {
 
 interface FamilyActions {
   initialize: () => Promise<void>;
-  addMember: (member: Omit<FamilyMember, 'id'>) => Promise<void>;
+  addMember: (member: Omit<FamilyMember, 'id'> & { id?: string }) => Promise<void>;
   updateMember: (id: string, updates: Partial<FamilyMember>) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
   updateMemberLocation: (id: string, latitude: number, longitude: number) => Promise<void>;
@@ -71,7 +89,7 @@ const saveMembers = async (members: FamilyMember[]) => {
 
 export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => ({
   ...initialState,
-  
+
   // Initialize by loading from storage and Firebase
   initialize: async () => {
     // ELITE: Cleanup existing Firebase subscription before re-initializing
@@ -102,7 +120,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
 
           // Load family members from Firebase
           const cloudMembers = await firebaseService.loadFamilyMembers(deviceId);
-          
+
           // Merge: Firebase takes precedence if both exist
           if (cloudMembers && cloudMembers.length > 0) {
             set({ members: cloudMembers });
@@ -117,14 +135,14 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
                 // ELITE: Merge Firebase members with local state
                 const currentMembers = get().members;
                 const memberMap = new Map(currentMembers.map(m => [m.id, m]));
-                
+
                 // Update or add Firebase members
                 firebaseMembers.forEach((member: FamilyMember) => {
                   if (member && member.id) {
                     memberMap.set(member.id, member);
                   }
                 });
-                
+
                 const mergedMembers = Array.from(memberMap.values());
                 set({ members: mergedMembers });
                 await saveMembers(mergedMembers);
@@ -132,14 +150,15 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
                 logger.error('Error processing real-time family members:', error);
               }
             });
-            
+
             // ELITE: Store unsubscribe function for cleanup
             if (unsubscribe && typeof unsubscribe === 'function') {
               set({ firebaseUnsubscribe: unsubscribe });
             }
-          } catch (subscribeError: any) {
+          } catch (subscribeError: unknown) {
             // ELITE: Don't log permission errors as errors - they're expected in offline-first apps
-            if (subscribeError?.code === 'permission-denied' || subscribeError?.message?.includes('permission') || subscribeError?.message?.includes('Missing or insufficient permissions')) {
+            const errorObj = subscribeError as { code?: string; message?: string };
+            if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission') || errorObj?.message?.includes('Missing or insufficient permissions')) {
               if (__DEV__) {
                 logger.debug('Firebase family subscription permission denied (app continues with local storage)');
               }
@@ -153,19 +172,20 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       logger.error('Firebase sync failed, using local data:', error);
     }
   },
-  
+
   addMember: async (member) => {
     const { members } = get();
+    // ELITE: Allow explicit ID (e.g. from QR code) or generate new one
     const newMember: FamilyMember = {
       ...member,
-      id: `family-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: member.id || `family-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     };
     const updatedMembers = [...members, newMember];
     set({ members: updatedMembers });
-    
+
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
-    
+
     // ELITE: Save to Firebase with offline sync queue
     try {
       const deviceId = await getDeviceId();
@@ -179,8 +199,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'save',
-              collection: 'familyMembers',
-              documentId: newMember.id,
+
+
               data: newMember,
               priority: 'normal',
             });
@@ -190,8 +210,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'save',
-            collection: 'familyMembers',
-            documentId: newMember.id,
+
+
             data: newMember,
             priority: 'normal',
           });
@@ -204,8 +224,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { offlineSyncService } = await import('../services/OfflineSyncService');
         await offlineSyncService.queueOperation({
           type: 'save',
-          collection: 'familyMembers',
-          documentId: newMember.id,
+
+
           data: newMember,
           priority: 'normal',
         });
@@ -226,7 +246,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           location: newMember.location ? {
             latitude: newMember.location.latitude,
             longitude: newMember.location.longitude,
-            timestamp: newMember.location.timestamp || Date.now(),
+            timestamp: newMember.location?.timestamp || Date.now() || Date.now(),
           } : undefined,
           lastSeen: newMember.lastSeen,
           relationship: newMember.relationship,
@@ -241,16 +261,16 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       logger.error('Failed to send family member to backend:', error);
     }
   },
-  
+
   updateMember: async (id, updates) => {
     const { members } = get();
     const updatedMembers = members.map(m => m.id === id ? { ...m, ...updates, lastSeen: Date.now() } : m);
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
-    
+
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
-    
+
     // ELITE: Save to Firebase with offline sync queue
     if (updatedMember) {
       try {
@@ -264,8 +284,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
               const { offlineSyncService } = await import('../services/OfflineSyncService');
               await offlineSyncService.queueOperation({
                 type: 'update',
-                collection: 'familyMembers',
-                documentId: updatedMember.id,
+
+
                 data: updatedMember,
                 priority: 'normal',
               });
@@ -275,8 +295,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'update',
-              collection: 'familyMembers',
-              documentId: updatedMember.id,
+
+
               data: updatedMember,
               priority: 'normal',
             });
@@ -289,8 +309,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'update',
-            collection: 'familyMembers',
-            documentId: updatedMember.id,
+
+
             data: updatedMember,
             priority: 'normal',
           });
@@ -310,7 +330,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             location: updatedMember.location ? {
               latitude: updatedMember.location.latitude,
               longitude: updatedMember.location.longitude,
-              timestamp: updatedMember.location.timestamp || Date.now(),
+              timestamp: updatedMember.location?.timestamp || Date.now() || Date.now(),
             } : undefined,
             lastSeen: updatedMember.lastSeen,
             relationship: updatedMember.relationship,
@@ -324,15 +344,15 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       }
     }
   },
-  
+
   removeMember: async (id) => {
     const { members } = get();
     const updatedMembers = members.filter(m => m.id !== id);
     set({ members: updatedMembers });
-    
+
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
-    
+
     // ELITE: Delete from Firebase with offline sync queue
     try {
       const deviceId = await getDeviceId();
@@ -345,8 +365,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'delete',
-              collection: 'familyMembers',
-              documentId: id,
+
+
               data: {},
               priority: 'normal',
             });
@@ -356,8 +376,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'delete',
-            collection: 'familyMembers',
-            documentId: id,
+
+
             data: {},
             priority: 'normal',
           });
@@ -370,8 +390,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { offlineSyncService } = await import('../services/OfflineSyncService');
         await offlineSyncService.queueOperation({
           type: 'delete',
-          collection: 'familyMembers',
-          documentId: id,
+
+
           data: {},
           priority: 'normal',
         });
@@ -392,19 +412,19 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       logger.error('Failed to delete family member from backend:', error);
     }
   },
-  
+
   updateMemberLocation: async (id, latitude, longitude) => {
     // ELITE: Validate inputs
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       logger.error('Invalid member ID for location update:', id);
       return;
     }
-    
+
     if (typeof latitude !== 'number' || isNaN(latitude) || latitude < -90 || latitude > 90) {
       logger.error('Invalid latitude:', latitude);
       return;
     }
-    
+
     if (typeof longitude !== 'number' || isNaN(longitude) || longitude < -180 || longitude > 180) {
       logger.error('Invalid longitude:', longitude);
       return;
@@ -417,36 +437,36 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       logger.warn('Member not found for location update:', id);
       return;
     }
-    
-    const locationChanged = 
-      existingMember.latitude !== latitude || 
+
+    const locationChanged =
+      existingMember.latitude !== latitude ||
       existingMember.longitude !== longitude ||
       existingMember.location?.latitude !== latitude ||
       existingMember.location?.longitude !== longitude;
-    
+
     if (!locationChanged) {
       // Location unchanged - no need to update
       return;
     }
-    
+
     // ELITE: Update both latitude/longitude (for backward compatibility) and location object
-    const updatedMembers = members.map(m => 
-      m.id === id 
-        ? { 
-            ...m, 
-            latitude, // Update direct properties for backward compatibility
-            longitude,
-            location: { latitude, longitude, timestamp: Date.now() }, // Update location object
-            lastSeen: Date.now() 
-          }
-        : m
+    const updatedMembers = members.map(m =>
+      m.id === id
+        ? {
+          ...m,
+          latitude, // Update direct properties for backward compatibility
+          longitude,
+          location: { latitude, longitude, timestamp: Date.now() }, // Update location object
+          lastSeen: Date.now(),
+        }
+        : m,
     );
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
-    
+
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
-    
+
     // Save to Firebase (lazy load to avoid circular dependency)
     if (updatedMember) {
       try {
@@ -492,7 +512,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { notificationService } = await import('../services/NotificationService');
         await notificationService.showFamilyLocationUpdateNotification(
           updatedMember.name,
-          { latitude, longitude }
+          { latitude, longitude },
         ).catch((error) => {
           logger.error('Failed to send location update notification:', error);
         });
@@ -501,7 +521,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       }
     }
   },
-  
+
   updateMemberStatus: async (id, status) => {
     const { members } = get();
     // OPTIMIZED: Check if update is actually needed (prevents unnecessary re-renders)
@@ -511,14 +531,14 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       // Status unchanged, skip update - Zustand will prevent re-render anyway, but this is more efficient
       return;
     }
-    
+
     const updatedMembers = members.map(m => m.id === id ? { ...m, status, lastSeen: Date.now() } : m);
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
-    
+
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
-    
+
     // Save to Firebase (lazy load to avoid circular dependency)
     if (updatedMember) {
       try {
@@ -544,7 +564,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             location: updatedMember.location ? {
               latitude: updatedMember.location.latitude,
               longitude: updatedMember.location.longitude,
-              timestamp: updatedMember.location.timestamp || Date.now(),
+              timestamp: updatedMember.location?.timestamp || Date.now() || Date.now(),
             } : undefined,
             lastSeen: updatedMember.lastSeen,
             relationship: updatedMember.relationship,
@@ -588,7 +608,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       }
     }
   },
-  
+
   clear: async () => {
     // ELITE: Cleanup Firebase subscription before clearing
     const { firebaseUnsubscribe } = get();
@@ -599,12 +619,12 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         logger.error('Error unsubscribing from Firebase family members:', error);
       }
     }
-    
+
     set({ ...initialState, firebaseUnsubscribe: null });
     await AsyncStorage.removeItem(STORAGE_KEY).catch((error) => {
       logger.error('Failed to clear AsyncStorage:', error);
     });
-    
+
     // Clear Firebase data (lazy load to avoid circular dependency)
     try {
       const deviceId = await getDeviceId();

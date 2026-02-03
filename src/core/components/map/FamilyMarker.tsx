@@ -9,34 +9,43 @@ interface FamilyMarkerProps {
   name: string;
   avatarUrl?: string;
   status: 'safe' | 'need-help' | 'critical' | 'unknown';
+  lastSeen?: number; // ELITE: Persistence support
 }
 
-export function FamilyMarker({ name, avatarUrl, status }: FamilyMarkerProps) {
+export function FamilyMarker({ name, avatarUrl, status, lastSeen }: FamilyMarkerProps) {
   const pulse = useSharedValue(1);
-  
+
+  // ELITE: Visual Aging Logic
+  const isStale = lastSeen ? (Date.now() - lastSeen) > (60 * 60 * 1000) : false; // Older than 1h
+  const displayStatus = isStale ? 'unknown' : status;
+
   const getStatusColor = () => {
+    if (isStale) return ['#94a3b8', '#64748b']; // Slate/Grey for stale
+
     switch (status) {
-      case 'safe':
-        return ['#10b981', '#059669'];
-      case 'need-help':
-        return ['#f59e0b', '#d97706'];
-      case 'critical':
-        return ['#dc2626', '#991b1b'];
-      default:
-        return ['#6b7280', '#4b5563'];
+    case 'safe':
+      return ['#10b981', '#059669'];
+    case 'need-help':
+      return ['#f59e0b', '#d97706'];
+    case 'critical':
+      return ['#dc2626', '#991b1b'];
+    default:
+      return ['#6b7280', '#4b5563'];
     }
   };
 
   const getStatusIcon = () => {
+    if (isStale) return 'time'; // Clock icon for stale data
+
     switch (status) {
-      case 'safe':
-        return 'checkmark-circle';
-      case 'need-help':
-        return 'alert-circle';
-      case 'critical':
-        return 'warning';
-      default:
-        return 'person';
+    case 'safe':
+      return 'checkmark-circle';
+    case 'need-help':
+      return 'alert-circle';
+    case 'critical':
+      return 'warning';
+    default:
+      return 'person';
     }
   };
 
@@ -46,7 +55,7 @@ export function FamilyMarker({ name, avatarUrl, status }: FamilyMarkerProps) {
       pulse.value = withRepeat(
         withTiming(1.2, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
         -1,
-        true
+        true,
       );
     }
   }, [status]);
@@ -76,7 +85,7 @@ export function FamilyMarker({ name, avatarUrl, status }: FamilyMarkerProps) {
           ]}
         />
       )}
-      
+
       {/* Main marker */}
       <LinearGradient
         colors={statusColors as [string, string]}
@@ -93,7 +102,7 @@ export function FamilyMarker({ name, avatarUrl, status }: FamilyMarkerProps) {
           </View>
         )}
       </LinearGradient>
-      
+
       {/* Status indicator */}
       <View style={[styles.statusBadge, { backgroundColor: statusColors[0] }]}>
         <Ionicons name={icon} size={10} color="#ffffff" />

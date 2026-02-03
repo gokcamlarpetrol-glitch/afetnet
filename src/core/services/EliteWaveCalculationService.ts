@@ -311,7 +311,7 @@ function getSiteAmplification(vs30: number | undefined, magnitude: number, dista
 function calculatePGA_BooreAtkinson(
   magnitude: number,
   hypocentralDistance: number,
-  siteAmplification: number
+  siteAmplification: number,
 ): number {
   // Constants for Boore & Atkinson (2008)
   const c1 = -0.505;
@@ -351,7 +351,7 @@ function calculatePGA_BooreAtkinson(
 function calculatePGA_CampbellBozorgnia(
   magnitude: number,
   hypocentralDistance: number,
-  siteAmplification: number
+  siteAmplification: number,
 ): number {
   // Constants for Campbell & Bozorgnia (2008)
   const c1 = -1.715;
@@ -386,7 +386,7 @@ function calculatePGA_CampbellBozorgnia(
 function calculatePGA_Elite(
   magnitude: number,
   hypocentralDistance: number,
-  siteAmplification: number
+  siteAmplification: number,
 ): { pga: number; uncertainty: number } {
   // CRITICAL: Ensure minimum distance to prevent division by zero
   const safeDistance = Math.max(1.0, hypocentralDistance);
@@ -498,7 +498,7 @@ function calculateArrivalTimeUncertainty(
   hypocentralDistance: number,
   depth: number,
   magnitude: number,
-  velocityUncertainty: number = 0.05 // 5% velocity uncertainty
+  velocityUncertainty: number = 0.05, // 5% velocity uncertainty
 ): number {
   // Uncertainty sources:
   // 1. Velocity model uncertainty (~5%)
@@ -539,7 +539,7 @@ function calculateConfidence_Elite(
   magnitude: number,
   hasUserLocation: boolean,
   hasVs30: boolean,
-  hasMultiStation: boolean
+  hasMultiStation: boolean,
 ): { confidence: number; quality: 'excellent' | 'good' | 'fair' | 'poor' } {
   let confidence = 100;
   
@@ -676,13 +676,13 @@ class EliteWaveCalculationService {
    */
   private calculateEpicentralDistance(
     epicenter: { latitude: number; longitude: number },
-    userLocation: UserLocation
+    userLocation: UserLocation,
   ): number {
     return calculateDistance(
       epicenter.latitude,
       epicenter.longitude,
       userLocation.latitude,
-      userLocation.longitude
+      userLocation.longitude,
     );
   }
 
@@ -691,7 +691,7 @@ class EliteWaveCalculationService {
    */
   private calculateHypocentralDistance(
     epicentralDistance: number,
-    depth: number
+    depth: number,
   ): number {
     // Hypocentral distance = sqrt(epicentralDistance² + depth²)
     return Math.sqrt(epicentralDistance * epicentralDistance + depth * depth);
@@ -703,7 +703,7 @@ class EliteWaveCalculationService {
   private getVelocitiesFrom3DModel(
     latitude: number,
     longitude: number,
-    depth: number
+    depth: number,
   ): { vp: number; vs: number; modelName: string } {
     const region = detectRegion(latitude, longitude);
     const model = VELOCITY_MODELS[region] || VELOCITY_MODELS.anatolian;
@@ -722,7 +722,7 @@ class EliteWaveCalculationService {
    */
   async calculateWaves(
     earthquake: EarthquakeSource,
-    userLocation?: UserLocation
+    userLocation?: UserLocation,
   ): Promise<EliteWaveCalculationResult | null> {
     try {
       // CRITICAL: Validate input
@@ -762,20 +762,20 @@ class EliteWaveCalculationService {
       // Calculate epicentral distance (surface distance)
       const epicentralDistance = this.calculateEpicentralDistance(
         { latitude: earthquake.latitude, longitude: earthquake.longitude },
-        location
+        location,
       );
 
       // Calculate hypocentral distance (3D distance)
       const hypocentralDistance = this.calculateHypocentralDistance(
         epicentralDistance,
-        earthquake.depth
+        earthquake.depth,
       );
 
       // Get velocities from 3D model
       const velocities = this.getVelocitiesFrom3DModel(
         earthquake.latitude,
         earthquake.longitude,
-        earthquake.depth
+        earthquake.depth,
       );
 
       // Calculate arrival times (using hypocentral distance for accuracy)
@@ -789,21 +789,21 @@ class EliteWaveCalculationService {
       const arrivalTimeUncertainty = calculateArrivalTimeUncertainty(
         hypocentralDistance,
         earthquake.depth,
-        earthquake.magnitude
+        earthquake.magnitude,
       );
 
       // Get site amplification
       const siteAmplification = getSiteAmplification(
         location.vs30,
         earthquake.magnitude,
-        epicentralDistance
+        epicentralDistance,
       );
 
       // Calculate PGA using elite models
       const pgaResult = calculatePGA_Elite(
         earthquake.magnitude,
         hypocentralDistance,
-        siteAmplification
+        siteAmplification,
       );
 
       // Calculate MMI from PGA
@@ -819,7 +819,7 @@ class EliteWaveCalculationService {
         earthquake.magnitude,
         true,
         !!location.vs30,
-        !!(earthquake.stations && earthquake.stations.length > 0)
+        !!(earthquake.stations && earthquake.stations.length > 0),
       );
 
       // Determine calculation method
@@ -899,7 +899,7 @@ class EliteWaveCalculationService {
    */
   async getTimeUntilSWave(
     earthquake: EarthquakeSource,
-    userLocation?: UserLocation
+    userLocation?: UserLocation,
   ): Promise<number | null> {
     const calculation = await this.calculateWaves(earthquake, userLocation);
     if (!calculation) {
@@ -921,7 +921,7 @@ class EliteWaveCalculationService {
   async isInDangerZone(
     earthquake: EarthquakeSource,
     userLocation?: UserLocation,
-    intensityThreshold: number = 5.0 // MMI 5.0 (moderate shaking)
+    intensityThreshold: number = 5.0, // MMI 5.0 (moderate shaking)
   ): Promise<boolean> {
     const calculation = await this.calculateWaves(earthquake, userLocation);
     if (!calculation) {

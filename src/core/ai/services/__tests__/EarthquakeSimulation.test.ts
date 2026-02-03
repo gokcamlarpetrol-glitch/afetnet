@@ -30,7 +30,7 @@ describe('EarthquakeAnalysisService - 5.0+ Magnitude Tests', () => {
 
     const analysis = await earthquakeAnalysisService.analyzeEarthquake(
       earthquake,
-      userLocation
+      userLocation,
     );
 
     // 5.0+ depremlerde doğrulama yapılır ama test ortamında API'ler çalışmayabilir
@@ -75,7 +75,7 @@ describe('EarthquakeAnalysisService - 5.0+ Magnitude Tests', () => {
 
     const analysis = await earthquakeAnalysisService.analyzeEarthquake(
       earthquake,
-      userLocation
+      userLocation,
     );
 
     if (analysis) {
@@ -114,7 +114,7 @@ describe('EarthquakeAnalysisService - 5.0+ Magnitude Tests', () => {
 
     const analysis = await earthquakeAnalysisService.analyzeEarthquake(
       earthquake,
-      userLocation
+      userLocation,
     );
 
     // 4.5 için doğrulama yapılmaz, her zaman sonuç dönmeli

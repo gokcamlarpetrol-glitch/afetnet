@@ -16,7 +16,7 @@ export async function isConnected(): Promise<boolean> {
     const state = await NetInfo.fetch();
     return state.isConnected ?? false;
   } catch (error) {
-      logger.error('Error checking connection:', error);
+    logger.error('Error checking connection:', error);
     return false;
   }
 }
@@ -43,7 +43,7 @@ export async function waitForConnection(timeoutMs: number = 5000): Promise<boole
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelay: number = 1000
+  initialDelay: number = 1000,
 ): Promise<T> {
   let lastError: Error | null = null;
 

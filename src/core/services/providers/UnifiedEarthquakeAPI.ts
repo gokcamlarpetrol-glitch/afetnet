@@ -6,9 +6,11 @@
  * Source: https://github.com/orhanayd/kandilli-rasathanesi-api
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import { createLogger } from '../../utils/logger';
 import { Earthquake } from '../../stores/earthquakeStore';
 import { parseAFADDate } from '../../utils/timeUtils';
+import { safeLowerCase } from '../../utils/safeString';
 
 const logger = createLogger('UnifiedEarthquakeAPI');
 
@@ -44,9 +46,11 @@ export class UnifiedEarthquakeAPI {
   name = 'Unified-API';
   private readonly baseUrl = 'https://api.orhanaydogdu.com.tr/deprem';
   private readonly timeout = 30000; // 30 seconds
-  
+
   // ELITE: Smart endpoint selection - avoid /latest if it's consistently failing
-  private useLatestEndpoint = true;
+  // CHANGED: Defaulting to FALSE because /latest is recently unreliable (404)
+  // The user explicitly requested to use /search directly.
+  private useLatestEndpoint = false;
   private latestEndpointFailures = 0;
   private readonly MAX_LATEST_FAILURES = 3;
 
@@ -58,19 +62,19 @@ export class UnifiedEarthquakeAPI {
    */
   async fetchRecent(): Promise<Earthquake[]> {
     try {
-      // ELITE: Skip /latest if it failed multiple times, go directly to /search
+      // ELITE: Skip /latest if disabled or failed multiple times, go directly to /search
       if (!this.useLatestEndpoint || this.latestEndpointFailures >= this.MAX_LATEST_FAILURES) {
-        if (__DEV__ && this.latestEndpointFailures >= this.MAX_LATEST_FAILURES) {
-          logger.debug(`ℹ️ Unified API /latest disabled after ${this.latestEndpointFailures} failures, using /search directly`);
+        if (__DEV__) {
+          logger.debug(`ℹ️ Unified API /latest disabled (or failed ${this.latestEndpointFailures}/${this.MAX_LATEST_FAILURES}), using /search directly`);
         }
         return await this.fetchAFADOnly();
       }
-      
+
       // CRITICAL: Use /data/latest endpoint - combines AFAD + Kandilli in one call
       // This is the fastest way to get data from both sources
       // API Documentation: https://github.com/orhanayd/kandilli-rasathanesi-api#-api-endpoints
       const url = `${this.baseUrl}/data/latest`;
-      
+
       if (__DEV__) {
         logger.debug(`📡 Unified API çağrılıyor (latest): ${url}`);
       }
@@ -94,7 +98,7 @@ export class UnifiedEarthquakeAPI {
       if (!response.ok) {
         // ELITE: Track /latest failures - if it fails too many times, disable it
         this.latestEndpointFailures++;
-        
+
         // ELITE: 404 is expected - /latest endpoint may not exist, fallback to /search
         // Only log at debug level to reduce noise
         if (__DEV__) {
@@ -106,12 +110,12 @@ export class UnifiedEarthquakeAPI {
         }
         return await this.fetchAFADOnly();
       }
-      
+
       // ELITE: Success - reset failure counter
       this.latestEndpointFailures = 0;
 
       const data: UnifiedAPIResponse = await response.json();
-      
+
       // CRITICAL: Check status field - API returns status: true/false
       if (!data.status || data.httpStatus !== 200) {
         if (__DEV__) {
@@ -119,7 +123,7 @@ export class UnifiedEarthquakeAPI {
         }
         return await this.fetchAFADOnly();
       }
-      
+
       if (!Array.isArray(data.result)) {
         if (__DEV__) {
           logger.warn('⚠️ Unified API: result is not an array');
@@ -138,10 +142,10 @@ export class UnifiedEarthquakeAPI {
           // Parse coordinates (API returns [lon, lat])
           const longitude = item.geojson.coordinates[0];
           const latitude = item.geojson.coordinates[1];
-          
+
           // Validate coordinates (Turkey bounds)
           if (isNaN(latitude) || latitude < 35 || latitude > 43 ||
-              isNaN(longitude) || longitude < 25 || longitude > 45) {
+            isNaN(longitude) || longitude < 25 || longitude > 45) {
             if (__DEV__ && i < 5) {
               logger.debug(`⚠️ Unified API deprem ${i + 1}: Türkiye sınırları dışında`);
             }
@@ -184,9 +188,9 @@ export class UnifiedEarthquakeAPI {
           }
 
           // Parse location
-          const location = item.title || 
-                          item.location_properties?.closestCity?.name || 
-                          'Türkiye';
+          const location = item.title ||
+            item.location_properties?.closestCity?.name ||
+            'Türkiye';
 
           if (!location || location.trim().length === 0) {
             if (__DEV__ && i < 5) {
@@ -217,9 +221,9 @@ export class UnifiedEarthquakeAPI {
           if (__DEV__ && earthquakes.length <= 3) {
             logger.debug(`✅ Unified API deprem ${earthquakes.length} parse edildi: ${location} - ${magnitude} ML (${source})`);
           }
-        } catch (parseError: any) {
+        } catch (parseError: unknown) {
           if (__DEV__ && i < 5) {
-            logger.warn(`⚠️ Unified API deprem parse hatası (${i + 1}/${data.result.length}):`, parseError?.message);
+            logger.warn(`⚠️ Unified API deprem parse hatası (${i + 1}/${data.result.length}):`, getErrorMessage(parseError));
           }
           continue;
         }
@@ -232,28 +236,28 @@ export class UnifiedEarthquakeAPI {
         logger.info(`✅ Unified API: ${earthquakes.length} deprem verisi alındı (${data.result.length} parse edildi)`);
         if (earthquakes.length > 0) {
           const latest = earthquakes[0];
-          const latestTime = new Date(latest.time).toLocaleString('tr-TR', { 
-            timeZone: 'Europe/Istanbul', 
+          const latestTime = new Date(latest.time).toLocaleString('tr-TR', {
+            timeZone: 'Europe/Istanbul',
             hour12: false,
             year: 'numeric',
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
-            second: '2-digit'
+            second: '2-digit',
           });
           logger.info(`🔝 Unified API en son deprem: ${latest.location} - ${latest.magnitude} ML (${latest.source}) - ${latestTime}`);
         }
       }
 
       return earthquakes.slice(0, 100); // Limit to 100
-    } catch (error: any) {
-      const errorType = error?.name || 'Unknown';
-      const errorMessage = error?.message || String(error);
+    } catch (error: unknown) {
+      const errorType = error instanceof Error ? error.name : 'Unknown';
+      const errorMessage = error instanceof Error ? getErrorMessage(error) : String(error);
       const isAborted = errorType === 'AbortError' || errorMessage.includes('aborted');
-      const isNetworkError = errorMessage.includes('Network request failed') || 
-                            errorMessage.includes('network') ||
-                            errorType === 'TypeError';
+      const isNetworkError = errorMessage.includes('Network request failed') ||
+        errorMessage.includes('network') ||
+        errorType === 'TypeError';
 
       if (__DEV__) {
         if (isAborted) {
@@ -276,7 +280,7 @@ export class UnifiedEarthquakeAPI {
     try {
       // Use POST /deprem/data/search endpoint - more reliable according to docs
       const url = `${this.baseUrl}/data/search`;
-      
+
       if (__DEV__) {
         logger.debug(`📡 Unified API (AFAD via search) çağrılıyor: ${url}`);
       }
@@ -319,15 +323,16 @@ export class UnifiedEarthquakeAPI {
       }
 
       const data: UnifiedAPIResponse = await response.json();
-      
+
       if (!data.status || data.httpStatus !== 200 || !Array.isArray(data.result)) {
         return [];
       }
 
       return this.parseAPIResponse(data.result, 'AFAD');
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (__DEV__) {
-        logger.debug('Unified API (AFAD) fetch error:', error?.message || String(error));
+        const errMsg = error instanceof Error ? getErrorMessage(error) : String(error);
+        logger.debug('Unified API (AFAD) fetch error:', errMsg);
       }
       return [];
     }
@@ -341,7 +346,7 @@ export class UnifiedEarthquakeAPI {
     try {
       // Use POST /deprem/data/search endpoint - more reliable according to docs
       const url = `${this.baseUrl}/data/search`;
-      
+
       if (__DEV__) {
         logger.debug(`📡 Unified API (Kandilli via search) çağrılıyor: ${url}`);
       }
@@ -384,15 +389,16 @@ export class UnifiedEarthquakeAPI {
       }
 
       const data: UnifiedAPIResponse = await response.json();
-      
+
       if (!data.status || data.httpStatus !== 200 || !Array.isArray(data.result)) {
         return [];
       }
 
       return this.parseAPIResponse(data.result, 'KANDILLI');
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (__DEV__) {
-        logger.debug('Unified API (Kandilli) fetch error:', error?.message || String(error));
+        const errMsg = error instanceof Error ? getErrorMessage(error) : String(error);
+        logger.debug('Unified API (Kandilli) fetch error:', errMsg);
       }
       return [];
     }
@@ -403,7 +409,7 @@ export class UnifiedEarthquakeAPI {
    */
   private parseAPIResponse(
     items: UnifiedAPIResponse['result'],
-    source: 'AFAD' | 'KANDILLI'
+    source: 'AFAD' | 'KANDILLI',
   ): Earthquake[] {
     const earthquakes: Earthquake[] = [];
     const now = Date.now();
@@ -414,9 +420,9 @@ export class UnifiedEarthquakeAPI {
       try {
         const longitude = item.geojson.coordinates[0];
         const latitude = item.geojson.coordinates[1];
-        
+
         if (isNaN(latitude) || latitude < 35 || latitude > 43 ||
-            isNaN(longitude) || longitude < 25 || longitude > 45) {
+          isNaN(longitude) || longitude < 25 || longitude > 45) {
           continue;
         }
 
@@ -434,15 +440,15 @@ export class UnifiedEarthquakeAPI {
           continue;
         }
 
-        const location = item.title || 
-                        item.location_properties?.closestCity?.name || 
-                        'Türkiye';
+        const location = item.title ||
+          item.location_properties?.closestCity?.name ||
+          'Türkiye';
 
         if (!location || location.trim().length === 0) {
           continue;
         }
 
-        const id = `unified-${source.toLowerCase()}-${item.earthquake_id || `${time}-${Math.round(latitude * 1000)}-${Math.round(longitude * 1000)}`}`;
+        const id = `unified-${safeLowerCase(source)}-${item.earthquake_id || `${time}-${Math.round(latitude * 1000)}-${Math.round(longitude * 1000)}`}`;
 
         earthquakes.push({
           id,

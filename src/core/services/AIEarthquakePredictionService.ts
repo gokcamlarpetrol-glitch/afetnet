@@ -6,7 +6,7 @@
 
 import { createLogger } from '../utils/logger';
 import { openAIService } from '../ai/services/OpenAIService';
-import { ensembleDetectionService } from './EnsembleDetectionService';
+import { ensembleDetectionService, EnsembleResult } from './EnsembleDetectionService';
 import { SensorReading } from './EnsembleDetectionService';
 
 const logger = createLogger('AIEarthquakePredictionService');
@@ -34,6 +34,15 @@ interface HistoricalPattern {
   magnitudeTrend: number[];
 }
 
+// ELITE: Type-safe earthquake data interface
+interface EarthquakeData {
+  time: number;
+  magnitude: number;
+  latitude?: number;
+  longitude?: number;
+  [key: string]: unknown;
+}
+
 class AIEarthquakePredictionService {
   private isInitialized = false;
   private historicalPatterns: Map<string, HistoricalPattern> = new Map();
@@ -42,11 +51,11 @@ class AIEarthquakePredictionService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
-    
+
     try {
       await ensembleDetectionService.initialize();
       this.isInitialized = true;
-      
+
       if (__DEV__) {
         logger.info('AIEarthquakePredictionService initialized - Real-time AI prediction active');
       }
@@ -62,7 +71,7 @@ class AIEarthquakePredictionService {
   async predict(
     sensorReadings: SensorReading[],
     location?: { latitude: number; longitude: number },
-    recentEarthquakes?: any[]
+    recentEarthquakes?: EarthquakeData[],
   ): Promise<AIPredictionResult | null> {
     if (!this.isInitialized) {
       logger.warn('AIEarthquakePredictionService not initialized');
@@ -72,27 +81,27 @@ class AIEarthquakePredictionService {
     try {
       // Step 1: Ensemble detection
       const ensembleResult = ensembleDetectionService.detect(sensorReadings);
-      
+
       // Step 2: Historical pattern analysis
       const historicalFactor = location
         ? this.analyzeHistoricalPattern(location, recentEarthquakes)
         : 0.5;
-      
+
       // Step 3: Precursor signal analysis
       const precursorFactor = this.analyzePrecursorSignals(sensorReadings);
-      
+
       // Step 4: Seismic activity trend
       const activityFactor = this.analyzeSeismicActivityTrend(recentEarthquakes);
-      
+
       // Step 5: AI-powered prediction (if OpenAI configured)
-      let aiPrediction = null;
+      let aiPrediction: { probability: number; timeAdvance: number } | undefined;
       if (openAIService.isConfigured() && sensorReadings.length >= 100) {
         aiPrediction = await this.generateAIPrediction(
           ensembleResult,
           historicalFactor,
           precursorFactor,
           activityFactor,
-          location
+          location,
         );
       }
 
@@ -106,16 +115,16 @@ class AIEarthquakePredictionService {
 
       // Calculate final probability
       const probability = this.calculateProbability(factors, ensembleResult);
-      
+
       // Determine if earthquake will occur
       const willOccur = probability > 0.7 && ensembleResult.confidence > 75;
-      
+
       // Calculate time advance
       const timeAdvance = ensembleResult.timeAdvance || this.estimateTimeAdvance(probability, factors);
-      
+
       // Determine urgency
       const urgency = this.determineUrgency(probability, ensembleResult.estimatedMagnitude, timeAdvance);
-      
+
       // Get recommended action
       const recommendedAction = this.getRecommendedAction(urgency, ensembleResult.estimatedMagnitude, timeAdvance);
 
@@ -152,7 +161,7 @@ class AIEarthquakePredictionService {
    */
   private analyzeHistoricalPattern(
     location: { latitude: number; longitude: number },
-    recentEarthquakes?: any[]
+    recentEarthquakes?: EarthquakeData[],
   ): number {
     if (!recentEarthquakes || recentEarthquakes.length === 0) {
       return 0.5; // Neutral if no data
@@ -215,16 +224,16 @@ class AIEarthquakePredictionService {
     // Look for subtle precursor patterns
     const recentReadings = readings.slice(-500); // Last 5 seconds at 100Hz
     const magnitudes = recentReadings.map(r => r.magnitude);
-    
+
     // Check for gradual increase (precursor signal)
     const firstHalf = magnitudes.slice(0, Math.floor(magnitudes.length / 2));
     const secondHalf = magnitudes.slice(Math.floor(magnitudes.length / 2));
-    
+
     const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
-    
+
     const increase = secondAvg - firstAvg;
-    
+
     // Small gradual increase indicates precursor
     if (increase > 0.01 && increase < 0.1) {
       return 0.7; // High precursor signal
@@ -238,7 +247,7 @@ class AIEarthquakePredictionService {
   /**
    * Analyze seismic activity trend
    */
-  private analyzeSeismicActivityTrend(recentEarthquakes?: any[]): number {
+  private analyzeSeismicActivityTrend(recentEarthquakes?: EarthquakeData[]): number {
     if (!recentEarthquakes || recentEarthquakes.length < 3) {
       return 0.5; // Neutral
     }
@@ -263,12 +272,12 @@ class AIEarthquakePredictionService {
    * Generate AI-powered prediction using OpenAI
    */
   private async generateAIPrediction(
-    ensembleResult: any,
+    ensembleResult: EnsembleResult,
     historicalFactor: number,
     precursorFactor: number,
     activityFactor: number,
-    location?: { latitude: number; longitude: number }
-  ): Promise<{ probability: number; timeAdvance: number } | null> {
+    location?: { latitude: number; longitude: number },
+  ): Promise<{ probability: number; timeAdvance: number } | undefined> {
     try {
       const prompt = `Deprem tahmini analizi yap:
 
@@ -316,7 +325,7 @@ Sadece JSON döndür, başka metin ekleme.`;
       logger.error('AI prediction generation error:', error);
     }
 
-    return null;
+    return undefined;
   }
 
   /**
@@ -324,7 +333,7 @@ Sadece JSON döndür, başka metin ekleme.`;
    */
   private calculateProbability(
     factors: AIPredictionResult['factors'],
-    ensembleResult: any
+    ensembleResult: EnsembleResult,
   ): number {
     // Weighted combination
     const weights = {
@@ -348,7 +357,7 @@ Sadece JSON döndür, başka metin ekleme.`;
    */
   private estimateTimeAdvance(
     probability: number,
-    factors: AIPredictionResult['factors']
+    factors: AIPredictionResult['factors'],
   ): number {
     // Higher probability and stronger precursor signals = more advance time
     const baseAdvance = 10; // Base 10 seconds
@@ -364,7 +373,7 @@ Sadece JSON döndür, başka metin ekleme.`;
   private determineUrgency(
     probability: number,
     magnitude: number,
-    timeAdvance: number
+    timeAdvance: number,
   ): 'low' | 'medium' | 'high' | 'critical' {
     if (probability > 0.85 && magnitude >= 5.0) {
       return 'critical';
@@ -390,7 +399,7 @@ Sadece JSON döndür, başka metin ekleme.`;
   private getRecommendedAction(
     urgency: 'low' | 'medium' | 'high' | 'critical',
     magnitude: number,
-    timeAdvance: number
+    timeAdvance: number,
   ): string {
     if (urgency === 'critical') {
       return `🚨 KRİTİK! ${magnitude.toFixed(1)} büyüklüğünde deprem ${Math.round(timeAdvance)} saniye içinde olabilir! HEMEN güvenli yere geçin!`;
@@ -428,7 +437,7 @@ Sadece JSON döndür, başka metin ekleme.`;
     this.isInitialized = false;
     this.historicalPatterns.clear();
     this.recentPredictions = [];
-    
+
     if (__DEV__) {
       logger.info('AIEarthquakePredictionService stopped');
     }

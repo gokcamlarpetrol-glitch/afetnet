@@ -13,6 +13,15 @@ export const shadows = {
     elevation: 2,
   },
 
+  // Medium (Elevated cards) - alias for 'md'
+  medium: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+
   // Medium (Elevated cards)
   md: {
     shadowColor: '#000',
@@ -38,6 +47,15 @@ export const shadows = {
     shadowOpacity: 0.25,
     shadowRadius: 24,
     elevation: 12,
+  },
+
+  // Glow effect (Buttons, interactive elements)
+  glow: {
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 8,
   },
 
   // Colored shadows (Accent elements)

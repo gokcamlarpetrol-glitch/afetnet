@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { Pressable, Text, StyleSheet, ViewStyle, TextStyle, ActivityIndicator } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors, borderRadius, spacing, typography } from '../theme';
 
 interface ButtonProps {
@@ -45,8 +46,17 @@ export default function Button({
         style,
       ]}
     >
+      {variant === 'primary' && !disabled && !loading ? (
+        <LinearGradient
+          colors={(colors.gradients?.mesh || [colors.primary.main, colors.primary.dark]) as any}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+        />
+      ) : null}
+
       {loading ? (
-        <ActivityIndicator color={variant === 'outline' ? colors.brand.primary : colors.text.primary} />
+        <ActivityIndicator color={variant === 'outline' ? colors.brand.primary : (variant === 'primary' ? (colors.text as any).inverse : colors.text.primary)} />
       ) : (
         <Text style={[
           styles.text,
@@ -67,6 +77,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
+    overflow: 'hidden', // Needed for gradient
   },
 
   // Variants
@@ -116,7 +127,7 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   primaryText: {
-    color: colors.text.primary,
+    color: (colors.text as any).inverse, // Cream text on Navy button
   },
   secondaryText: {
     color: colors.text.primary,

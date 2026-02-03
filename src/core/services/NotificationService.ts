@@ -19,6 +19,7 @@ const logger = createLogger('NotificationService');
 /**
  * Module state management
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let NotificationsModule: any = null;
 let isModuleLoading = false;
 let moduleLoadPromise: Promise<any> | null = null;
@@ -52,10 +53,10 @@ async function isNativeBridgeReady(): Promise<boolean> {
     }
 
     // Step 4: Check for Expo modules specifically
-    const hasExpoModules = moduleKeys.some(key => 
-      key.includes('Expo') || 
+    const hasExpoModules = moduleKeys.some(key =>
+      key.includes('Expo') ||
       key.includes('Location') ||
-      key.includes('Camera')
+      key.includes('Camera'),
     );
 
     return hasExpoModules;
@@ -78,7 +79,7 @@ async function waitForNativeBridge(maxWaitMs: number = 10000): Promise<boolean> 
       // CRITICAL: Additional stabilization delay - native bridge needs time to fully initialize
       // This prevents NativeEventEmitter errors by ensuring all native modules are ready
       await new Promise(resolve => setTimeout(resolve, 500)); // Increased from 300ms to 500ms
-      
+
       // CRITICAL: Double-check after delay to ensure bridge is still ready
       if (await isNativeBridgeReady()) {
         if (__DEV__) {
@@ -147,6 +148,7 @@ async function loadNotificationsModule(): Promise<any> {
       // ELITE: Load module using dynamic import() - SAFER than require/eval
       // CRITICAL: Use dynamic import() to prevent NativeEventEmitter errors
       // Dynamic import() handles native module loading more gracefully
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let module: any = null;
       try {
         // CRITICAL: Use dynamic import() instead of require/eval
@@ -154,16 +156,16 @@ async function loadNotificationsModule(): Promise<any> {
         const moduleName = 'expo-notifications';
         const importedModule = await import(moduleName);
         module = importedModule.default || importedModule;
-        
+
         // CRITICAL: Additional validation - ensure module is fully loaded
         if (!module || typeof module !== 'object') {
           throw new Error('Module loaded but invalid structure');
         }
-        
+
         // CRITICAL: Wait a bit more to ensure native bridge is fully ready
         await new Promise(resolve => setTimeout(resolve, 200));
-        
-      } catch (importError: any) {
+
+      } catch (importError: unknown) {
         // ELITE: If dynamic import fails, try with longer delay (native bridge might need more time)
         if (loadAttempts < MAX_LOAD_ATTEMPTS) {
           await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_BASE * loadAttempts * 3));
@@ -186,7 +188,7 @@ async function loadNotificationsModule(): Promise<any> {
         'setNotificationHandler',
         'getPermissionsAsync',
         'requestPermissionsAsync',
-        'scheduleNotificationAsync'
+        'scheduleNotificationAsync',
       ];
 
       for (const method of requiredMethods) {
@@ -201,19 +203,19 @@ async function loadNotificationsModule(): Promise<any> {
       logger.info('✅ expo-notifications module loaded successfully');
       return NotificationsModule;
 
-    } catch (error: any) {
-      const errorMsg = error?.message || String(error) || '';
-      const errorStack = error?.stack || '';
-      
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+
       // CRITICAL: Check for NativeEventEmitter errors (most common)
-      const isNativeEventEmitterError = 
+      const isNativeEventEmitterError =
         errorMsg.includes('NativeEventEmitter') ||
         errorMsg.includes('requires a non-null argument') ||
         errorMsg.includes('null') ||
         errorMsg.includes('undefined') ||
-        errorStack.includes('NativeEventEmitter') ||
-        errorStack.includes('PushNotificationIOS');
-      
+        (errorStack && errorStack.includes('NativeEventEmitter')) ||
+        (errorStack && errorStack.includes('PushNotificationIOS'));
+
       if (isNativeEventEmitterError) {
         if (loadAttempts < MAX_LOAD_ATTEMPTS) {
           // ELITE: Log as debug in dev mode only - this is expected behavior
@@ -264,14 +266,16 @@ async function loadNotificationsModule(): Promise<any> {
 /**
  * Get notifications module (sync - returns cached or null)
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getNotificationsSync(): any {
   return NotificationsModule;
 }
 
 /**
  * Get notifications module (async - ensures loading)
+ * ELITE: Exported for use by other services
  */
-async function getNotificationsAsync(): Promise<any> {
+export async function getNotificationsAsync(): Promise<any> {
   return loadNotificationsModule();
 }
 
@@ -344,7 +348,7 @@ class NotificationService {
             // ELITE: Determine behavior based on notification priority
             const priority = notification.request?.content?.data?.priority || 'normal';
             const isCritical = priority === 'critical' || notification.request?.content?.data?.type === 'eew' || notification.request?.content?.data?.type === 'sos';
-            
+
             return {
               shouldShowAlert: true, // Always show alert
               shouldPlaySound: true, // Always play sound
@@ -354,7 +358,7 @@ class NotificationService {
             };
           },
         });
-        
+
         // ELITE: Set up notification response handler (when user taps notification)
         if (typeof Notifications.addNotificationResponseReceivedListener === 'function') {
           Notifications.addNotificationResponseReceivedListener((response) => {
@@ -363,7 +367,7 @@ class NotificationService {
             });
           });
         }
-        
+
         // ELITE: Check for notification that opened the app (cold start)
         if (typeof Notifications.getLastNotificationResponseAsync === 'function') {
           Notifications.getLastNotificationResponseAsync().then((response) => {
@@ -447,8 +451,8 @@ class NotificationService {
   async showEarthquakeNotification(magnitude: number, location: string, time?: Date, isEEW: boolean = false, timeAdvance?: number): Promise<void> {
     try {
       // ELITE: Validate inputs first - ensure 100% accuracy
-      if (typeof magnitude !== 'number' || isNaN(magnitude) || magnitude <= 0 || 
-          !location || typeof location !== 'string' || location.trim().length === 0) {
+      if (typeof magnitude !== 'number' || isNaN(magnitude) || magnitude <= 0 ||
+        !location || typeof location !== 'string' || location.trim().length === 0) {
         if (__DEV__) {
           logger.debug('Invalid earthquake notification parameters');
         }
@@ -464,9 +468,9 @@ class NotificationService {
           location,
           isEEW,
           timeAdvance,
-          time?.getTime() || Date.now()
+          time?.getTime() || Date.now(),
         );
-        
+
         if (__DEV__) {
           logger.info(`✅ ELITE Magnitude-based notification sent: ${magnitude.toFixed(1)}M - ${location}`);
         }
@@ -483,7 +487,7 @@ class NotificationService {
         location,
         time,
         isEEW,
-        timeAdvance
+        timeAdvance,
       );
 
       // ELITE: Try to load notifications module with fallback
@@ -493,7 +497,7 @@ class NotificationService {
         try {
           Notifications = await Promise.race([
             getNotificationsAsync(),
-            new Promise<any>((resolve) => setTimeout(() => resolve(null), 1000)) // 1 second timeout
+            new Promise<any>((resolve) => setTimeout(() => resolve(null), 1000)), // 1 second timeout
           ]);
         } catch (error) {
           if (__DEV__) {
@@ -527,7 +531,7 @@ class NotificationService {
       if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
         try {
           const channelId = formatted.priority === 'critical' ? 'critical-alerts' : formatted.priority === 'high' ? 'high-priority' : 'normal-priority';
-          
+
           await Notifications.scheduleNotificationAsync({
             content: {
               title: formatted.title,
@@ -565,7 +569,7 @@ class NotificationService {
       if (__DEV__) {
         logger.info(`📢 Formatted earthquake notification (fallback): ${formatted.title} - ${formatted.body}`);
       }
-      
+
       // ELITE: Fallback - trigger haptic feedback even without native notifications
       try {
         const Haptics = await import('expo-haptics');
@@ -669,12 +673,12 @@ class NotificationService {
    * Show news notification (professional format)
    * Uses NotificationFormatterService for professional formatting
    */
-  async showNewsNotification(data: { 
-    title: string; 
-    summary: string; 
-    source: string; 
-    url?: string; 
-    articleId?: string 
+  async showNewsNotification(data: {
+    title: string;
+    summary: string;
+    source: string;
+    url?: string;
+    articleId?: string
   }): Promise<void> {
     try {
       // ELITE: Use NotificationFormatterService for professional formatting
@@ -682,7 +686,7 @@ class NotificationService {
       const formatted = notificationFormatterService.formatNewsNotification(
         data.title,
         data.summary,
-        data.source
+        data.source,
       );
 
       // ELITE: Use async getter to ensure module is loaded
@@ -700,7 +704,7 @@ class NotificationService {
       }
 
       if (!data.title || typeof data.title !== 'string' || data.title.trim().length === 0 ||
-          !data.summary || typeof data.summary !== 'string' || data.summary.trim().length === 0) {
+        !data.summary || typeof data.summary !== 'string' || data.summary.trim().length === 0) {
         if (__DEV__) {
           logger.debug('Invalid news notification title or summary');
         }
@@ -732,9 +736,9 @@ class NotificationService {
           subtitle: data.source, // iOS subtitle
           sound: formatted.sound || 'chime',
           priority: formatted.priority === 'high' ? 'high' : 'default',
-          data: { 
+          data: {
             ...formatted.data,
-            type: 'news', 
+            type: 'news',
             source: data.source || 'Unknown',
             url: data.url,
             articleId: data.articleId,
@@ -856,8 +860,8 @@ class NotificationService {
    * Show family location update notification
    */
   async showFamilyLocationUpdateNotification(
-    memberName: string, 
-    location: { latitude: number; longitude: number }
+    memberName: string,
+    location: { latitude: number; longitude: number },
   ): Promise<void> {
     try {
       // ELITE: Use async getter to ensure module is loaded
@@ -868,9 +872,9 @@ class NotificationService {
 
       // ELITE: Validate inputs
       if (!memberName || typeof memberName !== 'string' || memberName.trim().length === 0 ||
-          !location || typeof location !== 'object' ||
-          typeof location.latitude !== 'number' || isNaN(location.latitude) ||
-          typeof location.longitude !== 'number' || isNaN(location.longitude)) {
+        !location || typeof location !== 'object' ||
+        typeof location.latitude !== 'number' || isNaN(location.latitude) ||
+        typeof location.longitude !== 'number' || isNaN(location.longitude)) {
         if (__DEV__) {
           logger.debug('Invalid family location notification parameters');
         }
@@ -915,7 +919,7 @@ class NotificationService {
     messageId: string,
     userId: string,
     priority: 'critical' | 'high' | 'normal' = 'normal',
-    isSOS: boolean = false
+    isSOS: boolean = false,
   ): Promise<void> {
     try {
       // ELITE: Use NotificationFormatterService for professional formatting
@@ -924,7 +928,7 @@ class NotificationService {
         senderName,
         messageContent,
         isSOS,
-        priority === 'critical'
+        priority === 'critical',
       );
 
       const Notifications = await getNotificationsAsync();
@@ -1056,6 +1060,7 @@ class NotificationService {
    * ELITE: Handle notification tap (when user taps on notification)
    * Navigates to appropriate screen based on notification type
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleNotificationTap(response: any): Promise<void> {
     try {
       const data = response?.notification?.request?.content?.data;
@@ -1064,10 +1069,10 @@ class NotificationService {
       }
 
       const notificationType = data.type;
-      
+
       // ELITE: Dynamic import to prevent circular dependencies
       const { Linking } = await import('react-native');
-      
+
       switch (notificationType) {
         case 'earthquake':
         case 'turkey_earthquake_detection':
@@ -1085,7 +1090,7 @@ class NotificationService {
             });
           }
           break;
-          
+
         case 'message':
           // Navigate to conversation
           if (data.userId) {
@@ -1099,7 +1104,7 @@ class NotificationService {
             });
           }
           break;
-          
+
         case 'news':
           // Navigate to news detail
           if (data.articleId) {
@@ -1115,7 +1120,7 @@ class NotificationService {
             });
           }
           break;
-          
+
         case 'sos':
           // Navigate to SOS screen or family screen
           Linking.openURL('afetnet://sos').catch(() => {
@@ -1126,7 +1131,7 @@ class NotificationService {
             });
           });
           break;
-          
+
         case 'family_location':
           // Navigate to family screen
           Linking.openURL('afetnet://family').catch(() => {
@@ -1135,7 +1140,7 @@ class NotificationService {
             }
           });
           break;
-          
+
         default:
           // Default: Navigate to home
           Linking.openURL('afetnet://home').catch(() => {
@@ -1159,13 +1164,13 @@ class NotificationService {
       if (!Notifications || typeof Notifications.cancelAllScheduledNotificationsAsync !== 'function') {
         return;
       }
-      
+
       await Notifications.cancelAllScheduledNotificationsAsync();
-      
+
       if (typeof Notifications.dismissAllNotificationsAsync === 'function') {
         await Notifications.dismissAllNotificationsAsync();
       }
-      
+
       if (__DEV__) {
         logger.info('✅ All notifications cancelled');
       }
@@ -1183,17 +1188,75 @@ class NotificationService {
       if (!Notifications || typeof Notifications.getAllScheduledNotificationsAsync !== 'function') {
         return [];
       }
-      
+
       const notifications = await Notifications.getAllScheduledNotificationsAsync();
-      
+
       if (__DEV__) {
         logger.info(`Found ${notifications.length} scheduled notifications`);
       }
-      
+
       return notifications;
     } catch (error) {
       logger.error('Failed to get scheduled notifications:', error);
       return [];
+    }
+  }
+
+  /**
+   * ELITE: Show critical notification with maximum priority
+   * Used for life-saving alerts like on-device EEW
+   */
+  async showCriticalNotification(
+    title: string,
+    body: string,
+    options: { sound?: string; vibration?: number[]; critical?: boolean } = {},
+  ): Promise<void> {
+    try {
+      const Notifications = await getNotificationsAsync();
+      if (!Notifications) return;
+
+      // Ensure critical channel exists (Android)
+      if (Platform.OS === 'android') {
+        try {
+          await Notifications.setNotificationChannelAsync('critical-alerts', {
+            name: 'Critical Alerts',
+            importance: Notifications.AndroidImportance?.MAX || 5,
+            vibrationPattern: options.vibration || [0, 500, 200, 500],
+            lightColor: '#FF0000',
+            sound: options.sound || 'siren',
+            enableVibrate: true,
+            bypassDnd: true,
+          });
+        } catch (e) {
+          // ELITE: Channel setup failure is non-critical, notification will still work
+        }
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: options.sound || 'siren',
+          priority: 'max',
+          data: { type: 'critical' },
+          badge: 1,
+          sticky: true,
+        },
+        trigger: null,
+        ...(Platform.OS === 'android' && {
+          android: {
+            channelId: 'critical-alerts',
+            importance: Notifications.AndroidImportance?.MAX || 5,
+            priority: 'high',
+            sound: options.sound || 'siren',
+            vibrationPattern: options.vibration || [0, 500, 200, 500],
+          },
+        }),
+      });
+
+      if (__DEV__) logger.info(`🚨 CRITICAL NOTIFICATION: ${title}`);
+    } catch (error) {
+      logger.error('Critical notification failed:', error);
     }
   }
 }

@@ -12,7 +12,7 @@ export function useMesh() {
   const isConnected = useMeshStore(state => state.isConnected);
 
   const sendMessage = async (message: string, targetId?: string) => {
-    return bleMeshService.sendMessage(message, targetId);
+    return bleMeshService.sendMessage(message, targetId ?? '*'); // ELITE: Default to broadcast if no target
   };
 
   return {

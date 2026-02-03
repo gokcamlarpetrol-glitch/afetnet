@@ -10,6 +10,11 @@ import { useUserStatusStore } from '../stores/userStatusStore';
 
 const logger = createLogger('EnkazDetection');
 
+// ELITE: Type-safe sensor subscription interface
+interface SensorSubscription {
+  remove: () => void;
+}
+
 export type UserStatus = 'safe' | 'needs_help' | 'trapped' | 'sos' | 'offline';
 
 interface MotionData {
@@ -26,9 +31,9 @@ class EnkazDetectionService {
   private suspectedFall = false;
   private lastFallLogTime: number = 0; // ELITE: Debounce fall detection logs
   private readonly FALL_LOG_DEBOUNCE_MS = 5000; // 5 seconds between fall logs
-  
-  private accelerometerSubscription: any = null;
-  private gyroscopeSubscription: any = null;
+
+  private accelerometerSubscription: SensorSubscription | null = null;
+  private gyroscopeSubscription: SensorSubscription | null = null;
   private statusCheckInterval: NodeJS.Timeout | null = null;
 
   private readonly FALL_THRESHOLD = 2.5; // G-force threshold for fall detection
@@ -107,7 +112,7 @@ class EnkazDetectionService {
     if (magnitude > this.FALL_THRESHOLD) {
       this.suspectedFall = true;
       this.immobileStartTime = Date.now();
-      
+
       // ELITE: Debounce fall detection logs to prevent spam
       const now = Date.now();
       if (now - this.lastFallLogTime > this.FALL_LOG_DEBOUNCE_MS) {
@@ -145,13 +150,13 @@ class EnkazDetectionService {
     if (immobileDuration > this.IMMOBILE_DURATION_TRAPPED && this.suspectedFall) {
       newStatus = 'trapped';
       logger.warn('User appears to be trapped under debris!');
-      
+
       // Auto-trigger SOS if trapped for too long
       this.autoTriggerSOS();
     } else if (immobileDuration > this.IMMOBILE_DURATION_WARNING) {
       newStatus = 'needs_help';
       logger.warn('User appears immobile, may need help');
-      
+
       // Send notification to user
       this.sendWarningNotification();
     } else {
@@ -187,29 +192,29 @@ class EnkazDetectionService {
 
   private async autoTriggerSOS() {
     const store = useUserStatusStore.getState();
-    
+
     if (!store.sosTriggered) {
       store.setSosTriggered(true);
-      
+
       // ELITE: Use SOS Service for comprehensive SOS handling
       try {
         const { getSOSService } = await import('./SOSService');
         const sosService = getSOSService();
-        
+
         // ELITE: Auto-trigger SOS with current location
         await sosService.autoTriggerFromEnkazDetection(this.lastLocation ? {
           latitude: this.lastLocation.latitude,
           longitude: this.lastLocation.longitude,
           accuracy: 10, // Default accuracy
         } : null);
-        
+
         logger.warn('✅ ELITE SOS: Auto-triggered from enkaz detection!');
       } catch (error) {
         logger.error('Failed to auto-trigger SOS:', error);
         // Fallback to basic BLE SOS
         try {
           const { bleMeshService } = await import('./BLEMeshService');
-          await bleMeshService.sendSOS();
+          await bleMeshService.sendSOS('ENKAZ_AUTO_SOS');
         } catch (fallbackError) {
           logger.error('Fallback SOS also failed:', fallbackError);
         }
@@ -221,7 +226,7 @@ class EnkazDetectionService {
     try {
       // Import multi-channel alert service for critical warnings
       const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-      
+
       // Send warning alert to user
       await multiChannelAlertService.sendAlert({
         title: '⚠️ Durum Kontrolü',
@@ -231,7 +236,7 @@ class EnkazDetectionService {
         vibrationPattern: [0, 500, 200, 500], // Warning pattern
         ttsText: 'Durum kontrolü. Hareketsiz görünüyorsunuz. İyi misiniz?',
       });
-      
+
       logger.info('Warning notification sent');
     } catch (error) {
       logger.error('Warning notification error:', error);

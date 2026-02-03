@@ -1,28 +1,29 @@
 /**
- * PREMIUM HOOK
- * Access premium status and offerings
+ * PREMIUM HOOK - ELITE VERSION
+ * All features unlocked - Paid App Model
  */
 
 import { usePremiumStore } from '../stores/premiumStore';
-import { premiumService } from '../services/PremiumService';
 
 export function usePremium() {
   const isPremium = usePremiumStore(state => state.isPremium);
   const isLoading = usePremiumStore(state => state.isLoading);
 
-  const purchasePackage = async (packageId: string) => {
-    return premiumService.purchasePackage(packageId);
+  // ELITE: All features unlocked - no actual purchases needed
+  const purchasePackage = async (_packageId: string) => {
+    // No-op - app is paid, all features are unlocked
+    return true;
   };
 
   const restorePurchases = async () => {
-    return premiumService.restorePurchases();
+    // No-op - app is paid, all features are unlocked
+    return true;
   };
 
   return {
-    isPremium,
-    isLoading,
+    isPremium: true, // Always premium in paid app model
+    isLoading: false,
     purchasePackage,
     restorePurchases,
   };
 }
-

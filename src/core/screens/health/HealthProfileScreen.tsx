@@ -11,6 +11,7 @@
  * - Unique, special appearance
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -78,10 +79,20 @@ const CATEGORIES = [
   { id: 'emergency', title: 'Acil Durum Notları', icon: 'alert-circle', color: '#f59e0b' },
 ] as const;
 
-export default function HealthProfileScreen({ navigation }: any) {
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
+
+// ELITE: Type-safe navigation prop
+type HealthProfileNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface HealthProfileScreenProps {
+  navigation: HealthProfileNavigationProp;
+}
+
+export default function HealthProfileScreen({ navigation }: HealthProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { profile, updateProfile, loadProfile, isLoaded } = useHealthProfileStore();
-  
+
   const [formData, setFormData] = useState<HealthProfileFormData>({
     firstName: '',
     lastName: '',
@@ -100,7 +111,7 @@ export default function HealthProfileScreen({ navigation }: any) {
     emergencyContacts: [],
     notes: '',
   });
-  
+
   const [isSaving, setIsSaving] = useState(false);
   const [allergyInput, setAllergyInput] = useState('');
   const [conditionInput, setConditionInput] = useState('');
@@ -115,9 +126,9 @@ export default function HealthProfileScreen({ navigation }: any) {
         logger.debug('Failed to load health profile:', error);
       }
     };
-    
+
     if (!isLoaded) {
-    loadProfileData();
+      loadProfileData();
     }
   }, [loadProfile, isLoaded]);
 
@@ -156,13 +167,13 @@ export default function HealthProfileScreen({ navigation }: any) {
             emergencyContacts = profile.emergencyContacts;
           } else if (profile.emergencyContacts && typeof profile.emergencyContacts === 'object') {
             const contactsArray = Object.values(profile.emergencyContacts);
-            emergencyContacts = contactsArray.filter(c => 
-              c && typeof c === 'object' && 
-              ('id' in c || 'name' in c || 'phone' in c)
+            emergencyContacts = contactsArray.filter(c =>
+              c && typeof c === 'object' &&
+              ('id' in c || 'name' in c || 'phone' in c),
             ) as EmergencyContact[];
           }
-        } catch (parseError: any) {
-          logger.debug('Profile array parsing error (non-critical):', parseError?.message);
+        } catch (parseError: unknown) {
+          logger.debug('Profile array parsing error (non-critical):', getErrorMessage(parseError));
         }
 
         setFormData({
@@ -188,15 +199,15 @@ export default function HealthProfileScreen({ navigation }: any) {
           })),
           notes: profile.notes ? sanitizeString(String(profile.notes)) : '',
         });
-      } catch (error: any) {
-        logger.debug('Profile data parsing error (non-critical):', error?.message || String(error));
+      } catch (error: unknown) {
+        logger.debug('Profile data parsing error (non-critical):', getErrorMessage(error));
       }
     }
   }, [profile, isLoaded]);
 
   const validatePhoneNumber = useCallback((phone: string): boolean => {
     if (!phone || phone.trim().length === 0) return false;
-    const cleaned = phone.replace(/[\s\-\(\)]/g, '');
+    const cleaned = phone.replace(/[\s\-()]/g, '');
     return /^(\+90|0)?5\d{9}$/.test(cleaned) || /^\+\d{10,15}$/.test(cleaned);
   }, []);
 
@@ -310,7 +321,7 @@ export default function HealthProfileScreen({ navigation }: any) {
             haptics.impactLight();
           },
         },
-      ]
+      ],
     );
   }, []);
 
@@ -321,23 +332,23 @@ export default function HealthProfileScreen({ navigation }: any) {
       if (!c.name || !c.phone) return false;
       return validatePhoneNumber(c.phone);
     });
-    
+
     const invalidContacts = formData.emergencyContacts.filter(c => {
       if (!c.name || !c.phone) return true;
       return !validatePhoneNumber(c.phone);
     });
-    
+
     if (invalidContacts.length > 0) {
       Alert.alert(
         'Geçersiz Bilgiler',
         `Lütfen geçerli telefon numaraları girin:\n${invalidContacts.map(c => c.name || 'İsimsiz').join(', ')}`,
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
       return;
     }
 
     setIsSaving(true);
-    
+
     try {
       const profileUpdate: Partial<HealthProfile> = {
         firstName: sanitizeString(formData.firstName),
@@ -365,11 +376,11 @@ export default function HealthProfileScreen({ navigation }: any) {
         notes: sanitizeString(formData.notes),
         lastUpdated: Date.now(),
       };
-      
+
       await updateProfile(profileUpdate);
       Alert.alert('Başarılı', 'Sağlık profiliniz kaydedildi.', [{ text: 'Tamam' }]);
       logger.info('Health profile saved successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to save health profile:', error);
       Alert.alert(
         'Kayıt Hatası',
@@ -377,7 +388,7 @@ export default function HealthProfileScreen({ navigation }: any) {
         [
           { text: 'Tekrar Dene', onPress: handleSave },
           { text: 'Tamam', style: 'cancel' },
-        ]
+        ],
       );
     } finally {
       setIsSaving(false);
@@ -389,10 +400,10 @@ export default function HealthProfileScreen({ navigation }: any) {
 
     switch (category.id) {
       case 'personal':
-  return (
+        return (
           <Animated.View key={category.id} entering={FadeInDown.delay(delay)} style={styles.categoryContainer}>
             <View style={styles.categoryHeader}>
-      <LinearGradient
+              <LinearGradient
                 colors={[category.color, `${category.color}80`]}
                 style={styles.categoryIconGradient}
               >
@@ -400,7 +411,7 @@ export default function HealthProfileScreen({ navigation }: any) {
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
             </View>
-            
+
             <View style={styles.categoryContent}>
               <View style={styles.formRow}>
                 <Text style={styles.label}>Ad</Text>
@@ -413,7 +424,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                   maxLength={50}
                 />
               </View>
-              
+
               <View style={styles.formRow}>
                 <Text style={styles.label}>Soyad</Text>
                 <TextInput
@@ -425,7 +436,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                   maxLength={50}
                 />
               </View>
-              
+
               <View style={styles.formRow}>
                 <Text style={styles.label}>Doğum Tarihi</Text>
                 <TextInput
@@ -438,7 +449,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                   maxLength={10}
                 />
               </View>
-              
+
               <View style={styles.formRow}>
                 <Text style={styles.label}>Cinsiyet</Text>
                 <View style={styles.buttonGroup}>
@@ -449,9 +460,9 @@ export default function HealthProfileScreen({ navigation }: any) {
                         styles.button,
                         formData.gender === gender && styles.buttonActive,
                       ]}
-          onPress={() => {
+                      onPress={() => {
                         setFormData(prev => ({ ...prev, gender }));
-            haptics.impactLight();
+                        haptics.impactLight();
                       }}
                     >
                       {formData.gender === gender && (
@@ -474,7 +485,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                   ))}
                 </View>
               </View>
-              
+
               <View style={styles.formRow}>
                 <Text style={styles.label}>Boy ve Kilo</Text>
                 <View style={styles.row}>
@@ -518,21 +529,21 @@ export default function HealthProfileScreen({ navigation }: any) {
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
             </View>
-            
+
             <View style={styles.categoryContent}>
               <View style={styles.formRow}>
                 <Text style={styles.label}>Kan Grubu</Text>
-          <View style={styles.bloodTypeGrid}>
+                <View style={styles.bloodTypeGrid}>
                   {BLOOD_TYPES.map((type) => (
                     <Pressable
-                key={type}
-                style={[
-                  styles.bloodTypeButton,
+                      key={type}
+                      style={[
+                        styles.bloodTypeButton,
                         formData.bloodType === type && styles.bloodTypeButtonActive,
-                ]}
-                onPress={() => {
+                      ]}
+                      onPress={() => {
                         setFormData(prev => ({ ...prev, bloodType: type }));
-                  haptics.impactLight();
+                        haptics.impactLight();
                       }}
                     >
                       {formData.bloodType === type && (
@@ -543,18 +554,18 @@ export default function HealthProfileScreen({ navigation }: any) {
                           style={[StyleSheet.absoluteFill, { borderRadius: borderRadius.lg }]}
                         />
                       )}
-                <Text
-                  style={[
-                    styles.bloodTypeText,
+                      <Text
+                        style={[
+                          styles.bloodTypeText,
                           formData.bloodType === type && styles.bloodTypeTextActive,
-                  ]}
-                >
-                  {type}
-                </Text>
+                        ]}
+                      >
+                        {type}
+                      </Text>
                     </Pressable>
-            ))}
-          </View>
-        </View>
+                  ))}
+                </View>
+              </View>
 
               <View style={styles.formRow}>
                 <Text style={styles.label}>Alerjiler</Text>
@@ -574,10 +585,10 @@ export default function HealthProfileScreen({ navigation }: any) {
                   </View>
                 )}
                 <View style={styles.addRow}>
-          <TextInput
+                  <TextInput
                     style={styles.addInput}
-            placeholder="Örn: Polen, Fıstık, Penisilin"
-            placeholderTextColor={colors.text.tertiary}
+                    placeholder="Örn: Polen, Fıstık, Penisilin"
+                    placeholderTextColor={colors.text.tertiary}
                     value={allergyInput}
                     onChangeText={setAllergyInput}
                     onSubmitEditing={handleAddAllergy}
@@ -592,7 +603,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                     </LinearGradient>
                   </Pressable>
                 </View>
-        </View>
+              </View>
 
               <View style={styles.formRow}>
                 <Text style={styles.label}>Kronik Hastalıklar</Text>
@@ -612,10 +623,10 @@ export default function HealthProfileScreen({ navigation }: any) {
                   </View>
                 )}
                 <View style={styles.addRow}>
-          <TextInput
+                  <TextInput
                     style={styles.addInput}
-            placeholder="Örn: Diyabet, Astım, Hipertansiyon"
-            placeholderTextColor={colors.text.tertiary}
+                    placeholder="Örn: Diyabet, Astım, Hipertansiyon"
+                    placeholderTextColor={colors.text.tertiary}
                     value={conditionInput}
                     onChangeText={setConditionInput}
                     onSubmitEditing={handleAddCondition}
@@ -630,7 +641,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                     </LinearGradient>
                   </Pressable>
                 </View>
-        </View>
+              </View>
 
               <View style={styles.formRow}>
                 <Text style={styles.label}>Acil İlaçlar</Text>
@@ -650,10 +661,10 @@ export default function HealthProfileScreen({ navigation }: any) {
                   </View>
                 )}
                 <View style={styles.addRow}>
-          <TextInput
+                  <TextInput
                     style={styles.addInput}
-            placeholder="Örn: İnsülin, Ventolin, Aspirin"
-            placeholderTextColor={colors.text.tertiary}
+                    placeholder="Örn: İnsülin, Ventolin, Aspirin"
+                    placeholderTextColor={colors.text.tertiary}
                     value={medicationInput}
                     onChangeText={setMedicationInput}
                     onSubmitEditing={handleAddMedication}
@@ -668,14 +679,14 @@ export default function HealthProfileScreen({ navigation }: any) {
                     </LinearGradient>
                   </Pressable>
                 </View>
-        </View>
+              </View>
 
               <View style={styles.formRow}>
                 <Text style={styles.label}>Tıbbi Geçmiş</Text>
-            <TextInput
+                <TextInput
                   style={[styles.input, styles.textArea]}
                   placeholder="Ameliyatlar, kazalar, önemli tıbbi olaylar..."
-              placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor={colors.text.tertiary}
                   value={formData.medicalHistory}
                   onChangeText={(text) => setFormData(prev => ({ ...prev, medicalHistory: text }))}
                   multiline
@@ -699,14 +710,14 @@ export default function HealthProfileScreen({ navigation }: any) {
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
             </View>
-            
+
             <View style={styles.categoryContent}>
               <View style={styles.formRow}>
                 <Text style={styles.label}>Acil Durumda Yapılacaklar</Text>
-            <TextInput
+                <TextInput
                   style={[styles.input, styles.textArea]}
                   placeholder="Acil durumda yapılması gerekenler, özel talimatlar..."
-              placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor={colors.text.tertiary}
                   value={formData.notes}
                   onChangeText={(text) => setFormData(prev => ({ ...prev, notes: text }))}
                   multiline
@@ -714,7 +725,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                   maxLength={1000}
                 />
               </View>
-              
+
               <View style={styles.formRow}>
                 <Text style={styles.label}>Organ Bağışı Durumu</Text>
                 <View style={styles.buttonGroup}>
@@ -748,7 +759,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                       </Text>
                     </Pressable>
                   ))}
-          </View>
+                </View>
               </View>
             </View>
           </Animated.View>
@@ -774,7 +785,7 @@ export default function HealthProfileScreen({ navigation }: any) {
                 </LinearGradient>
               </Pressable>
             </View>
-            
+
             <View style={styles.categoryContent}>
               {formData.emergencyContacts.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -806,19 +817,19 @@ export default function HealthProfileScreen({ navigation }: any) {
                         <Ionicons name="trash-outline" size={20} color={((colors as any).danger?.main) || ((colors as any).emergency?.critical) || '#ef4444'} />
                       </Pressable>
                     </View>
-                    
+
                     <View style={styles.formRow}>
                       <Text style={styles.label}>İsim Soyisim</Text>
-            <TextInput
-              style={styles.input}
+                      <TextInput
+                        style={styles.input}
                         placeholder="Yakınının adı ve soyadı"
-              placeholderTextColor={colors.text.tertiary}
+                        placeholderTextColor={colors.text.tertiary}
                         value={contact.name}
                         onChangeText={(text) => handleUpdateEmergencyContact(contact.id, { name: text })}
                         maxLength={50}
                       />
                     </View>
-                    
+
                     <View style={styles.formRow}>
                       <Text style={styles.label}>Yakınlık Derecesi</Text>
                       <View style={styles.buttonGroup}>
@@ -853,27 +864,27 @@ export default function HealthProfileScreen({ navigation }: any) {
                           </Pressable>
                         ))}
                       </View>
-          </View>
+                    </View>
 
                     <View style={styles.formRow}>
                       <Text style={styles.label}>Telefon Numarası</Text>
-            <TextInput
-              style={styles.input}
+                      <TextInput
+                        style={styles.input}
                         placeholder="05XX XXX XX XX"
-              placeholderTextColor={colors.text.tertiary}
+                        placeholderTextColor={colors.text.tertiary}
                         value={contact.phone}
-              onChangeText={(text) => {
+                        onChangeText={(text) => {
                           const formatted = formatPhoneNumber(text);
                           handleUpdateEmergencyContact(contact.id, { phone: formatted });
-              }}
+                        }}
                         keyboardType="phone-pad"
-              maxLength={15}
-            />
-          </View>
+                        maxLength={15}
+                      />
+                    </View>
                   </Animated.View>
                 ))
               )}
-        </View>
+            </View>
           </Animated.View>
         );
 
@@ -890,7 +901,7 @@ export default function HealthProfileScreen({ navigation }: any) {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* ELITE: Premium gradient background */}
       <LinearGradient
         colors={['#000000', '#0a0e1a', '#0f172a', '#1a1f2e']}
@@ -923,11 +934,11 @@ export default function HealthProfileScreen({ navigation }: any) {
             <Ionicons name="arrow-back" size={22} color="#ffffff" />
           </LinearGradient>
         </Pressable>
-        
+
         <View style={styles.headerCenter}>
           <Text style={styles.headerSubtitle}>Acil durumlar için kritik bilgiler</Text>
         </View>
-        
+
         <View style={styles.headerRight} />
       </LinearGradient>
 
@@ -945,25 +956,25 @@ export default function HealthProfileScreen({ navigation }: any) {
         {/* ELITE: Premium Save Button */}
         <Animated.View entering={FadeInDown.delay(500)} style={styles.saveContainer}>
           <Pressable
-          style={styles.saveButton}
-          onPress={handleSave}
+            style={styles.saveButton}
+            onPress={handleSave}
             disabled={isSaving}
-        >
-          <LinearGradient
+          >
+            <LinearGradient
               colors={['#3b82f6', '#60a5fa', '#2563eb']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-            style={styles.saveButtonGradient}
-          >
+              style={styles.saveButtonGradient}
+            >
               {isSaving ? (
                 <ActivityIndicator color="#ffffff" />
               ) : (
                 <>
-            <Ionicons name="checkmark-circle" size={24} color="#ffffff" />
-            <Text style={styles.saveButtonText}>Kaydet</Text>
+                  <Ionicons name="checkmark-circle" size={24} color="#ffffff" />
+                  <Text style={styles.saveButtonText}>Kaydet</Text>
                 </>
               )}
-          </LinearGradient>
+            </LinearGradient>
           </Pressable>
         </Animated.View>
       </ScrollView>

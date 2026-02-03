@@ -19,8 +19,17 @@ import { useRescueStore, TrappedUser } from '../../stores/rescueStore';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { rescueBeaconService } from '../../services/RescueBeaconService';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
-export default function RescueTeamScreen({ navigation }: any) {
+// ELITE: Type-safe navigation prop
+type RescueTeamNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface RescueTeamScreenProps {
+  navigation: RescueTeamNavigationProp;
+}
+
+export default function RescueTeamScreen({ navigation }: RescueTeamScreenProps) {
   const { isRescueTeamMode, trappedUsers, toggleRescueTeamMode, clearTrappedUsers } =
     useRescueStore();
   const [refreshing, setRefreshing] = useState(false);
@@ -44,12 +53,12 @@ export default function RescueTeamScreen({ navigation }: any) {
   const handleRefresh = async () => {
     setRefreshing(true);
     rescueBeaconService.cleanupExpiredUsers();
-    
+
     // CRITICAL: Clear previous timeout if exists
     if (refreshTimeoutRef.current) {
       clearTimeout(refreshTimeoutRef.current);
     }
-    
+
     // CRITICAL: Store timeout ref for cleanup
     refreshTimeoutRef.current = setTimeout(() => {
       setRefreshing(false);
@@ -261,8 +270,8 @@ export default function RescueTeamScreen({ navigation }: any) {
                               user.battery > 50
                                 ? 'battery-full'
                                 : user.battery > 20
-                                ? 'battery-half'
-                                : 'battery-dead'
+                                  ? 'battery-half'
+                                  : 'battery-dead'
                             }
                             size={20}
                             color={

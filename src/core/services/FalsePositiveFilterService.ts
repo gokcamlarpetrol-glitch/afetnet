@@ -134,7 +134,7 @@ class FalsePositiveFilterService {
    */
   private classify(
     features: ReturnType<typeof this.extractFeatures>,
-    readings: SensorReading[]
+    readings: SensorReading[],
   ): FilterResult {
     // Rule 1: Noise detection
     if (features.meanMagnitude < this.NOISE_THRESHOLD) {

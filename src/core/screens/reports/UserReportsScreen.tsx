@@ -3,12 +3,15 @@
  * Community reporting system - "I felt a tremor" button, photo upload, citizen science
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { usePremiumStore } from '../../stores/premiumStore';
 import { bleMeshService } from '../../services/BLEMeshService';
@@ -17,6 +20,9 @@ import PremiumGate from '../../components/PremiumGate';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('UserReportsScreen');
+
+// ELITE: Typed navigation
+type UserReportsNavigationProp = StackNavigationProp<Record<string, object>>;
 
 interface UserReport {
   id: string;
@@ -45,7 +51,7 @@ const INTENSITY_DESCRIPTIONS = [
   { value: 10, label: 'X - Şiddetli', description: 'Çoğu bina yıkılır, köprüler çöker' },
 ];
 
-export default function UserReportsScreen({ navigation }: any) {
+export default function UserReportsScreen({ navigation }: { navigation: UserReportsNavigationProp }) {
   // CRITICAL: Read premium status from store (includes trial check)
   // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
   const isPremium = usePremiumStore((state) => state.isPremium);
@@ -81,11 +87,58 @@ export default function UserReportsScreen({ navigation }: any) {
   };
 
   const handlePickPhoto = async () => {
-    Alert.alert('Yakında', 'Fotoğraf özelliği yakında eklenecek');
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Fotoğraf seçmek için galeri izni vermelisiniz.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.5,
+      });
+
+      if (!result.canceled) {
+        setPhotoUri(result.assets[0].uri);
+      }
+    } catch (error: unknown) {
+      logger.error('Pick photo error:', error);
+      const errMsg = getErrorMessage(error);
+      if (errMsg.includes('Cannot find native module') || errMsg.includes('ExponentImagePicker')) {
+        Alert.alert('Güncelleme Gerekli', 'Kamera modülü yüklenmemiş. Lütfen uygulamayı yeniden derleyin (rebuild).');
+      } else {
+        Alert.alert('Hata', 'Fotoğraf seçilemedi');
+      }
+    }
   };
 
   const handleTakePhoto = async () => {
-    Alert.alert('Yakında', 'Fotoğraf özelliği yakında eklenecek');
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Fotoğraf çekmek için kamera izni vermelisiniz.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        quality: 0.5,
+      });
+
+      if (!result.canceled) {
+        setPhotoUri(result.assets[0].uri);
+      }
+    } catch (error: unknown) {
+      logger.error('Take photo error:', error);
+      const errMsg = getErrorMessage(error);
+      if (errMsg.includes('Cannot find native module') || errMsg.includes('ExponentImagePicker')) {
+        Alert.alert('Güncelleme Gerekli', 'Kamera modülü yüklenmemiş. Lütfen uygulamayı yeniden derleyin (rebuild).');
+      } else {
+        Alert.alert('Hata', 'Fotoğraf çekilemedi');
+      }
+    }
   };
 
   const handleSubmitReport = async () => {
@@ -104,7 +157,7 @@ export default function UserReportsScreen({ navigation }: any) {
 
     try {
       const deviceId = bleMeshService.getMyDeviceId() || 'unknown';
-      
+
       const report: UserReport = {
         id: `report_${Date.now()}_${deviceId}`,
         timestamp: Date.now(),
@@ -118,9 +171,9 @@ export default function UserReportsScreen({ navigation }: any) {
 
       // Broadcast via BLE mesh
       await bleMeshService.sendMessage(JSON.stringify({
-        type: 'user_report',
         ...report,
-      }));
+        type: 'user_report',
+      }), '*');
 
       // CRITICAL: Save to Firebase
       try {
@@ -153,7 +206,7 @@ export default function UserReportsScreen({ navigation }: any) {
             timestamp: report.timestamp,
             location: report.location,
             intensity: report.intensity,
-            type: report.type,
+            type: report.type as 'earthquake' | 'tremor',
             description: report.description,
             photoUri: report.photoUri,
           }).catch((error) => {
@@ -179,7 +232,7 @@ export default function UserReportsScreen({ navigation }: any) {
               setPhotoUri(null);
             },
           },
-        ]
+        ],
       );
 
       logger.info('User report submitted:', report);
@@ -195,7 +248,7 @@ export default function UserReportsScreen({ navigation }: any) {
     return (
       <PremiumGate
         featureName="Kullanıcı Raporları"
-        onUpgradePress={() => navigation?.navigate?.('Paywall')}
+
       />
     );
   }

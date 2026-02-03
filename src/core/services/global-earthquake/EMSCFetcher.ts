@@ -27,12 +27,12 @@ const EMSC_MAX_BACKOFF = 600000; // 10 minutes max
 
 function shouldSkipEMSC(): boolean {
   if (emscFailureCount === 0) return false;
-  
+
   const backoffTime = Math.min(
     EMSC_BACKOFF_BASE * Math.pow(2, emscFailureCount - 1),
-    EMSC_MAX_BACKOFF
+    EMSC_MAX_BACKOFF,
   );
-  
+
   const timeSinceFailure = Date.now() - lastEmscFailureTime;
   return timeSinceFailure < backoffTime;
 }
@@ -43,7 +43,7 @@ function recordEMSCFailure(): void {
   if (__DEV__) {
     const nextRetryIn = Math.min(
       EMSC_BACKOFF_BASE * Math.pow(2, emscFailureCount - 1),
-      EMSC_MAX_BACKOFF
+      EMSC_MAX_BACKOFF,
     );
     logger.debug(`EMSC API failed ${emscFailureCount} times. Next retry in ${Math.round(nextRetryIn / 1000)}s`);
   }
@@ -75,13 +75,13 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const realtimeUrl = `${EMSC_REALTIME_FEED}&starttime=${twoHoursAgo.toISOString()}&minmagnitude=3.0&minlatitude=${EXTENDED_REGION.minLat}&maxlatitude=${EXTENDED_REGION.maxLat}&minlongitude=${EXTENDED_REGION.minLon}&maxlongitude=${EXTENDED_REGION.maxLon}`;
     const queryUrl = `${EMSC_API}?format=geojson&starttime=${twoHoursAgo.toISOString()}&minmagnitude=3.0&orderby=time&limit=200&minlatitude=${EXTENDED_REGION.minLat}&maxlatitude=${EXTENDED_REGION.maxLat}&minlongitude=${EXTENDED_REGION.minLon}&maxlongitude=${EXTENDED_REGION.maxLon}`;
-    
+
     let url = realtimeUrl;
     let useRealtime = true;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
+
     let response;
     try {
       response = await ultraLowLatencyOptimizer.optimizedFetch(
@@ -93,7 +93,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
           },
           signal: controller.signal,
         },
-        'critical'
+        'critical',
       );
       clearTimeout(timeoutId);
     } catch (error) {
@@ -112,7 +112,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
               'User-Agent': 'AfetNet/1.0',
             },
           },
-          'high'
+          'high',
         );
       } else {
         return [];
@@ -126,7 +126,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
       }
       return [];
     }
-    
+
     // ELITE: Record success - reset backoff counter
     recordEMSCSuccess();
 
@@ -139,7 +139,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
         }
         return [];
       }
-      
+
       try {
         data = JSON.parse(responseText);
       } catch (parseError: unknown) {
@@ -163,7 +163,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
       }
       return [];
     }
-    
+
     if (data.features.length === 0) {
       if (__DEV__) {
         logger.debug('EMSC API returned empty features array (no earthquakes in time window)');
@@ -176,7 +176,7 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
       try {
         const props = feature.properties || {};
         const coords = feature.geometry?.coordinates;
-        
+
         if (!coords || !Array.isArray(coords) || coords.length < 2) {
           if (__DEV__) {
             logger.debug('Invalid EMSC event coordinates (filtered):', feature?.id || 'unknown');
@@ -222,9 +222,10 @@ export async function fetchFromEMSC(): Promise<GlobalEarthquakeEvent[]> {
           source: 'EMSC' as const,
           priority: true,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         if (__DEV__) {
-          logger.debug('Error parsing EMSC event (filtered):', error?.message || error, feature?.id || 'unknown');
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.debug('Error parsing EMSC event (filtered):', errorMessage, feature?.id || 'unknown');
         }
       }
     }

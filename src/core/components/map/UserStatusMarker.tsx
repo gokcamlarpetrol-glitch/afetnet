@@ -32,42 +32,42 @@ export function UserStatusMarker({ status, name, isCurrentUser = false }: Props)
             duration: 800,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       ).start();
     }
   }, [status]);
 
   const getStatusColor = () => {
     switch (status) {
-      case 'safe':
-        return '#10B981'; // Green
-      case 'needs_help':
-        return '#F59E0B'; // Amber
-      case 'trapped':
-        return '#DC2626'; // Deep red
-      case 'sos':
-        return '#EF4444'; // Bright red
-      case 'offline':
-        return '#6B7280'; // Gray
-      default:
-        return '#10B981';
+    case 'safe':
+      return '#10B981'; // Green
+    case 'needs_help':
+      return '#F59E0B'; // Amber
+    case 'trapped':
+      return '#DC2626'; // Deep red
+    case 'sos':
+      return '#EF4444'; // Bright red
+    case 'offline':
+      return '#6B7280'; // Gray
+    default:
+      return '#10B981';
     }
   };
 
   const getStatusIcon = () => {
     switch (status) {
-      case 'safe':
-        return 'checkmark-circle';
-      case 'needs_help':
-        return 'alert-circle';
-      case 'trapped':
-        return 'warning';
-      case 'sos':
-        return 'warning';
-      case 'offline':
-        return 'cloud-offline';
-      default:
-        return 'person';
+    case 'safe':
+      return 'checkmark-circle';
+    case 'needs_help':
+      return 'alert-circle';
+    case 'trapped':
+      return 'warning';
+    case 'sos':
+      return 'warning';
+    case 'offline':
+      return 'cloud-offline';
+    default:
+      return 'person';
     }
   };
 

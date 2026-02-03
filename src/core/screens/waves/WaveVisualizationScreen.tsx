@@ -27,6 +27,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 // @ts-ignore - useFocusEffect is available in @react-navigation/native but TypeScript types may be outdated
 import { useFocusEffect } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import * as Location from 'expo-location';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { eliteWaveCalculationService, type EliteWaveCalculationResult } from '../../services/EliteWaveCalculationService';
@@ -69,7 +70,9 @@ interface WaveData {
   };
 }
 
-export default function WaveVisualizationScreen({ navigation }: any) {
+type WaveVisualizationNavigationProp = StackNavigationProp<Record<string, object>>;
+
+export default function WaveVisualizationScreen({ navigation }: { navigation: WaveVisualizationNavigationProp }) {
   const [waveData, setWaveData] = useState<WaveData[]>([]);
   const [selectedWave, setSelectedWave] = useState<WaveData | null>(null);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -85,19 +88,19 @@ export default function WaveVisualizationScreen({ navigation }: any) {
     lastDataTime: number;
   } | null>(null);
   const [realTimeSeismicData, setRealTimeSeismicData] = useState<number[]>([]); // CRITICAL: Real-time accelerometer data for sismograf
-  
+
   // CRITICAL: AI Analysis State - Life-saving early warning system
   const [aiPrediction, setAiPrediction] = useState<AIPredictionResult | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [riskScore, setRiskScore] = useState<number | null>(null);
   const [lastAiAnalysisTime, setLastAiAnalysisTime] = useState(0);
   const [userPermissionGranted, setUserPermissionGranted] = useState(false);
-  
+
   const animationRef = useRef<Animated.Value>(new Animated.Value(0));
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const aiAnalysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const alertShownRef = useRef<Set<string>>(new Set()); // CRITICAL: Prevent duplicate alerts
-  
+
   const earthquakes = useEarthquakeStore((state) => state.items);
   const [eewEvents, setEewEvents] = useState<EEWEvent[]>([]);
 
@@ -117,12 +120,12 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             longitude: location.coords.longitude,
           });
         }
-        
+
         // CRITICAL: Request notification permission for early warning alerts
         const notificationStatus = await Notifications.requestPermissionsAsync();
         if (notificationStatus.granted) {
           setUserPermissionGranted(true);
-          
+
           // CRITICAL: Configure notification channel for Android
           await Notifications.setNotificationChannelAsync('earthquake-alerts', {
             name: 'Deprem Uyarıları',
@@ -132,7 +135,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             sound: 'default',
           });
         }
-        
+
         // CRITICAL: Initialize AI services for early warning
         try {
           await aiEarthquakePredictionService.initialize();
@@ -144,7 +147,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         logger.error('Failed to request permissions:', error);
       }
     };
-    
+
     requestPermissions();
   }, []);
 
@@ -157,7 +160,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
 
     try {
       setLoading(true);
-      
+
       // Get recent earthquakes (last 24 hours, magnitude >= 3.0)
       const now = Date.now();
       const recentEarthquakes = earthquakes
@@ -241,7 +244,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
 
       const validWaves = calculations.filter((w): w is WaveData => w !== null);
       setWaveData(validWaves);
-      
+
       // Select most urgent (shortest warning time)
       if (validWaves.length > 0) {
         const mostUrgent = validWaves.reduce((prev, current) => {
@@ -270,47 +273,47 @@ export default function WaveVisualizationScreen({ navigation }: any) {
     let detectionUnsubscribe: (() => void) | null = null;
     let eewUnsubscribe: (() => void) | null = null;
     let retryTimeout: NodeJS.Timeout | null = null;
-    
+
     // CRITICAL: Automatically start SeismicSensorService if not running
     // LIFE-SAVING: Service must be active continuously for early warning
     // ELITE: Always ensure service is running - 7/24 continuous monitoring
     // ELITE: Professional error handling with retry mechanism and graceful degradation
     const ensureSeismicServiceRunning = async (): Promise<void> => {
       if (!isMounted) return; // CRITICAL: Don't proceed if component unmounted
-      
+
       try {
         // CRITICAL: Safe access to seismicSensorService with null check
         if (!seismicSensorService) {
           logger.warn('SeismicSensorService not available - skipping initialization');
           return;
         }
-        
+
         // CRITICAL: Check both running status AND recent readings
         const stats = seismicSensorService.getStatistics();
         const isRunning = seismicSensorService.getRunningStatus();
         const hasRecentData = stats && stats.totalReadings > 0 && stats.timeSinceLastData < 60000;
-        
+
         // Service is truly active if running OR has recent data
         if (isRunning || hasRecentData) {
           if (__DEV__ && isMounted) {
-            logger.debug('✅ SeismicSensorService active:', { 
-              isRunning, 
-              readings: stats?.totalReadings || 0, 
+            logger.debug('✅ SeismicSensorService active:', {
+              isRunning,
+              readings: stats?.totalReadings || 0,
               lastData: stats ? `${Math.round(stats.timeSinceLastData / 1000)}s ago` : 'N/A'
             });
           }
           return; // Already active
         }
-        
+
         // CRITICAL: Service not active - start immediately
         logger.info('🚨 SeismicSensorService not active - auto-starting for 7/24 continuous monitoring...');
         await seismicSensorService.start();
-        
+
         // CRITICAL: Verify it actually started
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for initialization
-        
+
         if (!isMounted) return; // CRITICAL: Check again after async operation
-        
+
         const verifyStats = seismicSensorService.getStatistics();
         if (verifyStats && (verifyStats.isRunning || verifyStats.totalReadings > 0)) {
           logger.info('✅ SeismicSensorService auto-started successfully - 7/24 monitoring active');
@@ -326,10 +329,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             }
           }, 3000);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error('Failed to auto-start SeismicSensorService:', {
-          error: error?.message || error,
-          errorType: error?.name || typeof error,
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.name : typeof error,
         });
         // CRITICAL: Retry after delay - never give up (but respect component mount status)
         if (isMounted) {
@@ -344,46 +347,46 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         }
       }
     };
-    
+
     // ELITE: Safe initialization with error handling
     const initializeMonitoring = async () => {
       try {
         // Start service immediately
         await ensureSeismicServiceRunning();
-        
+
         if (!isMounted) return;
-        
+
         // Initial calculation with error handling
         try {
           await calculateWaves();
-        } catch (calcError: any) {
+        } catch (calcError: unknown) {
           logger.error('Initial wave calculation failed:', {
-            error: calcError?.message || calcError,
+            error: calcError instanceof Error ? calcError.message : String(calcError),
           });
           // Don't throw - continue with monitoring setup
         }
-        
+
         if (!isMounted) return;
-        
+
         // CRITICAL: Set up continuous monitoring interval for real-time P/S wave calculations
         // ELITE: Optimized interval for continuous monitoring - balance between accuracy and performance
         // Wave calculations are expensive but critical for life-saving early warnings
         let lastCalculationTime = 0;
         const CALCULATION_INTERVAL = 5000; // 5 seconds - ELITE: More frequent for real-time accuracy
-        
+
         monitoringInterval = setInterval(() => {
           if (!isMounted) {
             if (monitoringInterval) clearInterval(monitoringInterval);
             return;
           }
-          
+
           // ELITE: Debounce calculations to prevent excessive CPU usage
           const now = Date.now();
           if (now - lastCalculationTime < CALCULATION_INTERVAL) {
             return; // Skip if called too frequently
           }
           lastCalculationTime = now;
-          
+
           try {
             // CRITICAL: Always recalculate waves for real-time monitoring
             calculateWaves().catch((error) => {
@@ -395,13 +398,13 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             // CRITICAL: Don't throw - continue monitoring even if calculation fails
           }
         }, CALCULATION_INTERVAL); // 5 seconds - ELITE: Real-time continuous monitoring
-        
+
         // CRITICAL: Monitor SeismicSensorService status for real-time P/S wave detection
         // ELITE: Smart status check - if readings exist, service is running
         // LIFE-SAVING: Continuous monitoring ensures early warning capability
         const updateSeismicStatus = () => {
           if (!isMounted) return;
-          
+
           try {
             if (!seismicSensorService) {
               // CRITICAL: Service not available - try to ensure it's running
@@ -410,18 +413,18 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               });
               return;
             }
-            
+
             const stats = seismicSensorService.getStatistics();
-            
+
             // CRITICAL: Smart detection - if readings > 0 or recent data, service is active
             // ELITE: More lenient detection - service is active if:
             // 1. Explicitly running, OR
             // 2. Has readings and data < 120s old (more lenient for brief pauses)
             const isActuallyRunning = stats && (
-              stats.isRunning || 
+              stats.isRunning ||
               (stats.totalReadings > 0 && stats.timeSinceLastData < 120000) // 120 seconds = 2 minutes
             );
-            
+
             if (isMounted) {
               setSeismicMonitoringStatus({
                 isRunning: isActuallyRunning || false,
@@ -430,7 +433,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 lastDataTime: stats?.timeSinceLastData || 0,
               });
             }
-            
+
             // CRITICAL: Auto-restart only if truly stopped (no readings AND not running AND no recent data)
             if (!isActuallyRunning && stats && stats.totalReadings === 0 && stats.timeSinceLastData > 5000) {
               logger.warn('⚠️ SeismicSensorService stopped - auto-restarting for 7/24 monitoring...');
@@ -446,9 +449,9 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 }, 5000);
               });
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             logger.debug('Failed to get seismic sensor status:', {
-              error: error?.message || error,
+              error: error instanceof Error ? error.message : String(error),
             });
             // CRITICAL: On error, assume running to prevent false "stopped" status
             if (isMounted) {
@@ -462,10 +465,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             }
           }
         };
-        
+
         // Update status immediately
         updateSeismicStatus();
-        
+
         // CRITICAL: Update status every 2 seconds for real-time monitoring feedback
         // ELITE: More frequent status updates for better user experience
         statusInterval = setInterval(() => {
@@ -475,14 +478,14 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             if (statusInterval) clearInterval(statusInterval);
           }
         }, 2000); // 2 seconds - ELITE: Real-time status updates
-        
+
         // CRITICAL: Listen for P/S wave detections from SeismicSensorService
         // ELITE: Professional error handling in callback
         if (seismicSensorService && typeof seismicSensorService.onDetection === 'function') {
           try {
             detectionUnsubscribe = seismicSensorService.onDetection((event) => {
               if (!isMounted) return;
-              
+
               try {
                 if (__DEV__) {
                   logger.info('P/S wave detection received:', {
@@ -492,21 +495,21 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                     confidence: event?.confidence,
                   });
                 }
-                
+
                 // Update status immediately when detection occurs
                 updateSeismicStatus();
-                
+
                 // CRITICAL: Recalculate waves immediately when P/S wave is detected
                 calculateWaves().catch((calcError) => {
                   logger.debug('Wave recalculation failed after detection:', calcError);
                 });
-                
+
                 // ELITE: Haptic feedback for P-wave detection (with error handling)
                 try {
                   if (event?.pWaveDetected && event?.confidence > 70) {
                     haptics.notificationWarning();
                   }
-                  
+
                   // ELITE: Haptic feedback for S-wave detection (more urgent)
                   if (event?.sWaveDetected && event?.confidence > 70) {
                     haptics.notificationError();
@@ -515,34 +518,34 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                   logger.debug('Haptic feedback error:', hapticError);
                   // Don't throw - haptics are optional
                 }
-              } catch (callbackError: any) {
+              } catch (callbackError: unknown) {
                 logger.error('Error in detection callback:', {
-                  error: callbackError?.message || callbackError,
+                  error: callbackError instanceof Error ? callbackError.message : String(callbackError),
                 });
               }
             });
-          } catch (subscribeError: any) {
+          } catch (subscribeError: unknown) {
             logger.error('Failed to subscribe to seismic detections:', {
-              error: subscribeError?.message || subscribeError,
+              error: subscribeError instanceof Error ? subscribeError.message : String(subscribeError),
             });
           }
         }
-        
+
         // CRITICAL: Continuously collect real-time accelerometer data for sismograf
         // LIFE-SAVING: Sismograf must show real-time data continuously
         // ELITE: High-frequency data collection for accurate real-time visualization
         // CRITICAL: Stable interval management - prevents continuous restarts
         let lastDataUpdateTime = 0;
         const DATA_UPDATE_INTERVAL = 50; // 50ms = 20 Hz for smooth visualization
-        
+
         const collectRealTimeData = () => {
           if (!isMounted) return;
-          
+
           try {
             if (!seismicSensorService) {
               return;
             }
-            
+
             // Get recent readings from SeismicSensorService for visualization
             const stats = seismicSensorService.getStatistics();
             if (stats && (stats.isRunning || stats.totalReadings > 0)) {
@@ -575,40 +578,40 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 }
               }
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             logger.debug('Failed to collect real-time seismic data:', {
-              error: error?.message || error,
+              error: error instanceof Error ? error.message : String(error),
             });
             // CRITICAL: Don't throw - continue monitoring even if data collection fails
           }
         };
-        
+
         // CRITICAL: Initial data collection
         collectRealTimeData();
-        
+
         // CRITICAL: Set up stable interval - only restarts if component unmounts
         dataCollectionInterval = setInterval(collectRealTimeData, DATA_UPDATE_INTERVAL);
-        
+
         // CRITICAL: AI-Powered Real-time Analysis for Life-saving Early Warning
         // ELITE: Continuous AI analysis - P/S dalgasını yapay zekaya entegre ettik, mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz
         const performAIAnalysis = async () => {
           if (!isMounted || !userLocation || !userPermissionGranted) return;
-          
+
           try {
             // CRITICAL: Debounce AI analysis to prevent excessive API calls
             const now = Date.now();
             if (now - lastAiAnalysisTime < 2000) return; // Minimum 2 seconds between analyses
-            
+
             // CRITICAL: Get real-time sensor readings for AI analysis
             if (!seismicSensorService) return;
-            
+
             const stats = seismicSensorService.getStatistics();
             if (!stats || stats.totalReadings < 100) return; // Need at least 100 readings
-            
+
             // CRITICAL: Convert accelerometer data to SensorReading format for AI
             const recentReadings = seismicSensorService.getRecentReadings(500);
             if (!recentReadings || recentReadings.length < 100) return;
-            
+
             const sensorReadings: SensorReading[] = recentReadings.map((magnitude, index) => ({
               timestamp: Date.now() - (recentReadings.length - index) * 10, // 10ms intervals (100Hz)
               x: 0, // We only have magnitude, but AI can work with it
@@ -616,28 +619,29 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               z: 0,
               magnitude: magnitude,
             }));
-            
+
             setAiAnalysisLoading(true);
             setLastAiAnalysisTime(now);
-            
+
             // CRITICAL: AI Prediction - Life-saving early warning
             const prediction = await aiEarthquakePredictionService.predict(
               sensorReadings,
               userLocation,
-              earthquakes.slice(0, 20) // Recent earthquakes for context
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              earthquakes.slice(0, 20) as any[] // Recent earthquakes for context
             );
-            
+
             if (prediction && isMounted) {
               setAiPrediction(prediction);
-              
+
               // CRITICAL: Early Warning Alert System - Fastest notification
               if (prediction.willOccur && prediction.urgency === 'critical') {
                 const alertKey = `critical-${prediction.estimatedMagnitude}-${Math.floor(prediction.timeAdvance)}`;
-                
+
                 // CRITICAL: Prevent duplicate alerts
                 if (!alertShownRef.current.has(alertKey)) {
                   alertShownRef.current.add(alertKey);
-                  
+
                   // CRITICAL: Show immediate notification
                   if (userPermissionGranted) {
                     await Notifications.scheduleNotificationAsync({
@@ -656,7 +660,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       trigger: null, // Show immediately
                     });
                   }
-                  
+
                   // CRITICAL: Haptic feedback for critical alerts
                   try {
                     haptics.notificationError();
@@ -666,7 +670,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                   } catch (hapticError) {
                     logger.debug('Haptic feedback error:', hapticError);
                   }
-                  
+
                   logger.info('🚨 CRITICAL EARLY WARNING ALERT:', {
                     magnitude: prediction.estimatedMagnitude,
                     timeAdvance: prediction.timeAdvance,
@@ -675,10 +679,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 }
               } else if (prediction.willOccur && prediction.urgency === 'high') {
                 const alertKey = `high-${prediction.estimatedMagnitude}-${Math.floor(prediction.timeAdvance)}`;
-                
+
                 if (!alertShownRef.current.has(alertKey)) {
                   alertShownRef.current.add(alertKey);
-                  
+
                   if (userPermissionGranted) {
                     await Notifications.scheduleNotificationAsync({
                       content: {
@@ -696,7 +700,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       trigger: null,
                     });
                   }
-                  
+
                   try {
                     haptics.notificationWarning();
                   } catch (hapticError) {
@@ -705,22 +709,22 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 }
               }
             }
-            
+
             // CRITICAL: Calculate risk score for user location
             try {
               const riskScoreResult = await riskScoringService.calculateRiskScore({
                 location: userLocation,
               });
-              
+
               if (riskScoreResult && isMounted) {
                 setRiskScore(riskScoreResult.score || 0);
               }
             } catch (riskError) {
               logger.debug('Risk score calculation error:', riskError);
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             logger.error('AI analysis error:', {
-              error: error?.message || error,
+              error: error instanceof Error ? error.message : String(error),
             });
             // CRITICAL: Don't throw - continue monitoring even if AI analysis fails
           } finally {
@@ -729,10 +733,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             }
           }
         };
-        
+
         // CRITICAL: Initial AI analysis
         performAIAnalysis();
-        
+
         // CRITICAL: Continuous AI analysis every 3 seconds for fastest early warning
         // ELITE: Optimized interval for real-time AI analysis without excessive API calls
         aiAnalysisIntervalRef.current = setInterval(() => {
@@ -742,52 +746,52 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             });
           }
         }, 3000); // 3 seconds - ELITE: Fastest early warning with optimized API usage
-        
+
         // Listen for new EEW events with error handling
         if (eewService && typeof eewService.onEvent === 'function') {
           try {
             eewUnsubscribe = eewService.onEvent((event: EEWEvent) => {
               if (!isMounted) return;
-              
+
               try {
                 if (!event || !event.id) {
                   return; // Invalid event
                 }
-                
-      setEewEvents((prev) => {
-        // Avoid duplicates
+
+                setEewEvents((prev) => {
+                  // Avoid duplicates
                   if (prev && prev.find((e) => e && e.id === event.id)) {
-          return prev;
-        }
+                    return prev;
+                  }
                   return [...(prev || []), event];
-      });
-                
-      // CRITICAL: Recalculate waves immediately when new EEW event arrives
-      if (event.waveCalculation) {
+                });
+
+                // CRITICAL: Recalculate waves immediately when new EEW event arrives
+                if (event.waveCalculation) {
                   calculateWaves().catch((calcError) => {
                     logger.debug('Wave recalculation failed after EEW event:', calcError);
                   });
                 }
-              } catch (eewError: any) {
+              } catch (eewError: unknown) {
                 logger.error('Error processing EEW event:', {
-                  error: eewError?.message || eewError,
+                  error: eewError instanceof Error ? eewError.message : String(eewError),
                 });
               }
             });
-          } catch (subscribeError: any) {
+          } catch (subscribeError: unknown) {
             logger.error('Failed to subscribe to EEW events:', {
-              error: subscribeError?.message || subscribeError,
+              error: subscribeError instanceof Error ? subscribeError.message : String(subscribeError),
             });
           }
         }
-      } catch (initError: any) {
+      } catch (initError: unknown) {
         logger.error('Failed to initialize monitoring:', {
-          error: initError?.message || initError,
+          error: initError instanceof Error ? initError.message : String(initError),
         });
         // Don't throw - allow component to render with degraded functionality
       }
     };
-    
+
     // Start initialization
     initializeMonitoring().catch((error) => {
       logger.error('Monitoring initialization failed:', error);
@@ -796,14 +800,14 @@ export default function WaveVisualizationScreen({ navigation }: any) {
     // CRITICAL: Cleanup on unmount - prevent memory leaks and state updates after unmount
     return () => {
       isMounted = false; // CRITICAL: Mark as unmounted first
-      
+
       // Clear all intervals
       if (monitoringInterval) clearInterval(monitoringInterval);
       if (statusInterval) clearInterval(statusInterval);
       if (dataCollectionInterval) clearInterval(dataCollectionInterval);
       if (aiAnalysisIntervalRef.current) clearInterval(aiAnalysisIntervalRef.current);
       if (retryTimeout) clearTimeout(retryTimeout);
-      
+
       // Unsubscribe from all listeners
       if (detectionUnsubscribe && typeof detectionUnsubscribe === 'function') {
         try {
@@ -812,7 +816,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
           logger.debug('Error unsubscribing from detections:', unsubError);
         }
       }
-      
+
       if (eewUnsubscribe && typeof eewUnsubscribe === 'function') {
         try {
           eewUnsubscribe();
@@ -828,14 +832,14 @@ export default function WaveVisualizationScreen({ navigation }: any) {
   useFocusEffect(
     useCallback(() => {
       try {
-        calculateWaves().catch((error: any) => {
+        calculateWaves().catch((error: unknown) => {
           logger.error('Failed to calculate waves on focus:', {
-            error: error?.message || error,
+            error: error instanceof Error ? error.message : String(error),
           });
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error('Error in useFocusEffect:', {
-          error: error?.message || error,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }, [calculateWaves])
@@ -844,17 +848,17 @@ export default function WaveVisualizationScreen({ navigation }: any) {
   // Animation for wave propagation
   useEffect(() => {
     let animation: Animated.CompositeAnimation | null = null;
-    
+
     if (selectedWave && isAnimating) {
       const startAnimation = () => {
         animationRef.current.setValue(0);
-        
+
         animation = Animated.timing(animationRef.current, {
           toValue: 1,
           duration: selectedWave.calculation.warningTime * 1000, // Real-time animation
           useNativeDriver: false,
         });
-        
+
         animation.start(() => {
           setIsAnimating(false);
         });
@@ -862,7 +866,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
 
       startAnimation();
     }
-    
+
     // CRITICAL: Cleanup animation on unmount or when dependencies change
     return () => {
       if (animation) {
@@ -878,28 +882,28 @@ export default function WaveVisualizationScreen({ navigation }: any) {
     if (selectedWave) {
       let lastPWaveAlert = false;
       let lastSWaveAlert = false;
-      
+
       const updateProgress = () => {
         const now = Date.now();
         const elapsed = (now - selectedWave.earthquake.time) / 1000;
         const timeUntilSWave = selectedWave.calculation.sWaveArrivalTime - elapsed;
         const timeUntilPWave = selectedWave.calculation.pWaveArrivalTime - elapsed;
-        
+
         setAnimationTime(Math.max(0, timeUntilSWave));
-        
+
         // ELITE: Haptic feedback for critical moments
         if (!lastPWaveAlert && timeUntilPWave <= 5 && timeUntilPWave > 0) {
           // P-wave arriving soon
           haptics.notificationWarning();
           lastPWaveAlert = true;
         }
-        
+
         if (!lastSWaveAlert && timeUntilSWave <= 5 && timeUntilSWave > 0) {
           // S-wave arriving soon - CRITICAL
           haptics.notificationError();
           lastSWaveAlert = true;
         }
-        
+
         // Calculate real-time animation progress
         let progress = 0;
         if (elapsed < selectedWave.calculation.pWaveArrivalTime) {
@@ -910,13 +914,13 @@ export default function WaveVisualizationScreen({ navigation }: any) {
           // Between P and S wave
           progress = (elapsed - selectedWave.calculation.pWaveArrivalTime) / selectedWave.calculation.warningTime;
         }
-        
+
         setRealTimeProgress(progress);
       };
-      
+
       // Update immediately
       updateProgress();
-      
+
       // CRITICAL: Update every 50ms for ultra-smooth real-time animation
       // ELITE: Higher frequency for accurate countdown and progress tracking
       countdownIntervalRef.current = setInterval(updateProgress, 50); // 50ms = 20 Hz for smooth real-time updates
@@ -937,9 +941,9 @@ export default function WaveVisualizationScreen({ navigation }: any) {
     try {
       setRefreshing(true);
       await calculateWaves();
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to refresh waves:', {
-        error: error?.message || error,
+        error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setRefreshing(false);
@@ -958,9 +962,9 @@ export default function WaveVisualizationScreen({ navigation }: any) {
           // Don't throw - haptics are optional
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to start animation:', {
-        error: error?.message || error,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -982,9 +986,9 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         logger.debug('Haptic feedback error:', hapticError);
         // Don't throw - haptics are optional
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to stop animation:', {
-        error: error?.message || error,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -1001,12 +1005,12 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         timeUntilPWave: 0,
       };
     }
-    
+
     const now = Date.now();
     const elapsed = (now - currentWave.earthquake.time) / 1000;
     const timeUntilSWave = Math.max(0, currentWave.calculation.sWaveArrivalTime - elapsed);
     const timeUntilPWave = Math.max(0, currentWave.calculation.pWaveArrivalTime - elapsed);
-    
+
     return {
       animationProgress: realTimeProgress,
       elapsed,
@@ -1014,7 +1018,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
       timeUntilPWave,
     };
   }, [selectedWave, waveData, realTimeProgress]);
-  
+
   const { animationProgress, elapsed, timeUntilSWave, timeUntilPWave } = waveCalculations;
   const currentWave = selectedWave || waveData[0];
 
@@ -1095,8 +1099,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
       <View style={styles.monitoringStatusContainer}>
         <View style={[
           styles.monitoringStatusBadge,
-          (seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0) 
-            ? styles.monitoringStatusActive 
+          (seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0)
+            ? styles.monitoringStatusActive
             : styles.monitoringStatusInactive
         ]}>
           <View style={[
@@ -1104,8 +1108,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
             (seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0) && styles.monitoringStatusDotActive
           ]} />
           <Text style={styles.monitoringStatusText}>
-            {(seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0) 
-              ? '📡 SÜREKLI İZLEME AKTİF (7/24)' 
+            {(seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0)
+              ? '📡 SÜREKLI İZLEME AKTİF (7/24)'
               : '🔄 İzleme Başlatılıyor...'}
           </Text>
         </View>
@@ -1113,11 +1117,11 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         <View style={styles.monitoringStatsContainer}>
           <Text style={styles.monitoringStatsText}>
             {seismicMonitoringStatus?.totalReadings.toLocaleString() || 0} okuma • {seismicMonitoringStatus?.confirmedEvents || 0} tespit
-            {seismicMonitoringStatus && seismicMonitoringStatus.lastDataTime < 5000 
-              ? ' • Canlı' 
+            {seismicMonitoringStatus && seismicMonitoringStatus.lastDataTime < 5000
+              ? ' • Canlı'
               : seismicMonitoringStatus && seismicMonitoringStatus.lastDataTime < 60000
-              ? ` • ${Math.round(seismicMonitoringStatus.lastDataTime / 1000)}s önce`
-              : ' • Bekleniyor...'}
+                ? ` • ${Math.round(seismicMonitoringStatus.lastDataTime / 1000)}s önce`
+                : ' • Bekleniyor...'}
           </Text>
         </View>
       </View>
@@ -1131,15 +1135,15 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               aiPrediction?.urgency === 'critical'
                 ? ['#dc2626', '#991b1b']
                 : aiPrediction?.urgency === 'high'
-                ? ['#f59e0b', '#d97706']
-                : ['#3b82f6', '#2563eb']
+                  ? ['#f59e0b', '#d97706']
+                  : ['#3b82f6', '#2563eb']
             }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.aiAnalysisCard}
           >
             <View style={styles.aiAnalysisGlassOverlay} />
-            
+
             {/* AI Analysis Header */}
             <View style={styles.aiAnalysisHeader}>
               <View style={styles.aiAnalysisTitleContainer}>
@@ -1173,8 +1177,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       aiPrediction.urgency === 'critical'
                         ? 'warning'
                         : aiPrediction.urgency === 'high'
-                        ? 'alert-circle'
-                        : 'information-circle'
+                          ? 'alert-circle'
+                          : 'information-circle'
                     }
                     size={16}
                     color="#fff"
@@ -1183,10 +1187,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                     {aiPrediction.urgency === 'critical'
                       ? 'KRİTİK'
                       : aiPrediction.urgency === 'high'
-                      ? 'YÜKSEK'
-                      : aiPrediction.urgency === 'medium'
-                      ? 'ORTA'
-                      : 'DÜŞÜK'}
+                        ? 'YÜKSEK'
+                        : aiPrediction.urgency === 'medium'
+                          ? 'ORTA'
+                          : 'DÜŞÜK'}
                   </Text>
                 </View>
 
@@ -1198,12 +1202,12 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       {aiPrediction.willOccur ? '✅ Deprem Bekleniyor' : '❌ Deprem Beklenmiyor'}
                     </Text>
                   </View>
-                  
+
                   <View style={styles.predictionRow}>
                     <Text style={styles.predictionLabel}>Güven:</Text>
                     <Text style={styles.predictionValue}>{aiPrediction.confidence}%</Text>
                   </View>
-                  
+
                   {aiPrediction.willOccur && (
                     <>
                       <View style={styles.predictionRow}>
@@ -1212,7 +1216,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                           M{aiPrediction.estimatedMagnitude.toFixed(1)}
                         </Text>
                       </View>
-                      
+
                       <View style={styles.predictionRow}>
                         <Text style={styles.predictionLabel}>Süre:</Text>
                         <Text style={styles.predictionValue}>
@@ -1252,7 +1256,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       {(aiPrediction.factors.seismicActivity * 100).toFixed(0)}%
                     </Text>
                   </View>
-                  
+
                   <View style={styles.factorRow}>
                     <Text style={styles.factorLabel}>Öncü Sinyaller:</Text>
                     <View style={styles.factorBarContainer}>
@@ -1270,7 +1274,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       {(aiPrediction.factors.precursorSignals * 100).toFixed(0)}%
                     </Text>
                   </View>
-                  
+
                   <View style={styles.factorRow}>
                     <Text style={styles.factorLabel}>Tarihsel Desen:</Text>
                     <View style={styles.factorBarContainer}>
@@ -1288,7 +1292,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                       {(aiPrediction.factors.historicalPattern * 100).toFixed(0)}%
                     </Text>
                   </View>
-                  
+
                   <View style={styles.factorRow}>
                     <Text style={styles.factorLabel}>Ensemble Konsensüs:</Text>
                     <View style={styles.factorBarContainer}>
@@ -1341,7 +1345,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
         >
           {/* Glassmorphism overlay */}
           <View style={styles.glassOverlay} />
-          
+
           {/* Premium glow effect */}
           <View style={styles.glowEffect} />
           {/* Epicenter and User Location */}
@@ -1363,7 +1367,7 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               const ringProgress = Math.max(0, Math.min(1, animationProgress - ring * 0.2));
               const ringScale = ringProgress;
               const ringOpacity = ringProgress > 0 ? (1 - ringProgress) * 0.6 : 0;
-              
+
               return (
                 <Animated.View
                   key={`p-wave-${ring}`}
@@ -1380,13 +1384,13 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 />
               );
             })}
-            
+
             {/* S-Wave Circles (multiple rings for realistic effect) */}
             {[0, 1, 2].map((ring) => {
               const ringProgress = Math.max(0, Math.min(1, (animationProgress - 0.3) - ring * 0.15));
               const ringScale = ringProgress;
               const ringOpacity = ringProgress > 0 ? ringProgress * 0.8 : 0;
-              
+
               return (
                 <Animated.View
                   key={`s-wave-${ring}`}
@@ -1418,15 +1422,15 @@ export default function WaveVisualizationScreen({ navigation }: any) {
       {/* ELITE: Seismograph Visualization */}
       {/* CRITICAL: Always show sismograf - 7/24 continuous monitoring for life-saving early warnings */}
       {/* Sismograf her zaman aktif olmalı - dalgaları sürekli analiz edip bildirim göndermeli */}
-        <SeismographVisualization
+      <SeismographVisualization
         pWaveArrivalTime={currentWave?.calculation.pWaveArrivalTime || 0}
         sWaveArrivalTime={currentWave?.calculation.sWaveArrivalTime || 0}
-          elapsed={elapsed}
+        elapsed={elapsed}
         magnitude={currentWave?.earthquake.magnitude || 0}
-          isAnimating={isAnimating}
+        isAnimating={isAnimating}
         isMonitoringActive={true} // CRITICAL: Always active - 7/24 monitoring
         realTimeData={realTimeSeismicData.length > 0 ? realTimeSeismicData : undefined}
-        />
+      />
 
       {/* ELITE: Premium Info Card with Glassmorphism */}
       <View style={styles.infoCard}>
@@ -1532,8 +1536,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                   currentWave.calculation.estimatedIntensity >= 7
                     ? ['#dc2626', '#991b1b']
                     : currentWave.calculation.estimatedIntensity >= 5
-                    ? ['#f59e0b', '#d97706']
-                    : ['#10b981', '#059669']
+                      ? ['#f59e0b', '#d97706']
+                      : ['#10b981', '#059669']
                 }
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -1549,8 +1553,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               {currentWave.calculation.estimatedIntensity >= 7
                 ? 'Şiddetli sarsıntı bekleniyor'
                 : currentWave.calculation.estimatedIntensity >= 5
-                ? 'Orta şiddette sarsıntı bekleniyor'
-                : 'Hafif sarsıntı bekleniyor'}
+                  ? 'Orta şiddette sarsıntı bekleniyor'
+                  : 'Hafif sarsıntı bekleniyor'}
             </Text>
           </View>
 
@@ -1572,10 +1576,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               {currentWave.calculation.estimatedPGA >= 0.5
                 ? 'Çok yüksek zemin ivmesi'
                 : currentWave.calculation.estimatedPGA >= 0.2
-                ? 'Yüksek zemin ivmesi'
-                : currentWave.calculation.estimatedPGA >= 0.1
-                ? 'Orta zemin ivmesi'
-                : 'Düşük zemin ivmesi'}
+                  ? 'Yüksek zemin ivmesi'
+                  : currentWave.calculation.estimatedPGA >= 0.1
+                    ? 'Orta zemin ivmesi'
+                    : 'Düşük zemin ivmesi'}
             </Text>
           </View>
         </View>
@@ -1587,10 +1591,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               currentWave.calculation.quality === 'excellent'
                 ? ['#10b981', '#059669']
                 : currentWave.calculation.quality === 'good'
-                ? ['#3b82f6', '#2563eb']
-                : currentWave.calculation.quality === 'fair'
-                ? ['#f59e0b', '#d97706']
-                : ['#ef4444', '#dc2626']
+                  ? ['#3b82f6', '#2563eb']
+                  : currentWave.calculation.quality === 'fair'
+                    ? ['#f59e0b', '#d97706']
+                    : ['#ef4444', '#dc2626']
             }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -1602,8 +1606,8 @@ export default function WaveVisualizationScreen({ navigation }: any) {
                 currentWave.calculation.quality === 'excellent'
                   ? 'checkmark-circle'
                   : currentWave.calculation.quality === 'good'
-                  ? 'checkmark-circle'
-                  : 'warning'
+                    ? 'checkmark-circle'
+                    : 'warning'
               }
               size={18}
               color="#fff"
@@ -1612,10 +1616,10 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               {currentWave.calculation.quality === 'excellent'
                 ? 'Mükemmel'
                 : currentWave.calculation.quality === 'good'
-                ? 'İyi'
-                : currentWave.calculation.quality === 'fair'
-                ? 'Orta'
-                : 'Düşük'} Kalite
+                  ? 'İyi'
+                  : currentWave.calculation.quality === 'fair'
+                    ? 'Orta'
+                    : 'Düşük'} Kalite
             </Text>
             <Text style={styles.qualityConfidence}>
               {currentWave.calculation.confidence}% güven
@@ -1627,12 +1631,12 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               {currentWave.calculation.calculationMethod === 'elite'
                 ? 'Elite'
                 : currentWave.calculation.calculationMethod === 'advanced'
-                ? 'Gelişmiş'
-                : currentWave.calculation.calculationMethod === 'site_adjusted'
-                ? 'Site Düzeltmeli'
-                : currentWave.calculation.calculationMethod === 'regional'
-                ? 'Bölgesel'
-                : 'Standart'} Hesaplama
+                  ? 'Gelişmiş'
+                  : currentWave.calculation.calculationMethod === 'site_adjusted'
+                    ? 'Site Düzeltmeli'
+                    : currentWave.calculation.calculationMethod === 'regional'
+                      ? 'Bölgesel'
+                      : 'Standart'} Hesaplama
             </Text>
           </View>
         </View>
@@ -1646,16 +1650,16 @@ export default function WaveVisualizationScreen({ navigation }: any) {
               {currentWave.calculation.region === 'nafz'
                 ? 'Kuzey Anadolu Fay Hattı'
                 : currentWave.calculation.region === 'eafz'
-                ? 'Doğu Anadolu Fay Hattı'
-                : currentWave.calculation.region === 'aegean'
-                ? 'Ege Bölgesi'
-                : currentWave.calculation.region === 'marmara'
-                ? 'Marmara Bölgesi'
-                : currentWave.calculation.region === 'mediterranean'
-                ? 'Akdeniz Kıyısı'
-                : currentWave.calculation.region === 'blacksea'
-                ? 'Karadeniz Kıyısı'
-                : 'Anadolu Plakası'}
+                  ? 'Doğu Anadolu Fay Hattı'
+                  : currentWave.calculation.region === 'aegean'
+                    ? 'Ege Bölgesi'
+                    : currentWave.calculation.region === 'marmara'
+                      ? 'Marmara Bölgesi'
+                      : currentWave.calculation.region === 'mediterranean'
+                        ? 'Akdeniz Kıyısı'
+                        : currentWave.calculation.region === 'blacksea'
+                          ? 'Karadeniz Kıyısı'
+                          : 'Anadolu Plakası'}
             </Text>
           </View>
           <View style={styles.technicalDetail}>

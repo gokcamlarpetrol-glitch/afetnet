@@ -16,10 +16,10 @@ const TIMEOUT_MS = 10000; // 10 seconds
  */
 async function withTimeout<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
 ): Promise<T> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS)
+    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
   
   return Promise.race([operation(), timeoutPromise]);
@@ -30,7 +30,7 @@ async function withTimeout<T>(
  */
 export async function saveEarthquake(
   earthquake: EarthquakeFirebaseData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveEarthquake');
@@ -51,7 +51,7 @@ export async function saveEarthquake(
         ...earthquake,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'Earthquake save'
+      'Earthquake save',
     );
 
     if (__DEV__) {
@@ -80,7 +80,7 @@ export async function saveEarthquake(
  */
 export async function saveFeltEarthquakeReport(
   report: FeltEarthquakeReportData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveFeltEarthquakeReport');
@@ -102,7 +102,7 @@ export async function saveFeltEarthquakeReport(
         ...report,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'Felt earthquake report save'
+      'Felt earthquake report save',
     );
 
     if (__DEV__) {
@@ -131,7 +131,7 @@ export async function saveFeltEarthquakeReport(
  */
 export async function getIntensityData(
   earthquakeId: string,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<Record<string, unknown>[] | null> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, cannot get intensity data');
@@ -149,7 +149,7 @@ export async function getIntensityData(
     
     const snapshot = await withTimeout(
       () => getDocs(q),
-      'Intensity data load'
+      'Intensity data load',
     );
     
     if (snapshot.empty) {

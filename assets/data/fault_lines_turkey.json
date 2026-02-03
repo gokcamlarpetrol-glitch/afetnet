@@ -1,0 +1,119 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Kuzey Anadolu Fay Hattı (NAF)",
+                "magnitude_potential": "7.5+"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [
+                        26.04,
+                        40.16
+                    ],
+                    [
+                        27.36,
+                        40.54
+                    ],
+                    [
+                        29.98,
+                        40.76
+                    ],
+                    [
+                        32.65,
+                        40.89
+                    ],
+                    [
+                        35.45,
+                        40.85
+                    ],
+                    [
+                        38.12,
+                        40.23
+                    ],
+                    [
+                        40.89,
+                        39.42
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Doğu Anadolu Fay Hattı (DAF)",
+                "magnitude_potential": "7.0+"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [
+                        36.19,
+                        36.21
+                    ],
+                    [
+                        36.85,
+                        37.12
+                    ],
+                    [
+                        37.96,
+                        37.85
+                    ],
+                    [
+                        39.52,
+                        38.65
+                    ],
+                    [
+                        40.89,
+                        39.42
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Ege Graben Sistemi",
+                "magnitude_potential": "6.5+"
+            },
+            "geometry": {
+                "type": "MultiLineString",
+                "coordinates": [
+                    [
+                        [
+                            26.5,
+                            38.5
+                        ],
+                        [
+                            29.0,
+                            38.5
+                        ]
+                    ],
+                    [
+                        [
+                            27.0,
+                            37.8
+                        ],
+                        [
+                            29.0,
+                            37.9
+                        ]
+                    ],
+                    [
+                        [
+                            27.2,
+                            39.1
+                        ],
+                        [
+                            28.5,
+                            39.1
+                        ]
+                    ]
+                ]
+            }
+        }
+    ]
+}

@@ -11,6 +11,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { voiceCommandService } from '../../services/VoiceCommandService';
 import * as haptics from '../../utils/haptics';
 import { colors } from '../../theme';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('VoiceCommandPanel');
 
 interface VoiceCommandPanelProps {
   onCommandExecuted?: (command: string) => void;
@@ -61,7 +64,7 @@ export default function VoiceCommandPanel({ onCommandExecuted }: VoiceCommandPan
       haptics.notificationSuccess();
       onCommandExecuted?.(command);
     } catch (error) {
-      console.error('Voice command error:', error);
+      logger.error('Voice command error:', error);
       haptics.notificationError();
     } finally {
       // Reset after animation
@@ -79,7 +82,7 @@ export default function VoiceCommandPanel({ onCommandExecuted }: VoiceCommandPan
       <View style={styles.commandsGrid}>
         {commands.map((cmd) => {
           const isExecuting = executing === cmd.id;
-          
+
           return (
             <TouchableOpacity
               key={cmd.id}
@@ -97,10 +100,10 @@ export default function VoiceCommandPanel({ onCommandExecuted }: VoiceCommandPan
                   isExecuting && styles.commandGradientExecuting,
                 ]}
               >
-                <Ionicons 
-                  name={isExecuting ? 'checkmark-circle' : cmd.icon} 
-                  size={32} 
-                  color="#ffffff" 
+                <Ionicons
+                  name={isExecuting ? 'checkmark-circle' : cmd.icon}
+                  size={32}
+                  color="#ffffff"
                 />
                 <Text style={styles.commandLabel}>
                   {isExecuting ? 'Gönderiliyor...' : cmd.label}

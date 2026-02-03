@@ -56,7 +56,7 @@ export function safeGoBack(navigation: NavigationProp<any> | null | undefined | 
  */
 export function safeGoBackWithCallback(
   navigation: NavigationProp<any> | null | undefined,
-  callback?: () => void
+  callback?: () => void,
 ): () => void {
   return () => {
     if (callback) {

@@ -48,11 +48,11 @@ class BackendPushService {
       // ELITE: Get backend URL from ENV config (centralized)
       const { ENV } = await import('../config/env');
       this.baseUrl = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
-      
+
       if (__DEV__) {
         logger.info(`Backend URL: ${this.baseUrl}`);
       }
-      
+
       await this.registerPushToken(pushToken);
       this._isInitialized = true;
     } catch (error) {
@@ -103,7 +103,7 @@ class BackendPushService {
       if (!pushToken || pushToken.length < 10 || pushToken.length > 500) {
         throw new Error('Invalid push token');
       }
-      
+
       // Elite: Validate coordinates if provided
       if (latitude !== null && (latitude < -90 || latitude > 90)) {
         throw new Error('Invalid latitude');
@@ -121,7 +121,7 @@ class BackendPushService {
       const lastAttempt = await this.getLastAttemptTime(rateLimitKey);
       const now = Date.now();
       const RATE_LIMIT_MS = 60000; // 1 minute between attempts
-      
+
       if (lastAttempt && (now - lastAttempt) < RATE_LIMIT_MS) {
         throw new Error('Rate limit exceeded. Please wait before retrying.');
       }
@@ -155,7 +155,7 @@ class BackendPushService {
       if (result.ok) {
         this.isRegistered = true;
         logger.info('✅ Successfully registered push token with backend');
-        
+
         // Schedule periodic location updates
         this.startLocationUpdates(deviceId, pushToken, deviceType);
       } else {
@@ -163,7 +163,7 @@ class BackendPushService {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
+
       // Elite: Better error handling - don't spam logs for network errors
       if (this.registrationAttempts < this.MAX_ATTEMPTS) {
         // ELITE: Clear any existing retry timeout
@@ -171,13 +171,13 @@ class BackendPushService {
           clearTimeout(this.retryTimeout);
           this.retryTimeout = null;
         }
-        
+
         // Silent retry - don't log every attempt (reduces spam)
         // Only log in dev mode and only first attempt
         if (__DEV__ && this.registrationAttempts === 1) {
           logger.debug(`Backend registration attempt ${this.registrationAttempts} failed (will retry silently)`);
         }
-        
+
         // Retry with exponential backoff
         const delay = Math.pow(2, this.registrationAttempts) * 1000; // 2s, 4s, 8s
         this.retryTimeout = setTimeout(() => {
@@ -190,7 +190,7 @@ class BackendPushService {
           clearTimeout(this.retryTimeout);
           this.retryTimeout = null;
         }
-        
+
         // Only log final failure once (not every attempt)
         if (__DEV__) {
           logger.warn(`Backend registration failed after ${this.MAX_ATTEMPTS} attempts. Backend may be unavailable. App will continue without backend push notifications.`);
@@ -210,7 +210,7 @@ class BackendPushService {
       clearInterval(this.locationUpdateInterval);
       this.locationUpdateInterval = null;
     }
-    
+
     // ELITE: Update location every 5 minutes with proper error handling
     this.locationUpdateInterval = setInterval(async () => {
       try {
@@ -220,7 +220,7 @@ class BackendPushService {
           this.stopLocationUpdates();
           return;
         }
-        
+
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           if (__DEV__) {
@@ -233,13 +233,13 @@ class BackendPushService {
         const locationPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        
-        const timeoutPromise = new Promise<null>((resolve) => 
-          setTimeout(() => resolve(null), 10000) // 10 second timeout
+
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), 10000), // 10 second timeout
         );
-        
+
         const location = await Promise.race([locationPromise, timeoutPromise]);
-        
+
         if (!location) {
           if (__DEV__) {
             logger.debug('Location request timed out or failed');
@@ -250,10 +250,10 @@ class BackendPushService {
         // ELITE: Validate coordinates
         const latitude = location.coords.latitude;
         const longitude = location.coords.longitude;
-        
-        if (isNaN(latitude) || isNaN(longitude) || 
-            latitude < -90 || latitude > 90 ||
-            longitude < -180 || longitude > 180) {
+
+        if (isNaN(latitude) || isNaN(longitude) ||
+          latitude < -90 || latitude > 90 ||
+          longitude < -180 || longitude > 180) {
           logger.warn('Invalid location coordinates received');
           return;
         }
@@ -273,13 +273,13 @@ class BackendPushService {
             timestamp: Date.now(),
           }),
         });
-        
+
         const fetchTimeoutPromise = new Promise<Response>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timeout')), 15000) // 15 second timeout
+          setTimeout(() => reject(new Error('Request timeout')), 15000), // 15 second timeout
         );
-        
+
         const response = await Promise.race([fetchPromise, fetchTimeoutPromise]);
-        
+
         if (!response.ok) {
           if (__DEV__) {
             logger.debug(`Location update failed: ${response.status} ${response.statusText}`);
@@ -289,9 +289,9 @@ class BackendPushService {
             logger.debug('Location updated successfully with backend');
           }
         }
-      } catch (error: any) {
-        const errorMessage = error?.message || String(error);
-        
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
         // ELITE: Don't log timeout errors as warnings (expected behavior)
         if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
           if (__DEV__) {
@@ -339,13 +339,13 @@ class BackendPushService {
     try {
       // ELITE: Stop location updates first
       this.stopLocationUpdates();
-      
+
       // ELITE: Clear retry timeout
       if (this.retryTimeout) {
         clearTimeout(this.retryTimeout);
         this.retryTimeout = null;
       }
-      
+
       const deviceId = await getDeviceId();
       if (!deviceId || !this.baseUrl) {
         this.isRegistered = false;
@@ -362,21 +362,21 @@ class BackendPushService {
           userId: deviceId,
         }),
       });
-      
+
       const fetchTimeoutPromise = new Promise<Response>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), 10000) // 10 second timeout
+        setTimeout(() => reject(new Error('Request timeout')), 10000), // 10 second timeout
       );
-      
+
       await Promise.race([fetchPromise, fetchTimeoutPromise]);
 
       this.isRegistered = false;
       logger.info('Unregistered from backend');
-    } catch (error: any) {
-      const errorMessage = error?.message || String(error);
-      
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
       // ELITE: Mark as unregistered even if request fails
       this.isRegistered = false;
-      
+
       if (errorMessage.includes('timeout')) {
         if (__DEV__) {
           logger.debug('Unregister request timed out (non-critical)');
@@ -413,10 +413,10 @@ class BackendPushService {
 
     try {
       // ELITE: Validate input
-      if (!detection.id || !detection.deviceId || 
-          isNaN(detection.latitude) || isNaN(detection.longitude) ||
-          detection.latitude < -90 || detection.latitude > 90 ||
-          detection.longitude < -180 || detection.longitude > 180) {
+      if (!detection.id || !detection.deviceId ||
+        isNaN(detection.latitude) || isNaN(detection.longitude) ||
+        detection.latitude < -90 || detection.latitude > 90 ||
+        detection.longitude < -180 || detection.longitude > 180) {
         logger.warn('Invalid seismic detection data');
         return;
       }
@@ -446,7 +446,7 @@ class BackendPushService {
       });
 
       const timeoutPromise = new Promise<Response>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), 10000) // 10 second timeout
+        setTimeout(() => reject(new Error('Request timeout')), 10000), // 10 second timeout
       );
 
       const response = await Promise.race([fetchPromise, timeoutPromise]);
@@ -460,8 +460,8 @@ class BackendPushService {
           logger.info('Seismic detection sent to backend successfully');
         }
       }
-    } catch (error: any) {
-      const errorMessage = error?.message || String(error);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('timeout')) {
         if (__DEV__) {
           logger.debug('Seismic detection send timed out');
@@ -477,12 +477,12 @@ class BackendPushService {
    */
   cleanup(): void {
     this.stopLocationUpdates();
-    
+
     if (this.retryTimeout) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
     }
-    
+
     this.isRegistered = false;
     this._isInitialized = false;
     this.registrationAttempts = 0;

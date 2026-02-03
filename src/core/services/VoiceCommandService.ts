@@ -9,6 +9,7 @@ import { Audio } from 'expo-av';
 import { logger } from '../utils/logger';
 import { whistleService } from './WhistleService';
 import { getSOSService } from './SOSService';
+import { safeLowerCase, safeIncludes } from '../utils/safeString';
 
 type VoiceCommand = 'yardim' | 'konum' | 'duduk' | 'sos';
 
@@ -143,15 +144,15 @@ class VoiceCommandService {
 
     try {
       this.isListening = true;
-      
+
       // Speak instruction
       await this.speak('Sesli komut modu aktif. Yardım, Konum veya Düdük deyin.');
-      
+
       // Start recording (simplified - real implementation would use speech recognition)
       this.recording = new Audio.Recording();
       await this.recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       await this.recording.startAsync();
-      
+
       logger.info('VoiceCommandService listening');
     } catch (error) {
       logger.error('VoiceCommandService start failed:', error);
@@ -170,7 +171,7 @@ class VoiceCommandService {
         await this.recording.stopAndUnloadAsync();
         this.recording = null;
       }
-      
+
       this.isListening = false;
       logger.info('VoiceCommandService stopped');
     } catch (error) {
@@ -183,24 +184,24 @@ class VoiceCommandService {
    * @param text - Recognized text from speech
    */
   async processCommand(text: string) {
-    const normalizedText = text.toLowerCase().trim();
-    
+    const normalizedText = safeLowerCase(text).trim();
+
     for (const [commandName, handler] of this.commands) {
       for (const keyword of handler.keywords) {
-        if (normalizedText.includes(keyword)) {
+        if (safeIncludes(normalizedText, keyword)) {
           logger.info(`VoiceCommandService: Executing ${commandName}`);
-          
+
           // Speak response
           await this.speak(handler.response);
-          
+
           // Execute action
           await handler.action();
-          
+
           return true;
         }
       }
     }
-    
+
     // No command matched
     await this.speak('Komut anlaşılamadı. Yardım, Konum veya Düdük deyin.');
     return false;

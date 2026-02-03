@@ -16,11 +16,15 @@ export interface MapLayers {
   pois: boolean;
   trappedUsers: boolean;
   hazardZones: boolean;
+  heatmap: boolean;
+  meshNetwork: boolean;
 }
 
 interface Props {
   layers: MapLayers;
   onLayerToggle: (layer: keyof MapLayers) => void;
+  onOfflineMapsPress?: () => void;
+  onMeshNetworkPress?: () => void;
   earthquakeCount: number;
   familyCount: number;
   poisCount: number;
@@ -34,6 +38,8 @@ export default function MapLayerControl({
   familyCount,
   poisCount,
   trappedUsersCount,
+  onOfflineMapsPress,
+  onMeshNetworkPress,
 }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -228,6 +234,108 @@ export default function MapLayerControl({
                   <Ionicons name="checkmark" size={16} color="#ffffff" />
                 )}
               </View>
+            </Pressable>
+
+            {/* Heatmap Toggle */}
+            <Pressable
+              style={styles.layerItem}
+              onPress={() => handleLayerToggle('heatmap')}
+            >
+              <View style={styles.layerInfo}>
+                <Ionicons
+                  name="flame"
+                  size={20}
+                  color={layers.heatmap ? '#f97316' : colors.text.tertiary}
+                />
+                <Text
+                  style={[
+                    styles.layerLabel,
+                    !layers.heatmap && styles.layerLabelDisabled,
+                  ]}
+                >
+                  Isı Haritası
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.checkbox,
+                  layers.heatmap && styles.checkboxActive,
+                ]}
+              >
+                {layers.heatmap && (
+                  <Ionicons name="checkmark" size={16} color="#ffffff" />
+                )}
+              </View>
+            </Pressable>
+
+            {/* Mesh Network Toggle */}
+            <Pressable
+              style={styles.layerItem}
+              onPress={() => handleLayerToggle('meshNetwork')}
+            >
+              <View style={styles.layerInfo}>
+                <Ionicons
+                  name="radio"
+                  size={20}
+                  color={layers.meshNetwork ? '#2563eb' : colors.text.tertiary}
+                />
+                <Text
+                  style={[
+                    styles.layerLabel,
+                    !layers.meshNetwork && styles.layerLabelDisabled,
+                  ]}
+                >
+                  Mesh Ağı
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.checkbox,
+                  layers.meshNetwork && styles.checkboxActive,
+                ]}
+              >
+                {layers.meshNetwork && (
+                  <Ionicons name="checkmark" size={16} color="#ffffff" />
+                )}
+              </View>
+            </Pressable>
+
+            {/* Mesh Network Detail */}
+            <Pressable
+              style={styles.layerItem}
+              onPress={() => {
+                haptics.impactLight();
+                onMeshNetworkPress?.();
+              }}
+            >
+              <View style={styles.layerInfo}>
+                <Ionicons
+                  name="git-network-outline"
+                  size={20}
+                  color={colors.text.primary}
+                />
+                <Text style={styles.layerLabel}>Ağ Durumu</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
+            </Pressable>
+
+            {/* Offline Maps Manager */}
+            <Pressable
+              style={styles.layerItem}
+              onPress={() => {
+                haptics.impactLight();
+                onOfflineMapsPress?.();
+              }}
+            >
+              <View style={styles.layerInfo}>
+                <Ionicons
+                  name="cloud-download-outline"
+                  size={20}
+                  color={colors.text.primary}
+                />
+                <Text style={styles.layerLabel}>Çevrimdışı Harita</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
             </Pressable>
           </BlurView>
         </View>

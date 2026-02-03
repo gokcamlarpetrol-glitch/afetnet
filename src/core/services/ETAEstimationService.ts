@@ -40,7 +40,7 @@ class ETAEstimationService {
    */
   async calculateETA(
     epicenter: { latitude: number; longitude: number },
-    userLocation?: { latitude: number; longitude: number } | null
+    userLocation?: { latitude: number; longitude: number } | null,
   ): Promise<ETAEstimate | null> {
     try {
       // Get user location if not provided
@@ -71,7 +71,7 @@ class ETAEstimationService {
         location.latitude,
         location.longitude,
         epicenter.latitude,
-        epicenter.longitude
+        epicenter.longitude,
       );
 
       // Calculate ETA for P-wave and S-wave
@@ -102,7 +102,7 @@ class ETAEstimationService {
     lat1: number,
     lon1: number,
     lat2: number,
-    lon2: number
+    lon2: number,
   ): number {
     const R = 6371; // Earth's radius in km
     const dLat = this.toRad(lat2 - lat1);
@@ -141,23 +141,23 @@ class ETAEstimationService {
    */
   private getRecommendedAction(alertLevel: AlertLevel, distance: number): string {
     switch (alertLevel) {
-      case AlertLevel.IMMINENT:
-        return distance < 50
-          ? 'Deprem çok yakın! Hemen güvenli yere geçin ve çök-kapan-tutun pozisyonu alın!'
-          : 'Deprem dalgaları yaklaşıyor! Güvenli yere geçin!';
+    case AlertLevel.IMMINENT:
+      return distance < 50
+        ? 'Deprem çok yakın! Hemen güvenli yere geçin ve çök-kapan-tutun pozisyonu alın!'
+        : 'Deprem dalgaları yaklaşıyor! Güvenli yere geçin!';
       
-      case AlertLevel.ACTION:
-        return distance < 50
-          ? 'Deprem yaklaşıyor! Güvenli yere geçin, pencerelerden uzak durun!'
-          : 'Deprem dalgaları yaklaşıyor. Güvenli yere geçmeye hazırlanın!';
+    case AlertLevel.ACTION:
+      return distance < 50
+        ? 'Deprem yaklaşıyor! Güvenli yere geçin, pencerelerden uzak durun!'
+        : 'Deprem dalgaları yaklaşıyor. Güvenli yere geçmeye hazırlanın!';
       
-      case AlertLevel.CAUTION:
-        return distance < 50
-          ? 'Deprem yaklaşıyor. Güvenli yere geçmeye hazırlanın.'
-          : 'Deprem dalgaları yaklaşıyor. Dikkatli olun.';
+    case AlertLevel.CAUTION:
+      return distance < 50
+        ? 'Deprem yaklaşıyor. Güvenli yere geçmeye hazırlanın.'
+        : 'Deprem dalgaları yaklaşıyor. Dikkatli olun.';
       
-      default:
-        return 'Deprem tespit edildi. Durumu takip edin.';
+    default:
+      return 'Deprem tespit edildi. Durumu takip edin.';
     }
   }
 

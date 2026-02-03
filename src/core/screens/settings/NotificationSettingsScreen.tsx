@@ -26,6 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
 const SOUND_TYPES = [
   { value: 'default', label: 'Varsayılan', icon: 'notifications', description: 'Sistem varsayılan sesi' },
@@ -45,7 +46,12 @@ const NOTIFICATION_MODES = [
   { value: 'critical-only', label: 'Sadece Kritik', icon: 'alert-circle', description: 'Sadece kritik depremler için bildirim' },
 ] as const;
 
-export default function NotificationSettingsScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface NotificationSettingsScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function NotificationSettingsScreen({ navigation }: NotificationSettingsScreenProps) {
   // Get all notification settings from store
   const {
     notificationsEnabled,
@@ -133,7 +139,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
     icon: string,
     title: string,
     subtitle: string,
-    rightComponent: React.ReactNode
+    rightComponent: React.ReactNode,
   ) => (
     <View style={styles.settingRow}>
       <View style={styles.settingIcon}>
@@ -168,7 +174,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                     type: Platform.OS === 'ios' ? 'public.audio' : 'audio/*',
                     copyToCacheDirectory: true,
                   });
-                  
+
                   if (!result.canceled && result.assets && result.assets.length > 0) {
                     const soundUri = result.assets[0].uri;
                     await AsyncStorage.setItem('customNotificationSoundUri', soundUri);
@@ -264,7 +270,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
     onValueChange: (value: number) => void,
     inputValue: string,
     setInputValue: (value: string) => void,
-    suffix?: string
+    suffix?: string,
   ) => {
     return (
       <View style={styles.sliderRow}>
@@ -327,7 +333,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Pressable onPress={() => navigation?.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.title}>Bildirim Ayarları</Text>
@@ -338,7 +344,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
         {/* Genel Bildirim Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Genel Bildirim Ayarları</Text>
-          
+
           {renderSettingRow(
             'notifications',
             'Bildirimler',
@@ -350,7 +356,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotifications(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -364,7 +370,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationPush(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -378,7 +384,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationFullScreen(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
         </View>
 
@@ -394,7 +400,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
         {/* Ses Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Ses Ayarları</Text>
-          
+
           {renderSettingRow(
             'volume-high',
             'Alarm Sesi',
@@ -406,7 +412,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationSound(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {notificationSound && (
@@ -429,7 +435,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 },
                 volumeInput,
                 setVolumeInput,
-                '%'
+                '%',
               )}
 
               {renderSliderRow(
@@ -445,7 +451,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 },
                 repeatInput,
                 setRepeatInput,
-                ' kez'
+                ' kez',
               )}
             </>
           )}
@@ -461,7 +467,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationVibration(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -475,14 +481,14 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationTTS(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
         </View>
 
         {/* Deprem Şiddeti Bazlı Ayarlar */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Deprem Şiddeti Bazlı Ayarlar</Text>
-          
+
           <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={20} color={colors.status.info} />
             <Text style={styles.infoBoxText}>
@@ -502,7 +508,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setMagnitudeBasedSound(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -516,7 +522,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setMagnitudeBasedVibration(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           <View style={styles.magnitudeInfo}>
@@ -547,7 +553,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
         {/* Zaman Bazlı Ayarlar */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Zaman Bazlı Ayarlar</Text>
-          
+
           {renderSettingRow(
             'moon',
             'Sessiz Saatler',
@@ -559,7 +565,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setQuietHoursEnabled(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {quietHoursEnabled && (
@@ -617,7 +623,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                     setQuietHoursCriticalOnly(value);
                   }}
                   trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-                />
+                />,
               )}
             </>
           )}
@@ -626,7 +632,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
         {/* Görünüm Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Görünüm Ayarları</Text>
-          
+
           {renderSettingRow(
             'lock-closed',
             'Kilit Ekranında Göster',
@@ -638,7 +644,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationShowOnLockScreen(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -652,7 +658,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationShowPreview(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -666,7 +672,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
                 setNotificationGroupByMagnitude(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
         </View>
 
@@ -674,7 +680,7 @@ export default function NotificationSettingsScreen({ navigation }: any) {
         <View style={styles.infoCard}>
           <Ionicons name="information-circle" size={24} color={colors.status.info} />
           <Text style={styles.infoText}>
-            Bu ayarlar bildirimlerinizi tamamen özelleştirmenizi sağlar. 
+            Bu ayarlar bildirimlerinizi tamamen özelleştirmenizi sağlar.
             Ses tonları, bildirim modları ve zaman bazlı ayarlar ile bildirimlerinizi istediğiniz gibi yapılandırabilirsiniz.
           </Text>
         </View>

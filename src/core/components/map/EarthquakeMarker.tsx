@@ -1,8 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../../theme';
 import { getMagnitudeColor, getMagnitudeSize } from '../../utils/mapUtils';
 
 interface EarthquakeMarkerProps {
@@ -10,7 +15,8 @@ interface EarthquakeMarkerProps {
   selected?: boolean;
 }
 
-export function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMarkerProps) {
+// Memoized for performance
+export const EarthquakeMarker = memo(function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMarkerProps) {
   const pulse = useSharedValue(1);
   const scale = useSharedValue(selected ? 1.2 : 1);
   const size = getMagnitudeSize(magnitude);
@@ -18,19 +24,20 @@ export function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMark
 
   useEffect(() => {
     // Pulse animation for all markers
-    pulse.value = withRepeat(
-      withTiming(1.15, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    );
-    
-    // Scale animation when selected
-    if (selected) {
-      scale.value = withTiming(1.2, { duration: 200 });
+    // Optimization: Only pulse significant earthquakes or if selected to save resources
+    if (magnitude >= 4.0 || selected) {
+      pulse.value = withRepeat(
+        withTiming(1.15, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
     } else {
-      scale.value = withTiming(1, { duration: 200 });
+      pulse.value = 1; // Reset if not pulsing
     }
-  }, [selected]);
+
+    // Scale animation when selected
+    scale.value = withTiming(selected ? 1.2 : 1, { duration: 200 });
+  }, [selected, magnitude]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value * pulse.value }],
@@ -43,15 +50,17 @@ export function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMark
 
   return (
     <Animated.View style={[styles.container, { width: size, height: size }, animatedStyle]}>
-      {/* Pulse ring */}
-      <Animated.View
-        style={[
-          styles.pulseRing,
-          { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
-          pulseStyle,
-        ]}
-      />
-      
+      {/* Pulse ring for high magnitude or selected */}
+      {(magnitude >= 4.0 || selected) && (
+        <Animated.View
+          style={[
+            styles.pulseRing,
+            { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
+            pulseStyle,
+          ]}
+        />
+      )}
+
       {/* Main marker */}
       <LinearGradient
         colors={[color, color + 'CC']}
@@ -61,7 +70,7 @@ export function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMark
           {magnitude.toFixed(1)}
         </Text>
       </LinearGradient>
-      
+
       {/* Selection ring */}
       {selected && (
         <View
@@ -73,7 +82,7 @@ export function EarthquakeMarker({ magnitude, selected = false }: EarthquakeMark
       )}
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

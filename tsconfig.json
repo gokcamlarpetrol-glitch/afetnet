@@ -56,6 +56,10 @@
     "dist",
     "**/*.test.ts",
     "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "src/test/**/*",
+    "src/**/__tests__/**/*",
     "src/offline/**/*"
   ],
   "extends": "./node_modules/expo/tsconfig.base.json"

@@ -1,54 +1,25 @@
-/**
- * AI ASSISTANT CARD - Home Screen Component
- * Provides access to AI features: Risk Score, Preparedness Plan, Panic Assistant
- */
-
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ActivityIndicator, Alert, Pressable } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../../../theme';
 import * as haptics from '../../../utils/haptics';
 import { useAIAssistantStore } from '../../../ai/stores/aiAssistantStore';
 import { aiAssistantCoordinator } from '../../../ai/services/AIAssistantCoordinator';
 import { createLogger } from '../../../utils/logger';
-import { RiskLevel } from '../../../ai/types/ai.types';
 import { i18nService } from '../../../services/I18nService';
-
-interface Props {
-  navigation: any;
-}
+import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurface';
+import { LinearGradient } from 'expo-linear-gradient';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('AIAssistantCard');
 
-const getRiskColor = (level?: RiskLevel) => {
-  switch (level) {
-    case 'critical':
-      return colors.emergency.critical;
-    case 'high':
-      return colors.emergency.warning;
-    case 'medium':
-      return colors.status.alert;
-    case 'low':
-    default:
-      return colors.status.success;
-  }
-};
+// ELITE: Typed navigation prop
+type AIAssistantNavigationProp = StackNavigationProp<ParamListBase>;
 
-const getRiskLabel = (level?: RiskLevel) => {
-  switch (level) {
-    case 'critical':
-      return i18nService.t('ai.criticalLevel');
-    case 'high':
-      return i18nService.t('ai.highRisk');
-    case 'medium':
-      return i18nService.t('ai.mediumRisk');
-    case 'low':
-      return i18nService.t('ai.lowRisk');
-    default:
-      return i18nService.t('ai.notPrepared');
-  }
-};
+interface AIAssistantCardProps {
+  navigation: AIAssistantNavigationProp;
+}
 
 const formatUpdateTime = (timestamp?: number | null) => {
   if (!timestamp) return i18nService.t('ai.dataPending');
@@ -58,564 +29,137 @@ const formatUpdateTime = (timestamp?: number | null) => {
     const minutes = Math.round(diff / (60 * 1000));
     return i18nService.t('ai.minutesAgo', { minutes: minutes.toString() });
   }
-  return new Date(timestamp).toLocaleTimeString('tr-TR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return new Date(timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 };
 
-export default function AIAssistantCard({ navigation }: Props) {
+export default function AIAssistantCard({ navigation }: AIAssistantCardProps) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const [expanded, setExpanded] = useState(false);
 
   const riskScore = useAIAssistantStore((state) => state.riskScore);
-  const riskScoreLoading = useAIAssistantStore((state) => state.riskScoreLoading);
-  const riskScoreFetchedAt = useAIAssistantStore((state) => state.riskScoreFetchedAt);
-  const preparednessPlan = useAIAssistantStore((state) => state.preparednessPlan);
-  const preparednessPlanLoading = useAIAssistantStore((state) => state.preparednessPlanLoading);
-  const preparednessPlanFetchedAt = useAIAssistantStore((state) => state.preparednessPlanFetchedAt);
-  const panicAssistant = useAIAssistantStore((state) => state.panicAssistant);
-  const panicAssistantLoading = useAIAssistantStore((state) => state.panicAssistantLoading);
-  const panicAssistantFetchedAt = useAIAssistantStore((state) => state.panicAssistantFetchedAt);
-
-  const anyLoading = riskScoreLoading || preparednessPlanLoading || panicAssistantLoading;
+  const loading = useAIAssistantStore((state) => state.riskScoreLoading);
+  const plan = useAIAssistantStore((state) => state.preparednessPlan);
+  const panic = useAIAssistantStore((state) => state.panicAssistant);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const preload = async () => {
-      try {
-        const state = useAIAssistantStore.getState();
-        const tasks: Promise<unknown>[] = [];
-
-        if (!state.riskScore && !state.riskScoreLoading) {
-          tasks.push(aiAssistantCoordinator.ensureRiskScore());
-        }
-        if (!state.preparednessPlan && !state.preparednessPlanLoading) {
-          tasks.push(aiAssistantCoordinator.ensurePreparednessPlan());
-        }
-        if (!state.panicAssistant && !state.panicAssistantLoading) {
-          tasks.push(aiAssistantCoordinator.ensurePanicAssistant('earthquake'));
-        }
-
-        if (tasks.length === 0) return;
-        await Promise.all(tasks);
-      } catch (error) {
-        if (!cancelled) {
-          logger.warn('AI assistant ön yüklemesi kısmen tamamlandı', error);
-        }
-      }
-    };
-
-    preload();
-
-    return () => {
-      cancelled = true;
-    };
+    aiAssistantCoordinator.ensureRiskScore().catch(() => { });
+    aiAssistantCoordinator.ensurePreparednessPlan().catch(() => { });
+    aiAssistantCoordinator.ensurePanicAssistant('earthquake').catch(() => { });
   }, []);
 
-  const riskMetric = useMemo(() => {
-    if (riskScore) {
-      return {
-        value: riskScore.score.toString(),
-        suffix: '/100',
-        status: getRiskLabel(riskScore.level),
-        statusColor: getRiskColor(riskScore.level),
-        updated: formatUpdateTime(riskScore.lastUpdated || riskScoreFetchedAt),
-      };
-    }
-    if (riskScoreLoading) {
-      return {
-        value: '•••',
-        suffix: '',
-        status: 'Hesaplanıyor',
-        statusColor: colors.text.secondary,
-        updated: 'İşleniyor',
-      };
-    }
-    return {
-      value: '--',
-      suffix: '',
-      status: 'Hazırlanmadı',
-      statusColor: colors.text.secondary,
-      updated: 'Veri bekleniyor',
-    };
-  }, [riskScore, riskScoreLoading, riskScoreFetchedAt]);
-
-  const planMetric = useMemo(() => {
-    if (preparednessPlan) {
-      const totalItems = preparednessPlan.sections.reduce((acc, section) => acc + section.items.length, 0);
-      const completedItems = preparednessPlan.sections.reduce(
-        (acc, section) => acc + section.items.filter((item) => item.completed).length,
-        0
-      );
-      const remainingItems = Math.max(0, totalItems - completedItems);
-      return {
-        value: `${preparednessPlan.completionRate}%`,
-        suffix: '',
-        status: remainingItems > 0 ? `${remainingItems} adım kaldı` : 'Tüm görevler hazır',
-        statusColor: remainingItems > 0 ? colors.status.info : colors.status.success,
-        updated: formatUpdateTime(preparednessPlan.updatedAt || preparednessPlanFetchedAt),
-      };
-    }
-    if (preparednessPlanLoading) {
-      return {
-        value: '•••',
-        suffix: '',
-        status: 'Oluşturuluyor',
-        statusColor: colors.text.secondary,
-        updated: 'İşleniyor',
-      };
-    }
-    return {
-      value: '--',
-      suffix: '',
-      status: 'Plan oluştur',
-      statusColor: colors.text.secondary,
-      updated: 'Veri bekleniyor',
-    };
-  }, [preparednessPlan, preparednessPlanLoading, preparednessPlanFetchedAt]);
-
-  const panicMetric = useMemo(() => {
-    if (panicAssistant) {
-      const total = panicAssistant.actions.length;
-      const completed = panicAssistant.actions.filter((action) => action.completed).length;
-      const percent = total ? Math.round((completed / total) * 100) : 0;
-      return {
-        value: total ? `${completed}/${total}` : '--',
-        suffix: '',
-        status: total ? `%${percent} hazır` : 'Aksiyon yükleniyor',
-        statusColor: percent >= 75 ? colors.status.success : colors.accent.primary,
-        updated: formatUpdateTime(panicAssistant.lastUpdate || panicAssistantFetchedAt),
-      };
-    }
-    if (panicAssistantLoading) {
-      return {
-        value: '•••',
-        suffix: '',
-        status: 'Hazırlanıyor',
-        statusColor: colors.text.secondary,
-        updated: 'İşleniyor',
-      };
-    }
-    return {
-      value: '--',
-      suffix: '',
-      status: i18nService.t('ai.startPreparation'),
-      statusColor: colors.text.secondary,
-      updated: 'Veri bekleniyor',
-    };
-  }, [panicAssistant, panicAssistantLoading, panicAssistantFetchedAt]);
-
-  const statsData = useMemo(
-    () => [
-      {
-        key: 'risk',
-        label: i18nService.t('ai.riskScore'),
-        value: riskMetric.value,
-        suffix: riskMetric.suffix,
-        caption: riskMetric.status,
-        updated: riskMetric.updated,
-        accent: '#60a5fa',
-        background: 'rgba(96, 165, 250, 0.12)',
-      },
-      {
-        key: 'plan',
-        label: i18nService.t('ai.preparednessPlan'),
-        value: planMetric.value,
-        suffix: planMetric.suffix,
-        caption: planMetric.status,
-        updated: planMetric.updated,
-        accent: '#34d399',
-        background: 'rgba(52, 211, 153, 0.12)',
-      },
-      {
-        key: 'panic',
-        label: i18nService.t('ai.disasterGuide'),
-        value: panicMetric.value,
-        suffix: panicMetric.suffix,
-        caption: panicMetric.status,
-        updated: panicMetric.updated,
-        accent: '#f87171',
-        background: 'rgba(248, 113, 113, 0.12)',
-      },
-    ],
-    [riskMetric.value, riskMetric.suffix, riskMetric.status, riskMetric.updated, planMetric.value, planMetric.suffix, planMetric.status, planMetric.updated, panicMetric.value, panicMetric.suffix, panicMetric.status, panicMetric.updated]
-  );
-
   const toggleExpanded = useCallback(() => {
+    haptics.selectionChanged();
     setExpanded((prev) => !prev);
   }, []);
 
-  const animatePress = () =>
-    new Promise<void>((resolve) => {
-      Animated.sequence([
-        Animated.timing(scaleAnim, {
-          toValue: 0.97,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scaleAnim, {
-          toValue: 1,
-          duration: 120,
-          useNativeDriver: true,
-        }),
-      ]).start(() => resolve());
-    });
+  const animatePress = () => new Promise<void>((resolve) => {
+    Animated.sequence([Animated.timing(scaleAnim, { toValue: 0.98, duration: 100, useNativeDriver: true }), Animated.timing(scaleAnim, { toValue: 1, duration: 120, useNativeDriver: true })]).start(() => resolve());
+  });
 
-  const handlePress = async (screen: 'RiskScore' | 'PreparednessPlan' | 'PanicAssistant') => {
-    haptics.impactMedium();
-    await animatePress();
+  const handlePress = async (screen: string) => { haptics.impactMedium(); await animatePress(); navigation.navigate(screen); };
 
-    // CRITICAL: AI assistant navigation with timeout and error handling
-    try {
-      // CRITICAL: Ensure data with timeout (15 seconds per service)
-      const ensurePromises: Promise<unknown>[] = [];
-      
-      if (screen === 'RiskScore') {
-        const ensurePromise = aiAssistantCoordinator.ensureRiskScore(true);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(i18nService.t('ai.riskScoreTimeout'))), 15000)
-        );
-        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
-      } else if (screen === 'PreparednessPlan') {
-        const ensurePromise = aiAssistantCoordinator.ensurePreparednessPlan(true);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(i18nService.t('ai.planTimeout'))), 15000)
-        );
-        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
-      } else {
-        const ensurePromise = aiAssistantCoordinator.ensurePanicAssistant('earthquake', true);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(i18nService.t('ai.guideTimeout'))), 15000)
-        );
-        ensurePromises.push(Promise.race([ensurePromise, timeoutPromise]));
-      }
-
-      // Wait for data preparation (with timeout)
-      await Promise.race([
-        Promise.all(ensurePromises),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(i18nService.t('ai.dataLoadTimeout'))), 20000)
-        )
-      ]);
-
-      // CRITICAL: Navigate with error handling
-      if (navigation && typeof navigation.navigate === 'function') {
-        navigation.navigate(screen);
-      } else {
-          throw new Error(i18nService.t('ai.navigationNotAvailable'));
-      }
-    } catch (error: any) {
-      logger.error('AI assistant action failed:', error);
-      
-      // CRITICAL: Still try to navigate even if data loading failed
-      // User can see loading state on the detail screen
-      try {
-        if (navigation && typeof navigation.navigate === 'function') {
-          navigation.navigate(screen);
-        } else {
-          Alert.alert(
-            i18nService.t('ai.navigationError'),
-            i18nService.t('ai.navigationUnavailable'),
-            [{ text: i18nService.t('common.ok'), style: 'default' }]
-          );
-        }
-      } catch (navError) {
-        const errorMessage = error?.message || 'Bilinmeyen hata';
-        Alert.alert(
-          i18nService.t('ai.serviceError'),
-          errorMessage.includes('zaman aşımı') || errorMessage.includes('timeout') || errorMessage.includes('Timeout')
-            ? i18nService.t('ai.timeoutMessage')
-            : i18nService.t('ai.dataLoadError'),
-          [{ text: i18nService.t('common.ok'), style: 'default' }]
-        );
-      }
-    }
-  };
+  // Helper to calculate completions
+  const planProgress = useMemo(() => plan ? Math.round(plan.completionRate) : 0, [plan]);
+  const panicProgress = useMemo(() => panic ? panic.progressPercentage : 0, [panic]);
+  const riskVal = useMemo(() => riskScore ? riskScore.score : 0, [riskScore]);
 
   return (
     <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
-      <LinearGradient
-        colors={['#1a1f2e', '#141824']}
-        style={styles.gradient}
-      >
-        <Pressable
-          style={styles.header}
-          onPress={toggleExpanded}
-          hitSlop={12}
-          accessibilityRole="button"
-        >
-          <View style={styles.headerLeft}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="sparkles" size={20} color="#60a5fa" />
+      <PremiumMaterialSurface variant="A">
+        <View style={styles.cardContent}>
+          <Pressable style={styles.header} onPress={toggleExpanded} hitSlop={12}>
+            <View style={styles.headerLeft}>
+              {/* Logo: Soft Lavender Icon Box */}
+              <View style={[styles.iconContainer, { backgroundColor: '#f3e8ff' }]}>
+                <Ionicons name="sparkles" size={18} color="#a855f7" />
+              </View>
+              <View>
+                <Text style={styles.title}>{i18nService.t('ai.assistant')}</Text>
+                <Text style={styles.subtitle}>{i18nService.t('ai.assistantSubtitle')}</Text>
+              </View>
             </View>
-            <View>
-              <Text style={styles.title}>{i18nService.t('ai.assistant')}</Text>
-              <Text style={styles.subtitle}>{i18nService.t('ai.assistantSubtitle')}</Text>
+            <View style={styles.headerRight}>
+              <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color="#94a3b8" style={{ marginLeft: 8 }} />
             </View>
-          </View>
-          <View style={styles.headerRight}>
-            <Ionicons
-              name={expanded ? 'chevron-up-outline' : 'chevron-down-outline'}
-              size={18}
-              color={colors.text.secondary}
-            />
-          </View>
-        </Pressable>
+          </Pressable>
 
-        {expanded && (
-          <>
-            <View style={styles.statsRow}>
-              {statsData.map((stat) => (
-                <View key={stat.key} style={[styles.statsCard, { backgroundColor: stat.background }]}> 
-                  <Text style={styles.statsLabel}>{stat.label}</Text>
-                  <View
-                    style={[
-                      styles.statsValueRow,
-                      stat.key !== 'risk' && styles.statsValueRowCompact,
-                    ]}
-                  >
-                    <Text style={[styles.statsValue, { color: stat.accent }]}>{stat.value}</Text>
-                    {stat.suffix ? <Text style={[styles.statsSuffix, { color: stat.accent }]}>{stat.suffix}</Text> : null}
-                  </View>
-                  <Text style={styles.statsCaption} numberOfLines={1}>{stat.caption}</Text>
-                  <Text style={styles.statsUpdated}>{i18nService.t('ai.last')}: {stat.updated}</Text>
-                </View>
-              ))}
+          {expanded && (
+            <View style={{ marginTop: 16 }}>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                {/* Risk Score - Soft Serenity Blue */}
+                <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={() => handlePress('RiskScore')}>
+                  <LinearGradient colors={['#e0f2fe', '#bae6fd']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.buttonGradient}>
+                    <View style={styles.buttonTopRow}>
+                      <Ionicons name="shield-checkmark" size={24} color="#0ea5e9" />
+                      <Text style={[styles.scoreText, { color: '#0369a1' }]}>{riskVal}</Text>
+                    </View>
+                    <Text style={[styles.buttonLabel, { color: '#0284c7' }]}>{i18nService.t('ai.riskScore')}</Text>
+                    <Text style={[styles.buttonSub, { color: '#38bdf8' }]}>Güvenlik Durumu</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                {/* Plan - Soft Sage/Mint */}
+                <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={() => handlePress('PreparednessPlan')}>
+                  <LinearGradient colors={['#dcfce7', '#bbf7d0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.buttonGradient}>
+                    <View style={styles.buttonTopRow}>
+                      <Ionicons name="leaf" size={24} color="#16a34a" />
+                      <Text style={[styles.scoreText, { color: '#15803d' }]}>%{planProgress}</Text>
+                    </View>
+                    <Text style={[styles.buttonLabel, { color: '#16a34a' }]}>{i18nService.t('ai.preparednessPlan')}</Text>
+                    <Text style={[styles.buttonSub, { color: '#4ade80' }]}>Hazırlık Seviyesi</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                {/* Panic - Soft Antique Rose */}
+                <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={() => handlePress('PanicAssistant')}>
+                  <LinearGradient colors={['#ffe4e6', '#fecdd3']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.buttonGradient}>
+                    <View style={styles.buttonTopRow}>
+                      <Ionicons name="heart" size={24} color="#e11d48" />
+                      <Text style={[styles.scoreText, { color: '#be123c' }]}>%{panicProgress}</Text>
+                    </View>
+                    <Text style={[styles.buttonLabel, { color: '#e11d48' }]}>{i18nService.t('ai.disasterGuide')}</Text>
+                    <Text style={[styles.buttonSub, { color: '#fb7185' }]}>Acil Durum</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                {/* AI - Soft Lavender Mist */}
+                <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={() => navigation.navigate('LocalAIAssistant')}>
+                  <LinearGradient colors={['#f3e8ff', '#e9d5ff']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.buttonGradient}>
+                    <View style={styles.buttonTopRow}>
+                      <Ionicons name="sparkles" size={24} color="#9333ea" />
+                      <Ionicons name="arrow-forward" size={18} color="#c084fc" />
+                    </View>
+                    <Text style={[styles.buttonLabel, { color: '#9333ea' }]}>Asistan</Text>
+                    <Text style={[styles.buttonSub, { color: '#c084fc' }]}>Yapay Zeka</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             </View>
-
-            <View style={styles.buttonsContainer}>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => handlePress('RiskScore')}
-                disabled={anyLoading}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={['#1d4ed8', '#1e40af']}
-                  style={[styles.buttonGradient, riskScoreLoading && styles.buttonGradientLoading]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.riskScore')}</Text>
-                    {riskScoreLoading ? (
-                      <ActivityIndicator size="small" color="#bfdbfe" />
-                    ) : null}
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => handlePress('PreparednessPlan')}
-                disabled={anyLoading}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={['#10b981', '#059669']}
-                  style={[styles.buttonGradient, preparednessPlanLoading && styles.buttonGradientLoading]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.preparednessPlan')}</Text>
-                    {preparednessPlanLoading ? (
-                      <ActivityIndicator size="small" color="#d1fae5" />
-                    ) : null}
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => handlePress('PanicAssistant')}
-                disabled={anyLoading}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={['#ef4444', '#dc2626']}
-                  style={[styles.buttonGradient, panicAssistantLoading && styles.buttonGradientLoading]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View style={styles.buttonTitleRow}>
-                    <Text style={styles.buttonTitleLarge}>{i18nService.t('ai.disasterGuide')}</Text>
-                    {panicAssistantLoading ? (
-                      <ActivityIndicator size="small" color="#fee2e2" />
-                    ) : null}
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.disclaimer}>
-              <Ionicons name="information-circle-outline" size={14} color={colors.text.tertiary} />
-              <Text style={styles.disclaimerText}>
-                Bu içerik bilgilendirme amaçlıdır. AFAD ve resmi kurumların uyarıları önceliklidir.
-              </Text>
-            </View>
-          </>
-        )}
-      </LinearGradient>
+          )}
+        </View>
+      </PremiumMaterialSurface>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    marginBottom: spacing[6],
-  },
-  gradient: {
-    borderRadius: 18,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.18)',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing[3],
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-  },
-  iconContainer: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  subtitle: {
-    marginTop: 1,
-    fontSize: 11,
-    fontWeight: '500',
-    color: colors.text.secondary,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing[3],
-    marginTop: spacing[2],
-    marginBottom: spacing[3],
-  },
-  statsCard: {
-    flex: 1,
-    borderRadius: 18,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[4],
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.18)',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 12,
-    elevation: 2,
-    alignItems: 'flex-start',
-    gap: spacing[2],
-  },
-  statsLabel: {
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    color: colors.text.secondary,
-    marginBottom: spacing[1],
-  },
-  statsValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: spacing[4],
-  },
-  statsValueRowCompact: {
-    marginTop: spacing[3],
-  },
-  statsValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    lineHeight: 32,
-    color: colors.text.primary,
-  },
-  statsSuffix: {
-    fontSize: 16,
-    fontWeight: '700',
-    paddingBottom: 2,
-    color: colors.text.primary,
-  },
-  statsCaption: {
-    marginTop: spacing[2],
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(226, 232, 240, 0.9)',
-  },
-  statsUpdated: {
-    marginTop: spacing[1],
-    fontSize: 11,
-    color: colors.text.tertiary,
-  },
-  buttonsContainer: {
-    flexDirection: 'row',
-    gap: spacing[3],
-    marginTop: spacing[4],
-    marginBottom: spacing[4],
-  },
-  button: {
-    flex: 1,
-  },
-  buttonGradient: {
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    minHeight: 88,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  buttonGradientLoading: {
-    opacity: 0.8,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  buttonTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing[2],
-  },
-  buttonTitleLarge: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 0.2,
-  },
-  disclaimer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingTop: spacing[4],
-    borderTopWidth: 1,
-    borderTopColor: colors.border.light,
-  },
-  disclaimerText: {
-    flex: 1,
-    fontSize: 11,
-    color: colors.text.tertiary,
-    lineHeight: 16,
-  },
+  container: { marginBottom: spacing[6], marginHorizontal: 4 },
+  cardContent: { padding: 20 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  iconContainer: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 18, fontWeight: '700', color: '#1e293b', letterSpacing: -0.5 },
+  subtitle: { fontSize: 13, fontWeight: '500', color: '#64748b', marginTop: 2 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
+  statusText: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  button: { borderRadius: 24, overflow: 'hidden', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8 },
+  buttonGradient: { padding: 16, minHeight: 110, justifyContent: 'space-between' },
+  buttonTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  scoreText: { fontSize: 22, fontWeight: '800' },
+  buttonLabel: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  buttonSub: { fontSize: 11, fontWeight: '600' },
 });
-

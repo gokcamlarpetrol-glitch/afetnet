@@ -23,8 +23,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-export default function EarthquakeSettingsScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface EarthquakeSettingsScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSettingsScreenProps) {
   // Get all earthquake settings from store
   const {
     minMagnitudeForNotification,
@@ -139,7 +145,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
   const handleEewToggle = async (enabled: boolean) => {
     haptics.impactLight();
     setEew(enabled);
-    
+
     // Start/stop EEW service
     const { eewService } = await import('../../services/EEWService');
     if (enabled) {
@@ -156,22 +162,22 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
 
   const handlePriorityChange = (
     type: 'critical' | 'high' | 'medium' | 'low',
-    priority: string
+    priority: string,
   ) => {
     haptics.impactLight();
     switch (type) {
-      case 'critical':
-        setPriorityCritical(priority as 'critical' | 'high' | 'normal');
-        break;
-      case 'high':
-        setPriorityHigh(priority as 'critical' | 'high' | 'normal');
-        break;
-      case 'medium':
-        setPriorityMedium(priority as 'high' | 'normal' | 'low');
-        break;
-      case 'low':
-        setPriorityLow(priority as 'normal' | 'low');
-        break;
+    case 'critical':
+      setPriorityCritical(priority as 'critical' | 'high' | 'normal');
+      break;
+    case 'high':
+      setPriorityHigh(priority as 'critical' | 'high' | 'normal');
+      break;
+    case 'medium':
+      setPriorityMedium(priority as 'high' | 'normal' | 'low');
+      break;
+    case 'low':
+      setPriorityLow(priority as 'normal' | 'low');
+      break;
     }
   };
 
@@ -179,7 +185,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     icon: string,
     title: string,
     subtitle: string,
-    rightComponent: React.ReactNode
+    rightComponent: React.ReactNode,
   ) => (
     <View style={styles.settingRow}>
       <View style={styles.settingIcon}>
@@ -203,7 +209,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     onChangeText: (text: string) => void,
     placeholder: string,
     keyboardType: 'numeric' | 'default' = 'numeric',
-    suffix?: string
+    suffix?: string,
   ) => (
     <View style={styles.settingRow}>
       <View style={styles.settingIcon}>
@@ -230,7 +236,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
   const renderPrioritySelector = (
     type: 'critical' | 'high' | 'medium' | 'low',
     currentPriority: string,
-    options: string[]
+    options: string[],
   ) => {
     return (
       <View style={styles.priorityContainer}>
@@ -250,9 +256,9 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
               ]}
             >
               {option === 'critical' ? 'Kritik' :
-               option === 'high' ? 'Yüksek' :
-               option === 'normal' ? 'Normal' :
-               option === 'low' ? 'Düşük' : option}
+                option === 'high' ? 'Yüksek' :
+                  option === 'normal' ? 'Normal' :
+                    option === 'low' ? 'Düşük' : option}
             </Text>
           </Pressable>
         ))}
@@ -264,7 +270,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Pressable onPress={() => navigation?.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.title}>Deprem Ayarları</Text>
@@ -275,7 +281,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         {/* Bildirim Eşikleri */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bildirim Eşikleri</Text>
-          
+
           {renderInputRow(
             'notifications',
             'Minimum Büyüklük',
@@ -284,7 +290,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
             handleMagnitudeChange,
             '3.0',
             'numeric',
-            'M'
+            'M',
           )}
 
           {renderInputRow(
@@ -295,7 +301,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
             handleDistanceChange,
             '0',
             'numeric',
-            'km'
+            'km',
           )}
 
           {renderInputRow(
@@ -306,7 +312,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
             handleCriticalMagnitudeChange,
             '6.0',
             'numeric',
-            'M'
+            'M',
           )}
 
           {renderInputRow(
@@ -317,14 +323,14 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
             handleCriticalDistanceChange,
             '100',
             'numeric',
-            'km'
+            'km',
           )}
         </View>
 
         {/* Erken Uyarı Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Erken Uyarı Sistemi</Text>
-          
+
           {renderSettingRow(
             'warning',
             'Erken Uyarı',
@@ -333,7 +339,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
               value={eewEnabled}
               onValueChange={handleEewToggle}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {eewEnabled && (
@@ -346,7 +352,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 handleEewMagnitudeChange,
                 '3.5',
                 'numeric',
-                'M'
+                'M',
               )}
 
               {renderInputRow(
@@ -357,7 +363,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 handleEewTimeChange,
                 '10',
                 'numeric',
-                'sn'
+                'sn',
               )}
             </>
           )}
@@ -366,7 +372,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         {/* Sensör Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sensör Tabanlı Algılama</Text>
-          
+
           {renderSettingRow(
             'phone-portrait',
             'Sensör Algılama',
@@ -375,7 +381,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
               value={seismicSensorEnabled}
               onValueChange={handleSensorToggle}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {seismicSensorEnabled && (
@@ -408,8 +414,8 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                         ]}
                       >
                         {level === 'low' ? 'Düşük' :
-                         level === 'medium' ? 'Orta' :
-                         level === 'high' ? 'Yüksek' : level}
+                          level === 'medium' ? 'Orta' :
+                            level === 'high' ? 'Yüksek' : level}
                       </Text>
                     </Pressable>
                   ))}
@@ -427,7 +433,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                     setSensorFalsePositiveFilter(value);
                   }}
                   trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-                />
+                />,
               )}
             </>
           )}
@@ -436,7 +442,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         {/* Kaynak Seçimi */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Veri Kaynakları</Text>
-          
+
           {renderSettingRow(
             'globe',
             'AFAD',
@@ -448,7 +454,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setSourceAFAD(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -462,7 +468,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setSourceUSGS(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -476,7 +482,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setSourceEMSC(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -490,7 +496,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setSourceKOERI(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -504,14 +510,14 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setSourceCommunity(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
         </View>
 
         {/* Bildirim Türleri */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bildirim Türleri</Text>
-          
+
           {renderSettingRow(
             'notifications',
             'Push Bildirim',
@@ -523,7 +529,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setNotificationPush(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -537,7 +543,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setNotificationFullScreen(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -551,7 +557,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setNotificationSound(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -565,7 +571,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setNotificationVibration(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
 
           {renderSettingRow(
@@ -579,14 +585,14 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
                 setNotificationTTS(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}
-            />
+            />,
           )}
         </View>
 
         {/* Öncelik Ayarları */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bildirim Öncelikleri</Text>
-          
+
           <View style={styles.settingRow}>
             <View style={styles.settingIcon}>
               <Ionicons name="alert-circle" size={24} color={colors.status.danger} />
@@ -636,7 +642,7 @@ export default function EarthquakeSettingsScreen({ navigation }: any) {
         <View style={styles.infoCard}>
           <Ionicons name="information-circle" size={24} color={colors.status.info} />
           <Text style={styles.infoText}>
-            Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar. 
+            Bu ayarlar deprem bildirimlerinizi özelleştirmenizi sağlar.
             Minimum büyüklük ve mesafe filtreleri ile sadece ilgilendiğiniz depremler için bildirim alabilirsiniz.
           </Text>
         </View>

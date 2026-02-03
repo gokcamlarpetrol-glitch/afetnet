@@ -27,13 +27,13 @@ export function SwipeableConversationCard({ item, index, onPress, onDelete }: Sw
   const isToday = date.toDateString() === new Date().toDateString();
   const displayTime = isToday ? timeStr : date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
 
-  // Generate avatar color based on userId
+  // Generate avatar color based on userId - Using pastel versions
   const avatarColors = [
-    ['#3b82f6', '#2563eb'],
-    ['#8b5cf6', '#7c3aed'],
-    ['#ec4899', '#db2777'],
-    ['#f59e0b', '#d97706'],
-    ['#10b981', '#059669'],
+    ['#bfdbfe', '#93c5fd'], // Pastel Blue
+    ['#ddd6fe', '#c4b5fd'], // Pastel Violet
+    ['#fbcfe8', '#f9a8d4'], // Pastel Pink
+    ['#fef3c7', '#fde68a'], // Pastel Amber
+    ['#d1fae5', '#a7f3d0'], // Pastel Emerald
   ];
   const colorIndex = item.userId.charCodeAt(0) % avatarColors.length;
   const [avatarColor1, avatarColor2] = avatarColors[colorIndex];
@@ -95,17 +95,17 @@ const styles = StyleSheet.create({
   conversationCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   avatarGradient: {
     width: 56,
@@ -114,12 +114,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colors.brand.primary + '30',
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   avatarText: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: '800',
+    color: '#334155',
   },
   conversationInfo: {
     flex: 1,
@@ -132,12 +132,13 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#334155',
   },
   time: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: '#64748b',
+    fontWeight: '500',
   },
   messagePreview: {
     flexDirection: 'row',
@@ -147,24 +148,26 @@ const styles = StyleSheet.create({
   lastMessage: {
     flex: 1,
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#64748b',
+    fontWeight: '400',
   },
   unreadBadge: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    minWidth: 24,
+    minWidth: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.brand.primary,
+    backgroundColor: '#3b82f6',
+    shadowColor: '#3b82f6',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 4,
+    elevation: 3,
   },
   unreadText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

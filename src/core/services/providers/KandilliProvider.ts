@@ -72,7 +72,7 @@ export class KandilliProvider {
           }
 
           const html = await response.text();
-          
+
           if (!html || html.length < 100) {
             throw new Error('Empty or invalid response');
           }
@@ -83,11 +83,11 @@ export class KandilliProvider {
           }
 
           const earthquakes = this.parseKandilliHTML(html);
-          
+
           if (__DEV__) {
             logger.info(`📊 Kandilli HTML parse tamamlandı: ${earthquakes.length} deprem parse edildi (endpoint: ${url})`);
           }
-          
+
           // Filter: Last 7 days and magnitude >= 1.0 (same as AFAD)
           const now = Date.now();
           const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -95,7 +95,7 @@ export class KandilliProvider {
             const isRecent = eq.time >= sevenDaysAgo;
             const isValidMag = eq.magnitude >= 1.0;
             const isNotFuture = eq.time <= now + 2 * 60 * 60 * 1000; // Allow 2 hours in future
-            
+
             return isRecent && isValidMag && isNotFuture;
           });
 
@@ -103,23 +103,23 @@ export class KandilliProvider {
             logger.info(`✅ Kandilli: ${filtered.length} deprem verisi alındı (${earthquakes.length} parse edildi)`);
             if (filtered.length > 0) {
               const latest = filtered[0];
-              const latestTime = new Date(latest.time).toLocaleString('tr-TR', { 
-                timeZone: 'Europe/Istanbul', 
+              const latestTime = new Date(latest.time).toLocaleString('tr-TR', {
+                timeZone: 'Europe/Istanbul',
                 hour12: false,
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit',
-                second: '2-digit'
+                second: '2-digit',
               });
               logger.info(`🔝 Kandilli en son deprem: ${latest.location} - ${latest.magnitude} ML - ${latestTime}`);
             } else if (earthquakes.length > 0) {
               logger.warn(`⚠️ Kandilli: ${earthquakes.length} deprem parse edildi ama hiçbiri filtre kriterlerini geçmedi!`);
               const oldest = earthquakes[earthquakes.length - 1];
-              const oldestTime = new Date(oldest.time).toLocaleString('tr-TR', { 
-                timeZone: 'Europe/Istanbul', 
-                hour12: false
+              const oldestTime = new Date(oldest.time).toLocaleString('tr-TR', {
+                timeZone: 'Europe/Istanbul',
+                hour12: false,
               });
               logger.warn(`   En eski deprem: ${oldestTime} (${Math.round((now - oldest.time) / (24 * 60 * 60 * 1000))} gün önce)`);
             } else {
@@ -141,18 +141,18 @@ export class KandilliProvider {
             // Continue to next endpoint
             throw new Error('No earthquakes after filtering');
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           clearTimeout(timeoutId);
-          lastError = error;
-          
+          lastError = error instanceof Error ? error : new Error(String(error));
+
           // CRITICAL: Log detailed error information
-          const errorType = error?.name || 'Unknown';
-          const errorMessage = error?.message || String(error);
+          const errorType = error instanceof Error ? error.name : 'Unknown';
+          const errorMessage = error instanceof Error ? error.message : String(error);
           const isAborted = errorType === 'AbortError' || errorMessage.includes('aborted');
-          const isNetworkError = errorMessage.includes('Network request failed') || 
-                                errorMessage.includes('network') ||
-                                errorType === 'TypeError';
-          
+          const isNetworkError = errorMessage.includes('Network request failed') ||
+            errorMessage.includes('network') ||
+            errorType === 'TypeError';
+
           // ELITE: Reduce logging noise - only log first 2 attempts
           if (__DEV__ && attemptCount <= 2) {
             if (isAborted) {
@@ -163,7 +163,7 @@ export class KandilliProvider {
               logger.debug(`⚠️ Kandilli endpoint başarısız: ${url} - ${errorType}: ${errorMessage}`);
             }
           }
-          
+
           // Try next endpoint
           continue;
         }
@@ -175,9 +175,10 @@ export class KandilliProvider {
         logger.debug(`⚠️ Tüm Kandilli endpoint'leri başarısız oldu (${attemptCount}/${maxAttempts} deneme):`, lastError?.message || 'Unknown error');
       }
       return [];
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (__DEV__) {
-        logger.debug('Kandilli fetch error:', error?.message || String(error));
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.debug('Kandilli fetch error:', errMsg);
       }
       return [];
     }
@@ -186,12 +187,12 @@ export class KandilliProvider {
   private parseKandilliHTML(html: string): Earthquake[] {
     try {
       const earthquakes: Earthquake[] = [];
-      
+
       // Kandilli HTML format: pre tag with fixed-width text
       // Real format from http://www.koeri.boun.edu.tr/scripts/lst0.asp:
       // 2025.11.10 22:54:37  39.2353   28.1785        8.5      -.-  1.7  -.-   SINDIRGI (BALIKESIR)                              İlksel
       // Format: YYYY.MM.DD HH:MM:SS  LAT      LON      DEPTH    MD   ML   Mw    LOCATION
-      
+
       // Extract pre tag content - CRITICAL: Handle both <pre> and <PRE> tags
       const preMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
       if (!preMatch) {
@@ -200,33 +201,33 @@ export class KandilliProvider {
         }
         return [];
       }
-      
+
       const content = preMatch[1];
       const lines = content.split('\n');
-      
+
       if (__DEV__) {
         logger.debug(`📊 Kandilli HTML: ${lines.length} satır bulundu`);
       }
-      
+
       for (const line of lines) {
         const trimmed = line.trim();
-        
+
         // Skip empty lines, header lines, and lines that are too short
-        if (!trimmed || 
-            trimmed.length < 50 || 
-            trimmed.includes('Date') || 
-            trimmed.includes('Tarih') ||
-            trimmed.includes('Büyüklük') ||
-            trimmed.includes('TÜRKİYE VE YAKIN') ||
-            trimmed.includes('BÖLGESEL DEPREM') ||
-            trimmed.includes('YAPAY SARSINTI') ||
-            trimmed.includes('Son 500 deprem') ||
-            trimmed.includes('---') ||
-            trimmed.startsWith('YYYY') ||
-            trimmed.startsWith('----------') ||
-            trimmed.startsWith('..................') ||
-            trimmed.startsWith('.....') ||
-            /^[^0-9]/.test(trimmed)) {
+        if (!trimmed ||
+          trimmed.length < 50 ||
+          trimmed.includes('Date') ||
+          trimmed.includes('Tarih') ||
+          trimmed.includes('Büyüklük') ||
+          trimmed.includes('TÜRKİYE VE YAKIN') ||
+          trimmed.includes('BÖLGESEL DEPREM') ||
+          trimmed.includes('YAPAY SARSINTI') ||
+          trimmed.includes('Son 500 deprem') ||
+          trimmed.includes('---') ||
+          trimmed.startsWith('YYYY') ||
+          trimmed.startsWith('----------') ||
+          trimmed.startsWith('..................') ||
+          trimmed.startsWith('.....') ||
+          /^[^0-9]/.test(trimmed)) {
           continue;
         }
 
@@ -243,43 +244,43 @@ export class KandilliProvider {
           // ML: X.X (positions 51-55) - THIS IS THE MAGNITUDE
           // Mw: -.- or X.X (positions 56-60)
           // Location: rest (position 61+)
-          
+
           if (trimmed.length < 60) continue;
-          
+
           // Use regex for more flexible parsing (handles variable spacing)
           const dateTimeMatch = trimmed.match(/^(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2}:\d{2})/);
           if (!dateTimeMatch) continue;
-          
+
           const dateStr = dateTimeMatch[1]; // YYYY.MM.DD
           const timeStr = dateTimeMatch[2]; // HH:MM:SS
-          
+
           // Extract coordinates and magnitude using regex (more reliable)
           const coordsMatch = trimmed.match(/\s+(\d{2}\.\d{4})\s+(\d{2}\.\d{4})\s+(\d+\.?\d*)\s+/);
           if (!coordsMatch) continue;
-          
+
           const latStr = coordsMatch[1];
           const lonStr = coordsMatch[2];
           const depthStr = coordsMatch[3];
-          
+
           // Extract ML magnitude (main magnitude field)
           // Format: "MD   ML   Mw" -> we want ML (second value)
           // Example: "      -.-  1.7  -.-   " -> ML = 1.7
           // More flexible regex to handle variable spacing
           const magPattern = /\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+/;
           let magMatch = trimmed.match(magPattern);
-          
+
           if (!magMatch) {
             // Fallback: Try simpler pattern
             const simpleMagMatch = trimmed.match(/\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)/);
             if (!simpleMagMatch) continue;
             magMatch = simpleMagMatch;
           }
-          
+
           // ML is the second magnitude value (index 2 in match array)
           // Priority: ML > Mw > MD (use first valid magnitude)
           let magStr = '-1';
           const magnitudes = [magMatch[1], magMatch[2], magMatch[3]]; // MD, ML, Mw
-          
+
           // Prefer ML (index 1), then Mw (index 2), then MD (index 0)
           const priority = [1, 2, 0]; // ML first, then Mw, then MD
           for (const idx of priority) {
@@ -291,18 +292,18 @@ export class KandilliProvider {
               }
             }
           }
-          
+
           if (magStr === '-1') continue; // No valid magnitude found
-          
+
           // Extract location (everything after the magnitude fields)
           const locationMatch = trimmed.match(/\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(.+?)(?:\s+İlksel|$)/);
-          const location = locationMatch && locationMatch[4] 
+          const location = locationMatch && locationMatch[4]
             ? locationMatch[4].trim().replace(/\s+/g, ' ')
             : trimmed.substring(61).trim().replace(/\s+/g, ' ').split(/\s+/)[0] || 'Türkiye';
 
           // Validate date format (YYYY.MM.DD)
           if (!/^\d{4}\.\d{2}\.\d{2}$/.test(dateStr)) continue;
-          
+
           // Validate time format (HH:MM:SS)
           if (!/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) continue;
 
@@ -310,12 +311,12 @@ export class KandilliProvider {
           // CRITICAL: Kandilli verileri Türkiye saatine göre (UTC+3) geliyor
           // Format: "YYYY-MM-DD HH:MM:SS" -> Parse as Turkey timezone
           const dateTimeStr = `${dateStr.replace(/\./g, '-')} ${timeStr}`;
-          
+
           // CRITICAL: Parse as Turkey timezone (UTC+3) explicitly
           // Add timezone indicator to ensure correct parsing
           const dateTimeWithTz = `${dateTimeStr}+03:00`;
           const parsedDate = new Date(dateTimeWithTz);
-          
+
           // If timezone parsing fails, fallback to manual conversion
           let utcTime: number;
           if (!isNaN(parsedDate.getTime())) {
@@ -329,7 +330,7 @@ export class KandilliProvider {
             // Convert: local time -> UTC -> Turkey time -> UTC (subtract Turkey offset)
             utcTime = localTime - localOffset - turkeyOffset;
           }
-          
+
           const latitude = parseFloat(latStr);
           const longitude = parseFloat(lonStr);
           const depth = parseFloat(depthStr);
@@ -342,22 +343,22 @@ export class KandilliProvider {
             }
             continue;
           }
-          
+
           if (isNaN(latitude) || latitude < 35 || latitude > 43 ||
-              isNaN(longitude) || longitude < 25 || longitude > 45) {
+            isNaN(longitude) || longitude < 25 || longitude > 45) {
             if (__DEV__ && earthquakes.length < 3) {
               logger.debug(`⚠️ Kandilli: Geçersiz koordinatlar - ${latitude}, ${longitude}`);
             }
             continue;
           }
-          
+
           if (isNaN(depth) || depth < 0 || depth > 1000) {
             if (__DEV__ && earthquakes.length < 3) {
               logger.debug(`⚠️ Kandilli: Geçersiz derinlik - ${depth}`);
             }
             continue;
           }
-          
+
           if (isNaN(magnitude) || magnitude < 0 || magnitude > 10) {
             if (__DEV__ && earthquakes.length < 3) {
               logger.debug(`⚠️ Kandilli: Geçersiz büyüklük - ${magnitude}`);
@@ -368,10 +369,10 @@ export class KandilliProvider {
           // Validate coordinates are within Turkey bounds
           // CRITICAL: Process each earthquake individually (one by one) - same as AFAD
           // Validate each earthquake before adding
-          if (latitude >= 35 && latitude <= 43 && 
-              longitude >= 25 && longitude <= 45 &&
-              magnitude >= 1.0 && magnitude <= 10 &&
-              location && location.length > 0) {
+          if (latitude >= 35 && latitude <= 43 &&
+            longitude >= 25 && longitude <= 45 &&
+            magnitude >= 1.0 && magnitude <= 10 &&
+            location && location.length > 0) {
             const earthquake = {
               id: `kandilli-${utcTime}-${Math.round(latitude * 1000)}-${Math.round(longitude * 1000)}`,
               magnitude,
@@ -382,9 +383,9 @@ export class KandilliProvider {
               longitude,
               source: 'KANDILLI' as const,
             };
-            
+
             earthquakes.push(earthquake);
-            
+
             if (__DEV__ && earthquakes.length <= 3) {
               logger.debug(`✅ Kandilli deprem ${earthquakes.length} parse edildi: ${location} - ${magnitude} ML - ${dateStr} ${timeStr}`);
             }
@@ -405,13 +406,13 @@ export class KandilliProvider {
       // Remove duplicates (same location and time within 5 minutes)
       const unique: Earthquake[] = [];
       const seen = new Set<string>();
-      
+
       for (const eq of earthquakes) {
         const timeKey = Math.floor(eq.time / (5 * 60 * 1000)); // 5 minute buckets
         const latKey = Math.round(eq.latitude * 100);
         const lonKey = Math.round(eq.longitude * 100);
         const key = `${timeKey}-${latKey}-${lonKey}`;
-        
+
         if (!seen.has(key)) {
           seen.add(key);
           unique.push(eq);

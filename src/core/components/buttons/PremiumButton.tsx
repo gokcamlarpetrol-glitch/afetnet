@@ -62,75 +62,75 @@ const PremiumButton: React.FC<PremiumButtonProps> = ({
 
   const getVariantStyles = () => {
     switch (variant) {
-      case 'primary':
-        return {
-          gradient: ['#3b82f6', '#2563eb', '#1e40af'] as [string, string, string],
-          textColor: '#fff',
-          shadowColor: '#3b82f6',
-        };
-      case 'secondary':
-        return {
-          gradient: ['#1e293b', '#0f172a'] as [string, string],
-          textColor: '#fff',
-          shadowColor: '#334155',
-        };
-      case 'danger':
-        return {
-          gradient: ['#ef4444', '#dc2626', '#b91c1c'] as [string, string, string],
-          textColor: '#fff',
-          shadowColor: '#ef4444',
-        };
-      case 'success':
-        return {
-          gradient: ['#10b981', '#059669', '#047857'] as [string, string, string],
-          textColor: '#fff',
-          shadowColor: '#10b981',
-        };
-      case 'ghost':
-        return {
-          gradient: ['transparent', 'transparent'] as [string, string],
-          textColor: '#3b82f6',
-          shadowColor: 'transparent',
-        };
-      default:
-        return {
-          gradient: ['#3b82f6', '#2563eb'] as [string, string],
-          textColor: '#fff',
-          shadowColor: '#3b82f6',
-        };
+    case 'primary':
+      return {
+        gradient: ['#3b82f6', '#2563eb', '#1e40af'] as [string, string, string],
+        textColor: '#fff',
+        shadowColor: '#3b82f6',
+      };
+    case 'secondary':
+      return {
+        gradient: ['#1e293b', '#0f172a'] as [string, string],
+        textColor: '#fff',
+        shadowColor: '#334155',
+      };
+    case 'danger':
+      return {
+        gradient: ['#ef4444', '#dc2626', '#b91c1c'] as [string, string, string],
+        textColor: '#fff',
+        shadowColor: '#ef4444',
+      };
+    case 'success':
+      return {
+        gradient: ['#10b981', '#059669', '#047857'] as [string, string, string],
+        textColor: '#fff',
+        shadowColor: '#10b981',
+      };
+    case 'ghost':
+      return {
+        gradient: ['transparent', 'transparent'] as [string, string],
+        textColor: '#3b82f6',
+        shadowColor: 'transparent',
+      };
+    default:
+      return {
+        gradient: ['#3b82f6', '#2563eb'] as [string, string],
+        textColor: '#fff',
+        shadowColor: '#3b82f6',
+      };
     }
   };
 
   const getSizeStyles = () => {
     switch (size) {
-      case 'small':
-        return {
-          paddingVertical: 10,
-          paddingHorizontal: 16,
-          fontSize: 14,
-          iconSize: 16,
-        };
-      case 'medium':
-        return {
-          paddingVertical: 14,
-          paddingHorizontal: 24,
-          fontSize: 16,
-          iconSize: 20,
-        };
-      case 'large':
-        return {
-          paddingVertical: 18,
-          paddingHorizontal: 32,
-          fontSize: 18,
-          iconSize: 24,
-        };
-      default:
-        return {
-          paddingVertical: 14,
-          paddingHorizontal: 24,
-          fontSize: 16,
-          iconSize: 20,
-        };
+    case 'small':
+      return {
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        fontSize: 14,
+        iconSize: 16,
+      };
+    case 'medium':
+      return {
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        fontSize: 16,
+        iconSize: 20,
+      };
+    case 'large':
+      return {
+        paddingVertical: 18,
+        paddingHorizontal: 32,
+        fontSize: 18,
+        iconSize: 24,
+      };
+    default:
+      return {
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        fontSize: 16,
+        iconSize: 20,
+      };
     }
   };
 

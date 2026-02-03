@@ -16,6 +16,14 @@ export const spacing = {
   12: 48,  // 3rem
   16: 64,  // 4rem
   20: 80,  // 5rem
+
+  // Semantic Aliases
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  '2xl': 48,
 };
 
 export const borderRadius = {

@@ -118,7 +118,7 @@ class RegionalRiskService {
     latitude: number,
     longitude: number,
     userBuildingAge?: number,
-    userBuildingFloor?: number
+    userBuildingFloor?: number,
   ): Promise<RegionalRisk> {
     try {
       // Get city/district name (reverse geocoding)
@@ -133,31 +133,31 @@ class RegionalRiskService {
         latitude,
         longitude,
         userBuildingAge,
-        userBuildingFloor
+        userBuildingFloor,
       );
       
       const tsunamiRisk = this.calculateTsunamiRisk(
         baseRisk,
         latitude,
-        longitude
+        longitude,
       );
       
       const floodRisk = this.calculateFloodRisk(
         baseRisk,
         latitude,
-        longitude
+        longitude,
       );
       
       const landslideRisk = this.calculateLandslideRisk(
         baseRisk,
         latitude,
-        longitude
+        longitude,
       );
       
       const fireRisk = this.calculateFireRisk(
         baseRisk,
         latitude,
-        longitude
+        longitude,
       );
       
       // Calculate overall risk (weighted)
@@ -254,9 +254,9 @@ class RegionalRiskService {
         async (location) => {
           await this.calculateRisk(
             location.coords.latitude,
-            location.coords.longitude
+            location.coords.longitude,
           );
-        }
+        },
       );
     } catch (error) {
       logger.error('Location monitoring error:', error);
@@ -336,7 +336,7 @@ class RegionalRiskService {
     lat: number,
     lng: number,
     buildingAge?: number,
-    buildingFloor?: number
+    buildingFloor?: number,
   ): number {
     let risk = baseRisk.earthquakeRisk || 50;
     
@@ -372,7 +372,7 @@ class RegionalRiskService {
   private calculateTsunamiRisk(
     baseRisk: Partial<RegionalRisk>,
     lat: number,
-    lng: number
+    lng: number,
   ): number {
     let risk = baseRisk.tsunamiRisk || 0;
     
@@ -396,7 +396,7 @@ class RegionalRiskService {
   private calculateFloodRisk(
     baseRisk: Partial<RegionalRisk>,
     lat: number,
-    lng: number
+    lng: number,
   ): number {
     let risk = baseRisk.floodRisk || 20;
     
@@ -419,7 +419,7 @@ class RegionalRiskService {
   private calculateLandslideRisk(
     baseRisk: Partial<RegionalRisk>,
     lat: number,
-    lng: number
+    lng: number,
   ): number {
     let risk = baseRisk.landslideRisk || 10;
     
@@ -441,7 +441,7 @@ class RegionalRiskService {
   private calculateFireRisk(
     baseRisk: Partial<RegionalRisk>,
     lat: number,
-    lng: number
+    lng: number,
   ): number {
     let risk = baseRisk.fireRisk || 20;
     

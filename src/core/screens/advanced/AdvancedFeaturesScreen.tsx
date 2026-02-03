@@ -10,6 +10,7 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import Card from '../../components/Card';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
 const logger = createLogger('AdvancedFeaturesScreen');
 
@@ -39,7 +40,12 @@ function FeatureCard({ icon, title, description, onPress, color }: FeatureCardPr
   );
 }
 
-export default function AdvancedFeaturesScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface AdvancedFeaturesScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function AdvancedFeaturesScreen({ navigation }: AdvancedFeaturesScreenProps) {
   const features = [
     {
       icon: 'medical' as const,
@@ -105,7 +111,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
             onPress={() => {
               // ELITE: Navigate to actual feature screens
               haptics.impactMedium();
-              
+
               // Map features to actual screens
               const screenMap: { [key: string]: string } = {
                 'Triage': 'MedicalInformation', // Medical triage
@@ -115,9 +121,9 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
                 'Rubble': 'EnkazDetection', // Rubble mode - use EnkazDetectionService
                 'NearbyChat': 'Messages', // Nearby chat via BLE Mesh
               };
-              
+
               const targetScreen = screenMap[feature.screen];
-              
+
               if (targetScreen) {
                 try {
                   const parentNavigator = navigation?.getParent?.() || navigation;
@@ -132,7 +138,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
                   Alert.alert(
                     feature.title,
                     feature.description + '\n\nBu özellik ilgili ekranda mevcuttur.',
-                    [{ text: 'Tamam' }]
+                    [{ text: 'Tamam' }],
                   );
                 }
               } else {
@@ -141,7 +147,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
                   Alert.alert(
                     'Enkaz Modu',
                     'Enkaz modu otomatik olarak aktif. Telefonunuzu enkaz altında bırakırsanız, otomatik olarak SOS sinyali gönderir ve konumunuzu paylaşır.',
-                    [{ text: 'Tamam' }]
+                    [{ text: 'Tamam' }],
                   );
                 } else {
                   // Default: Navigate to related screen
@@ -159,7 +165,7 @@ export default function AdvancedFeaturesScreen({ navigation }: any) {
             <Text style={styles.infoTitle}>Premium Özellikler</Text>
           </View>
           <Text style={styles.infoText}>
-            Bu özellikler profesyonel afet müdahale ekipleri için tasarlanmıştır. 
+            Bu özellikler profesyonel afet müdahale ekipleri için tasarlanmıştır.
             Offline çalışır ve BLE mesh ağı üzerinden senkronize olur.
           </Text>
         </Card>

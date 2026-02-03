@@ -13,90 +13,58 @@ import { createLogger } from '../utils/logger';
  */
 
 // Lazy imports to avoid early initialization
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Notifications: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Audio: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Haptics: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Speech: any = null;
 
-/**
- * ELITE: Safe notification module loader
- * Reuses the same pattern from NotificationService for consistency
- */
+// ELITE: Promise cache for preventing race conditions
+let notificationsLoadPromise: Promise<typeof import('expo-notifications') | null> | null = null;
+
 /**
  * ELITE: Safe async notification module loader
- * Uses dynamic import to prevent immediate native bridge initialization
+ * Uses dynamic import instead of eval (secure, App Store compliant)
  */
 async function getNotificationsAsync(): Promise<typeof import('expo-notifications') | null> {
-  // CRITICAL: Return cached module if available
+  // Return cached module if available
   if (Notifications) {
     return Notifications;
   }
-  
-  // ELITE: Wait for native bridge with progressive checks
-  const MAX_WAIT_TIME = 2000;
-  const CHECK_INTERVAL = 200;
-  const MAX_CHECKS = MAX_WAIT_TIME / CHECK_INTERVAL;
-  
-  for (let attempt = 0; attempt < MAX_CHECKS; attempt++) {
-    try {
-      // CRITICAL: Check if React Native bridge is ready
-      const RN = require('react-native');
-      const NativeModules = RN?.NativeModules;
-      if (!NativeModules || typeof NativeModules !== 'object' || Object.keys(NativeModules).length === 0) {
-        await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
-        continue;
-      }
-      
-      // ELITE: Use eval to prevent static analysis
-      try {
-        const moduleName = 'expo-' + 'notifications';
-        const module = eval(`require('${moduleName}')`);
-        if (module && typeof module === 'object') {
-          Notifications = module.default || module;
-          return Notifications;
-        }
-      } catch (evalError: unknown) {
-        // Fallback: Function constructor
-        try {
-          const expoPart = 'expo';
-          const notificationsPart = 'notifications';
-          const moduleNameDynamic = expoPart + '-' + notificationsPart;
-          const requireFn = new Function('moduleName', 'return require(moduleName)');
-          const module = requireFn(moduleNameDynamic);
-          if (module && typeof module === 'object') {
-            Notifications = module.default || module;
-            return Notifications;
-          }
-        } catch (fnError: unknown) {
-          const errorMessage = fnError instanceof Error ? fnError.message : String(fnError);
-          if (errorMessage.includes('NativeEventEmitter') || errorMessage.includes('null')) {
-            await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 2));
-            continue;
-          }
-        }
-      }
-      
-      // Wait before next attempt
-      await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('NativeEventEmitter') || errorMessage.includes('null')) {
-        await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 2));
-        continue;
-      }
-      // Other error - return null
-      return null;
-    }
+
+  // If already loading, wait for the same promise (prevents race condition)
+  if (notificationsLoadPromise) {
+    return notificationsLoadPromise;
   }
-  
-  // Max attempts reached
-  return null;
+
+  // Create and cache the loading promise
+  notificationsLoadPromise = (async () => {
+    try {
+      // ELITE: Use dynamic import (safe, no eval, App Store compliant)
+      const module = await import('expo-notifications');
+      Notifications = module.default || module;
+      return Notifications;
+    } catch (error) {
+      if (__DEV__) {
+        logger.debug('expo-notifications not available:', error);
+      }
+      return null;
+    } finally {
+      notificationsLoadPromise = null;
+    }
+  })();
+
+  return notificationsLoadPromise;
 }
 
 /**
  * ELITE: Sync wrapper (for backward compatibility)
  * Returns null if module not ready
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getNotifications(): any {
   return Notifications;
 }
@@ -184,6 +152,7 @@ const DEFAULT_CHANNELS: AlertChannels = {
 };
 
 class MultiChannelAlertService {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private soundInstance: any = null; // Audio.Sound | null
   private ledInterval: NodeJS.Timeout | null = null;
   private vibrationInterval: NodeJS.Timeout | null = null;
@@ -373,7 +342,7 @@ class MultiChannelAlertService {
     if (!Notifications || typeof Notifications.setNotificationChannelAsync !== 'function') {
       return;
     }
-    
+
     // Critical alert channel (bypasses Do Not Disturb)
     await Notifications.setNotificationChannelAsync('critical-alerts', {
       name: 'Critical Alerts',
@@ -414,9 +383,9 @@ class MultiChannelAlertService {
       logger.debug('Notifications not available for push notification (using fallback channels)');
       return null;
     }
-    
+
     let channelId = 'normal-priority';
-    
+
     if (options.priority === 'critical') {
       channelId = 'critical-alerts';
     } else if (options.priority === 'high') {
@@ -428,9 +397,9 @@ class MultiChannelAlertService {
         title: options.title,
         body: options.body,
         sound: options.sound || 'default',
-        priority: options.priority === 'critical' ? 'max' : 
-                 options.priority === 'high' ? 'high' :
-                 'default',
+        priority: options.priority === 'critical' ? 'max' :
+          options.priority === 'high' ? 'high' :
+            'default',
         data: options.data || {},
         categoryIdentifier: 'alert',
         sticky: options.priority === 'critical', // Critical alerts stay until dismissed
@@ -458,7 +427,7 @@ class MultiChannelAlertService {
     // This will be handled by a React component overlay
     // For now, we'll use a high-priority notification that shows on lock screen
     // The actual full-screen modal will be shown by the AlertModal component
-    
+
     // ELITE: Use async getter to ensure notifications module is ready
     const NotificationsAsync = await getNotificationsAsync();
     if (!NotificationsAsync || typeof NotificationsAsync.scheduleNotificationAsync !== 'function') {
@@ -466,7 +435,7 @@ class MultiChannelAlertService {
       logger.debug('Notifications not available for full-screen alert (using fallback channels)');
       return;
     }
-    
+
     // Schedule a critical notification that shows on lock screen
     if (Platform.OS === 'ios') {
       await NotificationsAsync.scheduleNotificationAsync({
@@ -528,13 +497,13 @@ class MultiChannelAlertService {
         // Load custom sound
         const { sound } = await Audio.Sound.createAsync(
           { uri: soundFile },
-          { shouldPlay: true, isLooping: true, volume: 1.0 }
+          { shouldPlay: true, isLooping: true, volume: 1.0 },
         );
         this.soundInstance = sound;
       } else {
         // Use default alarm sound (SOS pattern)
         const sosPattern = [0.2, 0.1, 0.2, 0.1, 0.2, 0.1, 0.5, 0.1, 0.5, 0.1, 0.5, 0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
-        
+
         // For now, use system notification sound
         // Custom audio file would be better but requires asset bundling
         const Notifications = getNotifications();
@@ -564,18 +533,18 @@ class MultiChannelAlertService {
       if (Platform.OS === 'ios') {
         // iOS supports haptic feedback
         const sosPattern = pattern || [0, 200, 100, 200, 100, 200, 100, 500, 100, 500, 100, 500, 100, 200, 100, 200, 100, 200];
-        
+
         // Execute vibration pattern
         const vibrate = async () => {
           try {
             for (let i = 0; i < sosPattern.length; i += 2) {
               const duration = sosPattern[i];
               const pause = sosPattern[i + 1] || 0;
-              
+
               if (duration > 0 && Haptics.impactAsync) {
                 await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Heavy || Haptics.ImpactFeedbackStyle?.Medium);
               }
-              
+
               if (pause > 0) {
                 await new Promise(resolve => setTimeout(resolve, pause));
               }
@@ -602,7 +571,7 @@ class MultiChannelAlertService {
         if (Haptics.impactAsync) {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Heavy || Haptics.ImpactFeedbackStyle?.Medium);
         }
-        
+
         if (pattern) {
           // Custom pattern vibration
           this.vibrationInterval = setInterval(async () => {

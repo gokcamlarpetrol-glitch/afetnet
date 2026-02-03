@@ -10,6 +10,19 @@ const logger = createLogger('UserStatusStore');
 
 export type UserStatus = 'safe' | 'needs_help' | 'trapped' | 'sos' | 'offline';
 
+// ELITE: Map local status to backend-compatible status
+type BackendStatus = 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
+const mapStatusForBackend = (status: UserStatus): BackendStatus => {
+  switch (status) {
+  case 'safe': return 'safe';
+  case 'needs_help': return 'need-help';
+  case 'trapped': return 'trapped';
+  case 'sos': return 'critical';
+  case 'offline': return 'unknown';
+  default: return 'unknown';
+  }
+};
+
 interface Location {
   latitude: number;
   longitude: number;
@@ -46,10 +59,10 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
 
   setStatus: async (status) => {
     set({ status, lastUpdate: Date.now() });
-    
+
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../../lib/device');
+      const { getDeviceId } = await import('../utils/device');
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
@@ -73,7 +86,7 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       if (backendEmergencyService.initialized) {
         const { location } = get();
         await backendEmergencyService.sendStatusUpdate({
-          status,
+          status: mapStatusForBackend(status),
           location: location ? {
             latitude: location.latitude,
             longitude: location.longitude,
@@ -87,13 +100,13 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       logger.error('Failed to send status update to backend:', error);
     }
   },
-  
+
   setLocation: async (location) => {
     set({ location, lastUpdate: Date.now() });
-    
+
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../../lib/device');
+      const { getDeviceId } = await import('../utils/device');
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
@@ -110,17 +123,17 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       logger.error('Failed to save location to Firebase:', error);
     }
   },
-  
+
   setSosTriggered: (triggered) => set({ sosTriggered: triggered }),
-  
+
   setBatteryLevel: (level) => set({ batteryLevel: level }),
-  
+
   updateStatus: async (status, location) => {
     set({ status, location: location || null, lastUpdate: Date.now() });
-    
+
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../../lib/device');
+      const { getDeviceId } = await import('../utils/device');
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
@@ -142,7 +155,7 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       const { backendEmergencyService } = await import('../services/BackendEmergencyService');
       if (backendEmergencyService.initialized) {
         await backendEmergencyService.sendStatusUpdate({
-          status,
+          status: mapStatusForBackend(status),
           location: location ? {
             latitude: location.latitude,
             longitude: location.longitude,
@@ -156,7 +169,7 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       logger.error('Failed to send status update to backend:', error);
     }
   },
-  
+
   reset: () => set(initialState),
 }));
 

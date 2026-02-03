@@ -18,6 +18,11 @@ import { usePremiumStore } from '../stores/premiumStore';
 
 const logger = createLogger('AccountDeletionService');
 
+// ELITE: Type-safe Firebase error interface
+interface FirebaseError extends Error {
+  code?: string;
+}
+
 interface DeletionProgress {
   step: string;
   progress: number;
@@ -31,7 +36,7 @@ class AccountDeletionService {
    */
   async deleteAccount(
     deviceId: string,
-    onProgress?: (progress: DeletionProgress) => void
+    onProgress?: (progress: DeletionProgress) => void,
   ): Promise<{ success: boolean; errors: string[] }> {
     const errors: string[] = [];
     let progress = 0;
@@ -190,11 +195,12 @@ class AccountDeletionService {
         success: errors.length === 0,
         errors,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
       logger.error('Account deletion failed:', error);
       return {
         success: false,
-        errors: [error.message || 'Unknown error'],
+        errors: [errMsg],
       };
     }
   }
@@ -218,8 +224,9 @@ class AccountDeletionService {
       const deviceRef = doc(db, 'devices', deviceId);
       await deleteDoc(deviceRef);
       logger.info('Device data deleted');
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
       logger.debug('Device deletion skipped (permission denied)');
@@ -242,8 +249,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} family members`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -265,8 +273,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} messages`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -288,8 +297,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} conversations`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -311,8 +321,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} location updates`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -334,8 +345,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} status updates`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -354,8 +366,9 @@ class AccountDeletionService {
       const healthRef = doc(db, 'devices', deviceId, 'healthProfile', 'current');
       await deleteDoc(healthRef);
       logger.info('Health profile deleted');
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -374,8 +387,9 @@ class AccountDeletionService {
       const iceRef = doc(db, 'devices', deviceId, 'ice', 'current');
       await deleteDoc(iceRef);
       logger.info('ICE data deleted');
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -397,8 +411,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} earthquake alerts`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
@@ -421,8 +436,9 @@ class AccountDeletionService {
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} SOS signals`);
-    } catch (error: any) {
-      if (error?.code !== 'permission-denied') {
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }

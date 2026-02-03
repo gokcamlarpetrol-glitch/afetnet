@@ -1,0 +1,40 @@
+{
+    "rules": {
+        "presence": {
+            "$userId": {
+                ".write": "auth != null && auth.uid === $userId",
+                ".read": "auth != null",
+                ".validate": "newData.hasChildren(['state', 'lastChanged'])",
+                "state": {
+                    ".validate": "newData.isString() && (newData.val() === 'online' || newData.val() === 'offline' || newData.val() === 'away')"
+                },
+                "lastChanged": {
+                    ".validate": "newData.val() <= now"
+                },
+                "lastSeen": {
+                    ".validate": "newData.val() <= now"
+                },
+                "deviceType": {
+                    ".validate": "newData.isString() && newData.val().length <= 50"
+                }
+            }
+        },
+        "typing": {
+            "$conversationId": {
+                "$userId": {
+                    ".write": "auth != null && auth.uid === $userId",
+                    ".read": "auth != null",
+                    ".validate": "newData.hasChildren(['isTyping', 'timestamp'])",
+                    "isTyping": {
+                        ".validate": "newData.isBoolean()"
+                    },
+                    "timestamp": {
+                        ".validate": "newData.val() <= now"
+                    }
+                }
+            }
+        },
+        ".read": false,
+        ".write": false
+    }
+}

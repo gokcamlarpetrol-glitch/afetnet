@@ -14,10 +14,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
-  splash: { 
-    image: "./assets/splash.png", 
-    resizeMode: "contain", 
-    backgroundColor: "#C62828", 
+  splash: {
+    image: "./assets/splash.png",
+    resizeMode: "contain",
+    backgroundColor: "#C62828",
   },
   primaryColor: "#C62828",
   updates: { fallbackToCacheTimeout: 0 },
@@ -35,6 +35,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-font",
     "expo-localization",
+    [
+      "@config-plugins/react-native-ble-plx",
+      {
+        "isBackgroundEnabled": true,
+        "modes": [
+          "peripheral",
+          "central"
+        ],
+        "bluetoothAlwaysPermission": "Allow AfetNet to connect to other devices for offline messaging."
+      }
+    ],
     // "expo-torch", // NOTE: expo-torch doesn't have a config plugin, but works as native module
     // "expo-maps", // Disabled - react-native-maps kullanılıyor (development build gerekli)
     [
@@ -42,15 +53,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         "ios": {
           "deploymentTarget": "15.1",
+          "useFrameworks": "static", // Critical for some native modules
+          "jsEngine": "hermes" // ELITE SECURITY: Bytecode compilation
         },
+        "android": {
+          "compileSdkVersion": 34,
+          "targetSdkVersion": 34,
+          "buildToolsVersion": "34.0.0",
+          "jsEngine": "hermes", // ELITE SECURITY: Bytecode compilation
+          "kotlinVersion": "1.9.23",
+          "enableProguardInReleaseBuilds": true, // ELITE SECURITY: Obfuscation
+        }
       },
     ],
+    // ELITE: Google Sign-In Plugin
+    "@react-native-google-signin/google-signin",
   ],
   ios: {
     ...config.ios,
-    buildNumber: "10",
-          bundleIdentifier: "com.gokhancamci.afetnetapp",
+    buildNumber: "11", // Incremented for security update
+    bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
+    jsEngine: "hermes", // Redundant but explicit
+
     infoPlist: {
       ...(config.ios?.infoPlist || {}),
       NSLocationWhenInUseUsageDescription: "AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.",
@@ -79,14 +104,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Background modes Info.plist'te UIBackgroundModes ile tanımlı (yeterli)
     entitlements: {
       "aps-environment": "production", // CRITICAL: Production için "production" (App Store için zorunlu)
-      "com.apple.developer.in-app-payments": ["merchant.com.gokhancamci.afetnetapp"],
-      // Push notifications - Apple Developer Portal'da aktif edildiyse true yapın
-      // "com.apple.developer.push-notifications": true,
+      // IAP kaldırıldı - uygulama tamamen ücretsiz
     },
+    googleServicesFile: "./GoogleService-Info.plist",
   },
   android: {
     ...config.android,
-          package: "com.gokhancamci.afetnetapp",
+    package: "com.gokhancamci.afetnetapp",
     versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
@@ -104,6 +128,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.RECORD_AUDIO",
       "android.permission.INTERNET",
     ],
+    googleServicesFile: "./google-services.json",
   },
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },

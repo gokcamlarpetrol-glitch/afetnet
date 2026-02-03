@@ -17,14 +17,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-export default function PrivacyPolicyScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface PrivacyPolicyScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
       <LinearGradient
         colors={['#0f172a', '#1e293b']}
@@ -33,7 +39,7 @@ export default function PrivacyPolicyScreen({ navigation }: any) {
         <Pressable
           onPress={() => {
             haptics.impactLight();
-            navigation.goBack();
+            navigation?.goBack();
           }}
           style={styles.backButton}
         >
@@ -52,15 +58,15 @@ export default function PrivacyPolicyScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. GİRİŞ</Text>
           <Text style={styles.paragraph}>
-            AfetNet ("Biz", "Bizim" veya "Uygulama"), kullanıcılarımızın gizliliğini korumayı taahhüt eder. 
-            Bu Gizlilik Politikası, AfetNet uygulamasını kullandığınızda topladığımız bilgileri, bu bilgileri 
+            AfetNet ("Biz", "Bizim" veya "Uygulama"), kullanıcılarımızın gizliliğini korumayı taahhüt eder.
+            Bu Gizlilik Politikası, AfetNet uygulamasını kullandığınızda topladığımız bilgileri, bu bilgileri
             nasıl kullandığımızı ve paylaştığımızı açıklar.
           </Text>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. TOPLANAN BİLGİLER</Text>
-          
+
           <Text style={styles.subsectionTitle}>2.1. Kişisel Bilgiler</Text>
           <Text style={styles.paragraph}>
             • Cihaz Kimliği: Her cihaz için benzersiz bir kimlik oluşturulur{'\n'}
@@ -146,7 +152,7 @@ export default function PrivacyPolicyScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>9. ÇOCUKLARIN GİZLİLİĞİ</Text>
           <Text style={styles.paragraph}>
-            AfetNet 13 yaş altı çocuklardan bilerek veri toplamaz. 13 yaş altı kullanıcılar için 
+            AfetNet 13 yaş altı çocuklardan bilerek veri toplamaz. 13 yaş altı kullanıcılar için
             ebeveyn izni gereklidir.
           </Text>
         </View>
@@ -154,7 +160,7 @@ export default function PrivacyPolicyScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>10. DEĞİŞİKLİKLER</Text>
           <Text style={styles.paragraph}>
-            Bu Gizlilik Politikası zaman zaman güncellenebilir. Önemli değişikliklerde size bildirim 
+            Bu Gizlilik Politikası zaman zaman güncellenebilir. Önemli değişikliklerde size bildirim
             gönderilecektir. Değişiklikleri kabul etmek için uygulamayı kullanmaya devam edebilirsiniz.
           </Text>
         </View>

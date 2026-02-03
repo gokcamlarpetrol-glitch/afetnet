@@ -24,8 +24,14 @@ import {
 } from '../../services/MapDownloadService';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-export default function OfflineMapSettingsScreen({ navigation }: any) {
+// ELITE: Proper navigation typing for type safety
+interface OfflineMapSettingsScreenProps {
+  navigation?: StackNavigationProp<Record<string, undefined>>;
+}
+
+export default function OfflineMapSettingsScreen({ navigation }: OfflineMapSettingsScreenProps) {
   const [downloadedRegions, setDownloadedRegions] = useState<string[]>([]);
   const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
   const [totalSize, setTotalSize] = useState(0);
@@ -33,7 +39,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
 
   useEffect(() => {
     loadData();
-    
+
     // Refresh downloads every second
     const interval = setInterval(() => {
       setDownloads(mapDownloadService.getAllDownloads());
@@ -71,7 +77,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -94,7 +100,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -121,7 +127,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Pressable onPress={() => navigation?.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.title}>Çevrimdışı Haritalar</Text>
@@ -168,7 +174,7 @@ export default function OfflineMapSettingsScreen({ navigation }: any) {
                       {(region.estimatedSize / 1024 / 1024).toFixed(0)} MB
                     </Text>
                   </View>
-                  
+
                   {downloaded && (
                     <View style={styles.downloadedBadge}>
                       <Ionicons name="checkmark-circle" size={20} color="#10b981" />

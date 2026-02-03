@@ -18,7 +18,7 @@ import type {
   EarthquakeFirebaseData,
   FeltEarthquakeReportData,
 } from '../types/firebase';
-import { saveDeviceId as saveDeviceIdOp } from './firebase/FirebaseDeviceOperations';
+import { saveDeviceId as saveDeviceIdOp, subscribeToDeviceLocation as subscribeToDeviceLocationOp } from './firebase/FirebaseDeviceOperations';
 import { saveFamilyMember as saveFamilyMemberOp, loadFamilyMembers as loadFamilyMembersOp, deleteFamilyMember as deleteFamilyMemberOp, subscribeToFamilyMembers as subscribeToFamilyMembersOp } from './firebase/FirebaseFamilyOperations';
 import { saveMessage as saveMessageOp, loadMessages as loadMessagesOp, subscribeToMessages as subscribeToMessagesOp, saveConversation as saveConversationOp, loadConversations as loadConversationsOp, deleteConversation as deleteConversationOp } from './firebase/FirebaseMessageOperations';
 import { saveNewsSummary as saveNewsSummaryOp, getNewsSummary as getNewsSummaryOp, NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
@@ -34,7 +34,7 @@ export type { NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
 
 class FirebaseDataService {
   private _isInitialized = false;
-  
+
   get isInitialized(): boolean {
     return this._isInitialized;
   }
@@ -50,25 +50,26 @@ class FirebaseDataService {
     try {
       // ELITE: Ensure Firebase app is initialized with async getter
       const firebaseModule = await import('../../lib/firebase');
-      
+
       // ELITE: Check for named export
       const getFirebaseAppAsync = firebaseModule.getFirebaseAppAsync;
-      
+      const signInAnonymously = firebaseModule.signInAnonymouslyAsync; // ELITE: Import via named export
+
       if (!getFirebaseAppAsync || typeof getFirebaseAppAsync !== 'function') {
         if (__DEV__) {
           logger.debug('getFirebaseAppAsync is not available in firebase module - Firestore disabled');
         }
         return;
       }
-      
+
       // ELITE: Initialize Firebase app with timeout protection
       const initPromise = getFirebaseAppAsync();
       const timeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), 8000) // 8 second timeout
+        setTimeout(() => resolve(null), 8000), // 8 second timeout
       );
-      
+
       const firebaseApp = await Promise.race([initPromise, timeoutPromise]);
-      
+
       if (!firebaseApp) {
         if (__DEV__) {
           logger.debug('Firebase app not initialized - Firestore disabled (app continues with AsyncStorage)');
@@ -76,14 +77,20 @@ class FirebaseDataService {
         return;
       }
 
+      // ELITE: Authenticate Anonymously (Required for Firestore Rules)
+      // This enables "Write Once, Read Many" for shared news summaries
+      if (signInAnonymously && typeof signInAnonymously === 'function') {
+        await signInAnonymously();
+      }
+
       // ELITE: Get Firestore instance with async initialization and timeout
       const dbPromise = getFirestoreInstanceAsync();
       const dbTimeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), 5000) // 5 second timeout
+        setTimeout(() => resolve(null), 5000), // 5 second timeout
       );
-      
+
       const db = await Promise.race([dbPromise, dbTimeoutPromise]);
-      
+
       if (!db) {
         if (__DEV__) {
           logger.debug('Firestore not available - using AsyncStorage fallback');
@@ -93,16 +100,16 @@ class FirebaseDataService {
 
       this._isInitialized = true;
       if (__DEV__) {
-        logger.info('✅ FirebaseDataService initialized successfully');
+        logger.info('✅ FirebaseDataService initialized successfully (Auth + Firestore)');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
-      const errorMessage = error?.message || String(error);
-      const errorType = error?.name || typeof error;
-      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorType = error instanceof Error ? error.name : typeof error;
+
       // ELITE: Don't log bundle errors as errors - they're expected in some environments
-      if (errorMessage.includes('LoadBundleFromServerRequestError') || 
-          errorMessage.includes('Could not load bundle')) {
+      if (errorMessage.includes('LoadBundleFromServerRequestError') ||
+        errorMessage.includes('Could not load bundle')) {
         if (__DEV__) {
           logger.debug('FirebaseDataService init skipped (bundle load error - expected in some environments)');
         }
@@ -122,6 +129,17 @@ class FirebaseDataService {
   async saveDeviceId(deviceId: string): Promise<boolean> {
     return saveDeviceIdOp(deviceId, this._isInitialized);
   }
+  /**
+   * Subscribe to a specific device's location updates
+   */
+  async subscribeToDeviceLocation(
+    deviceId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    callback: (location: any) => void,
+  ): Promise<() => void> {
+    return subscribeToDeviceLocationOp(deviceId, callback, this._isInitialized);
+  }
+
 
   /**
    * Save family member to Firestore
@@ -148,9 +166,9 @@ class FirebaseDataService {
    * Subscribe to family members changes (real-time sync)
    */
   async subscribeToFamilyMembers(
-    userDeviceId: string, 
+    userDeviceId: string,
     callback: (members: FamilyMember[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
   ): Promise<() => void> {
     return subscribeToFamilyMembersOp(userDeviceId, callback, onError, this._isInitialized);
   }
@@ -189,7 +207,7 @@ class FirebaseDataService {
   async subscribeToMessages(
     userDeviceId: string,
     callback: (messages: MessageData[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
   ): Promise<(() => void) | null> {
     return subscribeToMessagesOp(userDeviceId, callback, onError, this._isInitialized);
   }
@@ -218,6 +236,7 @@ class FirebaseDataService {
   /**
    * Save health profile to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveHealthProfile(userDeviceId: string, profile: any): Promise<boolean> {
     return saveHealthProfileOp(userDeviceId, profile, this._isInitialized);
   }
@@ -232,6 +251,7 @@ class FirebaseDataService {
   /**
    * Save earthquake to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveEarthquake(earthquake: any): Promise<boolean> {
     return saveEarthquakeOp(earthquake, this._isInitialized);
   }
@@ -239,6 +259,7 @@ class FirebaseDataService {
   /**
    * Save felt earthquake report to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveFeltEarthquakeReport(report: any): Promise<boolean> {
     return saveFeltEarthquakeReportOp(report, this._isInitialized);
   }
@@ -253,6 +274,7 @@ class FirebaseDataService {
   /**
    * Save location update to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveLocationUpdate(userDeviceId: string, location: any): Promise<boolean> {
     return saveLocationUpdateOp(userDeviceId, location, this._isInitialized);
   }
@@ -260,6 +282,7 @@ class FirebaseDataService {
   /**
    * Save ICE (In Case of Emergency) data to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveICE(userDeviceId: string, iceData: any): Promise<boolean> {
     return saveICEOp(userDeviceId, iceData, this._isInitialized);
   }
@@ -274,6 +297,7 @@ class FirebaseDataService {
   /**
    * Save status update to Firestore
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveStatusUpdate(userDeviceId: string, statusData: any): Promise<boolean> {
     return saveStatusUpdateOp(userDeviceId, statusData, this._isInitialized);
   }
@@ -293,6 +317,7 @@ class FirebaseDataService {
     sWaveDetected: boolean;
     confidence: number;
     warningTime: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     waveCalculation?: any;
     source: string;
   }): Promise<boolean> {
@@ -313,7 +338,7 @@ class FirebaseDataService {
       }
 
       const { doc, setDoc } = await import('firebase/firestore');
-      
+
       // ELITE: Timeout protection for seismic detection save
       const TIMEOUT_MS = 10000; // 10 seconds
       const savePromise = setDoc(doc(db, 'seismicDetections', detection.id), {
@@ -321,11 +346,11 @@ class FirebaseDataService {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }, { merge: true });
-      
+
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Seismic detection save timeout')), TIMEOUT_MS)
+        setTimeout(() => reject(new Error('Seismic detection save timeout')), TIMEOUT_MS),
       );
-      
+
       await Promise.race([savePromise, timeoutPromise]);
 
       if (__DEV__) {
@@ -335,7 +360,7 @@ class FirebaseDataService {
     } catch (error: unknown) {
       const errorObj = error as { code?: string; message?: string };
       const errorMessage = errorObj?.message || String(error);
-      
+
       // ELITE: Handle permission errors gracefully
       if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
         if (__DEV__) {
@@ -343,16 +368,16 @@ class FirebaseDataService {
         }
         return false;
       }
-      
+
       // ELITE: Handle bundle errors gracefully
-      if (errorMessage.includes('LoadBundleFromServerRequestError') || 
-          errorMessage.includes('Could not load bundle')) {
+      if (errorMessage.includes('LoadBundleFromServerRequestError') ||
+        errorMessage.includes('Could not load bundle')) {
         if (__DEV__) {
           logger.debug('Seismic detection save skipped (bundle error - expected in some environments)');
         }
         return false;
       }
-      
+
       logger.error('Failed to save seismic detection:', error);
       return false;
     }

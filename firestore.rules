@@ -1,219 +1,186 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Elite Security: Strict authentication checks
-    function isSystemClient() {
-      return request.auth != null && request.auth.token.admin == true;
-    }
+    // ============================================================
+    // AFETNET ELITE FIRESTORE SECURITY RULES
+    // Version: 2.0.0 - Enhanced with Contact Requests
+    // ============================================================
 
+    // Helper: Check if authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Allow anonymous or authenticated users (always true for emergency features)
-    function allowAnonymousOrAuthenticated() {
-      return true; // Allow anonymous access for emergency features (location, status, news summaries)
+    // Helper: Check if user owns this resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Elite: Device ID validation with strict format check
-    function isValidDeviceId(deviceId) {
-      return deviceId != null && 
-             deviceId is string && 
-             deviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
-             deviceId.size() == 12;
-    }
-
-    // Elite: Validate device ownership with strict checks
-    // CRITICAL: Allow anonymous access for emergency features (device registration)
-    function allowDeviceWrite(deviceId) {
-      return isSystemClient() || 
-             (allowAnonymousOrAuthenticated() && 
-              isValidDeviceId(deviceId) && 
-              request.resource.data.deviceId == deviceId && 
-              request.resource.data.deviceId != null &&
-              // Prevent deviceId tampering
-              resource == null || resource.data.deviceId == deviceId);
-    }
-
-    // Elite: Public read only for emergency data (earthquakes, SOS)
-    function allowPublicRead() {
-      return isSystemClient() || isAuthenticated();
-    }
-
-    // Elite: Emergency public read (only for critical data)
-    function allowEmergencyPublicRead() {
-      return true; // Only for earthquakes and SOS signals
-    }
-
-    // Elite Security: Devices collection - STRICT access control
-    // CRITICAL: Allow anonymous access for emergency device registration
-    match /devices/{deviceId} {
-      // Elite: Allow read for authenticated users or system, or if reading own device
-      allow read: if isSystemClient() || 
-                     (allowAnonymousOrAuthenticated() && isValidDeviceId(deviceId));
-      // Elite: Only device owner can write, with strict validation (anonymous allowed for emergency)
-      allow create: if allowDeviceWrite(deviceId) && 
-                       isValidDeviceId(request.resource.data.deviceId) &&
-                       request.resource.data.deviceId == deviceId;
-      allow update: if allowDeviceWrite(deviceId) && 
-                       isValidDeviceId(resource.data.deviceId) &&
-                       resource.data.deviceId == deviceId &&
-                       // Prevent deviceId change
-                       request.resource.data.deviceId == resource.data.deviceId;
-      allow delete: if isSystemClient();
-
-      // Elite Security: Family members - STRICT validation
-      // CRITICAL: Allow anonymous access for emergency features
-      match /familyMembers/{memberId} {
-        // Elite: Only device owner can read family members (anonymous allowed for emergency)
-        allow read: if allowAnonymousOrAuthenticated() && isValidDeviceId(deviceId);
-        allow create: if allowDeviceWrite(deviceId) &&
-                         request.resource.data.id is string &&
-                         request.resource.data.id.size() > 0 &&
-                         request.resource.data.id.size() <= 100 &&
-                         request.resource.data.name is string &&
-                         request.resource.data.name.size() > 0 &&
-                         request.resource.data.name.size() <= 100;
-        allow update: if allowDeviceWrite(deviceId) &&
-                         request.resource.data.id == resource.data.id; // Prevent ID change
-        allow delete: if allowDeviceWrite(deviceId);
+    // ==================== USER PROFILES ====================
+    match /users/{userId} {
+      // Anyone authenticated can read basic profile (for QR contact lookup)
+      allow read: if isAuthenticated();
+      
+      // Only owner can write their own profile
+      allow write: if isOwner(userId);
+      
+      // ==================== CONTACTS ====================
+      match /contacts/{contactId} {
+        // Only owner can read/write contacts
+        allow read, write: if isOwner(userId);
       }
       
-      // Health profile subcollection
-      match /healthProfile/{profileId} {
-        allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== BLOCKED USERS ====================
+      match /blocked/{blockedId} {
+        // Only owner can manage blocked list
+        allow read, write: if isOwner(userId);
       }
       
-      // ICE (In Case of Emergency) subcollection
-      match /ice/{iceId} {
-        allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== CONTACT REQUESTS ====================
+      match /contactRequests/{requestId} {
+        // Owner can read their incoming requests
+        allow read: if isOwner(userId);
+        
+        // Owner can update/delete (accept/decline) their requests
+        allow update, delete: if isOwner(userId);
+        
+        // Anyone authenticated can create a request TO this user
+        // (when they add this user as a contact)
+        allow create: if isAuthenticated() 
+          && request.resource.data.fromUserId == request.auth.uid
+          && request.resource.data.status == 'pending';
       }
       
-      // Location updates subcollection (also check 'locations' for backward compatibility)
-      match /locationUpdates/{locationId} {
-        allow read: if allowPublicRead();
-        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== NOTIFICATIONS ====================
+      match /notifications/{notificationId} {
+        // Owner can read/delete their notifications
+        allow read, delete: if isOwner(userId);
+        
+        // Anyone authenticated can create notifications
+        allow create: if isAuthenticated();
+        
+        // Owner can update (mark as read)
+        allow update: if isOwner(userId);
       }
       
-      match /locations/{locationId} {
-        allow read: if allowPublicRead();
-        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== MESSAGES ====================
+      match /messages/{messageId} {
+        // Only owner can access messages
+        allow read, write: if isOwner(userId);
       }
       
-      // Status updates subcollection (also check 'status' for backward compatibility)
-      match /statusUpdates/{statusId} {
-        allow read: if allowPublicRead();
-        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== CONVERSATIONS ====================
+      match /conversations/{conversationId} {
+        // Only owner can access conversations
+        allow read, write: if isOwner(userId);
       }
       
-      match /status/{statusId} {
-        allow read: if allowPublicRead();
-        allow write: if allowAnonymousOrAuthenticated() && (request.resource.data.deviceId == deviceId || request.resource.data.deviceId == null);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== REACTIONS ====================
+      match /reactions/{reactionId} {
+        // Only owner can access their reactions
+        allow read, write: if isOwner(userId);
       }
       
-      // Earthquake alerts subcollection
-      match /earthquakeAlerts/{alertId} {
-        allow read: if allowPublicRead();
-        allow write: if allowDeviceWrite(deviceId);
-        allow delete: if allowDeviceWrite(deviceId);
+      // ==================== VOICE MESSAGES ====================
+      match /voiceMessages/{voiceId} {
+        // Only owner can access voice message metadata
+        allow read, write: if isOwner(userId);
       }
     }
     
-    // Elite Security: Emergency SOS signals - Public read for emergency, strict write
-    match /sos/{sosId} {
-      // Elite: Public read for emergency response (life-saving)
-      allow read: if allowEmergencyPublicRead();
-      // Elite: Strict write validation - only authenticated users or valid device IDs
-      allow create: if (isAuthenticated() || 
-                        (request.resource.data.deviceId != null && 
-                         isValidDeviceId(request.resource.data.deviceId))) &&
-                       request.resource.data.deviceId is string &&
-                       request.resource.data.timestamp is int &&
-                       request.resource.data.latitude is number &&
-                       request.resource.data.longitude is number;
-      allow update: if isAuthenticated() || 
-                       (resource.data.deviceId != null && 
-                        request.resource.data.deviceId == resource.data.deviceId);
-      allow delete: if isSystemClient() || 
-                       (isAuthenticated() && resource.data.deviceId != null);
+    // ==================== PUBLIC PROFILES (for QR lookup) ====================
+    match /publicProfiles/{userId} {
+      // Anyone can read public profiles
+      allow read: if isAuthenticated();
+      
+      // Only owner updates their public profile
+      allow write: if isOwner(userId);
     }
     
-    // Elite Security: Messages collection - STRICT access control
-    match /messages/{messageId} {
-      // Elite: Only authenticated users or message participants can read
-      allow read: if isAuthenticated() && 
-                     (resource.data.from is string || resource.data.to is string);
-      // Elite: Strict write validation
-      allow create: if isAuthenticated() &&
-                       request.resource.data.from is string &&
-                       isValidDeviceId(request.resource.data.from) &&
-                       request.resource.data.to is string &&
-                       request.resource.data.content is string &&
-                       request.resource.data.content.size() > 0 &&
-                       request.resource.data.content.size() <= 10000; // Max message size
-      allow update: if false; // Messages are immutable
-      allow delete: if isSystemClient() || 
-                       (isAuthenticated() && resource.data.from is string);
+    // ==================== FAMILIES ====================
+    match /families/{familyId} {
+      // Family members can read
+      allow read: if isAuthenticated() 
+        && (request.auth.uid in resource.data.memberIds 
+            || request.auth.uid == resource.data.adminId);
+      
+      // Admin can update
+      allow update: if isAuthenticated() 
+        && request.auth.uid == resource.data.adminId;
+      
+      // Anyone authenticated can create (becomes admin)
+      allow create: if isAuthenticated()
+        && request.resource.data.adminId == request.auth.uid;
+      
+      // Only admin can delete
+      allow delete: if isAuthenticated()
+        && request.auth.uid == resource.data.adminId;
+        
+      // Family members subcollection
+      match /members/{memberId} {
+        allow read, write: if isAuthenticated()
+          && (request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberIds
+              || request.auth.uid == get(/databases/$(database)/documents/families/$(familyId)).data.adminId);
+      }
     }
     
-    // Elite Security: Earthquakes collection - Public read for emergency, strict write
+    // ==================== EARTHQUAKE DATA ====================
     match /earthquakes/{earthquakeId} {
-      // Elite: Public read for emergency awareness (life-saving)
-      allow read: if allowEmergencyPublicRead();
-      // Elite: Strict write validation - only system or authenticated users with magnitude >= 4.0
-      allow create: if isSystemClient() || 
-                       (isAuthenticated() && 
-                        request.resource.data.magnitude is number &&
-                        request.resource.data.magnitude >= 4.0 &&
-                        request.resource.data.latitude is number &&
-                        request.resource.data.longitude is number &&
-                        request.resource.data.time is int);
-      allow update: if isSystemClient();
-      allow delete: if isSystemClient(); // Only system can delete
+      // Anyone authenticated can read
+      allow read: if isAuthenticated();
+      
+      // Only server/admin can write (via Cloud Functions)
+      allow write: if false;
+    }
+    
+    // ==================== REPORTS ====================
+    match /reports/{reportId} {
+      // Anyone authenticated can read
+      allow read: if isAuthenticated();
+      
+      // Anyone authenticated can create reports
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+      
+      // Only author can update/delete
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+    
+    // ==================== SOS ALERTS ====================
+    match /sosAlerts/{alertId} {
+      // Anyone authenticated can read (emergency info is public)
+      allow read: if isAuthenticated();
+      
+      // Anyone authenticated can create SOS
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+      
+      // Only author can update/delete
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+    
+    // ==================== ASSEMBLY POINTS ====================
+    match /assemblyPoints/{pointId} {
+      // Anyone can read
+      allow read: if true;
+      
+      // Only admin (via Cloud Functions)
+      allow write: if false;
+    }
+    
+    // ==================== NEWS SUMMARIES ====================
+    match /newsSummaries/{summaryId} {
+      // Anyone can read
+      allow read: if true;
+      
+      // Anyone authenticated can write (for AI summaries)
+      allow write: if isAuthenticated();
     }
 
-    // Elite Security: News summaries collection - STRICT validation
-    match /news_summaries/{articleId} {
-      // Elite: Public read for cached summaries (non-sensitive)
-      allow read: if allowEmergencyPublicRead();
-      // Elite: Strict create validation - allow anonymous for caching
-      allow create: if isSystemClient() ||
-        (
-          allowAnonymousOrAuthenticated() &&
-          !exists(/databases/$(database)/documents/news_summaries/$(articleId)) &&
-          request.resource.data.summary is string &&
-          request.resource.data.summary.size() > 0 &&
-          request.resource.data.summary.size() <= 6000 &&
-          (request.resource.data.createdByDeviceId == null || isValidDeviceId(request.resource.data.createdByDeviceId)) &&
-          (request.resource.data.ttlMs == null || (request.resource.data.ttlMs is int && request.resource.data.ttlMs > 0 && request.resource.data.ttlMs <= 43200000)) &&
-          request.resource.data.articleId is string &&
-          request.resource.data.articleId == articleId
-        );
-      allow update: if isSystemClient() || allowAnonymousOrAuthenticated();
-      allow delete: if isSystemClient();
-    }
-    
-    // Backward compatibility: newsSummaries collection
-    match /newsSummaries/{articleId} {
-      allow read: if allowEmergencyPublicRead();
-      allow create: if isSystemClient() || allowAnonymousOrAuthenticated();
-      allow update: if isSystemClient() || allowAnonymousOrAuthenticated();
-      allow delete: if isSystemClient();
-    }
-    
-    // Deny all other access
+    // ==================== DEFAULT DENY ====================
+    // Catch-all: deny all other access
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-

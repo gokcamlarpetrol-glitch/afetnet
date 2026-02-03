@@ -119,7 +119,7 @@ class BatterySaverService {
     brightness: string;
     animations: string;
     backgroundSync: string;
-  } {
+    } {
     if (!this.isEnabled) {
       return {
         brightness: 'Normal',

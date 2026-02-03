@@ -34,7 +34,7 @@ class CacheStrategyService {
       staleTime?: number;
       expireTime?: number;
       useMemoryCache?: boolean;
-    }
+    },
   ): Promise<T> {
     const staleTime = options?.staleTime || this.DEFAULT_STALE_TIME;
     const expireTime = options?.expireTime || this.DEFAULT_EXPIRE_TIME;
@@ -87,7 +87,7 @@ class CacheStrategyService {
     fetchFn: () => Promise<T>,
     staleTime: number,
     expireTime: number,
-    useMemoryCache: boolean = true
+    useMemoryCache: boolean = true,
   ): Promise<void> {
     try {
       const freshData = await fetchFn();
@@ -112,7 +112,7 @@ class CacheStrategyService {
     fetchFn: () => Promise<T>,
     staleTime: number,
     expireTime: number,
-    useMemoryCache: boolean = true
+    useMemoryCache: boolean = true,
   ): Promise<T> {
     const data = await fetchFn();
     await this.set(key, data, staleTime, expireTime, useMemoryCache);
@@ -127,7 +127,7 @@ class CacheStrategyService {
     data: T,
     staleTime?: number,
     expireTime?: number,
-    useMemoryCache: boolean = true
+    useMemoryCache: boolean = true,
   ): Promise<void> {
     const now = Date.now();
     const stale = staleTime || this.DEFAULT_STALE_TIME;
@@ -215,7 +215,7 @@ class CacheStrategyService {
   getStats(): {
     memoryCacheSize: number;
     memoryCacheKeys: string[];
-  } {
+    } {
     return {
       memoryCacheSize: this.memoryCache.size,
       memoryCacheKeys: Array.from(this.memoryCache.keys()),

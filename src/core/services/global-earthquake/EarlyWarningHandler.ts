@@ -22,7 +22,7 @@ const TURKEY_BOUNDS = {
  */
 export async function canSendEarlyWarning(
   event: GlobalEarthquakeEvent,
-  lastAFADCheckTime: number
+  lastAFADCheckTime: number,
 ): Promise<boolean> {
   if (!event || typeof event.time !== 'number' || isNaN(event.time)) {
     return false;
@@ -38,11 +38,11 @@ export async function canSendEarlyWarning(
 
   if (eventAgeSeconds < 30) {
     const afadCheckDelay = now - lastAFADCheckTime;
-    
+
     if (afadCheckDelay > 5000) {
       return true;
     }
-    
+
     if (eventAgeSeconds < 15) {
       return true;
     }
@@ -55,31 +55,31 @@ export async function canSendEarlyWarning(
  * Trigger early warning for Turkey earthquake detected by USGS/EMSC
  */
 export async function triggerEarlyWarningForTurkeyEarthquake(
-  event: GlobalEarthquakeEvent
+  event: GlobalEarthquakeEvent,
 ): Promise<void> {
   if (!event || typeof event.magnitude !== 'number' || typeof event.time !== 'number' ||
-      isNaN(event.magnitude) || isNaN(event.time)) {
+    isNaN(event.magnitude) || isNaN(event.time)) {
     logger.warn('Invalid event for Turkey earthquake warning:', event);
     return;
   }
 
   const { useSettingsStore } = await import('../../stores/settingsStore');
   const settings = useSettingsStore.getState();
-  
+
   if (!settings.eewEnabled) {
     if (__DEV__) {
       logger.debug('EEW notifications disabled by user - skipping early warning');
     }
     return;
   }
-  
+
   if (!settings.notificationPush) {
     if (__DEV__) {
       logger.debug('Push notifications disabled by user - skipping early warning');
     }
     return;
   }
-  
+
   if (event.magnitude < settings.eewMinMagnitude) {
     if (__DEV__) {
       logger.debug(`EEW magnitude threshold not met: ${event.magnitude} < ${settings.eewMinMagnitude}`);
@@ -91,12 +91,12 @@ export async function triggerEarlyWarningForTurkeyEarthquake(
   const eventTime = event.time;
   const now = Date.now();
   const detectionDelay = (now - eventTime) / 1000;
-  
+
   if (detectionDelay < 0 || detectionDelay > 3600) {
     logger.warn('Invalid detection delay:', detectionDelay);
     return;
   }
-  
+
   if (__DEV__) {
     logger.info(`🇹🇷 TURKEY EARTHQUAKE DETECTED BY ${event.source}: M${event.magnitude.toFixed(1)} at ${event.region}${isCritical ? ' 🚨 CRITICAL!' : ''} (${detectionDelay.toFixed(1)}s after event)`);
     logger.info(`⏱️ EARLY WARNING: ${detectionDelay.toFixed(1)}s detection delay - USGS/EMSC advantage over AFAD (8-10s faster)`);
@@ -111,14 +111,19 @@ export async function triggerEarlyWarningForTurkeyEarthquake(
     const validMagnitude = Math.max(0, Math.min(10, event.magnitude));
     const validRegion = String(event.region || 'Unknown').substring(0, 255);
     const validEventTime = Math.max(0, Math.min(Date.now() + 60000, event.time));
-    
-    useEEWStore.getState().setActive({
-      eventId,
-      etaSec: 0,
-      mag: validMagnitude,
-      region: validRegion,
-      issuedAt: validEventTime,
+
+    useEEWStore.getState().setActiveAlert({
+      id: eventId,
+      magnitude: validMagnitude,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      depth: event.depth || 10,
+      location: validRegion,
+      timestamp: validEventTime,
+      estimatedArrivalTime: 0,
+      estimatedIntensity: undefined,
       source: `${event.source}_TURKEY_DETECTION`,
+      verified: false,
     });
 
     let aiAnalysis = '';
@@ -143,7 +148,7 @@ export async function triggerEarlyWarningForTurkeyEarthquake(
       vibration: settings.notificationVibration,
       tts: settings.notificationTTS,
     };
-    
+
     if (!channels.pushNotification && !channels.fullScreenAlert && !channels.alarmSound && !channels.vibration && !channels.tts) {
       if (__DEV__) {
         logger.debug('All notification channels disabled by user - skipping alert');
@@ -177,7 +182,7 @@ export async function triggerEarlyWarningForTurkeyEarthquake(
  */
 export async function triggerGlobalEarlyWarning(
   event: GlobalEarthquakeEvent,
-  prediction: TurkeyImpactPrediction
+  prediction: TurkeyImpactPrediction,
 ): Promise<void> {
   if (!event || !prediction) {
     logger.warn('Invalid event or prediction for early warning:', { event, prediction });
@@ -186,28 +191,28 @@ export async function triggerGlobalEarlyWarning(
 
   const { useSettingsStore } = await import('../../stores/settingsStore');
   const settings = useSettingsStore.getState();
-  
+
   if (!settings.eewEnabled) {
     if (__DEV__) {
       logger.debug('EEW notifications disabled by user - skipping global early warning');
     }
     return;
   }
-  
+
   if (!settings.notificationPush) {
     if (__DEV__) {
       logger.debug('Push notifications disabled by user - skipping global early warning');
     }
     return;
   }
-  
+
   if (event.magnitude < settings.eewMinMagnitude) {
     if (__DEV__) {
       logger.debug(`EEW magnitude threshold not met: ${event.magnitude} < ${settings.eewMinMagnitude}`);
     }
     return;
   }
-  
+
   // CRITICAL: Require HIGH confidence for %100 accuracy (reduce false positives)
   // Higher threshold ensures reliable warnings
   if (prediction.confidence < 70) {
@@ -241,13 +246,18 @@ export async function triggerGlobalEarlyWarning(
     const validEta = Math.max(0, Math.min(3600, prediction.estimatedArrivalTime));
     const validRegion = String(event.region || 'Unknown').substring(0, 200);
 
-    useEEWStore.getState().setActive({
-      eventId,
-      etaSec: validEta,
-      mag: validMagnitude,
-      region: `${validRegion} (Global Erken Uyarı)`,
-      issuedAt: Date.now(),
+    useEEWStore.getState().setActiveAlert({
+      id: eventId,
+      magnitude: validMagnitude,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      depth: event.depth || 10,
+      location: `${validRegion} (Global Erken Uyarı)`,
+      timestamp: Date.now(),
+      estimatedArrivalTime: validEta,
+      estimatedIntensity: undefined,
       source: `GLOBAL_${event.source}`,
+      verified: false,
     });
 
     const validConfidence = Math.max(0, Math.min(100, prediction.confidence));
@@ -266,7 +276,7 @@ export async function triggerGlobalEarlyWarning(
       vibration: settings.notificationVibration,
       tts: settings.notificationTTS,
     };
-    
+
     if (!channels.pushNotification && !channels.fullScreenAlert && !channels.alarmSound && !channels.vibration && !channels.tts) {
       if (__DEV__) {
         logger.debug('All notification channels disabled by user - skipping global alert');
@@ -302,8 +312,8 @@ export async function triggerGlobalEarlyWarning(
  */
 export function isInsideTurkey(event: GlobalEarthquakeEvent): boolean {
   return event.latitude >= TURKEY_BOUNDS.minLat &&
-         event.latitude <= TURKEY_BOUNDS.maxLat &&
-         event.longitude >= TURKEY_BOUNDS.minLon &&
-         event.longitude <= TURKEY_BOUNDS.maxLon;
+    event.latitude <= TURKEY_BOUNDS.maxLat &&
+    event.longitude >= TURKEY_BOUNDS.minLon &&
+    event.longitude <= TURKEY_BOUNDS.maxLon;
 }
 

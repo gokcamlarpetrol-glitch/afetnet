@@ -145,14 +145,14 @@ class RescueBeaconService {
       const deviceId = await getDeviceId();
 
       // Get location
-      let location: any = null;
+      let location: BeaconPayload['location'] | undefined;
       try {
         const currentLocation = await locationService.getCurrentLocation();
         if (currentLocation) {
           location = {
             latitude: currentLocation.latitude,
             longitude: currentLocation.longitude,
-            accuracy: currentLocation.accuracy,
+            accuracy: currentLocation.accuracy ?? undefined, // ELITE: Convert null to undefined
           };
         }
       } catch (error) {
@@ -169,11 +169,18 @@ class RescueBeaconService {
       }
 
       // Create beacon payload
+      // ELITE: Map UserStatus to BeaconPayload status
+      const mapStatus = (s: string): BeaconPayload['status'] => {
+        if (s === 'trapped') return 'trapped';
+        if (s === 'needs_help' || s === 'sos') return 'injured';
+        return 'safe';
+      };
+
       const payload: BeaconPayload = {
         type: 'SOS_BEACON',
         userId: deviceId,
-        userName: (userStatus as any).name || 'Unknown',
-        status: userStatus.status as any,
+        userName: 'AfetNet User', // Privacy: Don't expose real name over BLE
+        status: mapStatus(userStatus.status),
         location,
         battery,
         timestamp: Date.now(),
@@ -205,9 +212,6 @@ class RescueBeaconService {
           content: payloadString,
           ttl: 10,
           priority: 'critical',
-          ackRequired: false,
-          sequence: 0,
-          attempts: 0,
         }).catch((error) => {
           logger.error('Error broadcasting SOS beacon:', error);
           // Don't throw - SOS beacon failure shouldn't break the service
@@ -296,20 +300,20 @@ class RescueBeaconService {
   private async sendTrappedUserNotification(payload: BeaconPayload, rssi?: number, distance?: number) {
     try {
       const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-      
-      const distanceText = distance 
-        ? distance < 1000 
-          ? `${Math.round(distance)}m uzaklıkta` 
+
+      const distanceText = distance
+        ? distance < 1000
+          ? `${Math.round(distance)}m uzaklıkta`
           : `${(distance / 1000).toFixed(1)}km uzaklıkta`
-        : rssi 
+        : rssi
           ? `Sinyal gücü: ${rssi} dBm`
           : 'Yakın bölgede';
-      
+
       const batteryText = payload.battery !== undefined ? `Pil: %${payload.battery}` : '';
-      const locationText = payload.location 
+      const locationText = payload.location
         ? `Konum: ${payload.location.latitude.toFixed(4)}, ${payload.location.longitude.toFixed(4)}`
         : '';
-      
+
       const body = [
         payload.message || `${payload.userName} yardım bekliyor`,
         distanceText,
@@ -318,8 +322,8 @@ class RescueBeaconService {
       ].filter(Boolean).join(' • ');
 
       await multiChannelAlertService.sendAlert({
-        title: payload.status === 'trapped' 
-          ? '🚨 ENKAZ ALTINDA KİŞİ TESPİT EDİLDİ' 
+        title: payload.status === 'trapped'
+          ? '🚨 ENKAZ ALTINDA KİŞİ TESPİT EDİLDİ'
           : '⚠️ YARDIM GEREKEN KİŞİ TESPİT EDİLDİ',
         body,
         priority: payload.status === 'trapped' ? 'critical' : 'high',

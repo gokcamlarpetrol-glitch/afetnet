@@ -66,79 +66,79 @@ export const useRescueStore = create<RescueState>()(
         beaconStartTime: null,
         beaconInterval: 10, // Default: 10 seconds
 
-      // Rescue team mode actions
-      enableRescueTeamMode: () => {
-        set({ isRescueTeamMode: true });
-      },
+        // Rescue team mode actions
+        enableRescueTeamMode: () => {
+          set({ isRescueTeamMode: true });
+        },
 
-      disableRescueTeamMode: () => {
-        set({ isRescueTeamMode: false, trappedUsers: [] });
-      },
+        disableRescueTeamMode: () => {
+          set({ isRescueTeamMode: false, trappedUsers: [] });
+        },
 
-      toggleRescueTeamMode: () => {
-        const current = get().isRescueTeamMode;
-        set({ isRescueTeamMode: !current });
-        if (current) {
-          set({ trappedUsers: [] });
-        }
-      },
-
-      // Trapped users management
-      addTrappedUser: (user: TrappedUser) => {
-        set((state) => {
-          // Check if user already exists
-          const exists = state.trappedUsers.find((u) => u.id === user.id);
-          let updatedUsers: TrappedUser[];
-          
-          if (exists) {
-            // Update existing user
-            updatedUsers = state.trappedUsers.map((u) =>
-              u.id === user.id ? { ...u, ...user, lastSeen: Date.now() } : u
-            );
-          } else {
-            // Add new user
-            updatedUsers = [...state.trappedUsers, { ...user, lastSeen: Date.now() }];
+        toggleRescueTeamMode: () => {
+          const current = get().isRescueTeamMode;
+          set({ isRescueTeamMode: !current });
+          if (current) {
+            set({ trappedUsers: [] });
           }
+        },
+
+        // Trapped users management
+        addTrappedUser: (user: TrappedUser) => {
+          set((state) => {
+          // Check if user already exists
+            const exists = state.trappedUsers.find((u) => u.id === user.id);
+            let updatedUsers: TrappedUser[];
           
-          // Elite: Clean expired users periodically
-          const cleanedUsers = cleanupExpiredUsers(updatedUsers);
+            if (exists) {
+            // Update existing user
+              updatedUsers = state.trappedUsers.map((u) =>
+                u.id === user.id ? { ...u, ...user, lastSeen: Date.now() } : u,
+              );
+            } else {
+            // Add new user
+              updatedUsers = [...state.trappedUsers, { ...user, lastSeen: Date.now() }];
+            }
           
-          return {
-            trappedUsers: cleanedUsers,
-          };
-        });
-      },
+            // Elite: Clean expired users periodically
+            const cleanedUsers = cleanupExpiredUsers(updatedUsers);
+          
+            return {
+              trappedUsers: cleanedUsers,
+            };
+          });
+        },
 
-      updateTrappedUser: (id: string, updates: Partial<TrappedUser>) => {
-        set((state) => ({
-          trappedUsers: state.trappedUsers.map((user) =>
-            user.id === id ? { ...user, ...updates, lastSeen: Date.now() } : user
-          ),
-        }));
-      },
+        updateTrappedUser: (id: string, updates: Partial<TrappedUser>) => {
+          set((state) => ({
+            trappedUsers: state.trappedUsers.map((user) =>
+              user.id === id ? { ...user, ...updates, lastSeen: Date.now() } : user,
+            ),
+          }));
+        },
 
-      removeTrappedUser: (id: string) => {
-        set((state) => ({
-          trappedUsers: state.trappedUsers.filter((user) => user.id !== id),
-        }));
-      },
+        removeTrappedUser: (id: string) => {
+          set((state) => ({
+            trappedUsers: state.trappedUsers.filter((user) => user.id !== id),
+          }));
+        },
 
-      clearTrappedUsers: () => {
-        set({ trappedUsers: [] });
-      },
+        clearTrappedUsers: () => {
+          set({ trappedUsers: [] });
+        },
 
-      // Beacon actions
-      startBeacon: () => {
-        set({ isBeaconActive: true, beaconStartTime: Date.now() });
-      },
+        // Beacon actions
+        startBeacon: () => {
+          set({ isBeaconActive: true, beaconStartTime: Date.now() });
+        },
 
-      stopBeacon: () => {
-        set({ isBeaconActive: false, beaconStartTime: null });
-      },
+        stopBeacon: () => {
+          set({ isBeaconActive: false, beaconStartTime: null });
+        },
 
-      setBeaconInterval: (seconds: number) => {
-        set({ beaconInterval: seconds });
-      },
+        setBeaconInterval: (seconds: number) => {
+          set({ beaconInterval: seconds });
+        },
       };
     },
     {
@@ -154,8 +154,8 @@ export const useRescueStore = create<RescueState>()(
           return now - user.lastSeen < expiryTime;
         }),
       }),
-    }
-  )
+    },
+  ),
 );
 
 

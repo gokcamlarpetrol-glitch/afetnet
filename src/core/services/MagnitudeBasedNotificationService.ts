@@ -39,7 +39,7 @@ export async function showMagnitudeBasedNotification(
   timeAdvance?: number,
   timestamp?: number,
   depth?: number,
-  source?: string
+  source?: string,
 ): Promise<void> {
   try {
     // ELITE: Validate inputs first - ensure 100% accuracy
@@ -146,7 +146,7 @@ function getPriorityForMagnitude(magnitude: number): 'critical' | 'high' | 'norm
  */
 function formatNotificationContent(
   config: MagnitudeNotificationConfig,
-  priority: 'critical' | 'high' | 'normal'
+  priority: 'critical' | 'high' | 'normal',
 ): {
   title: string;
   body: string;
@@ -195,8 +195,8 @@ function formatNotificationContent(
   const vibrationPattern = priority === 'critical'
     ? [0, 500, 200, 500, 200, 500, 200, 500] // Critical: Strong SOS pattern
     : priority === 'high'
-    ? [0, 300, 100, 300, 100, 300] // High: Medium pattern
-    : [0, 200]; // Normal: Light pattern
+      ? [0, 300, 100, 300, 100, 300] // High: Medium pattern
+      : [0, 200]; // Normal: Light pattern
 
   // ELITE: Android channel and importance
   const channelId = priority === 'critical' ? 'critical-alerts' : priority === 'high' ? 'high-priority' : 'normal-priority';
@@ -237,8 +237,8 @@ async function setupAndroidChannels(Notifications: any, priority: 'critical' | '
     const vibrationPattern = priority === 'critical'
       ? [0, 500, 200, 500, 200, 500]
       : priority === 'high'
-      ? [0, 300, 100, 300]
-      : [0, 200];
+        ? [0, 300, 100, 300]
+        : [0, 200];
     const lightColor = priority === 'critical' ? '#FF0000' : priority === 'high' ? '#FF6600' : '#000000';
 
     await Notifications.setNotificationChannelAsync(channelId, {
@@ -262,7 +262,7 @@ async function setupAndroidChannels(Notifications: any, priority: 'critical' | '
 async function sendMultiChannelAlert(
   formatted: ReturnType<typeof formatNotificationContent>,
   priority: 'critical' | 'high' | 'normal',
-  magnitude: number
+  magnitude: number,
 ): Promise<void> {
   try {
     const { multiChannelAlertService } = await import('./MultiChannelAlertService');
@@ -276,8 +276,8 @@ async function sendMultiChannelAlert(
       ttsText: magnitude >= 6.0
         ? `ACİL DURUM! Büyük deprem algılandı! ${magnitude.toFixed(1)} büyüklüğünde deprem! ${formatted.data.location}`
         : magnitude >= 5.0
-        ? `ÖNEMLİ DEPREM! ${magnitude.toFixed(1)} büyüklüğünde deprem algılandı! ${formatted.data.location}`
-        : `${magnitude.toFixed(1)} büyüklüğünde deprem algılandı. ${formatted.data.location}`,
+          ? `ÖNEMLİ DEPREM! ${magnitude.toFixed(1)} büyüklüğünde deprem algılandı! ${formatted.data.location}`
+          : `${magnitude.toFixed(1)} büyüklüğünde deprem algılandı. ${formatted.data.location}`,
       channels: {
         pushNotification: true,
         fullScreenAlert: priority === 'critical' || priority === 'high',

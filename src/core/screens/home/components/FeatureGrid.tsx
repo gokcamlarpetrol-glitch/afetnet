@@ -1,16 +1,15 @@
 /**
  * FEATURE GRID - 2x3 Big Grid (6 Cards)
- * Bigger cards, vibrant colors, no scroll
- * Removed: Settings, Whistle, Flashlight
+ * "Elite Color Edition" - Vibrant yet Elegant Gradients
  */
 
 import React, { useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as haptics from '../../../utils/haptics';
-import { colors } from '../../../theme';
 import { createLogger } from '../../../utils/logger';
+import { colors } from '../../../theme';
 
 const logger = createLogger('FeatureGrid');
 
@@ -23,13 +22,13 @@ interface Feature {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   gradient: [string, string];
+  iconColor: string;
   screen: string;
 }
 
 /**
  * ELITE: Premium Luxury Color Palette
- * 6 distinct, elegant, and sophisticated color gradients
- * Inspired by luxury brands and premium design systems
+ * Distinct, recognizable, but soft and high-end.
  */
 const FEATURES: Feature[] = [
   // Row 1
@@ -37,51 +36,57 @@ const FEATURES: Feature[] = [
     id: 'map',
     icon: 'map',
     title: 'Harita',
-    // ELITE: Deep Ocean Blue - Premium navy to cyan gradient
-    gradient: ['#1e3a5f', '#4a90e2'], // Zarif derin mavi tonları
-    screen: 'Map', // MainTabs içinde
+    // Serene Blue
+    gradient: ['#60a5fa', '#3b82f6'],
+    iconColor: '#eff6ff',
+    screen: 'Map',
   },
   {
     id: 'waves',
-    icon: 'radio', // ELITE: Changed from 'pulse' to 'radio' for P/S waves (radio waves)
+    icon: 'radio',
     title: 'P/S Dalga',
-    // ELITE: Elegant Amber Gold - Sophisticated amber to gold gradient
-    gradient: ['#8b6914', '#d4af37'], // Lüks altın tonları
-    screen: 'WaveVisualization', // Stack'te
+    // Warm Amber
+    gradient: ['#fbbf24', '#f59e0b'],
+    iconColor: '#fffbeb',
+    screen: 'WaveVisualization',
   },
   // Row 2
   {
     id: 'messages',
     icon: 'chatbubbles',
     title: 'Mesajlar',
-    // ELITE: Royal Purple - Deep purple to violet gradient
-    gradient: ['#5b2c6f', '#9b59b6'], // Zarif mor tonları
-    screen: 'Messages', // MainTabs içinde
+    // Royal Indigo
+    gradient: ['#818cf8', '#6366f1'],
+    iconColor: '#eef2ff',
+    screen: 'Messages',
   },
   {
     id: 'earthquakes',
-    icon: 'warning', // ELITE: Changed from 'pulse' to 'warning' for earthquakes (distinct from waves)
+    icon: 'warning',
     title: 'Deprem',
-    // ELITE: Crimson Red - Rich red to deep crimson gradient
-    gradient: ['#8b1538', '#c41e3a'], // Lüks kırmızı tonları
-    screen: 'AllEarthquakes', // Stack'te
+    // Urgent Rose
+    gradient: ['#f87171', '#ef4444'],
+    iconColor: '#fef2f2',
+    screen: 'AllEarthquakes',
   },
   // Row 3
   {
     id: 'assembly',
     icon: 'location',
     title: 'Toplanma',
-    // ELITE: Burnt Orange - Elegant orange to terracotta gradient
-    gradient: ['#a0522d', '#cd853f'], // Zarif turuncu-kahverengi tonları
-    screen: 'AssemblyPoints', // Stack'te
+    // Safety Emerald
+    gradient: ['#34d399', '#10b981'],
+    iconColor: '#ecfdf5',
+    screen: 'AssemblyPoints',
   },
   {
     id: 'health',
     icon: 'medkit',
     title: 'Sağlık',
-    // ELITE: Rose Quartz - Soft rose to pink gradient
-    gradient: ['#b76e79', '#e8b4b8'], // Zarif pembe tonları
-    screen: 'HealthProfile', // Stack'te
+    // Medical Teal
+    gradient: ['#2dd4bf', '#14b8a6'],
+    iconColor: '#f0fdfa',
+    screen: 'HealthProfile',
   },
 ];
 
@@ -134,9 +139,7 @@ function FeatureCard({ feature, onPress }: FeatureCardProps) {
     <Animated.View
       style={[
         styles.cardWrapper,
-        {
-          transform: [{ scale: scaleAnim }],
-        },
+        { transform: [{ scale: scaleAnim }] },
       ]}
     >
       <TouchableOpacity
@@ -151,21 +154,23 @@ function FeatureCard({ feature, onPress }: FeatureCardProps) {
           end={{ x: 1, y: 1 }}
           style={styles.card}
         >
-          {/* Glassmorphism overlay */}
-          <View style={styles.glassOverlay} />
-          
-          {/* ELITE: Premium Icon with Enhanced Styling */}
+          {/* Glass Specular Highlight */}
+          <View style={styles.glassHighlight} />
+
+          {/* Icon Circle */}
           <Animated.View
             style={[
               styles.iconContainer,
-              {
-                transform: [{ rotate: iconRotate }],
-              },
+              { transform: [{ rotate: iconRotate }] },
             ]}
           >
-            <Ionicons name={feature.icon} size={42} color="#ffffff" style={styles.iconShadow} />
+            <Ionicons
+              name={feature.icon}
+              size={28}
+              color={feature.gradient[1]} // Icon takes darker tone of bg
+            />
           </Animated.View>
-          
+
           {/* Title */}
           <Text style={styles.title} numberOfLines={1}>
             {feature.title}
@@ -176,109 +181,45 @@ function FeatureCard({ feature, onPress }: FeatureCardProps) {
   );
 }
 
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
+
+// ELITE: Properly typed navigation prop
+type FeatureGridNavigationProp = StackNavigationProp<ParamListBase>;
+
 interface FeatureGridProps {
-  navigation: any;
+  navigation: FeatureGridNavigationProp;
 }
 
 export default function FeatureGrid({ navigation }: FeatureGridProps) {
   const handlePress = (feature: Feature) => {
     haptics.impactMedium();
-    
-    // ELITE: Navigation with comprehensive error handling and retry
-    const attemptNavigation = () => {
-      try {
-          // Direct navigation - works for both tab screens and stack screens
-          // Since HomeScreen is inside MainTabs, we can navigate to tabs directly
-          // For stack screens, we need to go up to parent navigator
-          if (['Map', 'Messages'].includes(feature.screen)) {
-          // Tab screens - navigate within MainTabs
-          if (navigation && typeof navigation.navigate === 'function') {
-            navigation.navigate(feature.screen);
-            logger.info(`✅ Navigated to tab: ${feature.screen}`);
-            return;
-          } else {
-            throw new Error('Tab navigation not available');
-          }
-        } else {
-          // Stack screens - navigate to parent Stack Navigator
-          // ELITE: Try multiple navigation methods for reliability
-          let navigator = navigation;
-          
-          // Try to get parent navigator
-          try {
-            if (navigation?.getParent && typeof navigation.getParent === 'function') {
-              const parent = navigation.getParent();
-              if (parent && typeof parent.navigate === 'function') {
-                navigator = parent;
-              }
-            }
-          } catch (parentError) {
-            logger.debug('getParent failed, using current navigation:', parentError);
-          }
-          
-          // Try navigation
-          if (navigator && typeof navigator.navigate === 'function') {
-            navigator.navigate(feature.screen);
-            logger.info(`✅ Navigated to stack screen: ${feature.screen}`);
-            return;
-          } else {
-            throw new Error('Stack navigation not available');
-          }
-        }
-      } catch (error: any) {
-        // CRITICAL: Retry once if navigation fails
-        logger.error(`Navigation error (${feature.screen}):`, error);
-        
-        // Retry after short delay
-        setTimeout(() => {
-          try {
-            if (['Map', 'Messages'].includes(feature.screen)) {
-              if (navigation?.navigate) {
-                navigation.navigate(feature.screen);
-                logger.info(`✅ Retry navigation successful: ${feature.screen}`);
-                return;
-              }
-            } else {
-              let navigator = navigation;
-              try {
-                if (navigation?.getParent) {
-                  const parent = navigation.getParent();
-                  if (parent && typeof parent.navigate === 'function') {
-                    navigator = parent;
-                  }
-                }
-              } catch (parentError) {
-                // Ignore
-              }
-              
-              if (navigator?.navigate) {
-                navigator.navigate(feature.screen);
-                logger.info(`✅ Retry navigation successful: ${feature.screen}`);
-                return;
-              }
-            }
-            throw new Error('Retry navigation failed');
-          } catch (retryError) {
-            logger.error(`Navigation retry failed (${feature.screen}):`, retryError);
-            // Last resort: Show error to user
-            const Alert = require('react-native').Alert;
-            Alert.alert(
-              'Navigasyon Hatası',
-              `${feature.title} ekranına geçiş yapılamadı. Lütfen tekrar deneyin.`,
-              [{ text: 'Tamam', style: 'default' }]
-            );
-          }
-        }, 100);
+    // Simple robust navigation
+    try {
+      if (['Map', 'Messages'].includes(feature.screen)) {
+        navigation.navigate(feature.screen);
+      } else {
+        const parent = navigation.getParent();
+        if (parent) parent.navigate(feature.screen);
+        else navigation.navigate(feature.screen);
       }
-    };
-    
-    attemptNavigation();
+    } catch (e) {
+      logger.error('Nav Error', e);
+      // Retry
+      setTimeout(() => {
+        try {
+          navigation.navigate(feature.screen);
+        } catch (retryError) {
+          // ELITE: Final navigation attempt failed - user should manually navigate
+          logger.debug('Navigation retry failed for screen:', feature.screen);
+        }
+      }, 100);
+    }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Hızlı Erişim</Text>
-      
       <View style={styles.grid}>
         {FEATURES.map((feature) => (
           <FeatureCard
@@ -293,15 +234,15 @@ export default function FeatureGrid({ navigation }: FeatureGridProps) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    marginBottom: 20,
-  },
+  container: { marginBottom: 20 },
   header: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text.primary,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#64748b',
     marginBottom: 16,
-    letterSpacing: -0.5,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginLeft: 4,
   },
   grid: {
     flexDirection: 'row',
@@ -315,54 +256,40 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     height: '100%',
-    borderRadius: 24, // ELITE: Increased border radius for premium feel
-    padding: 18, // ELITE: Increased padding for luxury spacing
+    borderRadius: 24,
+    padding: 16,
     justifyContent: 'space-between',
-    borderWidth: 1.5, // ELITE: Slightly thicker border for premium look
-    borderColor: 'rgba(255, 255, 255, 0.2)', // ELITE: More visible border
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 }, // ELITE: Deeper shadow
-    shadowOpacity: 0.4, // ELITE: More pronounced shadow
-    shadowRadius: 16, // ELITE: Softer shadow spread
-    elevation: 12, // ELITE: Higher elevation
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
     overflow: 'hidden',
   },
-  glassOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)', // ELITE: More visible glass effect
-    borderRadius: 24,
+  glassHighlight: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: '40%',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
   },
   iconContainer: {
-    width: 60, // ELITE: Slightly larger icon container
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)', // ELITE: More visible background
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#ffffff', // White Circle
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)', // ELITE: Subtle border for premium look
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.3,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)', // ELITE: Text shadow for premium look
+    color: '#ffffff', // White Text on Color Card
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  iconShadow: {
-    textShadowColor: 'rgba(0, 0, 0, 0.4)', // ELITE: Icon shadow for depth
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    textShadowRadius: 2,
   },
 });

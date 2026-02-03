@@ -16,10 +16,10 @@ const TIMEOUT_MS = 10000; // 10 seconds
  */
 async function withTimeout<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
 ): Promise<T> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS)
+    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
   
   return Promise.race([operation(), timeoutPromise]);
@@ -31,7 +31,7 @@ async function withTimeout<T>(
 export async function saveStatusUpdate(
   userDeviceId: string,
   statusData: StatusUpdateData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveStatusUpdate');
@@ -50,7 +50,7 @@ export async function saveStatusUpdate(
         ...statusData,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'Status update save'
+      'Status update save',
     );
 
     if (__DEV__) {

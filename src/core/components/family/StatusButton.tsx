@@ -51,47 +51,47 @@ export function StatusButton({ status, onPress, active = false }: StatusButtonPr
 // ELITE: Type-safe status info with proper return types
 function getStatusInfo(
   status: StatusButtonProps['status'], 
-  active: boolean
+  active: boolean,
 ): {
   icon: keyof typeof Ionicons.glyphMap;
   text: string;
   gradientColors: [string, string];
 } {
   switch (status) {
-    case 'safe':
-      return { icon: 'shield-checkmark', text: 'Güvendeyim', gradientColors: ['#10b981', '#059669'] };
-    case 'need-help':
-      return { icon: 'help-buoy', text: 'Yardıma İhtiyacım Var', gradientColors: ['#f59e0b', '#d97706'] };
-    case 'critical':
-      return { icon: 'alert-circle', text: 'Acil Durum (SOS)', gradientColors: ['#ef4444', '#dc2626'] };
-    case 'location':
-      return active
-        ? { icon: 'location', text: 'Konum Paylaşılıyor', gradientColors: ['#3b82f6', '#2563eb'] }
-        : { icon: 'location-outline', text: 'Konumumu Paylaş', gradientColors: ['#1e3a8a', '#1e40af'] };
+  case 'safe':
+    return { icon: 'shield-checkmark', text: 'Güvendeyim', gradientColors: ['#10b981', '#059669'] };
+  case 'need-help':
+    return { icon: 'help-buoy', text: 'Yardıma İhtiyacım Var', gradientColors: ['#f59e0b', '#d97706'] };
+  case 'critical':
+    return { icon: 'alert-circle', text: 'Acil Durum (SOS)', gradientColors: ['#ef4444', '#dc2626'] };
+  case 'location':
+    return active
+      ? { icon: 'location', text: 'Konum Paylaşılıyor', gradientColors: ['#3b82f6', '#2563eb'] }
+      : { icon: 'location-outline', text: 'Konumumu Paylaş', gradientColors: ['#1e3a8a', '#1e40af'] };
   }
 }
 
 const styles = StyleSheet.create({
-    statusButtonContainer: {
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 8,
-      },
-      statusButtonGradient: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 20,
-        borderRadius: 16,
-        gap: 12,
-      },
-      statusButtonText: {
-        ...typography.body,
-        color: '#fff',
-        fontWeight: 'bold',
-      },
+  statusButtonContainer: {
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
+  },
+  statusButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    gap: 12,
+  },
+  statusButtonText: {
+    ...typography.body,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
 });

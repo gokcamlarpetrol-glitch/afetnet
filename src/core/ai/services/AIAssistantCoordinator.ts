@@ -5,6 +5,8 @@
  */
 
 import { createLogger } from '../../utils/logger';
+import { getErrorMessage } from '../../utils/errorUtils';
+import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 import { useAIAssistantStore } from '../stores/aiAssistantStore';
 import { riskScoringService } from './RiskScoringService';
 import { preparednessPlanService } from './PreparednessPlanService';
@@ -66,16 +68,16 @@ export const aiAssistantCoordinator = {
 
     try {
       store.setPreparednessPlanLoading(true);
-      
+
       // ELITE: Collect user profile information for personalized plan
       const planParams = await this.collectUserProfileParams();
-      
+
       if (__DEV__) {
         logger.info('Generating preparedness plan with params:', planParams);
       }
-      
+
       const plan = await preparednessPlanService.generatePlan(planParams);
-      
+
       // Validate plan has sections and items
       if (!plan.sections || plan.sections.length === 0) {
         logger.error('Generated plan has no sections!', {
@@ -85,7 +87,7 @@ export const aiAssistantCoordinator = {
         });
         throw new Error('Plan has no sections');
       }
-      
+
       const totalItems = plan.sections.reduce((sum, s) => sum + (s.items?.length || 0), 0);
       if (totalItems === 0) {
         logger.error('Generated plan has no items!', {
@@ -94,7 +96,7 @@ export const aiAssistantCoordinator = {
         });
         throw new Error('Plan has no items');
       }
-      
+
       if (__DEV__) {
         logger.info('✅ Preparedness plan loaded:', {
           sections: plan.sections.length,
@@ -103,16 +105,18 @@ export const aiAssistantCoordinator = {
           planTitle: plan.title,
         });
       }
-      
+
       store.setPreparednessPlan(plan);
       logger.info('Hazırlık planı güncellendi');
       return plan;
-    } catch (error: any) {
-      logger.error('Hazırlık planı alınamadı:', {
-        error: error?.message || error,
-        errorType: error?.name || typeof error,
-        stack: error?.stack,
-      });
+    } catch (error: unknown) {
+      const errorMessage = getErrorMessage(error);
+      const errorInfo = error instanceof Error ? {
+        error: errorMessage,
+        errorType: error.name,
+        stack: error.stack,
+      } : { error: String(error) };
+      logger.error('Hazırlık planı alınamadı:', errorInfo);
       store.setPreparednessPlanError('Hazırlık planı alınamadı');
       throw error;
     } finally {
@@ -151,44 +155,44 @@ export const aiAssistantCoordinator = {
         const { useFamilyStore } = await import('../../stores/familyStore');
         const familyState = useFamilyStore.getState();
         const members = familyState.members || [];
-        
+
         // Calculate family size (including user = 1 + members)
         params.familySize = Math.max(1, 1 + members.length);
-        
+
         // Check for children (from relationship or notes)
         params.hasChildren = members.some(m => {
-          const rel = m.relationship?.toLowerCase() || '';
-          const notes = m.notes?.toLowerCase() || '';
-          return rel.includes('çocuk') || rel.includes('child') || 
-                 rel.includes('kız') || rel.includes('oğul') ||
-                 notes.includes('çocuk') || notes.includes('child');
+          const rel = safeLowerCase(m.relationship);
+          const notes = safeLowerCase(m.notes);
+          return safeIncludes(rel, 'çocuk') || safeIncludes(rel, 'child') ||
+            safeIncludes(rel, 'kız') || safeIncludes(rel, 'oğul') ||
+            safeIncludes(notes, 'çocuk') || safeIncludes(notes, 'child');
         });
-        
+
         // Check for elderly (from relationship or notes)
         params.hasElderly = members.some(m => {
-          const rel = m.relationship?.toLowerCase() || '';
-          const notes = m.notes?.toLowerCase() || '';
-          return rel.includes('yaşlı') || rel.includes('elderly') ||
-                 rel.includes('dede') || rel.includes('nine') ||
-                 rel.includes('büyük') || notes.includes('yaşlı') || notes.includes('elderly');
+          const rel = safeLowerCase(m.relationship);
+          const notes = safeLowerCase(m.notes);
+          return safeIncludes(rel, 'yaşlı') || safeIncludes(rel, 'elderly') ||
+            safeIncludes(rel, 'dede') || safeIncludes(rel, 'nine') ||
+            safeIncludes(rel, 'büyük') || safeIncludes(notes, 'yaşlı') || safeIncludes(notes, 'elderly');
         });
-        
+
         // Check for pets (from relationship or notes)
         params.hasPets = members.some(m => {
-          const rel = m.relationship?.toLowerCase() || '';
-          const notes = m.notes?.toLowerCase() || '';
-          return rel.includes('pet') || rel.includes('hayvan') ||
-                 rel.includes('köpek') || rel.includes('kedi') ||
-                 notes.includes('pet') || notes.includes('hayvan');
+          const rel = safeLowerCase(m.relationship);
+          const notes = safeLowerCase(m.notes);
+          return safeIncludes(rel, 'pet') || safeIncludes(rel, 'hayvan') ||
+            safeIncludes(rel, 'köpek') || safeIncludes(rel, 'kedi') ||
+            safeIncludes(notes, 'pet') || safeIncludes(notes, 'hayvan');
         });
-        
+
         // Check for disabilities (from notes)
         params.hasDisabilities = members.some(m => {
-          const notes = m.notes?.toLowerCase() || '';
-          return notes.includes('engel') || notes.includes('disability') ||
-                 notes.includes('özürlü') || notes.includes('handicap');
+          const notes = safeLowerCase(m.notes);
+          return safeIncludes(notes, 'engel') || safeIncludes(notes, 'disability') ||
+            safeIncludes(notes, 'özürlü') || safeIncludes(notes, 'handicap');
         });
-        
+
         if (__DEV__) {
           logger.debug('Family profile collected:', {
             familySize: params.familySize,
@@ -198,16 +202,16 @@ export const aiAssistantCoordinator = {
             hasDisabilities: params.hasDisabilities,
           });
         }
-      } catch (familyError: any) {
+      } catch (familyError: unknown) {
         // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
-        const errorMessage = familyError?.message || String(familyError);
-        const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') || 
-                             errorMessage.includes('Could not load bundle');
-        
+        const errorMsg = getErrorMessage(familyError);
+        const isBundleError = errorMsg.includes('LoadBundleFromServerRequestError') ||
+          errorMsg.includes('Could not load bundle');
+
         if (isBundleError) {
           // ELITE: Bundle errors are expected in some environments - use defaults silently
           if (__DEV__) {
-            logger.debug('Family profile collection skipped (bundle error - expected):', errorMessage);
+            logger.debug('Family profile collection skipped (bundle error - expected):', errorMsg);
           }
         } else {
           logger.warn('Failed to collect family profile, using defaults:', familyError);
@@ -224,14 +228,14 @@ export const aiAssistantCoordinator = {
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          
+
           // Reverse geocode to get location name
           try {
             const addresses = await Location.reverseGeocodeAsync({
               latitude: location.coords.latitude,
               longitude: location.coords.longitude,
             });
-            
+
             if (addresses && addresses.length > 0) {
               const address = addresses[0];
               // Build location name: City, District
@@ -239,9 +243,9 @@ export const aiAssistantCoordinator = {
                 address.city || (address as any).subAdministrativeArea,
                 address.district || (address as any).subLocality,
               ].filter(Boolean);
-              
+
               params.locationName = locationParts.join(', ') || 'Türkiye';
-              
+
               if (__DEV__) {
                 logger.debug('Location collected:', params.locationName);
               }
@@ -271,7 +275,7 @@ export const aiAssistantCoordinator = {
           } else {
             params.riskLevel = 'low';
           }
-          
+
           if (__DEV__) {
             logger.debug('Risk level from score:', {
               score,
@@ -351,7 +355,7 @@ export const aiAssistantCoordinator = {
       const completedCount = actions.filter(a => a.completed).length;
       const totalCount = actions.length;
       const criticalRemaining = actions.filter(a => !a.completed && (a.warningLevel === 'critical' || a.warningLevel === 'emergency')).length;
-      
+
       const payload = {
         isActive: true,
         currentScenario: scenario,

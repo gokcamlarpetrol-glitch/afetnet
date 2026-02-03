@@ -8,7 +8,11 @@ import { View, Text, ScrollView, StyleSheet, Pressable, Linking } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+
+// ELITE: Typed navigation
+type VolunteerModuleNavigationProp = StackNavigationProp<Record<string, object>>;
 
 interface VolunteerTask {
   id: string;
@@ -107,7 +111,7 @@ const AID_ORGANIZATIONS: AidOrganization[] = [
   },
 ];
 
-export default function VolunteerModuleScreen({ navigation }: any) {
+export default function VolunteerModuleScreen({ navigation }: { navigation: VolunteerModuleNavigationProp }) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const getCategoryColor = (category: string) => {
@@ -173,7 +177,7 @@ export default function VolunteerModuleScreen({ navigation }: any) {
                 Tümü
               </Text>
             </Pressable>
-            
+
             {['medical', 'search', 'logistics', 'communication'].map((cat) => (
               <Pressable
                 key={cat}
@@ -190,8 +194,8 @@ export default function VolunteerModuleScreen({ navigation }: any) {
                   selectedCategory === cat && [styles.categoryChipTextActive, { color: getCategoryColor(cat) }],
                 ]}>
                   {cat === 'medical' ? 'Tıbbi' :
-                   cat === 'search' ? 'Arama' :
-                   cat === 'logistics' ? 'Lojistik' : 'İletişim'}
+                    cat === 'search' ? 'Arama' :
+                      cat === 'logistics' ? 'Lojistik' : 'İletişim'}
                 </Text>
               </Pressable>
             ))}
@@ -220,7 +224,7 @@ export default function VolunteerModuleScreen({ navigation }: any) {
                 <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(task.priority) }]}>
                   <Text style={styles.priorityText}>
                     {task.priority === 'high' ? 'YÜKSEK' :
-                     task.priority === 'medium' ? 'ORTA' : 'DÜŞÜK'}
+                      task.priority === 'medium' ? 'ORTA' : 'DÜŞÜK'}
                   </Text>
                 </View>
               </View>
@@ -266,7 +270,7 @@ export default function VolunteerModuleScreen({ navigation }: any) {
                 <View style={styles.orgIcon}>
                   <Ionicons
                     name={org.type === 'government' ? 'shield' :
-                          org.type === 'ngo' ? 'heart' : 'globe'}
+                      org.type === 'ngo' ? 'heart' : 'globe'}
                     size={24}
                     color={colors.brand.primary}
                   />

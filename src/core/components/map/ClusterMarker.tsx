@@ -1,79 +1,54 @@
 /**
  * CLUSTER MARKER
- * Displays clustered markers on the map
+ * Visual component for aggregated map points.
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Marker } from 'react-native-maps';
-import { LinearGradient } from 'expo-linear-gradient';
+import { colors } from '../../theme';
 import { Cluster } from '../../utils/markerClustering';
 
 interface Props {
   cluster: Cluster;
-  onPress?: (cluster: Cluster) => void;
+  onPress: (cluster: Cluster) => void;
 }
 
-export default function ClusterMarker({ cluster, onPress }: Props) {
-  // Size based on count
-  const size = Math.min(50 + cluster.count * 2, 80);
-  
-  // Color based on count
-  const getColors = (count: number): [string, string] => {
-    if (count > 50) return ['#dc2626', '#991b1b'];
-    if (count > 20) return ['#f59e0b', '#d97706'];
-    if (count > 10) return ['#3b82f6', '#2563eb'];
-    return ['#10b981', '#059669'];
+export const ClusterMarker: React.FC<Props> = ({ cluster, onPress }) => {
+  const count = cluster.point_count || 0;
+  const coordinate = {
+    latitude: cluster.latitude,
+    longitude: cluster.longitude,
   };
-
-  const colors = getColors(cluster.count);
+  // Determine size/color based on count
+  const size = count > 100 ? 50 : count > 20 ? 40 : 30;
+  const color = count > 100 ? '#ef4444' : count > 20 ? '#f97316' : '#3b82f6';
 
   return (
-    <Marker
-      coordinate={{
-        latitude: cluster.latitude,
-        longitude: cluster.longitude,
-      }}
-      onPress={() => onPress?.(cluster)}
-      tracksViewChanges={false}
-    >
-      <View style={[styles.container, { width: size, height: size }]}>
-        <LinearGradient
-          colors={colors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.gradient}
-        >
-          <Text style={[styles.text, { fontSize: size > 60 ? 18 : 14 }]}>
-            {cluster.count}
-          </Text>
-        </LinearGradient>
+    <Marker coordinate={coordinate} onPress={() => onPress(cluster)}>
+      <View style={[styles.clusterContainer, { width: size, height: size, backgroundColor: color }]}>
+        <Text style={styles.clusterText}>{count}</Text>
       </View>
     </Marker>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: {
+  clusterContainer: {
     borderRadius: 100,
-    overflow: 'hidden',
-    borderWidth: 3,
-    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
   },
-  gradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  text: {
-    fontWeight: '700',
-    color: '#ffffff',
+  clusterText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });
-
-

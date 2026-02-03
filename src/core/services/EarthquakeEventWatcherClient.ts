@@ -52,9 +52,10 @@ export class EarthquakeEventWatcherClient {
     // Try WebSocket first (lowest latency) - only if URL is configured
     try {
       await this.connectWebSocket();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
       logger.warn('WebSocket connection failed, falling back to HTTP polling', {
-        error: error.message,
+        error: errMsg,
       });
       this.startPolling();
     }
@@ -96,8 +97,9 @@ export class EarthquakeEventWatcherClient {
           try {
             const watcherEvent: WatcherEvent = JSON.parse(event.data);
             await this.handleEvent(watcherEvent);
-          } catch (error: any) {
-            logger.error('Failed to parse WebSocket message', { error: error.message });
+          } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error('Failed to parse WebSocket message', { error: errMsg });
           }
         };
 
@@ -116,7 +118,7 @@ export class EarthquakeEventWatcherClient {
             });
           }, 5000);
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         reject(error);
       }
     });
@@ -131,8 +133,9 @@ export class EarthquakeEventWatcherClient {
     this.pollInterval = setInterval(async () => {
       try {
         await this.pollEvents();
-      } catch (error: any) {
-        logger.error('Polling error', { error: error.message });
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error('Polling error', { error: errMsg });
       }
     }, this.POLL_INTERVAL_MS);
 
@@ -168,8 +171,9 @@ export class EarthquakeEventWatcherClient {
         await this.handleEvent(event);
         this.lastEventId = event.id;
       }
-    } catch (error: any) {
-      logger.debug('Poll failed', { error: error.message });
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.debug('Poll failed', { error: errMsg });
     }
   }
 
@@ -214,7 +218,7 @@ export class EarthquakeEventWatcherClient {
           userLocation.latitude,
           userLocation.longitude,
           earthquake.latitude,
-          earthquake.longitude
+          earthquake.longitude,
         );
 
         const radiusKm = 50; // Default radius
@@ -222,7 +226,7 @@ export class EarthquakeEventWatcherClient {
           // Show notification using existing NotificationService API
           await notificationService.showEarthquakeNotification(
             earthquake.magnitude,
-            earthquake.location
+            earthquake.location,
           );
 
           logger.info('Earthquake notification sent', {
@@ -233,8 +237,9 @@ export class EarthquakeEventWatcherClient {
           });
         }
       }
-    } catch (error: any) {
-      logger.error('Failed to handle event', { error: error.message });
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Failed to handle event', { error: errMsg });
     }
   }
 
@@ -245,7 +250,7 @@ export class EarthquakeEventWatcherClient {
     lat1: number,
     lon1: number,
     lat2: number,
-    lon2: number
+    lon2: number,
   ): number {
     const R = 6371; // Earth's radius in km
     const dLat = this.toRadians(lat2 - lat1);
@@ -254,9 +259,9 @@ export class EarthquakeEventWatcherClient {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRadians(lat1)) *
-        Math.cos(this.toRadians(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos(this.toRadians(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;

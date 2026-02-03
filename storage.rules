@@ -60,6 +60,31 @@ service firebase.storage {
                        (isAuthenticated() && isValidDeviceId(deviceId));
     }
     
+    // Elite Security: Voice messages - Owner access only
+    match /voice/{userId}/{allPaths=**} {
+      // Elite: Only owner can read their voice messages
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Elite: Only owner can write with size/type validation
+      allow write: if isAuthenticated() && 
+                      request.auth.uid == userId &&
+                      request.resource.size <= 2 * 1024 * 1024 && // Max 2MB (30s audio)
+                      request.resource.contentType.matches('audio/.*');
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Elite Security: Chat media (images, voice in conversations)
+    match /chat/{userId}/{allPaths=**} {
+      // Elite: Only owner can read their chat media
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Elite: Only owner can write with size/type validation
+      allow write: if isAuthenticated() && 
+                      request.auth.uid == userId &&
+                      request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+                      (request.resource.contentType.matches('image/.*') ||
+                       request.resource.contentType.matches('audio/.*'));
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
     // MBTiles offline maps (read-only, uploaded via admin)
     match /maps/{mapId}/{allPaths=**} {
       allow read: if true; // Public read for offline maps

@@ -9,6 +9,7 @@ import { createLogger } from '../utils/logger';
 const logger = createLogger('FirebaseStorage');
 
 // CRITICAL: Lazy load Firebase modules to prevent module loading errors
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let storage: any = null;
 
 async function getFirebaseAppAsync() {
@@ -44,7 +45,7 @@ async function getStorageInstance() {
 
 class FirebaseStorageService {
   private _isInitialized = false;
-  
+
   get isInitialized(): boolean {
     return this._isInitialized;
   }
@@ -78,7 +79,7 @@ class FirebaseStorageService {
   async uploadFile(
     path: string,
     file: Blob | Uint8Array | ArrayBuffer,
-    metadata?: { contentType?: string; customMetadata?: Record<string, string> }
+    metadata?: { contentType?: string; customMetadata?: Record<string, string> },
   ): Promise<string | null> {
     if (!this._isInitialized) {
       logger.warn('FirebaseStorageService not initialized');
@@ -96,13 +97,13 @@ class FirebaseStorageService {
       const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       await uploadBytes(storageRef, file, metadata || {});
-      
+
       const downloadURL = await getDownloadURL(storageRef);
-      
+
       if (__DEV__) {
         logger.info(`File uploaded: ${path}`);
       }
-      
+
       return downloadURL;
     } catch (error) {
       logger.error('Failed to upload file:', error);
@@ -130,7 +131,7 @@ class FirebaseStorageService {
       const { ref, getDownloadURL } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       const url = await getDownloadURL(storageRef);
-      
+
       return url;
     } catch (error) {
       logger.error('Failed to get download URL:', error);
@@ -158,11 +159,11 @@ class FirebaseStorageService {
       const { ref, deleteObject } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       await deleteObject(storageRef);
-      
+
       if (__DEV__) {
         logger.info(`File deleted: ${path}`);
       }
-      
+
       return true;
     } catch (error) {
       logger.error('Failed to delete file:', error);
@@ -190,9 +191,9 @@ class FirebaseStorageService {
       const { ref, listAll } = await import('firebase/storage');
       const storageRef = ref(storageInstance, path);
       const result = await listAll(storageRef);
-      
+
       const files = result.items.map(item => item.fullPath);
-      
+
       return files;
     } catch (error) {
       logger.error('Failed to list files:', error);

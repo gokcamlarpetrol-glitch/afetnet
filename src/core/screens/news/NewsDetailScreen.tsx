@@ -4,6 +4,7 @@
  * Premium feature with 2 tabs: AI Summary + Original Article (WebView)
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
@@ -21,6 +22,7 @@ import {
   Pressable,
   StatusBar,
   Alert,
+  ImageBackground,
 } from 'react-native';
 import type { WebViewProps } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,8 +44,9 @@ const logger = createLogger('NewsDetailScreen');
 
 type TabType = 'summary' | 'original';
 
+// ELITE: Props made compatible with react-navigation type system
 interface NewsDetailScreenProps {
-  route: {
+  route?: {
     params: {
       article: NewsArticle;
     };
@@ -52,7 +55,7 @@ interface NewsDetailScreenProps {
 
 export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   const navigation = useNavigation();
-  
+
   // CRITICAL: Validate route params and article
   const article = route?.params?.article;
   if (!article || typeof article !== 'object') {
@@ -64,17 +67,17 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     return null;
   }
   const insets = useSafeAreaInsets();
-  
+
   // CRITICAL: Validate URL with comprehensive type check
   const hasValidUrl = Boolean(
-    article && 
+    article &&
     typeof article === 'object' &&
-    article.url && 
-    typeof article.url === 'string' && 
-    article.url.trim() !== '' && 
-    article.url !== '#'
+    article.url &&
+    typeof article.url === 'string' &&
+    article.url.trim() !== '' &&
+    article.url !== '#',
   );
-  
+
   // ELITE: Varsayılan olarak AI Özeti sekmesi açık (eskisi gibi)
   const [activeTab, setActiveTab] = useState<TabType>('summary');
   const [aiSummary, setAiSummary] = useState<string>('');
@@ -174,7 +177,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         fontStyle: 'italic' as const,
       },
     }),
-    [colors]
+    [colors],
   );
   const ignoredDomTags = useMemo(() => ['script', 'style', 'link', 'form', 'input', 'button', 'iframe', 'svg', 'path', 'c-wiz', 'cwiz', 'c-data'], []);
 
@@ -200,7 +203,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     if (!html || typeof html !== 'string') {
       return '';
     }
-    
+
     // CRITICAL: Limit HTML length to prevent DoS
     const MAX_INPUT_LENGTH = 10 * 1024 * 1024; // 10MB max input
     if (html.length > MAX_INPUT_LENGTH) {
@@ -214,7 +217,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     sanitized = sanitized.replace(/<\/c-wiz>/gi, '</div>');
     sanitized = sanitized.replace(/<c-data[^>]*>/gi, '');
     sanitized = sanitized.replace(/<\/c-data>/gi, '');
-    
+
     sanitized = sanitized.replace(/<!DOCTYPE[^>]*>/gi, '');
     sanitized = sanitized.replace(/<head[\s\S]*?<\/head>/gi, '');
     sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/gi, '');
@@ -246,7 +249,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     if (!html || typeof html !== 'string') {
       return '';
     }
-    
+
     // CRITICAL: Limit HTML length to prevent DoS
     const MAX_INPUT_LENGTH = 10 * 1024 * 1024; // 10MB max input
     if (html.length > MAX_INPUT_LENGTH) {
@@ -285,7 +288,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       setArticleContentLoading(false);
       return;
     }
-    
+
     if (!article.url || typeof article.url !== 'string' || article.url.trim() === '' || article.url === '#') {
       logger.warn('⚠️ Geçersiz URL:', article.url);
       setArticleHtml('');
@@ -294,9 +297,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       setArticleContentLoading(false);
       return;
     }
-    
+
     logger.info('🚀 İçerik yükleniyor:', article.url);
-    
+
     // CRITICAL: Validate URL format
     let validatedUrl: string;
     try {
@@ -320,7 +323,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 
     // CRITICAL: Declare timeoutId in outer scope for cleanup
     let timeoutId: NodeJS.Timeout | null = null;
-    
+
     try {
       setArticleContentLoading(true);
       setArticleContentError(null);
@@ -329,7 +332,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 
       // Add timeout for article content fetch
       const controller = new AbortController();
-      
+
       timeoutId = setTimeout(() => {
         controller.abort();
       }, 15000); // 15 second timeout
@@ -354,7 +357,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       }
 
       const rawHtml = await response.text();
-      
+
       // CRITICAL: Validate response text
       if (!rawHtml || typeof rawHtml !== 'string' || rawHtml.trim().length === 0) {
         throw new Error('Empty response from server');
@@ -368,7 +371,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         const truncatedHtml = rawHtml.substring(0, MAX_HTML_LENGTH);
         const sanitizedHtml = sanitizeArticleHtml(truncatedHtml);
         const plainText = sanitizeArticleText(sanitizedHtml);
-        
+
         if (sanitizedHtml && sanitizedHtml.length > 0) {
           setArticleHtml(`<div class="afetnet-article">${sanitizedHtml}</div>`);
         }
@@ -387,7 +390,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         sanitizedHtmlLength: sanitizedHtml?.length || 0,
         plainTextLength: plainText?.length || 0,
       });
-      
+
       if ((sanitizedHtml && sanitizedHtml.length > 0) || (plainText && plainText.length > 0)) {
         if (sanitizedHtml && sanitizedHtml.length > 0) {
           const finalHtml = `<div class="afetnet-article">${sanitizedHtml}</div>`;
@@ -411,24 +414,24 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         setArticlePlainText('');
         setArticleContentError('Haber içeriği çözümlenemedi. Dış tarayıcıdan açmayı deneyin.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // CRITICAL: Clear timeout on error
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
-      
+
       logger.error('Failed to fetch article content:', err);
-      
+
       // Handle different error types
-      if (err?.name === 'AbortError' || err?.message?.includes('timeout')) {
+      if ((err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout')))) {
         setArticleContentError('Haber içeriği yüklenirken zaman aşımı oluştu. Dış tarayıcıdan açmayı deneyin.');
-      } else if (err?.message?.includes('Network request failed') || err?.message?.includes('network')) {
+      } else if (getErrorMessage(err).includes('Network request failed') || getErrorMessage(err).includes('network')) {
         setArticleContentError('İnternet bağlantısı sorunu. Lütfen bağlantınızı kontrol edin.');
       } else {
         setArticleContentError('Haber içeriği yüklenemedi. Dış tarayıcıdan açmayı deneyin.');
       }
-      
+
       setArticleHtml('');
       setArticlePlainText('');
     } finally {
@@ -444,64 +447,53 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   useEffect(() => {
     // Load AI summary when component mounts or article changes
     loadAISummary();
-    
+
     // ELITE: Scroll to top when article changes - ensure content starts from top
     setTimeout(() => {
       if (scrollViewRef.current) {
         scrollViewRef.current.scrollTo({ y: 0, animated: false });
       }
     }, 50);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ELITE: loadAISummary is memoized via useCallback with article dependency,
+    // adding it to deps would cause unnecessary re-runs
   }, [article.id]); // Re-load if article changes (loadAISummary is memoized with article dependency)
-  
-  // ELITE: Orijinal haber sekmesine geçildiğinde Safari'de aç (HTML parse yerine)
+
+  // ELITE: Orijinal haber sekmesine geçildiğinde inline WebView için URL ayarla (modal değil, sekme içinde göster)
   useEffect(() => {
     if (activeTab === 'original' && hasValidUrl && article.url) {
-      logger.info('✅ Orijinal haber sekmesi aktif, Safari\'de açılıyor:', article.url);
-      
-      // ELITE: HTML parse etmek yerine direkt Safari'de aç
-      // Bu Google News gibi karmaşık siteler için daha güvenilir
-      const openInSafari = async () => {
+      logger.info('✅ Orijinal haber sekmesi aktif, URL hazırlanıyor:', article.url);
+
+      // URL'i validate et ve inline gösterim için ayarla
+      const urlToOpen = article.url.trim();
+      if (urlToOpen && urlToOpen !== '#') {
         try {
-          // ELITE: Linking.openURL kullan (her zaman çalışır, native modül gerektirmez)
-          logger.info('🚀 Opening URL in Safari using Linking:', article.url);
-          const canOpen = await Linking.canOpenURL(article.url);
-          
-          if (canOpen) {
-            await Linking.openURL(article.url);
-            logger.info('✅ URL opened in Safari successfully');
-          } else {
-            logger.warn('⚠️ URL cannot be opened, falling back to HTML parse');
-            // Son fallback: HTML parse et
-            if (!articleHtml && !articlePlainText && !articleContentLoading) {
-              loadArticleContent().catch((error) => {
-                logger.error('Failed to load article content:', error);
-              });
-            }
+          const urlObj = new URL(urlToOpen);
+          if (['http:', 'https:'].includes(urlObj.protocol)) {
+            // ELITE: Inline WebView için URL'i ayarla (modal açma)
+            setInAppBrowserUrl(urlToOpen);
+            logger.info('✅ Inline WebView URL hazır:', urlToOpen);
           }
-        } catch (error: any) {
-          logger.error('⚠️ Failed to open URL in Safari:', error?.message);
-          // Son fallback: HTML parse et
+        } catch (urlError) {
+          logger.error('Invalid URL format:', urlError);
+          // Fallback: HTML parse et
           if (!articleHtml && !articlePlainText && !articleContentLoading) {
-            loadArticleContent().catch((err) => {
-              logger.error('Failed to load article content:', err);
+            loadArticleContent().catch((error) => {
+              logger.error('Failed to load article content:', error);
             });
           }
         }
-      };
-      
-      // Küçük bir delay ile aç (UI hazır olsun)
-      const timeoutId = setTimeout(() => {
-        openInSafari();
-      }, 300);
-      
-      return () => {
-        clearTimeout(timeoutId);
-      };
+      } else {
+        // Geçerli URL yok, HTML fallback yükle
+        if (!articleHtml && !articlePlainText && !articleContentLoading) {
+          loadArticleContent().catch((error) => {
+            logger.error('Failed to load article content:', error);
+          });
+        }
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ELITE: loadArticleContent is memoized, excluding from deps to prevent infinite loops
   }, [activeTab, hasValidUrl, article.url]);
-  
+
   useEffect(() => {
     // ELITE: Scroll to top when tab changes to summary - ensure content starts from top
     if (activeTab === 'summary' && scrollViewRef.current) {
@@ -510,7 +502,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       }, 50);
     }
   }, [activeTab]);
-  
+
   // ELITE: Scroll to top on initial mount
   useEffect(() => {
     setTimeout(() => {
@@ -541,7 +533,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     // WebView'i hemen yükle (tab değişikliğini bekleme)
     let isMounted = true;
     let timeoutId: NodeJS.Timeout | null = null;
-    
+
     // CRITICAL: Status'u sadece bir kez set et
     setWebViewStatus('loading');
 
@@ -560,14 +552,14 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     const loadWebView = async () => {
       try {
         const module = await import('react-native-webview');
-        
+
         if (!isMounted) {
           return;
         }
 
         // ELITE: WebView'i farklı şekillerde kontrol et
-        let WebView = null;
-        
+        let WebView: React.ComponentType<WebViewProps> | null = null;
+
         logger.debug('🔍 loadWebView modül detayları:', {
           hasWebView: !!module?.WebView,
           hasDefault: !!module?.default,
@@ -576,7 +568,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           keys: Object.keys(module || {}),
           allKeys: Object.getOwnPropertyNames(module || {}),
         });
-        
+
         if (module?.WebView) {
           WebView = module.WebView;
           logger.debug('✅ WebView bulundu (destructure method 1)');
@@ -596,15 +588,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                 logger.debug('✅ WebView bulundu (destructure method 2c: destructured from default)');
               }
             }
-          } catch (e: any) {
-            logger.debug('Default export işlenirken hata:', e?.message);
+          } catch {
+            // Error in processing default export - continue to fallback
           }
-        } else if (module?.default && typeof module.default === 'object' && 'WebView' in module.default) {
-          WebView = (module.default as any).WebView;
-          logger.debug('✅ WebView bulundu (destructure method 3)');
-        } else if (module?.default && typeof module.default === 'function') {
-          WebView = module.default;
-          logger.debug('✅ WebView bulundu (destructure method 4)');
         } else {
           // Fallback: Destructure dene
           try {
@@ -617,7 +603,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             // Ignore
           }
         }
-        
+
         if (!WebView) {
           logger.warn('⚠️ WebView component not found in module. Modül yapısı:', {
             hasWebView: !!module?.WebView,
@@ -626,8 +612,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             keys: Object.keys(module || {}),
           });
           if (isMounted) {
-          setWebViewComponent(null);
-          setWebViewStatus('unavailable');
+            setWebViewComponent(null);
+            setWebViewStatus('unavailable');
           }
           return;
         }
@@ -649,25 +635,25 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 
         logger.info('✅ WebView loaded successfully');
         if (isMounted) {
-        setWebViewComponent(() => WebView as React.ComponentType<WebViewProps>);
-        setWebViewStatus('ready');
+          setWebViewComponent(() => WebView as React.ComponentType<WebViewProps>);
+          setWebViewStatus('ready');
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!isMounted) {
           return;
         }
-        
+
         // CRITICAL: RNCWebViewModule hatası özel olarak handle et
-        const errorMessage = error?.message || String(error);
+        const errorMessage = getErrorMessage(error);
         if (errorMessage.includes('RNCWebViewModule') || errorMessage.includes('TurboModuleRegistry')) {
           logger.debug('⚠️ WebView native module not available (expected in Expo Go), using HTML fallback');
         } else {
           logger.debug('⚠️ react-native-webview module unavailable:', errorMessage);
         }
-        
+
         if (isMounted) {
-        setWebViewComponent(null);
-        setWebViewStatus('unavailable');
+          setWebViewComponent(null);
+          setWebViewStatus('unavailable');
         }
       }
     };
@@ -685,7 +671,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      });
+    });
 
     return () => {
       isMounted = false;
@@ -693,9 +679,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         clearTimeout(timeoutId);
       }
     };
-    // CRITICAL: webViewStatus dependency'sini kaldır - sonsuz döngüyü önlemek için
-    // ELITE: activeTab dependency'si eklendi - Orijinal Haber sekmesine geçildiğinde WebView yüklensin
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ELITE: webViewStatus excluded to prevent infinite render loop
+    // activeTab included to load WebView when switching to Original tab
   }, [hasValidUrl, article.url, activeTab]);
 
   // ELITE: Modal açıldığında WebView'i yükle
@@ -705,10 +690,10 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       import('react-native-webview')
         .then((module) => {
           logger.info('🔵 react-native-webview modülü yüklendi (useEffect):', !!module);
-          
+
           // ELITE: WebView'i farklı şekillerde kontrol et
-          let WebViewComponent = null;
-          
+          let WebViewComponent: React.ComponentType<WebViewProps> | null = null;
+
           logger.info('🔍 useEffect WebView modül detayları:', {
             hasWebView: !!module?.WebView,
             hasDefault: !!module?.default,
@@ -717,17 +702,17 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             keys: Object.keys(module || {}),
             allKeys: Object.getOwnPropertyNames(module || {}),
           });
-          
+
           if (module?.WebView) {
             WebViewComponent = module.WebView;
             logger.info('✅ WebView bulundu (useEffect method 1)');
           } else if (module?.default) {
             try {
               const defaultExport = module.default;
-            if (defaultExport && typeof defaultExport === 'object' && !Array.isArray(defaultExport) && 'WebView' in defaultExport) {
-              WebViewComponent = (defaultExport as any).WebView;
-              logger.info('✅ WebView bulundu (useEffect method 2a: default.WebView)');
-            } else if (typeof defaultExport === 'function' || (defaultExport && typeof (defaultExport as any).render === 'function')) {
+              if (defaultExport && typeof defaultExport === 'object' && !Array.isArray(defaultExport) && 'WebView' in defaultExport) {
+                WebViewComponent = (defaultExport as any).WebView;
+                logger.info('✅ WebView bulundu (useEffect method 2a: default.WebView)');
+              } else if (typeof defaultExport === 'function' || (defaultExport && typeof (defaultExport as any).render === 'function')) {
                 WebViewComponent = defaultExport;
                 logger.info('✅ WebView bulundu (useEffect method 2b: default as component)');
               } else if (typeof defaultExport === 'object') {
@@ -737,17 +722,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                   logger.info('✅ WebView bulundu (useEffect method 2c: destructured from default)');
                 }
               }
-            } catch (e: any) {
-              logger.warn('⚠️ useEffect default export işlenirken hata:', e?.message);
+            } catch (e: unknown) {
+              logger.warn('⚠️ useEffect default export işlenirken hata:', getErrorMessage(e));
             }
-          } else if (module?.default && typeof module.default === 'object' && 'WebView' in module.default) {
-            WebViewComponent = (module.default as any).WebView;
-            logger.info('✅ WebView bulundu (useEffect method 3)');
-          } else if (module?.default && typeof module.default === 'function') {
-            WebViewComponent = module.default;
-            logger.info('✅ WebView bulundu (useEffect method 4)');
           }
-          
+
           if (WebViewComponent) {
             const WebViewTyped = WebViewComponent as React.ComponentType<WebViewProps>;
             logger.info('✅ WebView yüklendi (modal useEffect)');
@@ -763,8 +742,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             });
           }
         })
-        .catch((e: any) => {
-          logger.error('❌ Modal useEffect: WebView yüklenemedi:', e?.message || e);
+        .catch((e: unknown) => {
+          logger.error('❌ Modal useEffect: WebView yüklenemedi:', getErrorMessage(e) || e);
         });
     }
   }, [inAppBrowserVisible, inAppBrowserUrl, NativeWebView, inAppBrowserWebView]);
@@ -792,16 +771,16 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       article.url
     ) {
       // İçerik yüklenmemişse veya boşsa, yükle
-      const needsLoad = !articleHtml || 
-                       !articlePlainText || 
-                       (articleHtml && articleHtml.trim().length === 0) ||
-                       (articlePlainText && articlePlainText.trim().length === 0);
-      
+      const needsLoad = !articleHtml ||
+        !articlePlainText ||
+        (articleHtml && articleHtml.trim().length === 0) ||
+        (articlePlainText && articlePlainText.trim().length === 0);
+
       if (needsLoad && !articleContentLoading) {
         logger.info('🔵 Modal açıldı, HTML içeriği yükleniyor...');
-      loadArticleContent().catch((error) => {
-        logger.error('Failed to load article content:', error);
-      });
+        loadArticleContent().catch((error) => {
+          logger.error('Failed to load article content:', error);
+        });
       } else {
         logger.info('🔵 Modal açıldı, HTML içeriği durumu:', {
           hasHtml: !!articleHtml,
@@ -812,8 +791,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         });
       }
     }
-    // CRITICAL: loadArticleContent zaten memoized, dependency'den çıkar
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ELITE: loadArticleContent is memoized via useCallback, excluded to prevent infinite loops
   }, [
     browserVisible,
     browserMode,
@@ -829,7 +807,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     if (!text || typeof text !== 'string') {
       return '';
     }
-    
+
     // Remove HTML tags but preserve text content
     let cleaned = text
       .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
@@ -841,10 +819,10 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       .replace(/&amp;/g, '&')
       .replace(/&nbsp;/g, ' ')
       .trim();
-    
+
     // Remove extra whitespace
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    
+
     // CRITICAL: Limit summary length to prevent overly long summaries
     // Max 2000 characters (approximately 400-500 words)
     const MAX_SUMMARY_LENGTH = 2000;
@@ -854,9 +832,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       const lastSentenceEnd = Math.max(
         truncated.lastIndexOf('.'),
         truncated.lastIndexOf('!'),
-        truncated.lastIndexOf('?')
+        truncated.lastIndexOf('?'),
       );
-      
+
       if (lastSentenceEnd > MAX_SUMMARY_LENGTH * 0.8) {
         // If we found a sentence end in the last 20%, use it
         cleaned = truncated.substring(0, lastSentenceEnd + 1) + '...';
@@ -870,15 +848,16 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         }
       }
     }
-    
+
     return cleaned;
   };
 
   const loadAISummary = useCallback(async () => {
+    logger.info('🔵 loadAISummary çağrıldı - article:', article?.title?.substring(0, 50));
     try {
       setLoading(true);
       setAiSummary(''); // Clear previous summary
-      
+
       // CRITICAL: Validate article before processing
       if (!article || typeof article !== 'object') {
         logger.error('Invalid article in loadAISummary:', article);
@@ -886,16 +865,20 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         setLoading(false);
         return;
       }
-      
+
       // Ensure OpenAI service is initialized
+      logger.info('🔧 OpenAI initialized check:', openAIService.isConfigured());
       if (!openAIService.isConfigured()) {
         try {
+          logger.info('🔄 OpenAI initialize başlatılıyor...');
           await openAIService.initialize();
+          logger.info('✅ OpenAI initialize tamamlandı, configured:', openAIService.isConfigured());
         } catch (initError) {
-          logger.debug('OpenAI initialization attempt failed:', initError);
+          logger.error('❌ OpenAI initialization failed:', initError);
         }
       }
-      
+
+      logger.info('📝 summarizeArticle çağrılıyor...');
       let summary: string;
       try {
         summary = await newsAggregatorService.summarizeArticle(article);
@@ -906,8 +889,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       } catch (summaryError) {
         logger.error('Failed to get summary from service:', summaryError);
         // Use fallback
-        const fallbackTitle = (article.title && typeof article.title === 'string') 
-          ? article.title.trim() 
+        const fallbackTitle = (article.title && typeof article.title === 'string')
+          ? article.title.trim()
           : '';
         const fallbackSummary = (article.summary && typeof article.summary === 'string')
           ? article.summary.trim()
@@ -917,17 +900,17 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         setLoading(false);
         return;
       }
-      
+
       // Clean HTML tags from AI summary
       const cleanedSummary = cleanAISummary(summary);
-      
+
       // CRITICAL: Validate cleaned summary
       if (cleanedSummary && cleanedSummary.trim().length > 0) {
         setAiSummary(cleanedSummary);
       } else {
         // If summary is empty, use fallback with validation
-        const fallbackTitle = (article.title && typeof article.title === 'string') 
-          ? article.title.trim() 
+        const fallbackTitle = (article.title && typeof article.title === 'string')
+          ? article.title.trim()
           : '';
         const fallbackSummary = (article.summary && typeof article.summary === 'string')
           ? article.summary.trim()
@@ -938,8 +921,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     } catch (error) {
       logger.error('Failed to load AI summary:', error);
       // CRITICAL: Safe fallback with validation
-      const fallbackTitle = (article?.title && typeof article.title === 'string') 
-        ? article.title.trim() 
+      const fallbackTitle = (article?.title && typeof article.title === 'string')
+        ? article.title.trim()
         : '';
       const fallbackSummary = (article?.summary && typeof article.summary === 'string')
         ? article.summary.trim()
@@ -959,15 +942,15 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         logger.error('Invalid article in handleShare');
         return;
       }
-      
+
       const shareTitle = (article.title && typeof article.title === 'string') ? article.title.trim() : 'Haber';
       const shareUrl = (article.url && typeof article.url === 'string' && article.url !== '#') ? article.url.trim() : '';
-      
+
       if (!shareUrl) {
         logger.warn('Cannot share: no valid URL');
         return;
       }
-      
+
       await Share.share({
         title: shareTitle,
         message: `${shareTitle}\n\n${shareUrl}`,
@@ -983,14 +966,14 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       Alert.alert(
         'URL Bulunamadı',
         'Bu haber için geçerli bir bağlantı bulunamadı.',
-        [{ text: 'Tamam', style: 'default' }]
+        [{ text: 'Tamam', style: 'default' }],
       );
       return;
     }
 
     haptics.impactMedium();
 
-      // ELITE: Linking.openURL kullan (her zaman çalışır, native modül gerektirmez)
+    // ELITE: Linking.openURL kullan (her zaman çalışır, native modül gerektirmez)
     try {
       // CRITICAL: Validate URL before opening
       if (!article || typeof article !== 'object' || !article.url || typeof article.url !== 'string') {
@@ -998,22 +981,22 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         Alert.alert(
           'Hata',
           'Geçersiz haber verisi.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
         return;
       }
-      
+
       const urlToOpen = article.url.trim();
       if (urlToOpen === '' || urlToOpen === '#') {
         logger.warn('Cannot open: invalid URL');
         Alert.alert(
           'URL Bulunamadı',
           'Bu haber için geçerli bir bağlantı bulunamadı.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
         return;
       }
-      
+
       // CRITICAL: Validate URL format
       try {
         const urlObj = new URL(urlToOpen);
@@ -1022,7 +1005,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           Alert.alert(
             'Geçersiz URL',
             'Bu haber bağlantısı geçersiz.',
-            [{ text: 'Tamam', style: 'default' }]
+            [{ text: 'Tamam', style: 'default' }],
           );
           return;
         }
@@ -1031,37 +1014,37 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         Alert.alert(
           'Geçersiz URL',
           'Bu haber bağlantısı geçersiz format.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
         return;
       }
-      
+
       // ELITE: Linking.openURL ile Safari'de aç (her zaman çalışır)
       const canOpen = await Linking.canOpenURL(urlToOpen);
       if (!canOpen) {
         Alert.alert(
           'Tarayıcı Açılamadı',
           'Bu bağlantıyı açmak için uygun bir tarayıcı bulunamadı.',
-          [{ text: 'Tamam', style: 'default' }]
+          [{ text: 'Tamam', style: 'default' }],
         );
         return;
       }
-      
+
       await Linking.openURL(urlToOpen);
       logger.info(`✅ Opening URL in external browser:`, urlToOpen);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to open URL:', error);
       Alert.alert(
         'Hata',
         'Haber bağlantısı açılırken bir hata oluştu. Lütfen tekrar deneyin.',
         [
-          { 
-            text: 'Tekrar Dene', 
+          {
+            text: 'Tekrar Dene',
             onPress: openAfetNetBrowser,
-            style: 'default'
+            style: 'default',
           },
-          { text: 'Tamam', style: 'cancel' }
-        ]
+          { text: 'Tamam', style: 'cancel' },
+        ],
       );
     }
   };
@@ -1074,23 +1057,23 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     if (!hasValidUrl || !article?.url) {
       logger.warn('⚠️ URL bulunamadı');
       Alert.alert('URL Bulunamadı', 'Bu haber için geçerli bir bağlantı bulunamadı.');
-        return;
-      }
-      
+      return;
+    }
+
     let url = article.url.trim();
     if (!url || url === '#') {
       logger.warn('⚠️ Geçersiz URL:', url);
       Alert.alert('URL Bulunamadı', 'Bu haber için geçerli bir bağlantı bulunamadı.');
-        return;
-      }
-      
+      return;
+    }
+
     // URL'i düzelt
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `https://${url}`;
     }
-    
+
     logger.info('🚀 URL açılıyor:', url);
-    
+
     try {
       // ELITE: Linking.openURL kullan (her zaman çalışır, native modül gerektirmez)
       // Önce Linking.openURL ile Safari'de açmayı dene
@@ -1101,26 +1084,26 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           logger.info('✅ URL opened in Safari using Linking');
           return;
         }
-      } catch (linkingError: any) {
-        logger.debug('Linking.openURL failed, trying WebView fallback:', linkingError?.message);
+      } catch (linkingError: unknown) {
+        logger.debug('Linking.openURL failed, trying WebView fallback:', getErrorMessage(linkingError));
       }
-      
+
       logger.info('🔵 Linking.openURL başarısız, WebView deneniyor...');
-      
+
       // 2. SONRA: WebView Modal (fallback)
       // WebView'i dinamik olarak yükle
       let webViewToUse = NativeWebView || inAppBrowserWebView;
       logger.info('🔵 Mevcut WebView:', { NativeWebView: !!NativeWebView, inAppBrowserWebView: !!inAppBrowserWebView });
-      
+
       if (!webViewToUse) {
         logger.info('🔵 WebView yok, dinamik yükleniyor...');
         try {
           const webViewModule = await import('react-native-webview');
           logger.info('🔵 react-native-webview modülü yüklendi:', !!webViewModule);
-          
+
           // ELITE: WebView'i farklı şekillerde kontrol et
-          let WebViewComponent = null;
-          
+          let WebViewComponent: React.ComponentType<WebViewProps> | null = null;
+
           logger.info('🔍 WebView modül detayları:', {
             hasWebView: !!webViewModule?.WebView,
             hasDefault: !!webViewModule?.default,
@@ -1130,7 +1113,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             keys: Object.keys(webViewModule || {}),
             allKeys: Object.getOwnPropertyNames(webViewModule || {}),
           });
-          
+
           // Method 1: webViewModule.WebView
           if (webViewModule?.WebView) {
             WebViewComponent = webViewModule.WebView;
@@ -1158,14 +1141,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                   logger.info('✅ WebView bulundu (method 2c: destructured from default)');
                 }
               }
-            } catch (e: any) {
-              logger.warn('⚠️ Default export işlenirken hata:', e?.message);
+            } catch (e: unknown) {
+              logger.warn('⚠️ Default export işlenirken hata:', getErrorMessage(e));
             }
-          }
-          // Method 3: webViewModule.default?.WebView (fallback)
-          else if (webViewModule?.default && typeof webViewModule.default === 'object' && 'WebView' in webViewModule.default) {
-            WebViewComponent = (webViewModule.default as any).WebView;
-            logger.info('✅ WebView bulundu (method 3: default.WebView)');
           }
           // Method 4: webViewModule (eğer direkt component ise)
           else if (typeof webViewModule === 'function') {
@@ -1175,7 +1153,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           // Method 5: Try require syntax (for compatibility)
           else {
             try {
-              // @ts-ignore
+              // ELITE: Fallback require for WebView loading when import fails
               const requireModule = require('react-native-webview');
               if (requireModule?.WebView) {
                 WebViewComponent = requireModule.WebView;
@@ -1184,11 +1162,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                 WebViewComponent = requireModule.default.WebView;
                 logger.info('✅ WebView bulundu (method 5: require.default.WebView)');
               }
-            } catch (requireError: any) {
-              logger.debug('Require method failed:', requireError?.message);
+            } catch (requireError: unknown) {
+              logger.debug('Require method failed:', getErrorMessage(requireError));
             }
           }
-          
+
           if (WebViewComponent) {
             webViewToUse = WebViewComponent as React.ComponentType<WebViewProps>;
             logger.info('✅ WebView component hazır, state güncelleniyor...');
@@ -1207,11 +1185,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               keys: Object.keys(webViewModule || {}),
             });
           }
-        } catch (e: any) {
-          logger.error('❌ WebView yüklenemedi:', e?.message || e);
+        } catch (e: unknown) {
+          logger.error('❌ WebView yüklenemedi:', getErrorMessage(e) || e);
         }
       }
-      
+
       if (webViewToUse) {
         // WebView yüklü, modal'ı aç (uygulama içinde)
         logger.info('✅ WebView hazır, modal açılıyor (uygulama içinde)...');
@@ -1220,17 +1198,17 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         logger.info('✅ WebView modal açıldı (uygulama içinde)');
         return;
       }
-      
+
       // CRITICAL: WebView yoksa eski browser modal'ı kullan (HTML fallback ile)
       logger.warn('⚠️ WebView yüklenemedi, HTML fallback modal açılıyor...');
       logger.info('🔵 HTML fallback modal açılıyor - browserVisible:', browserVisible);
-      
+
       // CRITICAL: Önce içeriği yükle, sonra modal'ı aç
       // İçerik yüklenmemişse veya yükleniyorsa, modal açıldıktan sonra yüklenecek
       setBrowserMode('html');
       setBrowserVisible(true);
       logger.info('✅ browserVisible set to true');
-      
+
       // CRITICAL: İçeriği garantili olarak yükle (her zaman)
       // useEffect hook'u da kontrol edecek ama burada da yükleyelim
       if (!articleHtml && !articlePlainText && !articleContentLoading) {
@@ -1256,32 +1234,32 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       }
       logger.info('✅ HTML fallback modal açıldı ve içerik yükleniyor');
       return;
-      
+
       // NOT REACHED: External browser fallback kaldırıldı - her zaman uygulama içinde açılmalı
       logger.warn('⚠️ Tüm in-app yöntemler başarısız, external browser deneniyor...');
-      
+
       // 3. SON ÇARE: External browser (sadece gerçekten gerekirse)
       try {
         const canOpen = await Promise.race([
           Linking.canOpenURL(url),
-          new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+          new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000)),
         ]);
-        
+
         if (canOpen) {
           await Promise.race([
             Linking.openURL(url),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000)),
           ]);
           logger.info('✅ External browser ile açıldı');
         } else {
           throw new Error('URL açılamıyor');
         }
-    } catch (error: any) {
-        logger.error('❌ External browser hatası:', error?.message || error);
+      } catch (error: unknown) {
+        logger.error('❌ External browser hatası:', getErrorMessage(error));
         Alert.alert('Hata', 'Web sayfası açılamadı. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.');
       }
-    } catch (error: any) {
-      logger.error('❌ Tüm yöntemler başarısız:', error?.message || error);
+    } catch (error: unknown) {
+      logger.error('❌ Tüm yöntemler başarısız:', getErrorMessage(error));
       Alert.alert('Hata', 'Web sayfası açılamadı. Lütfen tekrar deneyin.');
     }
   }, [article?.url, hasValidUrl, NativeWebView, inAppBrowserWebView, loadArticleContent, articleHtml, articlePlainText, articleContentLoading, browserVisible]);
@@ -1344,124 +1322,131 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   return (
     <View style={styles.container}>
       {/* ELITE: StatusBar - her zaman göster */}
-      <StatusBar 
-        translucent={true} 
-        barStyle="light-content" 
+      <StatusBar
+        translucent={true}
+        barStyle="light-content"
         backgroundColor="transparent"
       />
-      
+
       {/* ELITE: Header ve tabs her zaman gösterilir */}
       <>
-      {/* Header */}
-      <LinearGradient
-        colors={[colors.gradients.header[0], colors.gradients.header[1]]}
-            style={[styles.header, { paddingTop: Math.max(insets.top - 24, 0) }]}
-      >
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            haptics.impactLight();
-            if (navigation && 'goBack' in navigation) {
-              navigation.goBack();
-            }
-          }}
+        {/* Header */}
+        <LinearGradient
+          colors={[colors.gradients.header[0], colors.gradients.header[1]]}
+          style={[styles.header, { paddingTop: insets.top + 12 }]}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
-        
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>
-            {(article.source && typeof article.source === 'string') ? article.source : 'Haber'}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              haptics.impactLight();
+              if (navigation && 'goBack' in navigation) {
+                navigation.goBack();
+              }
+            }}
+          >
+            <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
+          </TouchableOpacity>
+
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {(article.source && typeof article.source === 'string') ? article.source : 'Haber'}
+            </Text>
+          </View>
+
+          <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+            <Ionicons name="share-outline" size={24} color={colors.text.primary} />
+          </TouchableOpacity>
+        </LinearGradient>
+
+        {/* Article Title */}
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>
+            {(article.title && typeof article.title === 'string') ? article.title : 'Haber'}
           </Text>
+          <View style={styles.meta}>
+            <Text style={styles.metaText}>
+              {(article.source && typeof article.source === 'string') ? article.source : 'Kaynak'}
+            </Text>
+            <Text style={styles.metaDot}>•</Text>
+            <Text style={styles.metaText}>
+              {article.publishedAt && typeof article.publishedAt === 'number' && !isNaN(article.publishedAt)
+                ? new Date(article.publishedAt).toLocaleDateString('tr-TR')
+                : 'Tarih bilgisi yok'}
+            </Text>
+            {article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude) && (
+              <>
+                <Text style={styles.metaDot}>•</Text>
+                <View style={styles.magnitudeBadge}>
+                  <Text style={styles.magnitudeText}>{article.magnitude.toFixed(1)}</Text>
+                </View>
+              </>
+            )}
+          </View>
         </View>
 
-        <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
-      </LinearGradient>
+        {/* Tabs */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'summary' && styles.tabActive]}
+            onPress={() => switchTab('summary')}
+          >
+            <Ionicons
+              name="sparkles"
+              size={20}
+              color={activeTab === 'summary' ? colors.accent.primary : colors.text.secondary}
+            />
+            <Text style={[styles.tabText, activeTab === 'summary' && styles.tabTextActive]}>
+              AI Özeti
+            </Text>
+          </TouchableOpacity>
 
-      {/* Article Title */}
-      <View style={styles.titleContainer}>
-        <Text style={styles.title}>
-          {(article.title && typeof article.title === 'string') ? article.title : 'Haber'}
-        </Text>
-        <View style={styles.meta}>
-          <Text style={styles.metaText}>
-            {(article.source && typeof article.source === 'string') ? article.source : 'Kaynak'}
-          </Text>
-          <Text style={styles.metaDot}>•</Text>
-          <Text style={styles.metaText}>
-            {article.publishedAt && typeof article.publishedAt === 'number' && !isNaN(article.publishedAt)
-              ? new Date(article.publishedAt).toLocaleDateString('tr-TR')
-              : 'Tarih bilgisi yok'}
-          </Text>
-          {article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude) && (
-            <>
-              <Text style={styles.metaDot}>•</Text>
-              <View style={styles.magnitudeBadge}>
-                <Text style={styles.magnitudeText}>{article.magnitude.toFixed(1)}</Text>
-              </View>
-            </>
-          )}
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'original' && styles.tabActive]}
+            onPress={() => switchTab('original')}
+          >
+            <Ionicons
+              name="newspaper-outline"
+              size={20}
+              color={activeTab === 'original' ? colors.accent.primary : colors.text.secondary}
+            />
+            <Text style={[styles.tabText, activeTab === 'original' && styles.tabTextActive]}>
+              Orijinal Haber
+            </Text>
+          </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'summary' && styles.tabActive]}
-          onPress={() => switchTab('summary')}
-        >
-          <Ionicons
-            name="sparkles"
-            size={20}
-            color={activeTab === 'summary' ? colors.accent.primary : colors.text.secondary}
-          />
-          <Text style={[styles.tabText, activeTab === 'summary' && styles.tabTextActive]}>
-            AI Özeti
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'original' && styles.tabActive]}
-          onPress={() => switchTab('original')}
-        >
-          <Ionicons
-            name="newspaper-outline"
-            size={20}
-            color={activeTab === 'original' ? colors.accent.primary : colors.text.secondary}
-          />
-          <Text style={[styles.tabText, activeTab === 'original' && styles.tabTextActive]}>
-            Orijinal Haber
-          </Text>
-        </TouchableOpacity>
-      </View>
       </>
 
       {/* Content */}
       {activeTab === 'summary' ? (
-        <ScrollView 
-          ref={scrollViewRef}
-          style={styles.content} 
-          contentContainerStyle={styles.contentPadding}
-          showsVerticalScrollIndicator={true}
-          contentInsetAdjustmentBehavior="never"
-          bounces={false}
+        <ImageBackground
+          source={require('../../../assets/images/premium/agenda_refined_bg.png')}
+          style={{ flex: 1 }}
+          imageStyle={{ opacity: 0.85 }}
+          resizeMode="cover"
         >
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.accent.primary} />
-              <Text style={styles.loadingText}>AI özeti oluşturuluyor...</Text>
-            </View>
-          ) : (
-            <>
-              <View style={styles.summaryCard}>
-                <View style={styles.summaryHeader}>
-                  <Ionicons name="sparkles" size={24} color={colors.accent.primary} />
-                  <Text style={styles.summaryTitle}>AI Özeti</Text>
-                </View>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.content}
+            contentContainerStyle={styles.contentPadding}
+            showsVerticalScrollIndicator={true}
+            contentInsetAdjustmentBehavior="never"
+            bounces={false}
+          >
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.accent.primary} />
+                <Text style={styles.loadingText}>AI özeti hazırlanıyor...</Text>
+                <Text style={[styles.loadingText, { fontSize: 12, marginTop: 4, color: colors.text.tertiary }]}>
+                  Önbellekte yoksa yeni özet oluşturuluyor
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* ELITE: Sadece özet metni göster - header kaldırıldı */}
                 {aiSummary && aiSummary.trim().length > 0 ? (
-                  <Text style={styles.summaryText} selectable={true}>{aiSummary}</Text>
+                  <View style={styles.summaryCard}>
+                    <Text style={styles.summaryText} selectable={true}>{aiSummary}</Text>
+                  </View>
                 ) : (
                   <View style={styles.emptySummaryContainer}>
                     <Ionicons name="information-circle-outline" size={24} color={colors.text.tertiary} />
@@ -1470,20 +1455,20 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                     </Text>
                   </View>
                 )}
-              </View>
 
-              {/* Disclaimer */}
-              <View style={styles.disclaimer}>
-                <Ionicons name="information-circle-outline" size={16} color={colors.text.tertiary} />
-                <Text style={styles.disclaimerText}>
-                  Bu özet yapay zeka tarafından oluşturulmuştur. Detaylı bilgi için haber metnini okuyun.
-                </Text>
-              </View>
-            </>
-          )}
-        </ScrollView>
+                {/* Disclaimer */}
+                <View style={styles.disclaimer}>
+                  <Ionicons name="information-circle-outline" size={16} color={colors.text.tertiary} />
+                  <Text style={styles.disclaimerText}>
+                    Bu özet yapay zeka tarafından oluşturulmuştur.
+                  </Text>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </ImageBackground>
       ) : (
-        // ELITE: Orijinal haber - Safari View Controller açılıyor (HTML parse yerine)
+        // ELITE: Orijinal Haber - Inline WebView gösterimi (modal değil, sekme içinde)
         <>
           {!hasValidUrl ? (
             <View style={styles.noUrlContainer}>
@@ -1491,27 +1476,59 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               <Text style={styles.noUrlText}>Orijinal haber bağlantısı bulunamadı.</Text>
             </View>
           ) : (
-            // ELITE: Safari View Controller açılıyor - içerik Safari'de gösterilecek
-            <ScrollView 
-              ref={scrollViewRef}
-              style={styles.content} 
-              contentContainerStyle={styles.contentPadding}
-              showsVerticalScrollIndicator={true}
-              contentInsetAdjustmentBehavior="never"
-              bounces={false}
-            >
-              <View style={styles.htmlFallbackContainer}>
-              {(() => {
-                // ELITE: Safari'de açılıyor mesajı
-                return (
-                  <View style={styles.emptyContentContainer}>
-                    <Ionicons name="globe-outline" size={64} color={colors.accent.primary} />
-                    <Text style={styles.emptyContentText}>
-                      Haber içeriği Safari'de açılıyor...
-                    </Text>
-                    <Text style={[styles.emptyContentText, { marginTop: 8, fontSize: 14 }]}>
-                      Safari açılmadıysa, aşağıdaki butona tıklayın.
-                    </Text>
+            // ELITE: Orijinal Haber - Inline WebView gösterimi (modal değil, sekme içinde)
+            <View style={styles.inlineWebViewContainer}>
+              {/* ELITE: WebView içerik alanı - Header kaldırıldı, tam ekran WebView */}
+              {inAppBrowserUrl && (NativeWebView || inAppBrowserWebView) ? (
+                (() => {
+                  const WebViewComponent = NativeWebView || inAppBrowserWebView;
+                  if (!WebViewComponent) {
+                    return (
+                      <View style={styles.inlineWebViewFallback}>
+                        <ActivityIndicator size="large" color={colors.accent.primary} />
+                        <Text style={styles.inlineWebViewFallbackText}>WebView yükleniyor...</Text>
+                      </View>
+                    );
+                  }
+                  const WebViewComponentTyped = WebViewComponent as any;
+                  return (
+                    <WebViewComponentTyped
+                      ref={webViewRef}
+                      source={{ uri: inAppBrowserUrl }}
+                      style={styles.inlineWebView}
+                      startInLoadingState
+                      javaScriptEnabled={true}
+                      domStorageEnabled={true}
+                      allowsBackForwardNavigationGestures={true}
+                      scalesPageToFit={true}
+                      renderLoading={() => (
+                        <View style={styles.inlineWebViewLoading}>
+                          <ActivityIndicator size="large" color={colors.accent.primary} />
+                          <Text style={styles.inlineWebViewLoadingText}>Sayfa yükleniyor...</Text>
+                        </View>
+                      )}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onError={(syntheticEvent: any) => {
+                        const { nativeEvent } = syntheticEvent;
+                        logger.error('Inline WebView error:', nativeEvent);
+                      }}
+                      onLoadStart={() => {
+                        logger.info('🔵 Inline WebView load started:', inAppBrowserUrl);
+                      }}
+                      onLoadEnd={() => {
+                        logger.info('✅ Inline WebView load ended');
+                      }}
+                    />
+                  );
+                })()
+              ) : (
+                // WebView yüklenmiyorsa fallback
+                <View style={styles.inlineWebViewFallback}>
+                  <ActivityIndicator size="large" color={colors.accent.primary} />
+                  <Text style={styles.inlineWebViewFallbackText}>
+                    {!inAppBrowserUrl ? 'URL hazırlanıyor...' : 'WebView yükleniyor...'}
+                  </Text>
+                  {hasValidUrl && (
                     <TouchableOpacity
                       style={styles.originalButton}
                       onPress={openExternalBrowser}
@@ -1522,15 +1539,13 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                         style={styles.originalButtonGradient}
                       >
                         <Ionicons name="open-outline" size={20} color="#fff" />
-                        <Text style={styles.originalButtonText}>Orijinal Sitede Aç</Text>
+                        <Text style={styles.originalButtonText}>Dış Tarayıcıda Aç</Text>
                       </LinearGradient>
                     </TouchableOpacity>
-                  </View>
-                );
-                
-              })()}
-              </View>
-            </ScrollView>
+                  )}
+                </View>
+              )}
+            </View>
           )}
         </>
       )}
@@ -1566,12 +1581,12 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               <Pressable style={styles.browserActionButton} onPress={handleShare} hitSlop={12}>
                 <Ionicons name="share-social-outline" size={22} color={colors.text.primary} />
               </Pressable>
-              <Pressable 
-                style={styles.browserActionButton} 
+              <Pressable
+                style={styles.browserActionButton}
                 onPress={() => {
                   logger.info('🔵 Browser header button tıklandı');
                   openExternalBrowser();
-                }} 
+                }}
                 hitSlop={12}
               >
                 <Ionicons name="open-outline" size={22} color={colors.text.primary} />
@@ -1579,7 +1594,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             </View>
           </LinearGradient>
 
-          {browserMode === 'webview' && showWebView ? (
+          {browserMode === 'webview' && showWebView && NativeWebView ? (
             <NativeWebView
               source={{ uri: article.url ?? '' }}
               style={styles.browserWebView}
@@ -1682,7 +1697,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       >
         <View style={styles.inAppBrowserContainer}>
           <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-          
+
           {/* ELITE: Header with back button - yukardan başla */}
           <View style={[styles.inAppBrowserHeader, { paddingTop: Math.max(insets.top - 28, 0) }]}>
             <TouchableOpacity
@@ -1695,7 +1710,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             >
               <Ionicons name="arrow-back" size={20} color={colors.text.primary} />
             </TouchableOpacity>
-            
+
             <View style={styles.inAppBrowserHeaderCenter}>
               <Text style={styles.inAppBrowserHeaderTitle} numberOfLines={1}>
                 {inAppBrowserUrl ? (() => {
@@ -1725,7 +1740,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               >
                 <Ionicons name="share-social-outline" size={18} color={colors.text.primary} />
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={styles.inAppBrowserActionButton}
                 onPress={() => {
@@ -2532,6 +2547,77 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     marginTop: 12,
+  },
+  // ELITE: Inline WebView styles (Orijinal Haber sekmesi için)
+  inlineWebViewContainer: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  inlineWebViewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background.secondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.light,
+  },
+  inlineWebViewTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlineWebViewTitle: {
+    ...typography.h4,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  inlineWebViewExternalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: colors.accent.primary + '15',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.accent.primary + '30',
+  },
+  inlineWebViewExternalText: {
+    ...typography.caption,
+    color: colors.accent.primary,
+    fontWeight: '600',
+  },
+  inlineWebView: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  inlineWebViewLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background.primary,
+    gap: 12,
+    padding: 24,
+  },
+  inlineWebViewLoadingText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  inlineWebViewFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background.primary,
+    gap: 16,
+    padding: 24,
+  },
+  inlineWebViewFallbackText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    textAlign: 'center',
   },
 });
 

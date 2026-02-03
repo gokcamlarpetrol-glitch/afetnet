@@ -22,29 +22,29 @@ export default function MessageStatusIndicator({
 }: Props) {
   const getIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (status) {
-      case 'sending':
-        return 'time';
-      case 'sent':
-        return 'checkmark';
-      case 'delivered':
-        return 'checkmark-done';
-      case 'read':
-        return 'checkmark-done';
-      case 'failed':
-        return 'alert-circle';
-      default:
-        return 'time';
+    case 'sending':
+      return 'time';
+    case 'sent':
+      return 'checkmark';
+    case 'delivered':
+      return 'checkmark-done';
+    case 'read':
+      return 'checkmark-done';
+    case 'failed':
+      return 'alert-circle';
+    default:
+      return 'time';
     }
   };
 
   const getColor = (): string => {
     switch (status) {
-      case 'read':
-        return '#3b82f6';
-      case 'failed':
-        return '#ef4444';
-      default:
-        return color;
+    case 'read':
+      return '#3b82f6';
+    case 'failed':
+      return '#ef4444';
+    default:
+      return color;
     }
   };
 

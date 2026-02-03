@@ -13,6 +13,7 @@ export interface FamilyMember {
   location?: {
     latitude: number;
     longitude: number;
+    timestamp?: number;
   };
   deviceId?: string; // BLE mesh device ID
   // ELITE: Extended fields for better member management

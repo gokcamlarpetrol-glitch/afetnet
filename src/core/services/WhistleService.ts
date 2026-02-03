@@ -196,7 +196,7 @@ class WhistleService {
           shouldPlay: false,
           isLooping: false,
           volume: 1.0,
-        }
+        },
       );
       
       this.sound = sound;

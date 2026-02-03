@@ -4,6 +4,7 @@
  * AI-powered with rule-based fallback
  */
 
+import { getErrorMessage } from '../../utils/errorUtils';
 import {
   RiskScore,
   RiskLevel,
@@ -26,6 +27,7 @@ import {
   distanceInKm,
   type RegionalHazardCluster,
 } from '../data/regionalRiskProfiles';
+import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 
 import type { LocationCoords } from '../../services/LocationService';
 import type { Earthquake } from '../../stores/earthquakeStore';
@@ -171,28 +173,28 @@ class RiskScoringService {
       const { useFamilyStore } = await import('../../stores/familyStore');
       const familyState = useFamilyStore.getState();
       const members = familyState.members || [];
-      
+
       // Check for disabilities (from notes)
       hasDisabled = members.some(m => {
-        const notes = m.notes?.toLowerCase() || '';
+        const notes = safeLowerCase(m.notes);
         return notes.includes('engel') || notes.includes('disability') ||
-               notes.includes('özürlü') || notes.includes('handicap');
+          notes.includes('özürlü') || notes.includes('handicap');
       });
-      
+
       // Count pets (from relationship or notes)
       petsCount = members.filter(m => {
-        const rel = m.relationship?.toLowerCase() || '';
-        const notes = m.notes?.toLowerCase() || '';
+        const rel = safeLowerCase(m.relationship);
+        const notes = safeLowerCase(m.notes);
         return rel.includes('pet') || rel.includes('hayvan') ||
-               rel.includes('köpek') || rel.includes('kedi') ||
-               notes.includes('pet') || notes.includes('hayvan');
+          rel.includes('köpek') || rel.includes('kedi') ||
+          notes.includes('pet') || notes.includes('hayvan');
       }).length;
-    } catch (familyError: any) {
+    } catch (familyError: unknown) {
       // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
-      const errorMessage = familyError?.message || String(familyError);
-      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') || 
-                           errorMessage.includes('Could not load bundle');
-      
+      const errorMessage = getErrorMessage(familyError);
+      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') ||
+        errorMessage.includes('Could not load bundle');
+
       if (isBundleError) {
         // ELITE: Bundle errors are expected in some environments - log as debug silently
         if (__DEV__) {
@@ -220,7 +222,7 @@ class RiskScoringService {
   }
 
   private async resolveLocation(
-    provided?: { latitude: number; longitude: number }
+    provided?: { latitude: number; longitude: number },
   ): Promise<LocationCoords | null> {
     if (provided) {
       return {
@@ -274,7 +276,7 @@ class RiskScoringService {
     constructionYear?: number;
     soilType?: 'soft' | 'rock' | 'reclaimed' | 'unknown';
   }): BuildingProfile {
-    const type = (params.buildingType || 'bilinmiyor').toLowerCase();
+    const type = safeLowerCase(params.buildingType || 'bilinmiyor');
     const floorNumber = params.floorNumber ?? 3;
     const constructionYear = params.constructionYear;
     const soil = params.soilType ?? 'unknown';
@@ -350,12 +352,12 @@ class RiskScoringService {
 
       const withDistance = location
         ? items.map((quake) => ({
-            ...quake,
-            distanceKm: distanceInKm(location, {
-              latitude: quake.latitude,
-              longitude: quake.longitude,
-            }),
-          }))
+          ...quake,
+          distanceKm: distanceInKm(location, {
+            latitude: quake.latitude,
+            longitude: quake.longitude,
+          }),
+        }))
         : items;
 
       const filtered = location
@@ -365,7 +367,7 @@ class RiskScoringService {
       const last24h = filtered.filter((quake) => now - quake.time <= 24 * 60 * 60 * 1000);
       const last7d = filtered.filter((quake) => now - quake.time <= 7 * 24 * 60 * 60 * 1000);
       const significant = filtered.filter(
-        (quake) => now - quake.time <= 72 * 60 * 60 * 1000 && quake.magnitude >= 4.0
+        (quake) => now - quake.time <= 72 * 60 * 60 * 1000 && quake.magnitude >= 4.0,
       );
 
       let maxMagnitude: number | undefined;
@@ -393,7 +395,7 @@ class RiskScoringService {
       return {
         totalLast24h: last24h.length,
         totalLast7d: last7d.length,
-        significantLast72h: significant as Array<Earthquake & { distanceKm?: number }> ,
+        significantLast72h: significant as Array<Earthquake & { distanceKm?: number }>,
         nearest,
         maxMagnitude,
         latestTimestamp,
@@ -478,17 +480,17 @@ class RiskScoringService {
       100,
       Math.max(
         0,
-        factors.reduce((sum, factor) => sum + factor.weight * factor.value, 0)
-      )
+        factors.reduce((sum, factor) => sum + factor.weight * factor.value, 0),
+      ),
     );
 
     const level: RiskLevel = totalScore >= 85
       ? 'critical'
       : totalScore >= 70
-      ? 'high'
-      : totalScore >= 45
-      ? 'medium'
-      : 'low';
+        ? 'high'
+        : totalScore >= 45
+          ? 'medium'
+          : 'low';
 
     const trend = this.computeTrend(cacheKey, totalScore);
     const aftershockProbability = this.calculateAftershockProbability(context);
@@ -539,10 +541,10 @@ class RiskScoringService {
       context.hazardCluster.hazardLevel === 'very_high'
         ? 85
         : context.hazardCluster.hazardLevel === 'high'
-        ? 75
-        : context.hazardCluster.hazardLevel === 'medium'
-        ? 55
-        : 40;
+          ? 75
+          : context.hazardCluster.hazardLevel === 'medium'
+            ? 55
+            : 40;
 
     if (typeof context.distanceToClusterCenterKm === 'number') {
       const ratio = context.distanceToClusterCenterKm / context.hazardCluster.radiusKm;
@@ -663,7 +665,7 @@ class RiskScoringService {
     context: RiskContext,
     level: RiskLevel,
     aftershockProbability: number,
-    regionalSummary?: RegionalRiskSummary
+    regionalSummary?: RegionalRiskSummary,
   ): RiskInsight[] {
     const insights: RiskInsight[] = [];
 
@@ -680,8 +682,8 @@ class RiskScoringService {
         severity: regionalSummary.hazardLevel === 'very_high'
           ? 'critical'
           : regionalSummary.hazardLevel === 'high'
-          ? 'warning'
-          : 'info',
+            ? 'warning'
+            : 'info',
         actions: [
           'AFAD toplanma alanlarını önceden kontrol edin',
           'Bina güçlendirme raporlarını güncelleyin',
@@ -706,8 +708,8 @@ class RiskScoringService {
       severity: context.preparedness.completionRate >= 75
         ? 'info'
         : context.preparedness.completionRate >= 40
-        ? 'warning'
-        : 'critical',
+          ? 'warning'
+          : 'critical',
       actions: [
         'Afet çantası ve iletişim planı hazırlayın',
         'Aile üyeleriyle düzenli tatbikat gerçekleştirin',
@@ -729,7 +731,7 @@ class RiskScoringService {
 
   private createRecommendations(
     context: RiskContext,
-    regionalSummary?: RegionalRiskSummary
+    regionalSummary?: RegionalRiskSummary,
   ): string[] {
     const recommendations = new Set<string>();
 
@@ -813,11 +815,13 @@ class RiskScoringService {
 
     // Yapısal bütünlük skoru
     let structuralIntegrity = 70;
-    if (building.type.toLowerCase().includes('beton') || building.type.toLowerCase().includes('arme')) {
+    const buildingType = safeLowerCase(building.type);
+
+    if (safeIncludes(buildingType, 'beton') || safeIncludes(buildingType, 'arme')) {
       structuralIntegrity = 75;
-    } else if (building.type.toLowerCase().includes('çelik')) {
+    } else if (safeIncludes(buildingType, 'çelik')) {
       structuralIntegrity = 85;
-    } else if (building.type.toLowerCase().includes('yığma') || building.type.toLowerCase().includes('ahşap')) {
+    } else if (safeIncludes(buildingType, 'yığma') || safeIncludes(buildingType, 'ahşap')) {
       structuralIntegrity = 45;
     }
 
@@ -875,7 +879,7 @@ class RiskScoringService {
     if (soilType === 'soft' || soilType === 'reclaimed') {
       vulnerabilities.push('Yumuşak zemin');
     }
-    if (building.type.toLowerCase().includes('yığma')) {
+    if (safeIncludes(buildingType, 'yığma')) {
       vulnerabilities.push('Yığma yapı tipi');
     }
 
@@ -888,7 +892,7 @@ class RiskScoringService {
     if (soilType === 'rock') {
       strengths.push('Sağlam zemin');
     }
-    if (building.type.toLowerCase().includes('çelik')) {
+    if (safeIncludes(buildingType, 'çelik')) {
       strengths.push('Çelik yapı');
     }
 
@@ -1152,7 +1156,7 @@ class RiskScoringService {
   private calculateMitigationPotential(
     context: RiskContext,
     currentScore: number,
-    buildingAnalysis: BuildingRiskAnalysis
+    buildingAnalysis: BuildingRiskAnalysis,
   ): MitigationPotential {
     const quickWins: Array<{
       action: string;
@@ -1257,7 +1261,7 @@ class RiskScoringService {
   private calculateSurvivalProbability(
     totalScore: number,
     buildingAnalysis: BuildingRiskAnalysis,
-    evacuationReadiness: EvacuationReadiness
+    evacuationReadiness: EvacuationReadiness,
   ): number {
     let probability = 100 - totalScore; // Temel skor
 
@@ -1390,14 +1394,14 @@ Yapısal Not: ${context.building.description}`;
       }
 
       let jsonStr = jsonMatch[0];
-      
+
       // ELITE: Fix truncated JSON by attempting to close unclosed brackets/braces
       // This handles cases where maxTokens limit cuts off the response
       const openBraces = (jsonStr.match(/\{/g) || []).length;
       const closeBraces = (jsonStr.match(/\}/g) || []).length;
       const openBrackets = (jsonStr.match(/\[/g) || []).length;
       const closeBrackets = (jsonStr.match(/\]/g) || []).length;
-      
+
       // Close unclosed structures
       if (openBraces > closeBraces) {
         jsonStr += '}'.repeat(openBraces - closeBraces);
@@ -1405,8 +1409,9 @@ Yapısal Not: ${context.building.description}`;
       if (openBrackets > closeBrackets) {
         jsonStr += ']'.repeat(openBrackets - closeBrackets);
       }
-      
+
       // ELITE: Try to parse, if it fails, try to extract valid JSON substring
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsed: any;
       try {
         parsed = JSON.parse(jsonStr);
@@ -1425,7 +1430,7 @@ Yapısal Not: ${context.building.description}`;
             }
           }
         }
-        
+
         // If still no valid JSON, throw original error
         if (!parsed) {
           throw parseError;
@@ -1434,6 +1439,7 @@ Yapısal Not: ${context.building.description}`;
 
       if (Array.isArray(parsed.insights)) {
         const extraInsights: RiskInsight[] = parsed.insights
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((item: any, idx: number) => ({
             id: `ai-${idx}`,
             title: item.title || 'AI Analizi',

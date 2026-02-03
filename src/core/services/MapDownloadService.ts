@@ -10,6 +10,18 @@ import { mbtilesProvider } from '../../offline/MBTilesProvider';
 
 const logger = createLogger('MapDownloadService');
 
+// ELITE: Type for FileSystem.DownloadResumable
+type DownloadResumable = ReturnType<typeof FileSystem.createDownloadResumable>;
+
+// ELITE: Extended FileInfo type with optional size
+interface FileInfoWithSize {
+  exists: boolean;
+  uri: string;
+  size?: number;
+  isDirectory?: boolean;
+  modificationTime?: number;
+}
+
 export interface MapRegion {
   id: string;
   name: string;
@@ -97,7 +109,7 @@ export const AVAILABLE_REGIONS: MapRegion[] = [
 
 class MapDownloadService {
   private downloads: Map<string, DownloadProgress> = new Map();
-  private downloadTasks: Map<string, any> = new Map();
+  private downloadTasks: Map<string, DownloadResumable> = new Map();
   private readonly MAPS_DIR = `${FileSystem.documentDirectory}maps/`;
 
   /**
@@ -158,45 +170,45 @@ class MapDownloadService {
         {},
         (downloadProgress) => {
           const { totalBytesWritten, totalBytesExpectedToWrite } = downloadProgress;
-          
+
           progress.bytesDownloaded = totalBytesWritten;
           progress.totalBytes = totalBytesExpectedToWrite;
           progress.percentage = (totalBytesWritten / totalBytesExpectedToWrite) * 100;
-          
+
           this.downloads.set(region.id, { ...progress });
-          
+
           logger.info(`Download progress: ${progress.percentage.toFixed(1)}%`);
-        }
+        },
       );
 
       this.downloadTasks.set(region.id, downloadResumable);
 
       // Start download
       const result = await downloadResumable.downloadAsync();
-      
+
       if (result) {
         progress.status = 'completed';
         progress.percentage = 100;
         this.downloads.set(region.id, { ...progress });
-        
+
         logger.info('Download completed:', region.name);
-        
+
         // Initialize MBTiles provider with downloaded file
         await mbtilesProvider.initialize(filePath);
-        
+
         return true;
       }
 
       return false;
     } catch (error) {
       logger.error('Download failed:', error);
-      
+
       const progress = this.downloads.get(region.id);
       if (progress) {
         progress.status = 'failed';
         this.downloads.set(region.id, { ...progress });
       }
-      
+
       return false;
     }
   }
@@ -210,7 +222,7 @@ class MapDownloadService {
       if (!task) return false;
 
       await task.pauseAsync();
-      
+
       const progress = this.downloads.get(regionId);
       if (progress) {
         progress.status = 'paused';
@@ -234,7 +246,7 @@ class MapDownloadService {
       if (!task) return false;
 
       await task.resumeAsync();
-      
+
       const progress = this.downloads.get(regionId);
       if (progress) {
         progress.status = 'downloading';
@@ -284,7 +296,7 @@ class MapDownloadService {
     try {
       const filePath = `${this.MAPS_DIR}${regionId}.mbtiles`;
       const fileInfo = await FileSystem.getInfoAsync(filePath);
-      
+
       if (fileInfo.exists) {
         await FileSystem.deleteAsync(filePath);
         logger.info('Region deleted:', regionId);
@@ -351,8 +363,8 @@ class MapDownloadService {
       for (const file of files) {
         if (file.endsWith('.mbtiles')) {
           const filePath = `${this.MAPS_DIR}${file}`;
-          const fileInfo = await FileSystem.getInfoAsync(filePath);
-          totalSize += (fileInfo as any).size || 0;
+          const fileInfo = await FileSystem.getInfoAsync(filePath) as FileInfoWithSize;
+          totalSize += fileInfo.size || 0;
         }
       }
 

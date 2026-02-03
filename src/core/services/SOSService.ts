@@ -72,17 +72,17 @@ class SOSService {
     lastSent: null,
     lastReceived: null,
   };
-  
+
   // ELITE: Adaptive beacon interval based on battery level
   private readonly MIN_BEACON_INTERVAL = 5000; // 5 seconds (high battery)
   private readonly MAX_BEACON_INTERVAL = 30000; // 30 seconds (low battery)
   private readonly CRITICAL_BATTERY_LEVEL = 20; // 20% battery
   private readonly LOW_BATTERY_LEVEL = 10; // 10% battery
-  
+
   // ELITE: Location update intervals
   private readonly LOCATION_UPDATE_INTERVAL_HIGH = 10000; // 10 seconds (high accuracy)
   private readonly LOCATION_UPDATE_INTERVAL_LOW = 30000; // 30 seconds (battery saving)
-  
+
   // ELITE: Multi-channel alert configuration
   private readonly ALERT_RETRY_COUNT = 3;
   private readonly ALERT_RETRY_DELAY = 2000; // 2 seconds
@@ -111,7 +111,7 @@ class SOSService {
 
   private async resolveLocation(
     providedLocation: { latitude: number; longitude: number; accuracy: number } | null,
-    shouldAutoRequest: boolean
+    shouldAutoRequest: boolean,
   ): Promise<{ location: { latitude: number; longitude: number; accuracy: number } | null; status: LocationStatus }> {
     if (providedLocation) {
       return { location: providedLocation, status: 'provided' };
@@ -188,20 +188,20 @@ class SOSService {
       trapped?: boolean;
       priority?: 'critical' | 'high' | 'normal';
       autoLocation?: boolean;
-    } = {}
+    } = {},
   ): Promise<void> {
     try {
       logger.info('📡 ELITE SOS: Sending emergency signal...');
 
       // Get real device ID from secure storage
-      const { getDeviceId } = await import('../../lib/device');
+      const { getDeviceId } = await import('../utils/device');
       const userId = await getDeviceId();
 
       const batteryLevel = await this.getBatteryPercentage();
       const networkStatus = await this.getNetworkStatus();
       const { location: finalLocation, status: locationStatus } = await this.resolveLocation(
         location,
-        options.autoLocation !== false
+        options.autoLocation !== false,
       );
 
       const signal: SOSSignal = {
@@ -210,7 +210,7 @@ class SOSService {
         location: finalLocation,
         message,
         userId,
-        batteryLevel,
+        batteryLevel: batteryLevel ?? undefined, // ELITE: Convert null to undefined
         networkStatus,
         locationStatus,
         trapped: options.trapped ?? true,
@@ -260,10 +260,10 @@ class SOSService {
   private async broadcastViaBLE(signal: SOSSignal): Promise<void> {
     try {
       logger.info('📡 ELITE SOS: Broadcasting via BLE mesh to ALL nearby devices...');
-      
+
       // CRITICAL: Ensure BLE Mesh service is running
       const { bleMeshService } = await import('./BLEMeshService');
-      
+
       // ELITE: Start BLE Mesh service if not running (critical for SOS)
       if (!bleMeshService.getIsRunning()) {
         try {
@@ -274,7 +274,7 @@ class SOSService {
           // Continue - will try to queue message
         }
       }
-      
+
       // ELITE: Enhanced SOS payload with all critical information
       const sosPayload = {
         type: 'SOS',
@@ -291,17 +291,14 @@ class SOSService {
           priority: signal.priority,
         },
       };
-      
+
       // CRITICAL: Use broadcastMessage to reach ALL nearby devices (not just family)
       // This ensures enkaz altındaki kişiler yakındaki TÜM cihazlara ulaşabilir
       await bleMeshService.broadcastMessage({
         type: 'sos',
         content: JSON.stringify(sosPayload),
         priority: 'critical',
-        ttl: 15, // ELITE: Higher TTL for maximum reach (15 hops)
-        ackRequired: false,
-        sequence: 0,
-        attempts: 0,
+        ttl: 10, // ELITE: Higher TTL
       });
 
       logger.info('✅ ELITE SOS: Broadcast sent to ALL nearby devices');
@@ -318,10 +315,10 @@ class SOSService {
   private async notifyNearbyDevices(signal: SOSSignal): Promise<void> {
     try {
       logger.info('📢 ELITE SOS: Multi-channel notification to nearby devices...');
-      
+
       // ELITE: Multi-channel alert service for maximum visibility
       const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-      
+
       // ELITE: Enhanced alert with all channels
       const alertConfig = {
         title: signal.trapped ? '🚨 ENKAZ ALTINDA - ACİL YARDIM!' : '🆘 ACİL YARDIM ÇAĞRISI',
@@ -329,7 +326,7 @@ class SOSService {
         priority: 'critical' as const,
         sound: 'emergency' as const,
         vibrationPattern: [0, 200, 100, 200, 100, 200, 100, 200], // Enhanced SOS pattern
-        ttsText: signal.trapped 
+        ttsText: signal.trapped
           ? 'ACİL DURUM! Enkaz altında biri var! Acil yardım gerekiyor!'
           : 'Acil yardım çağrısı! Bölgede biri yardıma ihtiyacı olan biri var!',
         channels: {
@@ -413,18 +410,16 @@ class SOSService {
       const { firebaseDataService } = await import('./FirebaseDataService');
       if (firebaseDataService.isInitialized) {
         // Save SOS as emergency message
-        const { getDeviceId } = await import('../../lib/device');
+        const { getDeviceId } = await import('../utils/device');
         const deviceId = await getDeviceId();
-        
+
         await firebaseDataService.saveMessage(deviceId, {
           id: signal.id,
-          from: signal.userId,
-          to: 'emergency',
+          fromDeviceId: signal.userId,
+          toDeviceId: 'emergency',
           content: signal.message,
           timestamp: signal.timestamp,
           type: 'sos',
-          delivered: false,
-          read: false,
         }).catch((error) => {
           logger.error('Failed to save SOS to Firebase:', error);
         });
@@ -442,16 +437,16 @@ class SOSService {
   private async triggerEmergencyMode(signal: SOSSignal): Promise<void> {
     try {
       const { emergencyModeService } = await import('./EmergencyModeService');
-      
+
       // ELITE: Create emergency event from SOS signal
       // Note: EmergencyModeService expects magnitude >= 6.0, so we'll skip activation
       // but ensure emergency features are active via other means
-      
+
       // ELITE: Instead, activate emergency features directly
       // - Location tracking is already started
       // - BLE Mesh is already broadcasting
       // - Emergency mode UI can be shown separately if needed
-      
+
       if (__DEV__) {
         logger.info('ELITE SOS: Emergency features activated via SOS signal');
       }
@@ -477,7 +472,7 @@ class SOSService {
       try {
         const batteryLevel = await Battery.getBatteryLevelAsync();
         const batteryPercent = Math.round(batteryLevel * 100);
-        
+
         if (batteryPercent <= this.LOW_BATTERY_LEVEL) {
           return this.MAX_BEACON_INTERVAL; // 30 seconds (low battery)
         } else if (batteryPercent <= this.CRITICAL_BATTERY_LEVEL) {
@@ -495,17 +490,17 @@ class SOSService {
       if (this.isActive && this.currentSignal) {
         try {
           const interval = await getBeaconInterval();
-          
+
           // Update interval if changed
           if (this.beaconInterval) {
             clearInterval(this.beaconInterval);
           }
-          
+
           this.beaconInterval = setInterval(async () => {
             if (this.isActive && this.currentSignal) {
               try {
                 await this.broadcastViaBLE(this.currentSignal);
-                
+
                 // ELITE: Adaptive haptic feedback based on battery
                 try {
                   const batteryLevel = await Battery.getBatteryLevelAsync();
@@ -522,7 +517,7 @@ class SOSService {
               }
             }
           }, interval);
-          
+
           if (__DEV__) {
             logger.info(`✅ ELITE SOS: Adaptive beacon started (${interval}ms interval)`);
           }
@@ -534,7 +529,7 @@ class SOSService {
 
     // Start immediately
     startBeacon();
-    
+
     // ELITE: Re-check battery level every minute to adjust interval
     // CRITICAL: Store interval ID for cleanup
     const batteryCheckInterval = setInterval(() => {
@@ -545,9 +540,9 @@ class SOSService {
         clearInterval(batteryCheckInterval);
       }
     }, 60000); // Check every minute
-    
+
     // Store interval ID for cleanup (will be cleared in stopSOSSignal)
-    (this as any).batteryCheckInterval = batteryCheckInterval;
+    this.batteryCheckInterval = batteryCheckInterval;
   }
 
   /**
@@ -598,7 +593,7 @@ class SOSService {
 
           // ELITE: Broadcast updated location
           await this.broadcastViaBLE(this.currentSignal);
-          
+
           // ELITE: Update backend
           await this.sendToBackend(this.currentSignal);
         }
@@ -611,16 +606,16 @@ class SOSService {
     const startUpdates = async () => {
       try {
         const batteryLevel = await Battery.getBatteryLevelAsync();
-        const interval = batteryLevel > 0.2 
-          ? this.LOCATION_UPDATE_INTERVAL_HIGH 
+        const interval = batteryLevel > 0.2
+          ? this.LOCATION_UPDATE_INTERVAL_HIGH
           : this.LOCATION_UPDATE_INTERVAL_LOW;
-        
+
         if (this.locationUpdateInterval) {
           clearInterval(this.locationUpdateInterval);
         }
-        
+
         this.locationUpdateInterval = setInterval(updateLocation, interval);
-        
+
         // Update immediately
         updateLocation();
       } catch (error) {
@@ -631,7 +626,7 @@ class SOSService {
     };
 
     startUpdates();
-    
+
     // ELITE: Re-check battery level every minute to adjust interval
     // CRITICAL: Store interval ID for cleanup
     const locationBatteryCheckInterval = setInterval(() => {
@@ -642,7 +637,7 @@ class SOSService {
         clearInterval(locationBatteryCheckInterval);
       }
     }, 60000); // Check every minute
-    
+
     // Store interval ID for cleanup (will be cleared in stopSOSSignal)
     this.locationBatteryCheckInterval = locationBatteryCheckInterval;
   }
@@ -730,8 +725,8 @@ class SOSService {
     try {
       const { firebaseAnalyticsService } = require('./FirebaseAnalyticsService');
       firebaseAnalyticsService.logEvent('sos_stopped', {
-        duration: this.currentSignal 
-          ? String(Date.now() - this.currentSignal.timestamp) 
+        duration: this.currentSignal
+          ? String(Date.now() - this.currentSignal.timestamp)
           : 'unknown',
       });
     } catch (error) {
@@ -746,7 +741,7 @@ class SOSService {
   async autoTriggerFromEnkazDetection(location: { latitude: number; longitude: number; accuracy: number } | null): Promise<void> {
     try {
       logger.warn('🚨 ELITE SOS: Auto-triggering from enkaz detection...');
-      
+
       await this.sendSOSSignal(
         location,
         'Otomatik algılandı: Enkaz altındayım! Acil yardım gerekiyor!',
@@ -754,7 +749,7 @@ class SOSService {
           trapped: true,
           priority: 'critical',
           autoLocation: true,
-        }
+        },
       );
     } catch (error) {
       logger.error('Failed to auto-trigger SOS from enkaz detection:', error);

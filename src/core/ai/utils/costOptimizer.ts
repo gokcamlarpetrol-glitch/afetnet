@@ -14,7 +14,7 @@ const logger = createLogger('CostOptimizer');
 export async function shouldSkipAPICall(
   serviceName: string,
   estimatedCost: number,
-  dailyCostThreshold: number = 0.10 // $0.10 per day default threshold
+  dailyCostThreshold: number = 0.10, // $0.10 per day default threshold
 ): Promise<boolean> {
   try {
     const stats = await costTracker.getStats();
@@ -83,7 +83,7 @@ export function optimizePrompt(prompt: string, maxLength: number = 1000): string
 export async function batchAPICalls<T>(
   items: T[],
   batchSize: number,
-  processor: (batch: T[]) => Promise<void>
+  processor: (batch: T[]) => Promise<void>,
 ): Promise<void> {
   // ELITE: Process in batches to reduce API call frequency
   for (let i = 0; i < items.length; i += batchSize) {

@@ -10,6 +10,7 @@
  */
 
 import { createLogger } from '../utils/logger';
+import { safeLowerCase } from '../utils/safeString';
 
 const logger = createLogger('EEWSecurityService');
 
@@ -21,12 +22,12 @@ export interface SecurityValidationResult {
 
 class EEWSecurityService {
   private isInitialized = false;
-  
+
   // Rate limiting per source
   private sourceRequestCounts: Map<string, { count: number; resetAt: number }> = new Map();
   private readonly MAX_REQUESTS_PER_MINUTE = 60;
   private readonly MAX_REQUESTS_PER_HOUR = 1000;
-  
+
   // Known malicious patterns
   private readonly MALICIOUS_PATTERNS = [
     /<script/i,
@@ -40,13 +41,13 @@ class EEWSecurityService {
     /%3C/i,
     /%3E/i,
   ];
-  
+
   // Valid coordinate ranges
   private readonly VALID_LATITUDE_RANGE = { min: -90, max: 90 };
   private readonly VALID_LONGITUDE_RANGE = { min: -180, max: 180 };
   private readonly VALID_MAGNITUDE_RANGE = { min: 0, max: 10 };
   private readonly VALID_DEPTH_RANGE = { min: 0, max: 1000 }; // km
-  
+
   // Valid source whitelist
   private readonly VALID_SOURCES = [
     'AFAD',
@@ -61,14 +62,14 @@ class EEWSecurityService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
-    
+
     this.isInitialized = true;
-    
+
     // Cleanup rate limit counters every hour
     setInterval(() => {
       this.cleanupRateLimits();
     }, 60 * 60 * 1000);
-    
+
     if (__DEV__) {
       logger.info('EEWSecurityService initialized - Elite security active');
     }
@@ -79,7 +80,7 @@ class EEWSecurityService {
    */
   validateAndSanitizeEvent(event: any): SecurityValidationResult {
     const errors: string[] = [];
-    
+
     if (!event || typeof event !== 'object') {
       return {
         isValid: false,
@@ -155,7 +156,7 @@ class EEWSecurityService {
       const now = Date.now();
       const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
       const oneHourFuture = now + 60 * 60 * 1000;
-      
+
       if (event.issuedAt < oneYearAgo) {
         errors.push('IssuedAt timestamp is too old (more than 1 year ago)');
       }
@@ -224,18 +225,18 @@ class EEWSecurityService {
 
     // Remove null bytes
     let sanitized = input.replace(/\0/g, '');
-    
+
     // Remove control characters (except newline, tab, carriage return)
     sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-    
+
     // Trim whitespace
     sanitized = sanitized.trim();
-    
+
     // Limit length (prevent DoS)
     if (sanitized.length > 1000) {
       sanitized = sanitized.substring(0, 1000);
     }
-    
+
     return sanitized;
   }
 
@@ -315,7 +316,7 @@ class EEWSecurityService {
       if (response.length > 1000) {
         errors.push('Response array too large (potential DoS)');
       }
-      
+
       // Validate each event
       for (let i = 0; i < Math.min(response.length, 100); i++) {
         const eventValidation = this.validateAndSanitizeEvent(response[i]);
@@ -353,14 +354,14 @@ class EEWSecurityService {
 
     try {
       const parsed = new URL(url);
-      
+
       // Only allow HTTPS/WSS
       if (!['https:', 'wss:'].includes(parsed.protocol)) {
         return false;
       }
 
       // Block localhost and private IPs
-      const hostname = parsed.hostname.toLowerCase();
+      const hostname = safeLowerCase(parsed.hostname);
       if (
         hostname === 'localhost' ||
         hostname === '127.0.0.1' ||
@@ -414,7 +415,7 @@ class EEWSecurityService {
   stop(): void {
     this.isInitialized = false;
     this.sourceRequestCounts.clear();
-    
+
     if (__DEV__) {
       logger.info('EEWSecurityService stopped');
     }

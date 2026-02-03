@@ -1,61 +1,29 @@
 {
   "indexes": [
     {
-      "collectionGroup": "devices",
+      "collectionGroup": "contactRequests",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "deviceId",
+          "fieldPath": "status",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "updatedAt",
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "familyMembers",
+      "collectionGroup": "notifications",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "deviceId",
+          "fieldPath": "read",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "lastSeen",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "sos",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "timestamp",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "latitude",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "longitude",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "messages",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "from",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "timestamp",
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
@@ -65,7 +33,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "to",
+          "fieldPath": "conversationId",
           "order": "ASCENDING"
         },
         {
@@ -73,64 +41,7 @@
           "order": "DESCENDING"
         }
       ]
-    },
-    {
-      "collectionGroup": "locationUpdates",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "deviceId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "timestamp",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "statusUpdates",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "deviceId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "timestamp",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "earthquakes",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "magnitude",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "time",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "earthquakeAlerts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "deviceId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "timestamp",
-          "order": "DESCENDING"
-        }
-      ]
-}
+    }
   ],
   "fieldOverrides": []
 }
-

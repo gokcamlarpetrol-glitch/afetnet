@@ -74,7 +74,8 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
       isMounted = false;
       clearTimeout(timeoutId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ELITE: Empty dependency array is intentional - permissions should only be
+    // requested once on component mount, not on re-renders
   }, []);
 
   const requestAllPermissions = async () => {
@@ -93,7 +94,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     try {
       logger.info('Requesting location permission...');
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      
+
       if (foregroundStatus === 'granted') {
         const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
         statuses.location = backgroundStatus === 'granted' || foregroundStatus === 'granted';
@@ -163,7 +164,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
         <Text style={styles.description}>
           AfetNet'in hayat kurtaran özelliklerini kullanmak için bazı izinlere ihtiyacımız var.
         </Text>
-        
+
         {isRequesting && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={((colors as any).accent?.primary) || ((colors as any).primary?.main) || '#3b82f6'} />

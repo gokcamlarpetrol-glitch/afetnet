@@ -70,7 +70,7 @@ class MultiSourceVerificationService {
     // Filter sources within time window
     const now = Date.now();
     const recentSources = sources.filter(s => 
-      now - s.timestamp <= this.VERIFICATION_WINDOW
+      now - s.timestamp <= this.VERIFICATION_WINDOW,
     );
 
     if (recentSources.length < this.MIN_SOURCES) {
@@ -82,7 +82,7 @@ class MultiSourceVerificationService {
 
     // Find the largest group (consensus)
     const largestGroup = locationGroups.reduce((largest, group) => 
-      group.length > largest.length ? group : largest
+      group.length > largest.length ? group : largest,
     );
 
     if (largestGroup.length < this.MIN_SOURCES) {
@@ -105,7 +105,7 @@ class MultiSourceVerificationService {
     const confidence = this.calculateVerificationConfidence(
       largestGroup,
       magnitudeConsensus,
-      recentSources.length
+      recentSources.length,
     );
 
     const verificationTime = Date.now() - verificationStartTime;
@@ -138,7 +138,7 @@ class MultiSourceVerificationService {
         const groupCenter = this.calculateGroupCenter(group);
         const distance = this.calculateDistance(
           source.location,
-          groupCenter
+          groupCenter,
         );
 
         if (distance <= this.LOCATION_TOLERANCE) {
@@ -174,7 +174,7 @@ class MultiSourceVerificationService {
    */
   private calculateDistance(
     loc1: { latitude: number; longitude: number },
-    loc2: { latitude: number; longitude: number }
+    loc2: { latitude: number; longitude: number },
   ): number {
     const latDiff = Math.abs(loc1.latitude - loc2.latitude);
     const lonDiff = Math.abs(loc1.longitude - loc2.longitude);
@@ -245,7 +245,7 @@ class MultiSourceVerificationService {
   private calculateVerificationConfidence(
     group: VerificationSource[],
     magnitudeConsensus: { avgMagnitude: number; stdDev: number },
-    totalSources: number
+    totalSources: number,
   ): number {
     let confidence = 50; // Base confidence
 

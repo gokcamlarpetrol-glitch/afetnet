@@ -37,7 +37,7 @@ export function deduplicateEarthquakes(earthquakes: Earthquake[]): Earthquake[] 
         const timeDiff = Math.abs(existing.time - eq.time);
         const distance = calculateDistance(
           existing.latitude, existing.longitude,
-          eq.latitude, eq.longitude
+          eq.latitude, eq.longitude,
         );
         
         // ELITE: More lenient duplicate detection - within 1 minute and 10km

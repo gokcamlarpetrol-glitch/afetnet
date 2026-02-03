@@ -7,6 +7,7 @@
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 import type { FirebaseMessagePayload } from '../types/firebase-messaging';
+import { safeLowerCase } from '../utils/safeString';
 
 const logger = createLogger('FirebaseService');
 
@@ -20,9 +21,10 @@ async function getFirebaseConfig() {
     const { FIREBASE_CONFIG } = await import('../config/firebase');
     firebaseConfigCache = Platform.OS === 'ios' ? FIREBASE_CONFIG.ios : FIREBASE_CONFIG.android;
     return firebaseConfigCache;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (__DEV__) {
-      logger.warn('Failed to load Firebase config:', error?.message || error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.warn('Failed to load Firebase config:', errMsg);
     }
     return null;
   }
@@ -36,26 +38,36 @@ let Notifications: any = null;
 let Device: any = null;
 let isNotificationsLoading = false;
 
+// ELITE: Promise cache for preventing race conditions
+let notificationsLoadPromise: Promise<typeof import('expo-notifications') | null> | null = null;
+
 async function getNotificationsAsync(): Promise<typeof import('expo-notifications') | null> {
+  // Return cached module if available
   if (Notifications) return Notifications;
-  if (isNotificationsLoading) {
-    // Wait for ongoing load
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return Notifications;
+
+  // If already loading, wait for the same promise (prevents race condition)
+  if (notificationsLoadPromise) {
+    return notificationsLoadPromise;
   }
-  
-  isNotificationsLoading = true;
-  try {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    // ELITE: Use eval to prevent static analysis
-    const moduleName = 'expo-' + 'notifications';
-    Notifications = eval(`require('${moduleName}')`);
-    return Notifications;
-  } catch (error) {
-    return null;
-  } finally {
-    isNotificationsLoading = false;
-  }
+
+  // Create and cache the loading promise
+  notificationsLoadPromise = (async () => {
+    try {
+      // ELITE: Use dynamic import instead of eval (safe, App Store compliant)
+      const module = await import('expo-notifications');
+      Notifications = module;
+      return Notifications;
+    } catch (error) {
+      if (__DEV__) {
+        logger.debug('expo-notifications not available:', error);
+      }
+      return null;
+    } finally {
+      notificationsLoadPromise = null;
+    }
+  })();
+
+  return notificationsLoadPromise;
 }
 
 function getNotifications(): any {
@@ -91,7 +103,7 @@ class FirebaseService {
       // ELITE: Use async loader to ensure native bridge is ready
       const Notifications = await getNotificationsAsync();
       const Device = getDevice();
-      
+
       if (!Notifications || !Device) {
         logger.warn('Notifications or Device not available - Firebase disabled');
         return;
@@ -128,23 +140,23 @@ class FirebaseService {
           });
           this.pushToken = expoToken.data;
           if (__DEV__) logger.info('Expo push token:', this.pushToken);
-          
+
           // ELITE: Try to get FCM token (for Firebase Cloud Messaging)
           // Note: FCM token may not be available in all environments (e.g., Expo Go, web)
           // This is optional - Expo push token is primary
           try {
             const { getFCMToken } = await import('../../lib/firebase');
-            
+
             // ELITE: Wait a bit for Firebase to fully initialize
             await new Promise(resolve => setTimeout(resolve, 1000));
-            
+
             const fcmToken = await getFCMToken();
             if (fcmToken && typeof fcmToken === 'string' && fcmToken.length > 10) {
               this.fcmToken = fcmToken;
               if (__DEV__) {
                 logger.info('FCM token obtained:', fcmToken.substring(0, 20) + '...');
               }
-              
+
               // ELITE: Register FCM token with backend (fire and forget)
               this.registerTokenWithBackend(fcmToken).catch((backendError) => {
                 // Backend registration is optional - don't block initialization
@@ -165,10 +177,21 @@ class FirebaseService {
             }
             // Don't throw - continue with Expo push token
           }
-          
+
           // ELITE: Set up foreground message handler for Firebase
           await this.setupForegroundMessageHandler();
-          
+
+          // ELITE: Sync token with Firestore (Future-proof)
+          try {
+            const { tokenSyncManager } = await import('./TokenSyncManager');
+            // Don't await - let it run in background
+            tokenSyncManager.syncToken().catch(err => {
+              if (__DEV__) logger.debug('Background token sync failed:', err);
+            });
+          } catch (syncError) {
+            // Ignore import errors
+          }
+
         } catch (tokenError) {
           if (__DEV__) logger.warn('Failed to get push token, continuing without it:', tokenError);
           // Continue without push token - app will still work
@@ -215,21 +238,21 @@ class FirebaseService {
   private async setupForegroundMessageHandler(): Promise<void> {
     try {
       const { onForegroundMessage } = await import('../../lib/firebase');
-      
+
       // ELITE: Handle foreground messages from Firebase
       this.foregroundMessageUnsubscribe = await onForegroundMessage(async (payload: FirebaseMessagePayload) => {
         try {
           if (__DEV__) {
             logger.info('📨 Firebase foreground message received:', payload);
           }
-          
+
           // ELITE: Process Firebase message and show notification
           await this.handleFirebaseMessage(payload);
         } catch (error) {
           logger.error('Failed to handle Firebase foreground message:', error);
         }
       });
-      
+
       if (__DEV__) {
         logger.info('✅ Firebase foreground message handler registered');
       }
@@ -253,104 +276,109 @@ class FirebaseService {
         }
         return;
       }
-      
+
       const data = payload?.data || {};
       const notification = payload?.notification || {};
-      
+
       // ELITE: Get notification service dynamically
       const { notificationService } = await import('./NotificationService');
-      
+
       // ELITE: Determine notification type and show appropriate notification
-      const notificationType = String(data.type || 'general').toLowerCase();
-      
+      const notificationType = safeLowerCase(data.type || 'general');
+
       switch (notificationType) {
-        case 'earthquake':
-        case 'eew':
-          const magnitude = parseFloat(data.magnitude || '0');
-          const location = String(data.location || data.region || 'Bilinmeyen konum').trim();
-          
-          if (magnitude > 0 && location.length > 0) {
-            await notificationService.showEarthquakeNotification(magnitude, location);
-          } else {
-            if (__DEV__) {
-              logger.debug('Invalid earthquake notification data:', { magnitude, location });
-            }
+      case 'earthquake':
+      case 'eew': {
+        const magnitude = parseFloat(data.magnitude || '0');
+        const location = String(data.location || data.region || 'Bilinmeyen konum').trim();
+
+        if (magnitude > 0 && location.length > 0) {
+          await notificationService.showEarthquakeNotification(magnitude, location);
+        } else {
+          if (__DEV__) {
+            logger.debug('Invalid earthquake notification data:', { magnitude, location });
           }
-          break;
-          
-        case 'message':
-          const senderName = String(data.senderName || 'Bilinmeyen').trim();
-          const messageContent = String(data.message || notification.body || '').trim();
-          const messageId = String(data.messageId || '').trim();
-          const userId = String(data.userId || '').trim();
-          const priority = (data.priority === 'critical' || data.priority === 'high') ? data.priority : 'normal';
-          
-          if (senderName.length > 0 && messageContent.length > 0) {
-            await notificationService.showMessageNotification(
-              senderName,
-              messageContent,
-              messageId,
-              userId,
-              priority
-            );
-          } else {
-            if (__DEV__) {
-              logger.debug('Invalid message notification data:', { senderName, messageContent });
-            }
+        }
+        break;
+      }
+
+      case 'message': {
+        const senderName = String(data.senderName || 'Bilinmeyen').trim();
+        const messageContent = String(data.message || notification.body || '').trim();
+        const messageId = String(data.messageId || '').trim();
+        const userId = String(data.userId || '').trim();
+        const priority = (data.priority === 'critical' || data.priority === 'high') ? data.priority : 'normal';
+
+        if (senderName.length > 0 && messageContent.length > 0) {
+          await notificationService.showMessageNotification(
+            senderName,
+            messageContent,
+            messageId,
+            userId,
+            priority,
+          );
+        } else {
+          if (__DEV__) {
+            logger.debug('Invalid message notification data:', { senderName, messageContent });
           }
-          break;
-          
-        case 'news':
-          const title = String(notification.title || data.title || 'Yeni Haber').trim();
-          const summary = String(notification.body || data.summary || '').trim();
-          const source = String(data.source || 'Haber').trim();
-          
-          if (title.length > 0 && summary.length > 0) {
-            await notificationService.showNewsNotification({
-              title,
-              summary,
-              source,
-              url: data.url && typeof data.url === 'string' ? data.url.trim() : undefined,
-              articleId: data.articleId && typeof data.articleId === 'string' ? data.articleId.trim() : undefined,
+        }
+        break;
+      }
+
+      case 'news': {
+        const title = String(notification.title || data.title || 'Yeni Haber').trim();
+        const summary = String(notification.body || data.summary || '').trim();
+        const source = String(data.source || 'Haber').trim();
+
+        if (title.length > 0 && summary.length > 0) {
+          await notificationService.showNewsNotification({
+            title,
+            summary,
+            source,
+            url: data.url && typeof data.url === 'string' ? data.url.trim() : undefined,
+            articleId: data.articleId && typeof data.articleId === 'string' ? data.articleId.trim() : undefined,
+          });
+        } else {
+          if (__DEV__) {
+            logger.debug('Invalid news notification data:', { title, summary });
+          }
+        }
+        break;
+      }
+
+      case 'sos': {
+        const from = String(data.from || data.senderName || 'Bilinmeyen').trim();
+
+        if (from.length > 0) {
+          await notificationService.showSOSNotification(from);
+        } else {
+          if (__DEV__) {
+            logger.debug('Invalid SOS notification data:', { from });
+          }
+        }
+        break;
+      }
+
+      default: {
+        // ELITE: Show generic notification for unknown types
+        const Notifications = await getNotificationsAsync();
+        if (Notifications) {
+          const genericTitle = String(notification.title || 'AfetNet').trim();
+          const genericBody = String(notification.body || data.message || '').trim();
+
+          if (genericTitle.length > 0 || genericBody.length > 0) {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: genericTitle || 'AfetNet',
+                body: genericBody || '',
+                sound: 'default',
+                data: data,
+              },
+              trigger: null,
             });
-          } else {
-            if (__DEV__) {
-              logger.debug('Invalid news notification data:', { title, summary });
-            }
           }
-          break;
-          
-        case 'sos':
-          const from = String(data.from || data.senderName || 'Bilinmeyen').trim();
-          
-          if (from.length > 0) {
-            await notificationService.showSOSNotification(from);
-          } else {
-            if (__DEV__) {
-              logger.debug('Invalid SOS notification data:', { from });
-            }
-          }
-          break;
-          
-        default:
-          // ELITE: Show generic notification for unknown types
-          const Notifications = await getNotificationsAsync();
-          if (Notifications) {
-            const genericTitle = String(notification.title || 'AfetNet').trim();
-            const genericBody = String(notification.body || data.message || '').trim();
-            
-            if (genericTitle.length > 0 || genericBody.length > 0) {
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: genericTitle || 'AfetNet',
-                  body: genericBody || '',
-                  sound: 'default',
-                  data: data,
-                },
-                trigger: null,
-              });
-            }
-          }
+        }
+      }
       }
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
@@ -368,11 +396,11 @@ class FirebaseService {
       // ELITE: Get user's location for backend registration
       // For now, use default province (Türkiye) - can be extended with user preferences
       const provinces: string[] = ['Türkiye'];
-      
+
       // ELITE: Register with backend worker (FCM token)
       const { registerTokenWithWorker } = await import('../../push/fcm');
       const success = await registerTokenWithWorker(token, provinces);
-      
+
       if (success) {
         if (__DEV__) {
           logger.info('✅ FCM token registered with backend');
@@ -382,7 +410,7 @@ class FirebaseService {
           logger.debug('FCM token registration with backend failed (non-critical)');
         }
       }
-      
+
       // ELITE: Also register with BackendPushService (for additional backend features)
       try {
         const { backendPushService } = await import('./BackendPushService');
@@ -409,12 +437,12 @@ class FirebaseService {
     try {
       const { getFCMToken } = await import('../../lib/firebase');
       const newToken = await getFCMToken();
-      
+
       if (newToken && typeof newToken === 'string' && newToken.length > 10) {
         if (newToken !== this.fcmToken) {
           const oldToken = this.fcmToken;
           this.fcmToken = newToken;
-          
+
           // ELITE: Re-register with backend if token changed
           if (oldToken) {
             // Fire and forget - don't block token refresh
@@ -431,7 +459,7 @@ class FirebaseService {
               }
             });
           }
-          
+
           if (__DEV__) {
             logger.info('✅ FCM token refreshed');
           }
@@ -442,22 +470,22 @@ class FirebaseService {
           logger.debug('FCM token refresh returned null (expected in some environments)');
         }
       }
-      
+
       return this.fcmToken;
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
       const errorMessage = errorObj?.message || String(error);
-      
+
       // ELITE: Some errors are expected and shouldn't be logged as errors
       if (errorMessage.includes('messaging/unsupported-browser') ||
-          errorMessage.includes('messaging/registration-token-not-found')) {
+        errorMessage.includes('messaging/registration-token-not-found')) {
         if (__DEV__) {
           logger.debug('FCM token refresh not available (expected in some environments)');
         }
       } else {
         logger.error('Failed to refresh FCM token:', errorMessage);
       }
-      
+
       return this.fcmToken;
     }
   }
@@ -474,7 +502,7 @@ class FirebaseService {
     try {
       const Notifications = await getNotificationsAsync();
       if (!Notifications) return;
-      
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'AfetNet Test',

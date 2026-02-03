@@ -92,11 +92,11 @@ class AccessibilityService {
    */
   getFontSizeMultiplier(): number {
     switch (this.settings.fontSize) {
-      case 'small': return 0.85;
-      case 'normal': return 1.0;
-      case 'large': return 1.25;
-      case 'extraLarge': return 1.5;
-      default: return 1.0;
+    case 'small': return 0.85;
+    case 'normal': return 1.0;
+    case 'large': return 1.25;
+    case 'extraLarge': return 1.5;
+    default: return 1.0;
     }
   }
 

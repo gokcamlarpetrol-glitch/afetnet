@@ -32,7 +32,7 @@ const TEMPLATES: MessageTemplate[] = [
     icon: 'checkmark-circle',
     title: 'Güvendeyim',
     message: 'Hayattayım, güvendeyim. Yardıma ihtiyacım yok.',
-    color: '#10b981',
+    color: '#10b981', // Emerald
     priority: 'normal',
   },
   {
@@ -40,7 +40,7 @@ const TEMPLATES: MessageTemplate[] = [
     icon: 'alert-circle',
     title: 'Enkaz Altındayım',
     message: 'Yardım gerekiyor, enkaz altındayım. Lütfen kurtarma ekiplerini gönderin.',
-    color: '#dc2626',
+    color: '#ef4444', // Red
     priority: 'critical',
   },
   {
@@ -48,7 +48,7 @@ const TEMPLATES: MessageTemplate[] = [
     icon: 'medkit',
     title: 'Yaralıyım',
     message: 'Yaralıyım, sağlık ekibi gerekli. Acil tıbbi yardım bekliyorum.',
-    color: '#f59e0b',
+    color: '#f59e0b', // Amber
     priority: 'high',
   },
   {
@@ -56,7 +56,7 @@ const TEMPLATES: MessageTemplate[] = [
     icon: 'git-network',
     title: 'Mesh Ağındayım',
     message: 'İletişim kuramıyorum, mesh ağındayım. Konumumu takip edin.',
-    color: '#6366f1',
+    color: '#6366f1', // Indigo
     priority: 'normal',
   },
 ];
@@ -79,7 +79,7 @@ export default function MessageTemplates() {
     if (!deviceId) {
       Alert.alert(
         'Mesh Ağı Kapalı',
-        'Bluetooth açık değil veya mesh ağı başlatılamadı. Lütfen Bluetoothu etkinleştirip tekrar deneyin.'
+        'Bluetooth açık değil veya mesh ağı başlatılamadı. Lütfen Bluetoothu etkinleştirip tekrar deneyin.',
       );
       haptics.notificationError();
       return false;
@@ -117,7 +117,7 @@ export default function MessageTemplates() {
       if (!senderId) {
         Alert.alert(
           'Bluetooth Kapalı',
-          'Bluetooth ve konum izinleri kapalı olduğu için mesaj gönderilemedi. Lütfen her iki izni de açıp tekrar deneyin.'
+          'Bluetooth ve konum izinleri kapalı olduğu için mesaj gönderilemedi. Lütfen her iki izni de açıp tekrar deneyin.',
         );
         haptics.notificationError();
         return;
@@ -130,10 +130,10 @@ export default function MessageTemplates() {
         haptics.notificationError();
         return;
       }
-      
+
       // ELITE: Create message content with proper structure
       const messageContent = template.message; // Send plain message text, not JSON
-      
+
       // ELITE: Send via BLE mesh service broadcast with validation
       try {
         // ELITE: Validate BLE mesh service is running
@@ -153,63 +153,60 @@ export default function MessageTemplates() {
           content: messageContent,
           priority: template.priority as 'critical' | 'high' | 'normal',
           type: 'broadcast',
-          ttl: 5,
-          ackRequired: false,
-          sequence: 0,
-          attempts: 0,
+          ttl: 3,
         }).catch((error) => {
           logger.error('Error broadcasting template message:', error);
           throw error; // Re-throw to be caught by outer try-catch
         });
 
-            const timestamp = Date.now();
-            const messageId = `template_${template.id}_${timestamp}`;
-            
-            // ELITE: Add message to store for local display (await async operation)
-            await useMessageStore.getState().addMessage({
-              id: messageId,
-              from: 'me',
-              to: 'broadcast',
-              content: template.message,
-              timestamp,
-              delivered: true,
-              read: true,
-            });
+        const timestamp = Date.now();
+        const messageId = `template_${template.id}_${timestamp}`;
 
-            // ELITE: Update conversations (sync operation, no await needed)
-            useMessageStore.getState().updateConversations();
-            
-            // ELITE: Send push notification for critical templates (hayati önem)
-            if (template.priority === 'critical' || template.priority === 'high') {
-              try {
-                const { notificationService } = await import('../../services/NotificationService');
-                await notificationService.showMessageNotification(
-                  'Acil Durum Mesajı',
-                  template.message,
-                  messageId,
-                  'broadcast',
-                  template.priority
-                );
-              } catch (notifError) {
-                logger.error('Failed to send template notification:', notifError);
-              }
-            }
-            
-            logger.info(`Template "${template.title}" sent successfully`);
-            
-            // ELITE: Show success feedback
-            Alert.alert(
-              'Mesaj Gönderildi',
-              `"${template.title}" mesajı mesh ağına yayınlandı.`,
-              [{ text: 'Tamam' }]
+        // ELITE: Add message to store for local display (await async operation)
+        await useMessageStore.getState().addMessage({
+          id: messageId,
+          from: 'me',
+          to: 'broadcast',
+          content: template.message,
+          timestamp,
+          delivered: true,
+          read: true,
+        });
+
+        // ELITE: Update conversations (sync operation, no await needed)
+        useMessageStore.getState().updateConversations();
+
+        // ELITE: Send push notification for critical templates (hayati önem)
+        if (template.priority === 'critical' || template.priority === 'high') {
+          try {
+            const { notificationService } = await import('../../services/NotificationService');
+            await notificationService.showMessageNotification(
+              'Acil Durum Mesajı',
+              template.message,
+              messageId,
+              'broadcast',
+              template.priority,
             );
-            
-            haptics.notificationSuccess();
+          } catch (notifError) {
+            logger.error('Failed to send template notification:', notifError);
+          }
+        }
+
+        logger.info(`Template "${template.title}" sent successfully`);
+
+        // ELITE: Show success feedback
+        Alert.alert(
+          'Mesaj Gönderildi',
+          `"${template.title}" mesajı mesh ağına yayınlandı.`,
+          [{ text: 'Tamam' }],
+        );
+
+        haptics.notificationSuccess();
       } catch (sendError) {
         logger.error('BLE send error:', sendError);
         Alert.alert(
           'Gönderim Hatası',
-          'Mesaj gönderilirken bir hata oluştu. Lütfen Bluetooth\'un açık olduğundan emin olun ve tekrar deneyin.'
+          'Mesaj gönderilirken bir hata oluştu. Lütfen Bluetooth\'un açık olduğundan emin olun ve tekrar deneyin.',
         );
         haptics.notificationError();
       }
@@ -219,7 +216,7 @@ export default function MessageTemplates() {
       const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
       Alert.alert(
         'Hata',
-        `Mesaj gönderilemedi: ${errorMessage}. Lütfen tekrar deneyin.`
+        `Mesaj gönderilemedi: ${errorMessage}. Lütfen tekrar deneyin.`,
       );
       haptics.notificationError();
     }
@@ -238,18 +235,18 @@ export default function MessageTemplates() {
             onPress={() => sendTemplate(template)}
           >
             <LinearGradient
-              colors={[`${template.color}20`, `${template.color}10`]}
+              colors={['rgba(255, 255, 255, 0.65)', 'rgba(255, 255, 255, 0.45)']}
               style={styles.card}
             >
-              <View style={[styles.iconContainer, { backgroundColor: `${template.color}30` }]}>
-                <Ionicons name={template.icon} size={32} color={template.color} />
+              <View style={[styles.iconContainer, { backgroundColor: `${template.color}15` }]}>
+                <Ionicons name={template.icon} size={28} color={template.color} />
               </View>
-              
+
               <Text style={styles.title}>{template.title}</Text>
               <Text style={styles.message} numberOfLines={2}>
                 {template.message}
               </Text>
-              
+
               {template.priority === 'critical' && (
                 <View style={styles.priorityBadge}>
                   <Text style={styles.priorityText}>KRİTİK</Text>
@@ -273,6 +270,7 @@ export default function MessageTemplates() {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
+    marginTop: 8,
   },
   headerRow: {
     flexDirection: 'row',
@@ -280,56 +278,64 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   header: {
-    ...typography.h3,
-    color: colors.text.primary,
-    marginBottom: 8,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#334155',
+    marginBottom: 4,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    ...typography.body,
-    color: colors.text.secondary,
-    marginBottom: 24,
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#64748b',
+    marginBottom: 20,
   },
   grid: {
-    gap: 16,
+    gap: 12,
   },
   card: {
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     gap: 12,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   iconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text.primary,
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#334155',
     letterSpacing: -0.3,
   },
   message: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text.secondary,
+    color: '#64748b',
     lineHeight: 20,
   },
   priorityBadge: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(220, 38, 38, 0.3)',
+    borderColor: 'rgba(239, 68, 68, 0.2)',
   },
   priorityText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     color: '#dc2626',
     letterSpacing: 0.5,
@@ -337,19 +343,19 @@ const styles = StyleSheet.create({
   info: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     marginTop: 24,
     padding: 16,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   infoText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '500',
-    color: colors.text.secondary,
+    color: '#64748b',
     lineHeight: 18,
   },
 });

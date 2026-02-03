@@ -5,47 +5,54 @@
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../../hooks/useMesh';
-import { colors, typography, shadows, spacing } from '../../../theme';
+import { colors, spacing } from '../../../theme';
 import * as haptics from '../../../utils/haptics';
+import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurface';
+
+// Define Peer Interface
+interface MeshPeer {
+  id: string;
+  name?: string;
+  rssi?: number;
+  lastSeen?: number;
+}
 
 export default function MeshNetworkPanel() {
   const [expanded, setExpanded] = useState(false);
   const heightAnim = useRef(new Animated.Value(0)).current;
-  
+
   // CRITICAL: Call hook unconditionally (React hooks rules)
-  // Hook itself won't throw, but store data might be undefined
   const meshData = useMesh();
-  
-  // CRITICAL: Safe data extraction with fallbacks
-  const peers = meshData?.peers || {};
+
+  // CRITICAL: Safe data extraction with fallbacks and type guards
+  const peers: { [key: string]: MeshPeer } = (meshData?.peers as any) || {};
   const isConnected = meshData?.isConnected || false;
   const messages = meshData?.messages || [];
   const peerCount = Object.keys(peers).length;
 
   // Real data from mesh store
   const messageCount = messages ? messages.length : 0;
-  
+
   // Calculate real signal strength from peer RSSI values
   const signalStrength = useMemo(() => {
     if (peerCount === 0) return 0;
-    
+
     const peerArray = Object.values(peers);
     const rssiValues = peerArray
-      .map((peer: any) => peer.rssi)
-      .filter((rssi: number) => rssi != null && rssi !== 0);
-    
+      .map((peer) => peer.rssi)
+      .filter((rssi): rssi is number => rssi != null && rssi !== 0);
+
     if (rssiValues.length === 0) return 50; // Default if no RSSI data
-    
+
     // Average RSSI to signal strength (RSSI ranges from -100 to 0)
-    const avgRssi = rssiValues.reduce((a: number, b: number) => a + b, 0) / rssiValues.length;
+    const avgRssi = rssiValues.reduce((a, b) => a + b, 0) / rssiValues.length;
     // Convert RSSI to percentage: -50 = 100%, -100 = 0%
     const strength = Math.max(0, Math.min(100, ((avgRssi + 100) / 50) * 100));
     return Math.round(strength);
   }, [peers, peerCount]);
-  
+
   // Progress bar animation
   const signalProgress = useRef(new Animated.Value(0)).current;
 
@@ -56,7 +63,7 @@ export default function MeshNetworkPanel() {
       useNativeDriver: false,
     });
     animation.start();
-    
+
     // CRITICAL: Cleanup animation on unmount
     return () => {
       animation.stop();
@@ -76,7 +83,7 @@ export default function MeshNetworkPanel() {
   const toggleExpanded = () => {
     haptics.impactLight();
     setExpanded(!expanded);
-    
+
     const animation = Animated.spring(heightAnim, {
       toValue: expanded ? 0 : 1,
       useNativeDriver: false,
@@ -87,13 +94,13 @@ export default function MeshNetworkPanel() {
   };
 
   useEffect(() => {
-    // İlk render'da animasyon değerini ayarla
+    // Initial animation value
     if (expanded) {
       heightAnim.setValue(1);
     } else {
       heightAnim.setValue(0);
     }
-    
+
     // CRITICAL: Cleanup animation on unmount
     return () => {
       heightAnim.stopAnimation();
@@ -103,40 +110,37 @@ export default function MeshNetworkPanel() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#1a1f2e', '#141824']}
-        style={styles.gradient}
-      >
+      <PremiumMaterialSurface variant="B">
         {/* Header - Tıklanabilir Accordion */}
-        <TouchableOpacity 
-          onPress={toggleExpanded} 
+        <TouchableOpacity
+          onPress={toggleExpanded}
           activeOpacity={0.7}
           style={styles.headerButton}
         >
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <View style={styles.headerLeftIcon}>
-                <Ionicons name="git-network" size={18} color={colors.mesh.primary} />
+              <View style={[styles.headerLeftIcon, { backgroundColor: isConnected ? 'rgba(22,163,74,0.14)' : 'rgba(100,116,139,0.14)' }]}>
+                <Ionicons name="git-network" size={18} color={isConnected ? "#16A34A" : "#64748B"} />
               </View>
               <Text style={styles.title}>Mesh Ağı</Text>
             </View>
             <View style={styles.headerRight}>
-              <View style={[styles.statusBadge, { 
-                backgroundColor: isConnected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.15)',
-                borderColor: isConnected ? colors.mesh.primary : colors.status.offline,
+              <View style={[styles.statusBadge, {
+                backgroundColor: isConnected ? 'rgba(22,163,74,0.14)' : 'rgba(100,116,139,0.14)',
+                borderColor: 'transparent',
               }]}>
-                <View style={[styles.statusDot, { 
-                  backgroundColor: isConnected ? colors.mesh.primary : colors.status.offline,
+                <View style={[styles.statusDot, {
+                  backgroundColor: isConnected ? '#16A34A' : '#64748B',
                 }]} />
-                <Text style={[styles.statusText, { 
-                  color: isConnected ? colors.mesh.primary : colors.status.offline,
+                <Text style={[styles.statusText, {
+                  color: isConnected ? '#15803D' : '#475569',
                 }]}>
                   {isConnected ? 'CANLI' : 'KAPALI'}
                 </Text>
               </View>
-              <Ionicons 
-                name={expanded ? 'chevron-up' : 'chevron-down'} 
-                size={20} 
+              <Ionicons
+                name={expanded ? 'chevron-up' : 'chevron-down'}
+                size={20}
                 color={colors.text.secondary}
                 style={styles.chevron}
               />
@@ -162,7 +166,7 @@ export default function MeshNetworkPanel() {
             {/* Stats Grid */}
             <View style={styles.statsGrid}>
               <View style={styles.statCard}>
-                <View style={[styles.statIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(59, 130, 246, 0.1)' }]}>
                   <Ionicons name="people" size={18} color={colors.mesh.primary} />
                 </View>
                 <Text style={styles.statValue}>{peerCount}</Text>
@@ -170,7 +174,7 @@ export default function MeshNetworkPanel() {
               </View>
 
               <View style={styles.statCard}>
-                <View style={[styles.statIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                   <Ionicons name="chatbubbles" size={18} color={colors.status.online} />
                 </View>
                 <Text style={styles.statValue}>{messageCount}</Text>
@@ -178,7 +182,7 @@ export default function MeshNetworkPanel() {
               </View>
 
               <View style={styles.statCard}>
-                <View style={[styles.statIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
                   <Ionicons name="pulse" size={18} color={colors.status.alert} />
                 </View>
                 <Text style={styles.statValue}>{signalStrength}%</Text>
@@ -217,11 +221,11 @@ export default function MeshNetworkPanel() {
               <View style={styles.devicesSection}>
                 <Text style={styles.devicesTitle}>Bağlı Cihazlar</Text>
                 <View style={styles.devicesList}>
-                  {Object.values(peers).slice(0, 3).map((peer: any, index) => (
+                  {Object.values(peers).slice(0, 3).map((peer, index) => (
                     <View key={index} style={styles.deviceItem}>
                       <View style={styles.deviceDot} />
                       <Text style={styles.deviceName}>
-                        Cihaz {index + 1}
+                        {peer.name || `Cihaz ${index + 1}`}
                       </Text>
                     </View>
                   ))}
@@ -245,25 +249,20 @@ export default function MeshNetworkPanel() {
             </View>
           </Animated.View>
         )}
-      </LinearGradient>
+      </PremiumMaterialSurface>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 20,
-  },
-  gradient: {
-    paddingHorizontal: spacing[5],
-    paddingVertical: spacing[4],
-    minHeight: 56,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border.light,
+    marginHorizontal: 4,
+    marginBottom: 16,
+    // Radius/Shadow handled by Surface
   },
   headerButton: {
-    // TouchableOpacity için
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[4],
   },
   header: {
     flexDirection: 'row',
@@ -280,7 +279,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: 'rgba(59, 130, 246, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -293,19 +291,21 @@ const styles = StyleSheet.create({
     // Animasyon Animated.View ile yapılıyor
   },
   collapsibleContent: {
-    // Animated.View için
+    paddingHorizontal: spacing[5],
+    paddingBottom: spacing[4],
   },
   title: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: colors.text.primary,
+    letterSpacing: 0.3,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 16,
+    borderRadius: 12,
     gap: 6,
     borderWidth: 1,
   },
@@ -316,39 +316,44 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: 0.6,
   },
   statsGrid: {
     flexDirection: 'row',
     gap: 12,
     marginBottom: 16,
+    marginTop: 8,
   },
   statCard: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.02)', // Very subtle grey
+    borderRadius: 16,
     padding: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border.light,
+    borderColor: 'rgba(15, 23, 42, 0.03)',
   },
   statIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   statValue: {
-    ...typography.h2,
+    fontSize: 18,
+    fontWeight: '800',
     color: colors.text.primary,
     marginBottom: 4,
   },
   statLabel: {
-    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   progressSection: {
     marginBottom: 16,
@@ -371,7 +376,7 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -383,7 +388,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.border.light,
+    borderTopColor: 'rgba(15, 23, 42, 0.05)',
   },
   devicesTitle: {
     fontSize: 13,
@@ -424,10 +429,10 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: colors.border.light,
+    borderTopColor: 'rgba(15, 23, 42, 0.05)',
   },
   footerText: {
-    ...typography.bodySmall,
+    fontSize: 12,
     color: colors.text.tertiary,
   },
 });

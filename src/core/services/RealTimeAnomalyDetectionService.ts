@@ -47,7 +47,7 @@ class RealTimeAnomalyDetectionService {
   detectAnomaly(
     value: number,
     source: string,
-    context?: { magnitude?: number; latitude?: number; longitude?: number }
+    context?: { magnitude?: number; latitude?: number; longitude?: number },
   ): AnomalyResult {
     if (!this.isInitialized) {
       return {

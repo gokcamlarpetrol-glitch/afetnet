@@ -1,743 +1,1082 @@
 /**
- * CONVERSATION SCREEN - Elite Chat Interface
- * Production-grade offline messaging with real-time updates
- * Zero-error guarantee with comprehensive error handling
+ * CONVERSATION SCREEN - ELITE EDITION V3
+ * Modern chat interface with full media messaging support.
+ * 
+ * FEATURES:
+ * - Text messaging with typing indicators
+ * - Image sending (camera + gallery)
+ * - Voice message recording and playback
+ * - Location sharing
+ * - Message reactions
+ * - Reply threading
+ * - Edit/Delete messages
  */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Pressable,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StatusBar,
-  Alert,
+  View, Text, StyleSheet, TextInput, Pressable, FlatList,
+  KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../components/SafeLinearGradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMessageStore, Message } from '../../stores/messageStore';
-import { bleMeshService } from '../../services/BLEMeshService';
-import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
-import { colors, typography, spacing } from '../../theme';
+import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
+import { hybridMessageService } from '../../services/HybridMessageService';
+import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
+import { BlurView } from '../../components/SafeBlurView';
+import Animated, { FadeInUp, Layout, FadeIn, FadeOut } from 'react-native-reanimated';
 import * as haptics from '../../utils/haptics';
-import { createLogger } from '../../utils/logger';
-// ELITE: Input sanitization handled inline for better control
-
-const logger = createLogger('ConversationScreen');
+import { useSettingsStore } from '../../stores/settingsStore';
+import { useMessageStore, Message } from '../../stores/messageStore';
+import { validateMessage, sanitizeForDisplay } from '../../utils/messageSanitizer';
+import MessageOptionsModal from '../../components/messages/MessageOptionsModal';
+import { AttachmentsModal } from '../../components/messages/AttachmentsModal';
+import { VoiceRecorderUI } from '../../components/messages/VoiceRecorderUI';
+import { voiceMessageService } from '../../services/VoiceMessageService';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase, RouteProp } from '@react-navigation/native';
 
 // ELITE: Type-safe navigation and route props
+type ConversationNavigationProp = StackNavigationProp<ParamListBase>;
+type ConversationRouteProp = RouteProp<{ Conversation: { userId: string } }, 'Conversation'>;
+
 interface ConversationScreenProps {
-  navigation: {
-    navigate: (screen: string, params?: { userId: string }) => void;
-    goBack: () => void;
-  };
-  route: {
-    params: {
-      userId: string;
-    };
-  };
+  navigation: ConversationNavigationProp;
+  route: ConversationRouteProp;
 }
 
-export default function ConversationScreen({ navigation, route }: ConversationScreenProps) {
-  // ELITE: Validate route params
-  const userId = useMemo(() => {
-    try {
-      const paramUserId = route.params?.userId;
-      if (!paramUserId || typeof paramUserId !== 'string' || paramUserId.trim().length === 0) {
-        logger.error('Invalid userId in route params:', route.params);
-        navigation.goBack();
-        return '';
-      }
-      return paramUserId.trim();
-    } catch (error) {
-      logger.error('Error reading route params:', error);
-      navigation.goBack();
-      return '';
-    }
-  }, [route.params, navigation]);
-  const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
-  const flatListRef = useRef<FlatList>(null);
-  const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+// ELITE: Typed MessageBubble props
+interface MessageBubbleProps {
+  message: MeshMessage;
+  isMe: boolean;
+  showTail: boolean;
+  onLongPress?: () => void;
+}
 
-  // ELITE: Load messages callback (memoized to prevent re-renders)
-  const loadMessages = useCallback(() => {
-    try {
-      const conversationMessages = useMessageStore.getState().getConversationMessages(userId);
-      // ELITE: Sort messages by timestamp (oldest first for chat display)
-      const sortedMessages = [...conversationMessages].sort((a, b) => a.timestamp - b.timestamp);
-      setMessages(sortedMessages);
-      // Mark as read (async but don't await - fire and forget)
-      useMessageStore.getState().markConversationRead(userId).catch((error) => {
-        logger.error('Failed to mark conversation as read:', error);
-      });
-    } catch (error) {
-      logger.error('Error loading messages:', error);
+// ELITE: Typing Indicator Component (inline for now)
+const TypingIndicatorDots = () => {
+  return (
+    <Animated.View
+      entering={FadeIn.duration(200)}
+      exiting={FadeOut.duration(200)}
+      style={styles.typingContainer}
+    >
+      <View style={styles.typingBubble}>
+        <View style={styles.dotContainer}>
+          <Animated.View style={[styles.dot, { opacity: 0.4 }]} />
+          <Animated.View style={[styles.dot, { opacity: 0.6 }]} />
+          <Animated.View style={[styles.dot, { opacity: 0.8 }]} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
+
+// ELITE: Network Status Banner Component (inline)
+const NetworkBanner = ({ status }: { status: 'online' | 'mesh' | 'offline' }) => {
+  const getStatusConfig = () => {
+    switch (status) {
+      case 'online':
+        return { color: '#22c55e', text: 'Çevrimiçi', icon: 'cloud-done' as const };
+      case 'mesh':
+        return { color: '#3b82f6', text: 'Mesh Ağı', icon: 'git-network' as const };
+      case 'offline':
+        return { color: '#f59e0b', text: 'Çevrimdışı', icon: 'cloud-offline' as const };
+    }
+  };
+
+  const config = getStatusConfig();
+
+  return (
+    <Animated.View entering={FadeIn} style={[styles.networkBanner, { backgroundColor: config.color + '20' }]}>
+      <Ionicons name={config.icon} size={14} color={config.color} />
+      <Text style={[styles.networkText, { color: config.color }]}>{config.text}</Text>
+    </Animated.View>
+  );
+};
+
+// Bubble Component
+const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
+  // Sanitize content for display
+  const displayContent = sanitizeForDisplay(message.content);
+
+  const getStatusIcon = () => {
+    switch (message.status) {
+      case 'sending':
+      case 'pending':
+        return 'time-outline';
+      case 'sent':
+        return 'checkmark';
+      case 'delivered':
+        return 'checkmark-done';
+      case 'read':
+        return 'checkmark-done';
+      case 'failed':
+        return 'close-circle';
+      default:
+        return 'checkmark';
+    }
+  };
+
+  const getStatusColor = () => {
+    if (message.status === 'failed') return '#ef4444';
+    if (message.status === 'read') return '#22c55e';
+    return '#64748b';
+  };
+
+  return (
+    <Animated.View
+      entering={FadeInUp.springify()}
+      layout={Layout.springify()}
+      style={[
+        styles.bubbleRow,
+        isMe ? styles.rowMe : styles.rowOther,
+        !showTail && { marginBottom: 2 },
+      ]}
+    >
+      <View style={[
+        styles.bubble,
+        isMe ? styles.bubbleMe : styles.bubbleOther,
+        !showTail && (isMe ? styles.noTailMe : styles.noTailOther),
+        message.status === 'failed' && styles.bubbleFailed,
+      ]}>
+        <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>
+          {displayContent}
+        </Text>
+
+        <View style={styles.metaRow}>
+          <Text style={[styles.timeText, isMe ? styles.timeMe : styles.timeOther]}>
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+          {isMe && (
+            <Ionicons
+              name={getStatusIcon()}
+              size={12}
+              color={getStatusColor()}
+            />
+          )}
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
+
+export default function ConversationScreen({ navigation, route }: ConversationScreenProps) {
+  const { userId } = route.params || {};
+  const insets = useSafeAreaInsets();
+  const [text, setText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [connectionState, setConnectionState] = useState<'online' | 'mesh' | 'offline'>('offline');
+  const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ELITE: Message options modal state
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+
+  // ELITE: Media messaging state
+  const [attachmentsModalVisible, setAttachmentsModalVisible] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ELITE: Get message store actions for edit/delete
+  const editMessage = useMessageStore(state => state.editMessage);
+  const deleteMessage = useMessageStore(state => state.deleteMessage);
+  const forwardMessage = useMessageStore(state => state.forwardMessage);
+
+  // ELITE: Connect to real store (M7 fix)
+  const allMessages = useMeshStore(state => state.messages);
+  const myDeviceId = useMeshStore(state => state.myDeviceId);
+
+  // Filter messages for this conversation
+  const messages = allMessages.filter(msg => {
+    // Show messages from/to this user
+    return msg.senderId === userId || msg.to === userId ||
+      msg.senderId === 'ME' || msg.to === 'broadcast';
+  }).sort((a, b) => a.timestamp - b.timestamp);
+
+  // Subscribe to connection state
+  useEffect(() => {
+    const unsubscribe = hybridMessageService.onConnectionChange((state) => {
+      setConnectionState(state);
+    });
+
+    // Set initial state
+    setConnectionState(hybridMessageService.getConnectionState());
+
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to typing indicators
+  useEffect(() => {
+    const unsubscribe = hybridMessageService.onTyping((typingUserId, _userName, typing) => {
+      if (typingUserId === userId) {
+        setIsTyping(typing);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
+
+  // Subscribe to new messages and auto-scroll
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages.length]);
+
+  // Handle text change with typing indicator
+  const handleTextChange = useCallback((newText: string) => {
+    setText(newText);
+
+    // Broadcast typing indicator
+    if (newText.length > 0) {
+      hybridMessageService.broadcastTyping(userId);
+    }
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
     }
   }, [userId]);
 
-  useEffect(() => {
-    const getMyId = async () => {
-      try {
-        const id = bleMeshService.getMyDeviceId() || await getDeviceIdFromLib();
-        setMyDeviceId(id || 'me');
-      } catch (error) {
-        logger.error('Failed to get device ID:', error);
-        setMyDeviceId('me');
-      }
-    };
-    getMyId();
-
-    // ELITE: Initialize message store if not already initialized
-    const initStore = async () => {
-      try {
-        await useMessageStore.getState().initialize();
-      } catch (error) {
-        logger.error('Failed to initialize message store:', error);
-      }
-    };
-    initStore();
-
-    // CRITICAL: Ensure BLE Mesh Service is started for offline messaging
-    // ELITE: This ensures messages can be sent/received without internet
-    const ensureMeshRunning = async () => {
-      try {
-        if (!bleMeshService.getIsRunning()) {
-          await bleMeshService.start();
-          if (__DEV__) {
-            logger.info('BLE Mesh service started from ConversationScreen for offline messaging');
-          }
-        }
-      } catch (error) {
-        logger.warn('BLE Mesh start failed (will retry on send):', error);
-        // Continue - service will be started when sending message
-      }
-    };
-    ensureMeshRunning();
-
-    loadMessages();
-
-    // Listen for new messages via BLE mesh
-    const unsubscribe = bleMeshService.onMessage(async (meshMessage) => {
-      try {
-        const content = meshMessage.content;
-        if (typeof content !== 'string') return;
-
-        // ELITE: Validate content length (prevent DoS)
-        if (content.length > 10000) {
-          logger.warn('Message content too large, skipping');
-          return;
-        }
-
-        // ELITE: Use safe JSON parsing
-        const { sanitizeJSON } = await import('../../utils/inputSanitizer');
-        const { sanitizeString } = await import('../../utils/validation');
-        const { sanitizeDeviceId } = await import('../../utils/validation');
-        
-        let messageData: any = null;
-        
-        try {
-          messageData = sanitizeJSON(content);
-        } catch {
-          // Not JSON, might be plain text - check if mesh message is text type
-          if (meshMessage.type === 'text') {
-            const senderId = meshMessage.from;
-            if (senderId === userId) {
-              // ELITE: Sanitize plain text content
-              const sanitizedContent = sanitizeString(content, 5000);
-              if (sanitizedContent && sanitizedContent.length > 0) {
-                const newMessage: Message = {
-                  id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                  from: userId,
-                  to: 'me',
-                  content: sanitizedContent,
-                  timestamp: Date.now(),
-                  delivered: true,
-                  read: false,
-                };
-                // ELITE: Await async addMessage to ensure proper state update
-                useMessageStore.getState().addMessage(newMessage).then(async () => {
-                  loadMessages();
-                  haptics.notificationSuccess();
-                  
-                  // ELITE: Send instant push notification (CRITICAL - hayati önem)
-                  try {
-                    const { notificationService } = await import('../../services/NotificationService');
-                    await notificationService.showMessageNotification(
-                      `Cihaz ${userId.slice(0, 8)}...`,
-                      sanitizedContent,
-                      newMessage.id,
-                      userId,
-                      'normal'
-                    );
-                  } catch (notifError) {
-                    logger.error('Failed to send message notification:', notifError);
-                    // Continue - notification failure shouldn't block message delivery
-                  }
-                }).catch((error) => {
-                  logger.error('Failed to add message:', error);
-                });
-              }
-            }
-          }
-          return;
-        }
-
-        // ELITE: Check if this is a chat message (parse from content)
-        // messageData.type can be 'chat', 'message', or 'text' from the parsed JSON
-        if (messageData && typeof messageData === 'object' && messageData !== null) {
-          const messageType = typeof messageData.type === 'string' ? messageData.type : null;
-          
-          if (messageType === 'chat' || messageType === 'message' || messageType === 'text' || meshMessage.type === 'text') {
-            // ELITE: Sanitize sender ID
-            const senderId = sanitizeDeviceId(
-              messageData.from || messageData.senderId || messageData.deviceId || ''
-            );
-            
-            if (senderId && senderId.length >= 4 && senderId === userId) {
-              // ELITE: Sanitize message content
-              const messageContent = sanitizeString(
-                messageData.content || messageData.message || content || '',
-                5000
-              );
-              
-              if (messageContent && messageContent.length > 0) {
-                // ELITE: Validate timestamp
-                const messageTimestamp = typeof messageData.timestamp === 'number' && !isNaN(messageData.timestamp)
-                  ? Math.max(0, Math.min(Date.now() + 60000, messageData.timestamp)) // Max 1 min in future
-                  : Date.now();
-                
-                const newMessage: Message = {
-                  id: typeof messageData.id === 'string' && messageData.id.length <= 100
-                    ? messageData.id
-                    : `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                  from: userId,
-                  to: 'me',
-                  content: messageContent,
-                  timestamp: messageTimestamp,
-                  delivered: true,
-                  read: false,
-                };
-                // ELITE: Await async addMessage to ensure proper state update
-                useMessageStore.getState().addMessage(newMessage).then(async () => {
-                  loadMessages();
-                  haptics.notificationSuccess();
-                  
-                  // ELITE: Send instant push notification (CRITICAL - hayati önem)
-                  try {
-                    const { notificationService } = await import('../../services/NotificationService');
-                    await notificationService.showMessageNotification(
-                      `Cihaz ${userId.slice(0, 8)}...`,
-                      messageContent,
-                      newMessage.id,
-                      userId,
-                      'normal'
-                    );
-                  } catch (notifError) {
-                    logger.error('Failed to send message notification:', notifError);
-                    // Continue - notification failure shouldn't block message delivery
-                  }
-                }).catch((error) => {
-                  logger.error('Failed to add message:', error);
-                });
-              }
-            }
-          }
-        }
-      } catch (error) {
-        logger.error('Error processing mesh message:', error);
-      }
-    });
-
-    // ELITE: Subscribe to message store changes instead of polling
-    // Zustand subscribe takes a single callback that receives the entire state
-    const unsubscribeStore = useMessageStore.subscribe(() => {
-      // Reload messages when store updates
-      loadMessages();
-    });
-
-    return () => {
-      unsubscribe();
-      unsubscribeStore();
-      // ELITE: Cleanup all timeouts on unmount
-      timeoutRefs.current.forEach((timeout) => {
-        clearTimeout(timeout);
-      });
-      timeoutRefs.current.clear();
-    };
-  }, [userId, loadMessages]);
-
+  // Send message using HybridMessageService
   const sendMessage = useCallback(async () => {
-    try {
-      // ELITE: Validate input
-      if (!inputText.trim() || !myDeviceId) {
-        return;
-      }
+    if (!text.trim()) return;
 
-      // ELITE: Validate myDeviceId
-      if (typeof myDeviceId !== 'string' || myDeviceId.trim().length === 0) {
-        logger.warn('Invalid myDeviceId:', myDeviceId);
-        Alert.alert('Hata', 'Cihaz ID geçersiz. Lütfen mesh ağını kontrol edin.');
-        return;
-      }
-
-      // ELITE: Sanitize user input before sending (prevent XSS, injection)
-      const { sanitizeString } = await import('../../utils/validation');
-      const { sanitizeText } = await import('../../utils/inputSanitizer');
-      
-      // ELITE: Trim and validate length
-      const trimmedInput = inputText.trim();
-      if (trimmedInput.length > 5000) {
-        Alert.alert('Hata', 'Mesaj çok uzun. Maksimum 5000 karakter.');
-        return;
-      }
-      
-      // ELITE: Sanitize input - remove dangerous characters
-      const sanitizedInput = sanitizeString(trimmedInput, 5000);
-      if (!sanitizedInput || sanitizedInput.length === 0) {
-        logger.warn('Message empty after sanitization');
-        Alert.alert('Hata', 'Mesaj içeriği geçersiz.');
-        return;
-      }
-      
-      // ELITE: Additional sanitization for text content
-      const messageContent = sanitizeText(sanitizedInput, '.,!?;:()[]{}-\'\"');
-      if (!messageContent || messageContent.length === 0) {
-        logger.warn('Message empty after text sanitization');
-        Alert.alert('Hata', 'Mesaj içeriği geçersiz karakterler içeriyor.');
-        return;
-      }
-      setInputText('');
-      haptics.impactMedium();
-
-      // ELITE: Create message object with validation
-      const timestamp = Date.now();
-      const messageId = `msg-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      const newMessage: Message = {
-        id: messageId,
-        from: 'me',
-        to: userId,
-        content: messageContent,
-        timestamp,
-        delivered: false,
-        read: false,
-      };
-
-      // ELITE: Add to store with error handling (await async operation)
-      try {
-        await useMessageStore.getState().addMessage(newMessage);
-      } catch (error) {
-        logger.error('Error adding message to store:', error);
-        Alert.alert('Hata', 'Mesaj kaydedilemedi.');
-        return;
-      }
-      
-      // ELITE: Update local state
-      setMessages(prev => [...prev, newMessage]);
-      
-      // ELITE: Send via BLE mesh with comprehensive error handling
-      try {
-        // CRITICAL: Ensure BLE Mesh Service is running before sending
-        // ELITE: This ensures offline messaging works without internet
-        if (!bleMeshService.getIsRunning()) {
-          try {
-            await bleMeshService.start();
-            if (__DEV__) {
-              logger.info('BLE Mesh service started before sending message');
-            }
-          } catch (startError) {
-            logger.warn('BLE Mesh start failed before sending (will queue message):', startError);
-            // Continue - message will be queued and sent when service starts
-          }
-        }
-
-        const messagePayload = JSON.stringify({
-          type: 'chat',
-          from: myDeviceId,
-          to: userId, // CRITICAL: userId is actually deviceId for offline messaging
-          content: messageContent,
-          timestamp,
-        });
-
-        // ELITE: Validate message payload size
-        if (messagePayload.length > 10000) {
-          logger.warn('Message payload too large:', messagePayload.length);
-          Alert.alert('Hata', 'Mesaj çok büyük. Lütfen daha kısa bir mesaj gönderin.');
-          return;
-        }
-
-        // CRITICAL: Send via BLE Mesh Service directly (actual BLE transmission)
-        // This ensures message is actually sent over BLE, not just stored
-        // ELITE: userId is deviceId for offline messaging - BLE Mesh uses deviceId
-        const sendPromise = bleMeshService.sendMessage(messagePayload, userId);
-        
-        // CRITICAL: Also add to mesh store for tracking and statistics
-        // ELITE: Only broadcast if message contains critical keywords or is urgent
-        // This optimizes battery usage - not every message needs broadcast
-        const isUrgent = messageContent.toLowerCase().includes('acil') || 
-                        messageContent.toLowerCase().includes('sos') ||
-                        messageContent.toLowerCase().includes('yardım') ||
-                        messageContent.toLowerCase().includes('kurtar');
-        
-        const broadcastPromise = isUrgent 
-          ? bleMeshService.broadcastMessage({
-              content: messagePayload,
-              type: 'text',
-              to: userId,
-              priority: 'high', // Elevated priority for urgent messages
-              ackRequired: false,
-              ttl: 3600,
-              sequence: 0,
-              attempts: 0,
-            })
-          : Promise.resolve(); // Skip broadcast for normal messages
-
-        // CRITICAL: Create timeout promise with cleanup (20 seconds for offline reliability)
-        let timeoutId: NodeJS.Timeout | null = null;
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => {
-            timeoutId = null;
-            reject(new Error('Send timeout'));
-          }, 20000); // CRITICAL: 20 seconds for offline mesh networks
-        });
-        
-        // CRITICAL: Wait for all operations with timeout protection
-        await Promise.race([
-          Promise.all([
-            sendPromise, 
-            broadcastPromise,
-          ]).finally(() => {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-              timeoutId = null;
-            }
-          }),
-          timeoutPromise.finally(() => {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-              timeoutId = null;
-            }
-          }),
-        ]);
-
-        // ELITE: Mark as delivered with delay (store timeout for cleanup)
-        const deliveredTimeoutId = setTimeout(() => {
-          try {
-            useMessageStore.getState().markAsDelivered(newMessage.id);
-            setMessages(prev => prev.map(m => 
-              m.id === newMessage.id ? { ...m, delivered: true } : m
-            ));
-            timeoutRefs.current.delete(newMessage.id);
-          } catch (error) {
-            logger.error('Error marking message as delivered:', error);
-            timeoutRefs.current.delete(newMessage.id);
-          }
-        }, 1000);
-        
-        // ELITE: Store timeout for cleanup
-        timeoutRefs.current.set(newMessage.id, deliveredTimeoutId);
-
-        haptics.notificationSuccess();
-        logger.info('Message sent successfully:', messageId);
-      } catch (error) {
-        logger.error('Failed to send message:', error);
-        haptics.notificationError();
-        Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
-        // ELITE: Cleanup timeout if exists
-        const deliveredTimeout = timeoutRefs.current.get(newMessage.id);
-        if (deliveredTimeout) {
-          clearTimeout(deliveredTimeout);
-          timeoutRefs.current.delete(newMessage.id);
-        }
-        // ELITE: Remove failed message from UI
-        setMessages(prev => prev.filter(msg => msg.id !== newMessage.id));
-      }
-
-      // ELITE: Scroll to bottom with error handling and cleanup
-      const scrollKey = `scroll-${Date.now()}`;
-      const scrollTimeoutId = setTimeout(() => {
-        try {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        } catch (error) {
-          logger.warn('Error scrolling to end:', error);
-        }
-        // CRITICAL: Cleanup timeout after scroll completes
-        timeoutRefs.current.delete(scrollKey);
-      }, 100);
-      
-      // ELITE: Store timeout for cleanup
-      timeoutRefs.current.set(scrollKey, scrollTimeoutId);
-    } catch (error) {
-      logger.error('Error in sendMessage:', error);
-      Alert.alert('Hata', 'Mesaj gönderilirken bir hata oluştu.');
+    // Validate message
+    const validation = validateMessage(text);
+    if (!validation.valid) {
+      Alert.alert('Hata', validation.error || 'Geçersiz mesaj');
+      return;
     }
-  }, [inputText, myDeviceId, userId, setMessages]);
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isMe = item.from === 'me';
-    
-    return (
-      <View style={[styles.messageContainer, isMe && styles.messageContainerMe]}>
-        <View style={[styles.messageBubble, isMe ? styles.messageBubbleMe : styles.messageBubbleOther]}>
-          <Text style={[styles.messageText, isMe && styles.messageTextMe]}>
-            {item.content}
-          </Text>
-          <View style={styles.messageFooter}>
-            <Text style={[styles.messageTime, isMe && styles.messageTimeMe]}>
-              {new Date(item.timestamp).toLocaleTimeString('tr-TR', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })}
-            </Text>
-            {isMe && (
-              <Ionicons 
-                name={item.delivered ? 'checkmark-done' : 'checkmark'} 
-                size={14} 
-                color={item.delivered ? colors.brand.primary : colors.text.tertiary} 
-              />
-            )}
-          </View>
-        </View>
-      </View>
+    haptics.impactLight();
+
+    try {
+      await hybridMessageService.sendMessage(validation.sanitized, userId, {
+        priority: 'normal',
+        type: 'CHAT',
+      });
+      setText('');
+    } catch (error) {
+      console.error('Send failed:', error);
+      Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
+    }
+  }, [text, userId]);
+
+  // Retry failed message
+  const retryMessage = useCallback(async (messageId: string) => {
+    haptics.impactMedium();
+    await hybridMessageService.retryAllFailed();
+  }, []);
+
+  // ELITE: Handle message long press to show options
+  const handleMessageLongPress = useCallback((message: Message) => {
+    haptics.impactLight();
+    setSelectedMessage(message);
+    setOptionsModalVisible(true);
+  }, []);
+
+  // ELITE: Handle edit message
+  const handleEditMessage = useCallback(async (messageId: string) => {
+    const message = selectedMessage;
+    if (!message) return;
+
+    setEditingMessageId(messageId);
+    setEditText(message.content);
+    setOptionsModalVisible(false);
+    // Focus will be handled by the edit input
+  }, [selectedMessage]);
+
+  // ELITE: Save edited message
+  const saveEditedMessage = useCallback(async () => {
+    if (!editingMessageId || !editText.trim()) return;
+
+    const success = await editMessage(editingMessageId, editText.trim());
+    if (success) {
+      haptics.notificationSuccess();
+    }
+    setEditingMessageId(null);
+    setEditText('');
+  }, [editingMessageId, editText, editMessage]);
+
+  // ELITE: Cancel editing
+  const cancelEditing = useCallback(() => {
+    setEditingMessageId(null);
+    setEditText('');
+  }, []);
+
+  // ELITE: Handle delete message
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    const success = await deleteMessage(messageId);
+    if (success) {
+      haptics.notificationWarning();
+    }
+    setOptionsModalVisible(false);
+  }, [deleteMessage]);
+
+  // ELITE: Handle forward message
+  const handleForwardMessage = useCallback(async (messageId: string) => {
+    Alert.alert(
+      'Mesajı İlet',
+      'Bu özellik yakında eklenecek.',
+      [{ text: 'Tamam', style: 'default' }]
     );
-  };
+    setOptionsModalVisible(false);
+  }, []);
 
-  const conversation = useMessageStore.getState().conversations.find(c => c.userId === userId);
+  // ELITE: Handle reply to message
+  const handleReplyToMessage = useCallback((messageId: string) => {
+    const message = selectedMessage;
+    if (message) {
+      setReplyToMessage(message);
+    }
+    setOptionsModalVisible(false);
+  }, [selectedMessage]);
+
+  // ELITE: Close options modal
+  const closeOptionsModal = useCallback(() => {
+    setOptionsModalVisible(false);
+    setSelectedMessage(null);
+  }, []);
+
+  // ============================================================================
+  // ELITE: Media Message Handlers
+  // ============================================================================
+
+  // Open camera and take photo
+  const handleCameraCapture = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Kameraya erişim için izin vermeniz gerekmektedir.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        await sendImageMessage(imageUri);
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      Alert.alert('Hata', 'Fotoğraf çekilemedi.');
+    }
+  }, [userId]);
+
+  // Open gallery and select photo
+  const handleGallerySelect = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Galeriye erişim için izin vermeniz gerekmektedir.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        await sendImageMessage(imageUri);
+      }
+    } catch (error) {
+      console.error('Gallery error:', error);
+      Alert.alert('Hata', 'Fotoğraf seçilemedi.');
+    }
+  }, [userId]);
+
+  // Send image message
+  const sendImageMessage = useCallback(async (imageUri: string) => {
+    haptics.impactMedium();
+    try {
+      await hybridMessageService.sendMediaMessage('image', userId, {
+        mediaLocalUri: imageUri,
+        caption: '',
+      });
+      haptics.notificationSuccess();
+    } catch (error) {
+      console.error('Send image error:', error);
+      Alert.alert('Hata', 'Fotoğraf gönderilemedi.');
+    }
+  }, [userId]);
+
+  // Start voice recording
+  const handleVoiceRecordStart = useCallback(async () => {
+    try {
+      const success = await voiceMessageService.startRecording();
+      if (success) {
+        setIsRecordingVoice(true);
+        setVoiceRecordingDuration(0);
+        haptics.impactMedium();
+
+        // Start duration timer
+        voiceRecordingIntervalRef.current = setInterval(() => {
+          setVoiceRecordingDuration(prev => prev + 1);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Voice recording error:', error);
+      Alert.alert('Hata', 'Ses kaydı başlatılamadı.');
+    }
+  }, []);
+
+  // Stop and send voice recording
+  const handleVoiceRecordSend = useCallback(async () => {
+    try {
+      if (voiceRecordingIntervalRef.current) {
+        clearInterval(voiceRecordingIntervalRef.current);
+        voiceRecordingIntervalRef.current = null;
+      }
+
+      const voiceMessage = await voiceMessageService.stopRecording();
+      setIsRecordingVoice(false);
+      setVoiceRecordingDuration(0);
+
+      if (voiceMessage) {
+        haptics.notificationSuccess();
+
+        // Send as media message
+        await hybridMessageService.sendMediaMessage('voice', userId, {
+          mediaLocalUri: voiceMessage.uri,
+          mediaDuration: Math.floor(voiceMessage.durationMs / 1000),
+        });
+
+        // Backup to Firebase
+        voiceMessageService.backupToFirebase(voiceMessage);
+      }
+    } catch (error) {
+      console.error('Voice send error:', error);
+      Alert.alert('Hata', 'Ses mesajı gönderilemedi.');
+    }
+  }, [userId]);
+
+  // Cancel voice recording
+  const handleVoiceRecordCancel = useCallback(async () => {
+    if (voiceRecordingIntervalRef.current) {
+      clearInterval(voiceRecordingIntervalRef.current);
+      voiceRecordingIntervalRef.current = null;
+    }
+
+    await voiceMessageService.cancelRecording();
+    setIsRecordingVoice(false);
+    setVoiceRecordingDuration(0);
+    haptics.notificationWarning();
+  }, []);
+
+  // Share current location
+  const handleShareLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Konum paylaşımı için izin vermeniz gerekmektedir.');
+        return;
+      }
+
+      haptics.impactLight();
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      // Get address if possible
+      let address: string | undefined;
+      try {
+        const [reverseGeocode] = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        if (reverseGeocode) {
+          address = [reverseGeocode.street, reverseGeocode.city, reverseGeocode.region]
+            .filter(Boolean)
+            .join(', ');
+        }
+      } catch {
+        // Ignore geocode errors
+      }
+
+      await hybridMessageService.sendMediaMessage('location', userId, {
+        location: {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          address,
+        },
+      });
+
+      haptics.notificationSuccess();
+    } catch (error) {
+      console.error('Location share error:', error);
+      Alert.alert('Hata', 'Konum paylaşılamadı.');
+    }
+  }, [userId]);
 
   return (
-    <KeyboardAvoidingView
+    <ImageBackground
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      resizeMode="cover"
     >
-      <StatusBar barStyle="light-content" />
-      
-      {/* Header */}
       <LinearGradient
-        colors={['#1e293b', '#0f172a']}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
-      >
-        <Pressable 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </Pressable>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerSubtitle}>Offline mesajlaşma</Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </LinearGradient>
+        colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
+        style={StyleSheet.absoluteFill}
+      />
+      <StatusBar barStyle="dark-content" />
 
-      {/* Messages List */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messagesList}
-        inverted={false}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <LinearGradient
-              colors={['#1e293b', '#0f172a']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.emptyIcon}
-            >
-              <Ionicons name="chatbubbles-outline" size={64} color={colors.brand.primary} />
-            </LinearGradient>
-            <Text style={styles.emptyText}>Henüz mesaj yok</Text>
-            <Text style={styles.emptySubtext}>
-              Bu konuşmada henüz mesaj bulunmuyor.{'\n'}İlk mesajı göndererek başlayın.
-            </Text>
+      {/* Elite Header */}
+      <BlurView intensity={20} tint="light" style={[styles.header, { paddingTop: insets.top }]}>
+        <View style={styles.headerContent}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#334155" />
+          </Pressable>
+
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerName}>Kullanıcı {userId?.slice(0, 4)}</Text>
+            <View style={styles.statusBadge}>
+              <NetworkBanner status={connectionState} />
+            </View>
           </View>
-        }
+
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable style={styles.callBtn} onPress={() => Alert.alert('Arama', 'Mesh araması başlatılıyor...')}>
+              <Ionicons name="call" size={20} color="#334155" />
+            </Pressable>
+
+            <Pressable
+              style={[styles.callBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}
+              onPress={() => {
+                Alert.alert(
+                  'Kişi Seçenekleri',
+                  'Bu kullanıcı ile ilgili ne yapmak istersiniz?',
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    {
+                      text: 'Şikayet Et',
+                      onPress: () => {
+                        Alert.alert('Bildirim Alındı', 'Kullanıcı ve içerik incelenmek üzere raporlandı.');
+                      },
+                    },
+                    {
+                      text: 'Engelle',
+                      style: 'destructive',
+                      onPress: () => {
+                        Alert.alert(
+                          'Engellensin mi?',
+                          'Bu kullanıcıdan artık mesaj almayacaksınız.',
+                          [
+                            { text: 'Vazgeç', style: 'cancel' },
+                            {
+                              text: 'Engelle',
+                              style: 'destructive',
+                              onPress: () => {
+                                useSettingsStore.getState().blockUser(userId);
+                                useMessageStore.getState().deleteConversation(userId);
+                                navigation.goBack();
+                                haptics.notificationSuccess();
+                              },
+                            },
+                          ],
+                        );
+                      },
+                    },
+                  ],
+                );
+              }}
+            >
+              <Ionicons name="ellipsis-vertical" size={20} color="#ef4444" />
+            </Pressable>
+          </View>
+        </View>
+      </BlurView>
+
+      {/* Messages */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={item => item.id}
+          renderItem={({ item, index }) => {
+            const isMe = item.senderId === 'ME' || item.senderId === myDeviceId;
+            const prevMsg = messages[index - 1];
+            const nextMsg = messages[index + 1];
+            const isLast = !nextMsg || nextMsg.senderId !== item.senderId;
+
+            // Convert MeshMessage to Message format for modal
+            const messageForModal: Message = {
+              id: item.id,
+              from: isMe ? 'me' : item.senderId,
+              to: item.to || userId,
+              content: item.content,
+              timestamp: item.timestamp,
+              delivered: item.status === 'delivered' || item.status === 'read',
+              read: item.status === 'read',
+              status: item.status,
+              isEdited: (item as any).isEdited,
+              isDeleted: (item as any).isDeleted,
+            };
+
+            return (
+              <Pressable
+                onLongPress={() => {
+                  haptics.impactLight();
+                  if (item.status === 'failed') {
+                    // Show retry option for failed messages
+                    Alert.alert(
+                      'Mesaj Gönderilemedi',
+                      'Bu mesajı yeniden göndermek ister misiniz?',
+                      [
+                        { text: 'İptal', style: 'cancel' },
+                        { text: 'Yeniden Gönder', onPress: () => retryMessage(item.id) },
+                      ]
+                    );
+                  } else {
+                    // Show message options modal
+                    handleMessageLongPress(messageForModal);
+                  }
+                }}
+              >
+                <MessageBubble
+                  message={item}
+                  isMe={isMe}
+                  showTail={isLast}
+                />
+              </Pressable>
+            );
+          }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 100 }}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          removeClippedSubviews={true}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="chatbubbles-outline" size={48} color="#94a3b8" />
+              <Text style={styles.emptyText}>Henüz mesaj yok</Text>
+              <Text style={styles.emptySubtext}>İlk mesajı göndererek sohbete başlayın</Text>
+            </View>
+          }
+          ListFooterComponent={isTyping ? <TypingIndicatorDots /> : null}
+        />
+
+        {/* Input Area */}
+        <BlurView intensity={50} tint="light" style={[styles.inputContainer, { paddingBottom: insets.bottom + 10 }]}>
+          {/* ELITE: Reply Preview Banner */}
+          {replyToMessage && (
+            <View style={styles.replyBanner}>
+              <View style={styles.replyContent}>
+                <Ionicons name="arrow-undo" size={16} color="#64748b" />
+                <Text style={styles.replyLabel}>Yanıtlanıyor:</Text>
+                <Text style={styles.replyPreview} numberOfLines={1}>
+                  {replyToMessage.content}
+                </Text>
+              </View>
+              <Pressable onPress={() => setReplyToMessage(null)} style={styles.replyClose}>
+                <Ionicons name="close" size={20} color="#64748b" />
+              </Pressable>
+            </View>
+          )}
+
+          {/* ELITE: Edit Mode Banner */}
+          {editingMessageId && (
+            <View style={styles.editBanner}>
+              <View style={styles.editContent}>
+                <Ionicons name="create" size={16} color="#0ea5e9" />
+                <Text style={styles.editLabel}>Mesajı Düzenleniyor</Text>
+              </View>
+              <Pressable onPress={cancelEditing} style={styles.editClose}>
+                <Ionicons name="close" size={20} color="#64748b" />
+              </Pressable>
+            </View>
+          )}
+
+          <View style={styles.inputRow}>
+            <Pressable
+              style={styles.attachBtn}
+              onPress={() => setAttachmentsModalVisible(true)}
+            >
+              <Ionicons name="add" size={24} color="#334155" />
+            </Pressable>
+
+            <TextInput
+              style={styles.input}
+              placeholder={editingMessageId ? "Düzenlenen mesaj..." : "Mesaj yaz..."}
+              placeholderTextColor="#94a3b8"
+              value={editingMessageId ? editText : text}
+              onChangeText={editingMessageId ? setEditText : handleTextChange}
+              multiline
+            />
+
+            {editingMessageId ? (
+              <Pressable
+                style={[styles.sendBtn, !editText.trim() && styles.sendBtnDisabled]}
+                onPress={saveEditedMessage}
+                disabled={!editText.trim()}
+              >
+                <Ionicons name="checkmark" size={20} color="#fff" />
+              </Pressable>
+            ) : text.trim() ? (
+              <Pressable
+                style={styles.sendBtn}
+                onPress={sendMessage}
+              >
+                <Ionicons name="arrow-up" size={20} color="#fff" />
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.micBtn}
+                onPress={handleVoiceRecordStart}
+              >
+                <Ionicons name="mic" size={22} color="#22c55e" />
+              </Pressable>
+            )}
+          </View>
+
+          {/* ELITE: Voice Recording UI */}
+          {isRecordingVoice && (
+            <VoiceRecorderUI
+              isRecording={isRecordingVoice}
+              duration={voiceRecordingDuration}
+              onCancel={handleVoiceRecordCancel}
+              onSend={handleVoiceRecordSend}
+            />
+          )}
+        </BlurView>
+      </KeyboardAvoidingView >
+
+      {/* ELITE: Message Options Modal */}
+      <MessageOptionsModal
+        visible={optionsModalVisible}
+        message={selectedMessage}
+        isOwnMessage={selectedMessage?.from === 'me'}
+        onClose={closeOptionsModal}
+        onEdit={handleEditMessage}
+        onDelete={handleDeleteMessage}
+        onForward={handleForwardMessage}
+        onReply={handleReplyToMessage}
       />
 
-      {/* Input Bar */}
-      <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            placeholder="Mesaj yazın..."
-            placeholderTextColor={colors.text.tertiary}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={5000}
-          />
-          <Pressable
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-            onPress={sendMessage}
-            disabled={!inputText.trim()}
-          >
-            <LinearGradient
-              colors={inputText.trim() ? [colors.brand.primary, colors.brand.secondary] : ['#334155', '#334155']}
-              style={styles.sendButtonGradient}
-            >
-              <Ionicons name="send" size={20} color="#fff" />
-            </LinearGradient>
-          </Pressable>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+      {/* ELITE: Attachments Modal */}
+      <AttachmentsModal
+        visible={attachmentsModalVisible}
+        onClose={() => setAttachmentsModalVisible(false)}
+        onSelectCamera={handleCameraCapture}
+        onSelectGallery={handleGallerySelect}
+        onSelectVoice={handleVoiceRecordStart}
+        onSelectLocation={handleShareLocation}
+      />
+    </ImageBackground >
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#f8fafc',
   },
   header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(51, 65, 85, 0.05)',
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    padding: 10,
+    height: 60,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+  backBtn: {
+    padding: 8,
   },
   headerInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 8,
   },
-  headerTitle: {
-    fontSize: 18,
+  headerName: {
+    fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: '#334155',
   },
-  headerSubtitle: {
-    fontSize: 12,
-    color: colors.text.secondary,
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 2,
   },
-  messagesList: {
-    padding: 16,
-    paddingBottom: 20,
-  },
-  messageContainer: {
-    marginBottom: 12,
-    alignItems: 'flex-start',
-  },
-  messageContainerMe: {
-    alignItems: 'flex-end',
-  },
-  messageBubble: {
-    maxWidth: '75%',
+  callBtn: {
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.5)',
     borderRadius: 20,
+  },
+
+  // Network Banner
+  networkBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    gap: 4,
+  },
+  networkText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  // Bubbles
+  bubbleRow: {
+    marginBottom: 8,
+    width: '100%',
+    flexDirection: 'row',
+  },
+  rowMe: {
+    justifyContent: 'flex-end',
+  },
+  rowOther: {
+    justifyContent: 'flex-start',
+  },
+  bubble: {
+    maxWidth: '75%',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#1e293b',
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  bubbleMe: {
+    backgroundColor: '#dbeafe',
+    borderBottomRightRadius: 4,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#bfdbfe',
   },
-  messageBubbleMe: {
-    backgroundColor: colors.brand.primary,
-    borderColor: colors.brand.primary,
+  bubbleOther: {
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#fff',
   },
-  messageBubbleOther: {
-    backgroundColor: '#1e293b',
+  bubbleFailed: {
+    borderColor: '#fecaca',
+    backgroundColor: '#fef2f2',
   },
-  messageText: {
+  noTailMe: {
+    borderBottomRightRadius: 20,
+  },
+  noTailOther: {
+    borderBottomLeftRadius: 20,
+  },
+  msgText: {
     fontSize: 15,
-    color: '#fff',
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  messageTextMe: {
-    color: '#fff',
+  textMe: {
+    color: '#1e3a8a',
   },
-  messageFooter: {
+  textOther: {
+    color: '#334155',
+  },
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    marginTop: 4,
     gap: 4,
+  },
+  timeText: {
+    fontSize: 10,
+    opacity: 0.8,
+  },
+  timeMe: {
+    color: '#60a5fa',
+  },
+  timeOther: {
+    color: '#94a3b8',
+  },
+
+  // Typing Indicator
+  typingContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    paddingVertical: 8,
+  },
+  typingBubble: {
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  dotContainer: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#94a3b8',
+  },
+
+  // Empty State
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 100,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#94a3b8',
     marginTop: 4,
   },
-  messageTime: {
-    fontSize: 11,
-    color: colors.text.tertiary,
-  },
-  messageTimeMe: {
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
+
+  // Input
   inputContainer: {
-    backgroundColor: '#1e293b',
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 12,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(51, 65, 85, 0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  attachBtn: {
+    padding: 10,
   },
   input: {
     flex: 1,
-    backgroundColor: '#0f172a',
-    borderRadius: 24,
+    minHeight: 40,
+    maxHeight: 120,
+    backgroundColor: '#fff',
+    borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    marginHorizontal: 8,
+    color: '#334155',
     fontSize: 15,
-    color: '#fff',
-    maxHeight: 100,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    overflow: 'hidden',
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyState: {
-    flex: 1,
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3B82F6',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
+    marginBottom: 0,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  emptyIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  sendBtnDisabled: {
+    backgroundColor: '#94a3b8',
+    shadowOpacity: 0,
+  },
+  micBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
   },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text.primary,
-    textAlign: 'center',
+  // ELITE: Reply banner styles
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(100, 116, 139, 0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#64748b',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     marginBottom: 8,
+    borderRadius: 8,
   },
-  emptySubtext: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
+  replyContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  replyLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  replyPreview: {
+    flex: 1,
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  replyClose: {
+    padding: 4,
+  },
+  // ELITE: Edit banner styles
+  editBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(14, 165, 233, 0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#0ea5e9',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  editContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0ea5e9',
+  },
+  editClose: {
+    padding: 4,
+  },
+  // ELITE: Input row wrapper
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
   },
 });

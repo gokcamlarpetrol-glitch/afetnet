@@ -31,7 +31,7 @@ export class AICache {
 
       await AsyncStorage.setItem(
         CACHE_PREFIX + key,
-        JSON.stringify(entry)
+        JSON.stringify(entry),
       );
 
       logger.info(`Cached: ${key} (TTL: ${ttl}ms)`);
@@ -46,7 +46,7 @@ export class AICache {
   static async get<T>(key: string): Promise<T | null> {
     try {
       const cached = await AsyncStorage.getItem(CACHE_PREFIX + key);
-      
+
       if (!cached) {
         return null;
       }
@@ -88,7 +88,7 @@ export class AICache {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
-      
+
       await AsyncStorage.multiRemove(cacheKeys);
       logger.info(`Cache cleared: ${cacheKeys.length} entries`);
     } catch (error) {
@@ -107,7 +107,7 @@ export class AICache {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
-      
+
       let totalSize = 0;
       let oldestTimestamp = Date.now();
 
@@ -115,7 +115,7 @@ export class AICache {
         const value = await AsyncStorage.getItem(key);
         if (value) {
           totalSize += value.length;
-          
+
           try {
             const entry = JSON.parse(value);
             if (entry.timestamp < oldestTimestamp) {
@@ -149,7 +149,7 @@ export class AICache {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
-      
+
       let cleaned = 0;
 
       for (const key of cacheKeys) {
@@ -158,7 +158,7 @@ export class AICache {
           try {
             const entry = JSON.parse(value);
             const age = Date.now() - entry.timestamp;
-            
+
             if (age > entry.ttl) {
               await AsyncStorage.removeItem(key);
               cleaned++;
@@ -183,17 +183,18 @@ export class AICache {
 /**
  * Cache key generator
  */
-export function generateCacheKey(service: string, params: any): string {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function generateCacheKey(service: string, params: Record<string, unknown>): string {
   // Parametreleri sırala ve string'e çevir
   const sortedParams = Object.keys(params)
     .sort()
     .reduce((acc, key) => {
       acc[key] = params[key];
       return acc;
-    }, {} as any);
+    }, {} as Record<string, unknown>);
 
   const paramsStr = JSON.stringify(sortedParams);
-  
+
   // Basit hash fonksiyonu
   let hash = 0;
   for (let i = 0; i < paramsStr.length; i++) {

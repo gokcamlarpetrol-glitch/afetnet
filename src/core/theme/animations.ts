@@ -27,7 +27,7 @@ export const EASINGS = {
 export const fadeIn = (
   animatedValue: Animated.Value,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   return Animated.timing(animatedValue, {
     toValue: 1,
@@ -44,7 +44,7 @@ export const fadeIn = (
 export const fadeOut = (
   animatedValue: Animated.Value,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   return Animated.timing(animatedValue, {
     toValue: 0,
@@ -61,7 +61,7 @@ export const fadeOut = (
 export const scaleIn = (
   animatedValue: Animated.Value,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   return Animated.spring(animatedValue, {
     toValue: 1,
@@ -78,7 +78,7 @@ export const scaleIn = (
 export const scaleOut = (
   animatedValue: Animated.Value,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   return Animated.timing(animatedValue, {
     toValue: 0,
@@ -96,7 +96,7 @@ export const pulse = (
   animatedValue: Animated.Value,
   minScale: number = 0.95,
   maxScale: number = 1.05,
-  duration: number = 1000
+  duration: number = 1000,
 ): Animated.CompositeAnimation => {
   return Animated.loop(
     Animated.sequence([
@@ -112,7 +112,7 @@ export const pulse = (
         easing: EASINGS.easeInOut,
         useNativeDriver: true,
       }),
-    ])
+    ]),
   );
 };
 
@@ -123,7 +123,7 @@ export const slideInUp = (
   animatedValue: Animated.Value,
   fromValue: number = 100,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   animatedValue.setValue(fromValue);
   return Animated.timing(animatedValue, {
@@ -142,7 +142,7 @@ export const slideInDown = (
   animatedValue: Animated.Value,
   fromValue: number = -100,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   animatedValue.setValue(fromValue);
   return Animated.timing(animatedValue, {
@@ -161,7 +161,7 @@ export const slideOutUp = (
   animatedValue: Animated.Value,
   toValue: number = -100,
   duration: number = DURATIONS.normal,
-  delay: number = 0
+  delay: number = 0,
 ): Animated.CompositeAnimation => {
   return Animated.timing(animatedValue, {
     toValue,
@@ -178,11 +178,11 @@ export const slideOutUp = (
 export const staggerFadeIn = (
   animatedValues: Animated.Value[],
   staggerDelay: number = 100,
-  duration: number = DURATIONS.normal
+  duration: number = DURATIONS.normal,
 ): Animated.CompositeAnimation => {
   return Animated.stagger(
     staggerDelay,
-    animatedValues.map((value) => fadeIn(value, duration))
+    animatedValues.map((value) => fadeIn(value, duration)),
   );
 };
 
@@ -193,11 +193,11 @@ export const staggerSlideIn = (
   animatedValues: Animated.Value[],
   staggerDelay: number = 100,
   duration: number = DURATIONS.normal,
-  fromValue: number = 50
+  fromValue: number = 50,
 ): Animated.CompositeAnimation => {
   return Animated.stagger(
     staggerDelay,
-    animatedValues.map((value) => slideInUp(value, fromValue, duration))
+    animatedValues.map((value) => slideInUp(value, fromValue, duration)),
   );
 };
 
@@ -206,7 +206,7 @@ export const staggerSlideIn = (
  */
 export const rotate = (
   animatedValue: Animated.Value,
-  duration: number = 2000
+  duration: number = 2000,
 ): Animated.CompositeAnimation => {
   return Animated.loop(
     Animated.timing(animatedValue, {
@@ -214,7 +214,7 @@ export const rotate = (
       duration,
       easing: Easing.linear,
       useNativeDriver: true,
-    })
+    }),
   );
 };
 
@@ -223,7 +223,7 @@ export const rotate = (
  */
 export const shake = (
   animatedValue: Animated.Value,
-  intensity: number = 10
+  intensity: number = 10,
 ): Animated.CompositeAnimation => {
   return Animated.sequence([
     Animated.timing(animatedValue, {
@@ -254,7 +254,7 @@ export const shake = (
  */
 export const bounce = (
   animatedValue: Animated.Value,
-  toValue: number = 1
+  toValue: number = 1,
 ): Animated.CompositeAnimation => {
   return Animated.spring(animatedValue, {
     toValue,

@@ -17,7 +17,7 @@ const LAST_CHECKED_KEY = 'last_checked_earthquake';
  */
 export async function processEarthquakeNotifications(
   earthquakes: Earthquake[],
-  settings: { minMagnitudeForNotification: number; maxDistanceForNotification: number; notificationPush: boolean }
+  settings: { minMagnitudeForNotification: number; maxDistanceForNotification: number; notificationPush: boolean },
 ): Promise<void> {
   if (earthquakes.length === 0) {
     return;
@@ -56,7 +56,7 @@ export async function processEarthquakeNotifications(
             latestEq.location,
             false, // Not EEW
             undefined, // No time advance
-            latestEq.time // Timestamp - CRITICAL for instant delivery
+            latestEq.time, // Timestamp - CRITICAL for instant delivery
           ).catch(async (error) => {
             logger.error('Failed to show magnitude-based notification:', error);
             // Fallback to standard notification
@@ -65,7 +65,7 @@ export async function processEarthquakeNotifications(
               await notificationService.showEarthquakeNotification(
                 latestEq.magnitude,
                 latestEq.location,
-                new Date(latestEq.time)
+                new Date(latestEq.time),
               );
             } catch (fallbackError) {
               logger.error('Failed to show fallback notification:', fallbackError);

@@ -13,103 +13,31 @@ import FamilyScreen from '../screens/family';
 import MessagesScreen from '../screens/messages';
 import SettingsScreen from '../screens/settings';
 
+import EliteTabBar from './components/EliteTabBar';
+
 const Tab = createBottomTabNavigator();
 
 export default function MainTabs() {
   return (
     <Tab.Navigator
+      id={undefined}
+      tabBar={(props) => <EliteTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: '#3b82f6',
-        tabBarInactiveTintColor: '#64748b',
+        headerShown: false,
+        tabBarShowLabel: false, // Labels handled by custom bar if needed, but we used icons only
         tabBarStyle: {
-          backgroundColor: '#1e293b',
-          borderTopColor: '#334155',
-          borderTopWidth: 1,
-          height: 70,
-          paddingBottom: 10,
-          paddingTop: 10,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
+          position: 'absolute', // Required for transparent background behind it
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          elevation: 0,
         },
       }}
     >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          headerShown: false, // Her ekran için ayrı ayrı gizle
-          tabBarLabel: 'Ana Sayfa',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'home' : 'home-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Map"
-        component={MapScreen}
-        options={{
-          headerShown: false,
-          tabBarLabel: 'Harita',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'map' : 'map-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Family"
-        component={FamilyScreen}
-        options={{
-          headerShown: false,
-          tabBarLabel: 'Aile',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'people' : 'people-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Messages"
-        component={MessagesScreen}
-        options={{
-          headerShown: false,
-          tabBarLabel: 'Mesajlar',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'chatbubbles' : 'chatbubbles-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{
-          headerShown: false,
-          tabBarLabel: 'Ayarlar',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'settings' : 'settings-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
+      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="Map" component={MapScreen} />
+      <Tab.Screen name="Family" component={FamilyScreen} />
+      <Tab.Screen name="Messages" component={MessagesScreen} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }

@@ -8,7 +8,11 @@ import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+
+// ELITE: Typed navigation
+type MedicalInformationNavigationProp = StackNavigationProp<Record<string, object>>;
 
 interface MedicalTopic {
   id: string;
@@ -168,7 +172,7 @@ const MEDICAL_TOPICS: MedicalTopic[] = [
   },
 ];
 
-export default function MedicalInformationScreen({ navigation }: any) {
+export default function MedicalInformationScreen({ navigation }: { navigation: MedicalInformationNavigationProp }) {
   const [selectedTopic, setSelectedTopic] = useState<MedicalTopic | null>(null);
 
   if (selectedTopic) {

@@ -18,8 +18,17 @@ import { calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
 import * as haptics from '../../utils/haptics';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('AssemblyPointsScreen');
+
+// ELITE: Type-safe navigation prop
+type AssemblyPointsNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface AssemblyPointsScreenProps {
+  navigation: AssemblyPointsNavigationProp;
+}
 
 interface AssemblyPoint {
   id: string;
@@ -47,15 +56,15 @@ const mapLocationToAssemblyPoint = (loc: MapLocation): AssemblyPoint => ({
     loc.type === 'assembly'
       ? 'park'
       : loc.type === 'home'
-      ? 'park'
-      : loc.type === 'shelter' || loc.type === 'hospital'
-      ? 'emergency'
-      : 'park',
+        ? 'park'
+        : loc.type === 'shelter' || loc.type === 'hospital'
+          ? 'emergency'
+          : 'park',
   isActive: true,
   isSample: !!loc.isSample,
 });
 
-export default function AssemblyPointsScreen({ navigation }: any) {
+export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScreenProps) {
   const insets = useSafeAreaInsets();
   // CRITICAL: Read premium status from store (includes trial check)
   // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
@@ -68,19 +77,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
   const [sortBy, setSortBy] = useState<'distance' | 'capacity'>('distance');
   const [showAddButton, setShowAddButton] = useState(true);
 
-  useEffect(() => {
-    getUserLocation();
-    loadAssemblyPoints();
-    
-    const unsubscribe = navigation.addListener?.('focus', () => {
-      loadAssemblyPoints();
-    });
-    
-    return () => {
-      unsubscribe?.();
-    };
-  }, [navigation, loadAssemblyPoints]);
-
+  // ELITE: Defined before usage to prevent hoisting issues
   const loadAssemblyPoints = useCallback(() => {
     try {
       const official = offlineMapService.getAllLocations().filter(loc => loc.type === 'assembly');
@@ -94,6 +91,19 @@ export default function AssemblyPointsScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
+    getUserLocation();
+    loadAssemblyPoints();
+
+    const unsubscribe = navigation.addListener?.('focus', () => {
+      loadAssemblyPoints();
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [navigation, loadAssemblyPoints]);
+
+  useEffect(() => {
     try {
       const enriched = basePoints.map(point => {
         if (!userLocation) {
@@ -104,7 +114,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
             userLocation.latitude,
             userLocation.longitude,
             point.latitude,
-            point.longitude
+            point.longitude,
           );
           return {
             ...point,
@@ -135,27 +145,27 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     try {
       // Request permission with timeout
       const permissionPromise = Location.requestForegroundPermissionsAsync();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Permission timeout')), 10000)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Permission timeout')), 10000),
       );
-      
+
       const { status } = await Promise.race([permissionPromise, timeoutPromise]) as any;
-      
+
       if (status !== 'granted') {
         Alert.alert(
           'Konum İzni Gerekli',
           'En yakın toplanma noktalarını görmek için konum izni gereklidir. Lütfen ayarlardan izin verin.',
           [
             { text: 'Tamam', style: 'default' },
-            { 
-              text: 'Ayarlara Git', 
+            {
+              text: 'Ayarlara Git',
               onPress: () => {
                 Linking.openSettings().catch((err) => {
                   logger.error('Failed to open settings:', err);
                 });
-              }
-            }
-          ]
+              },
+            },
+          ],
         );
         return;
       }
@@ -165,10 +175,10 @@ export default function AssemblyPointsScreen({ navigation }: any) {
         const positionPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        const positionTimeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Position timeout')), 15000)
+        const positionTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Position timeout')), 15000),
         );
-        
+
         const location = await Promise.race([positionPromise, positionTimeoutPromise]) as any;
 
         setUserLocation({
@@ -181,7 +191,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Low,
           });
-          
+
           setUserLocation({
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
@@ -191,16 +201,16 @@ export default function AssemblyPointsScreen({ navigation }: any) {
           Alert.alert(
             'Konum Alınamadı',
             'Konumunuz alınamadı. Toplanma noktaları mesafeye göre sıralanamayacak ancak tüm noktalar görüntülenecek.',
-            [{ text: 'Tamam' }]
+            [{ text: 'Tamam' }],
           );
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Location permission error:', error);
       Alert.alert(
         'Konum Hatası',
         'Konum izni alınırken bir hata oluştu. Lütfen tekrar deneyin.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -209,17 +219,17 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     // CRITICAL: Directions with comprehensive error handling and fallback
     try {
       const url = `https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}`;
-      
+
       // Check if URL can be opened
       const canOpen = await Linking.canOpenURL(url);
       if (!canOpen) {
         throw new Error('Cannot open maps URL');
       }
-      
+
       await Linking.openURL(url);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to open maps:', error);
-      
+
       // CRITICAL: Try alternative methods
       try {
         // Try Apple Maps on iOS
@@ -231,25 +241,25 @@ export default function AssemblyPointsScreen({ navigation }: any) {
             return;
           }
         }
-        
+
         // Fallback: Show coordinates
         Alert.alert(
           'Yol Tarifi',
           `Harita uygulaması açılamadı. Koordinatlar:\n${point.latitude}, ${point.longitude}\n\nBu koordinatları harita uygulamanızda arayabilirsiniz.`,
           [
             { text: 'Tamam', style: 'default' },
-            { 
-              text: 'Tekrar Dene', 
-              onPress: () => handleGetDirections(point)
-            }
-          ]
+            {
+              text: 'Tekrar Dene',
+              onPress: () => handleGetDirections(point),
+            },
+          ],
         );
       } catch (fallbackError) {
         logger.error('Fallback maps error:', fallbackError);
         Alert.alert(
           'Hata',
           'Harita uygulaması açılamadı. Lütfen manuel olarak harita uygulamanızı kullanın.',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
       }
     }
@@ -292,7 +302,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
     return (
       <PremiumGate
         featureName="Toplanma Noktaları Haritası"
-        onUpgradePress={() => navigation?.navigate?.('Paywall')}
+
       />
     );
   }
@@ -336,8 +346,8 @@ export default function AssemblyPointsScreen({ navigation }: any) {
       'Konumu Sil',
       `${pointName} adlı konumu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`,
       [
-        { 
-          text: 'İptal', 
+        {
+          text: 'İptal',
           style: 'cancel',
           onPress: () => haptics.impactLight(),
         },
@@ -361,17 +371,17 @@ export default function AssemblyPointsScreen({ navigation }: any) {
             }
           },
         },
-      ]
+      ],
     );
   }, [points, loadAssemblyPoints]);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable 
+        <Pressable
           onPress={() => {
             // CRITICAL: Navigation with error handling
             try {
@@ -430,16 +440,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
         </Pressable>
       </View>
 
-      {/* Map Placeholder */}
-      <View style={styles.map}>
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="map" size={64} color={colors.text.tertiary} />
-          <Text style={styles.mapPlaceholderText}>Toplanma Noktaları Haritası</Text>
-          <Text style={styles.mapPlaceholderSubtext}>
-            Offline harita desteği yakında aktif olacak
-          </Text>
-        </View>
-      </View>
+
 
       {/* Add Button */}
       <View style={styles.addButtonContainer}>
@@ -484,7 +485,7 @@ export default function AssemblyPointsScreen({ navigation }: any) {
                             style: 'destructive',
                             onPress: () => handleDeleteLocation(point.id),
                           },
-                        ]
+                        ],
                       );
                     }
                   }}
@@ -495,78 +496,78 @@ export default function AssemblyPointsScreen({ navigation }: any) {
                       <Text style={styles.customBadgeText}>Özel</Text>
                     </View>
                   )}
-                <View style={styles.pointHeader}>
-                  <View style={[styles.pointIcon, { backgroundColor: getTypeColor(point.type) + '20' }]}>
-                    <Ionicons name={getTypeIcon(point.type) as keyof typeof Ionicons.glyphMap} size={24} color={getTypeColor(point.type)} />
-                  </View>
-
-                  <View style={styles.pointInfo}>
-                    <Text style={styles.pointName}>{point.name}</Text>
-                    <Text style={styles.pointAddress}>{point.address}</Text>
-                    
-                    <View style={styles.pointDetails}>
-                      {point.distance !== undefined && (
-                        <View style={styles.detailItem}>
-                          <Ionicons name="navigate" size={14} color={colors.text.tertiary} />
-                          <Text style={styles.detailText}>
-                            {formatDistance(point.distance)}
-                          </Text>
-                        </View>
-                      )}
-                      
-                      <View style={styles.detailItem}>
-                        <Ionicons name="people" size={14} color={colors.text.tertiary} />
-                        <Text style={styles.detailText}>
-                          ~{point.capacity.toLocaleString('tr-TR')} kişi
-                        </Text>
-                      </View>
+                  <View style={styles.pointHeader}>
+                    <View style={[styles.pointIcon, { backgroundColor: getTypeColor(point.type) + '20' }]}>
+                      <Ionicons name={getTypeIcon(point.type) as keyof typeof Ionicons.glyphMap} size={24} color={getTypeColor(point.type)} />
                     </View>
-                  </View>
 
-                  <Ionicons
-                    name={selectedPoint?.id === point.id ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color={colors.text.tertiary}
-                  />
-                </View>
+                    <View style={styles.pointInfo}>
+                      <Text style={styles.pointName}>{point.name}</Text>
+                      <Text style={styles.pointAddress}>{point.address}</Text>
 
-                {/* Expanded Details */}
-                {selectedPoint?.id === point.id && (
-                  <View style={styles.expandedDetails}>
-                    <View style={styles.facilitiesContainer}>
-                      <Text style={styles.facilitiesTitle}>Olanaklar:</Text>
-                      <View style={styles.facilitiesList}>
-                        {point.facilities.map((facility, idx) => (
-                          <View key={idx} style={styles.facilityItem}>
-                            <Ionicons name={getFacilityIcon(facility) as keyof typeof Ionicons.glyphMap} size={16} color={colors.status.success} />
-                            <Text style={styles.facilityText}>
-                              {facility === 'water' ? 'Su' :
-                               facility === 'toilet' ? 'Tuvalet' :
-                               facility === 'medical' ? 'Tıbbi Yardım' :
-                               facility === 'food' ? 'Yiyecek' :
-                               facility === 'shelter' ? 'Barınak' : facility}
+                      <View style={styles.pointDetails}>
+                        {point.distance !== undefined && (
+                          <View style={styles.detailItem}>
+                            <Ionicons name="navigate" size={14} color={colors.text.tertiary} />
+                            <Text style={styles.detailText}>
+                              {formatDistance(point.distance)}
                             </Text>
                           </View>
-                        ))}
+                        )}
+
+                        <View style={styles.detailItem}>
+                          <Ionicons name="people" size={14} color={colors.text.tertiary} />
+                          <Text style={styles.detailText}>
+                            ~{point.capacity.toLocaleString('tr-TR')} kişi
+                          </Text>
+                        </View>
                       </View>
                     </View>
 
-                    <Pressable
-                      style={styles.directionsButton}
-                      onPress={() => handleGetDirections(point)}
-                    >
-                      <LinearGradient
-                        colors={[colors.brand.primary, colors.brand.secondary]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.directionsButtonGradient}
-                      >
-                        <Ionicons name="navigate" size={20} color="#fff" />
-                        <Text style={styles.directionsButtonText}>Yol Tarifi Al</Text>
-                      </LinearGradient>
-                    </Pressable>
+                    <Ionicons
+                      name={selectedPoint?.id === point.id ? "chevron-up" : "chevron-down"}
+                      size={20}
+                      color={colors.text.tertiary}
+                    />
                   </View>
-                )}
+
+                  {/* Expanded Details */}
+                  {selectedPoint?.id === point.id && (
+                    <View style={styles.expandedDetails}>
+                      <View style={styles.facilitiesContainer}>
+                        <Text style={styles.facilitiesTitle}>Olanaklar:</Text>
+                        <View style={styles.facilitiesList}>
+                          {point.facilities.map((facility, idx) => (
+                            <View key={idx} style={styles.facilityItem}>
+                              <Ionicons name={getFacilityIcon(facility) as keyof typeof Ionicons.glyphMap} size={16} color={colors.status.success} />
+                              <Text style={styles.facilityText}>
+                                {facility === 'water' ? 'Su' :
+                                  facility === 'toilet' ? 'Tuvalet' :
+                                    facility === 'medical' ? 'Tıbbi Yardım' :
+                                      facility === 'food' ? 'Yiyecek' :
+                                        facility === 'shelter' ? 'Barınak' : facility}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+
+                      <Pressable
+                        style={styles.directionsButton}
+                        onPress={() => handleGetDirections(point)}
+                      >
+                        <LinearGradient
+                          colors={[colors.brand.primary, colors.brand.secondary]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.directionsButtonGradient}
+                        >
+                          <Ionicons name="navigate" size={20} color="#fff" />
+                          <Text style={styles.directionsButtonText}>Yol Tarifi Al</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    </View>
+                  )}
                 </Pressable>
               </Animated.View>
             );

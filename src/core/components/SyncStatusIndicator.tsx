@@ -7,22 +7,16 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../theme';
-import { offlineSyncService } from '../services/OfflineSyncService';
+import { offlineSyncService, SyncStatus } from '../services/OfflineSyncService';
 import NetInfo from '@react-native-community/netinfo';
-
-interface SyncStatus {
-  queueLength: number;
-  isOnline: boolean;
-  isRunning: boolean;
-  failedOperations: number;
-}
 
 export default function SyncStatusIndicator() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     queueLength: 0,
     isOnline: true,
-    isRunning: false,
+    isSyncing: false,
     failedOperations: 0,
+    lastSyncTime: null,
   });
   const [isVisible, setIsVisible] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -33,11 +27,11 @@ export default function SyncStatusIndicator() {
     const updateStatus = () => {
       const status = offlineSyncService.getSyncStatus();
       setSyncStatus(status);
-      
+
       // Show indicator if there are pending operations or if offline
       const shouldBeVisible = status.queueLength > 0 || !status.isOnline;
       setIsVisible(shouldBeVisible);
-      
+
       // Animate visibility
       Animated.timing(fadeAnim, {
         toValue: shouldBeVisible ? 1 : 0,

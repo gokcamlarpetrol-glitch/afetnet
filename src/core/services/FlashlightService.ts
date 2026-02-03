@@ -9,6 +9,19 @@ import { CameraView } from 'expo-camera';
 import { logger } from '../utils/logger';
 import * as Brightness from 'expo-brightness';
 
+// ELITE: Type definitions for optional modules
+interface TorchModule {
+  default?: {
+    switchState: (on: boolean) => Promise<void>;
+  };
+}
+
+interface CameraModuleExports {
+  getCameraPermissionsAsync?: () => Promise<{ status: string }>;
+  requestCameraPermissionsAsync?: () => Promise<{ status: string }>;
+  CameraView?: typeof CameraView;
+}
+
 class FlashlightService {
   private isFlashing: boolean = false;
   private isOn: boolean = false;
@@ -16,7 +29,7 @@ class FlashlightService {
   private timeoutIds: Set<NodeJS.Timeout> = new Set();
   private hasPermission: boolean = false;
   private cameraRef: CameraView | null = null;
-  private torchModule: any = null;
+  private torchModule: TorchModule | null = null;
   private originalBrightness: number = 0.5;
   private patternLoop: Promise<void> | null = null;
 
@@ -28,19 +41,20 @@ class FlashlightService {
       // Try Camera permissions first
       // Note: expo-camera v17 exports functions directly, not via default
       const CameraModule = await import('expo-camera');
-      
+
       // Try to access permission functions - they may be named exports
       let status = 'undetermined';
       try {
         // Check if functions are available as named exports
-        const getPerms = (CameraModule as any).getCameraPermissionsAsync;
-        const requestPerms = (CameraModule as any).requestCameraPermissionsAsync;
-        
+        const cameraExports = CameraModule as CameraModuleExports;
+        const getPerms = cameraExports.getCameraPermissionsAsync;
+        const requestPerms = cameraExports.requestCameraPermissionsAsync;
+
         if (getPerms) {
           const result = await getPerms();
           status = result.status;
         }
-        
+
         // Request permissions if not granted
         if (status !== 'granted' && requestPerms) {
           const result = await requestPerms();
@@ -51,9 +65,9 @@ class FlashlightService {
         // Fallback: assume permission is needed but not critical for flashlight
         this.hasPermission = false;
       }
-      
+
       this.hasPermission = status === 'granted';
-      
+
       // Try to load expo-torch as fallback (optional, may not be installed)
       try {
         // ELITE: Type-safe torch access with proper error handling
@@ -70,14 +84,14 @@ class FlashlightService {
         logger.debug('expo-torch not available, using Camera API');
         this.torchModule = null;
       }
-      
+
       // Get original brightness for screen flashlight
       try {
         this.originalBrightness = await Brightness.getBrightnessAsync();
       } catch (brightnessError) {
         logger.debug('Brightness API not available');
       }
-      
+
       if (this.hasPermission || this.torchModule) {
         logger.info('✅ FlashlightService initialized');
       } else {
@@ -87,12 +101,12 @@ class FlashlightService {
           logger.debug('FlashlightService: No permissions or torch module (screen flashlight fallback available)');
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // CRITICAL: Handle LoadBundleFromServerRequestError gracefully
-      const errorMessage = error?.message || String(error);
-      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') || 
-                           errorMessage.includes('Could not load bundle');
-      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') ||
+        errorMessage.includes('Could not load bundle');
+
       if (isBundleError) {
         // ELITE: Bundle errors are expected in some environments - log as debug
         if (__DEV__) {
@@ -117,16 +131,16 @@ class FlashlightService {
    */
   async turnOn() {
     if (this.isOn) return;
-    
+
     this.isOn = true;
     this.isFlashing = false;
-    
+
     // Stop any flashing pattern
     this.clearAllTimeouts();
     if (this.patternLoop) {
       this.patternLoop = null;
     }
-    
+
     try {
       // Try expo-torch first
       if (this.torchModule?.default) {
@@ -134,14 +148,14 @@ class FlashlightService {
         logger.info('✅ Flashlight ON (expo-torch)');
         return;
       }
-      
+
       // Try Camera API - use flash prop instead of setFlashModeAsync
       if (this.cameraRef && this.hasPermission) {
         // Note: CameraView flash is controlled via props, not methods
         // We'll use expo-torch or screen flashlight as fallback
         logger.debug('Camera API available but flash control requires props');
       }
-      
+
       logger.warn('Flashlight not available - no torch module or camera permission');
     } catch (error) {
       logger.error('Flashlight turnOn failed:', error);
@@ -154,16 +168,16 @@ class FlashlightService {
    */
   async turnOff() {
     if (!this.isOn && !this.isFlashing) return;
-    
+
     this.isOn = false;
     this.isFlashing = false;
-    
+
     // Stop any flashing pattern
     this.clearAllTimeouts();
     if (this.patternLoop) {
       this.patternLoop = null;
     }
-    
+
     try {
       // Try expo-torch first
       if (this.torchModule?.default) {
@@ -171,7 +185,7 @@ class FlashlightService {
         logger.info('✅ Flashlight OFF (expo-torch)');
         return;
       }
-      
+
       // Try Camera API - flash is controlled via props
       if (this.cameraRef) {
         // Note: CameraView flash is controlled via props, not methods
@@ -271,7 +285,7 @@ class FlashlightService {
    */
   async turnOnScreenFlashlight() {
     if (this.isScreenFlashlight) return;
-    
+
     try {
       this.isScreenFlashlight = true;
       await Brightness.setBrightnessAsync(1.0);
@@ -287,7 +301,7 @@ class FlashlightService {
    */
   async turnOffScreenFlashlight() {
     if (!this.isScreenFlashlight) return;
-    
+
     try {
       this.isScreenFlashlight = false;
       await Brightness.setBrightnessAsync(this.originalBrightness);
@@ -330,14 +344,14 @@ class FlashlightService {
 
     // Clear all timeouts immediately
     this.clearAllTimeouts();
-    
+
     // Clear pattern loop reference
     this.patternLoop = null;
 
     try {
       // Ensure flashlight is off
       await this.turnOff();
-      
+
       // CRITICAL: Wait a bit to ensure pattern loop has checked isFlashing flag
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {

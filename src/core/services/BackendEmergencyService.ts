@@ -6,9 +6,10 @@
  */
 
 import { createLogger } from '../utils/logger';
-import { getDeviceId } from '../../lib/device';
+import { getDeviceId } from '../utils/device';
 import { APIClient, APIError } from '../api/client';
 import { ENV } from '../config/env';
+import { safeLowerCase, safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('BackendEmergencyService');
 
@@ -31,7 +32,7 @@ interface FamilyMemberData {
   deviceId: string;
   memberId: string;
   name: string;
-  status: 'safe' | 'need-help' | 'unknown' | 'critical';
+  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
   location?: {
     latitude: number;
     longitude: number;
@@ -64,14 +65,14 @@ interface ICEData {
   meds?: string;
   contacts?: Array<{
     name: string;
-  phone: string;
+    phone: string;
   }>;
   updatedAt: number;
 }
 
 interface StatusUpdateData {
   deviceId: string;
-  status: 'safe' | 'need-help' | 'unknown' | 'critical';
+  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
   location?: {
     latitude: number;
     longitude: number;
@@ -312,7 +313,7 @@ class BackendEmergencyService {
     if (this.familyMemberQueue.length >= this.MAX_QUEUE_SIZE) {
       // Remove oldest non-critical members first
       const nonCriticalIndex = this.familyMemberQueue.findIndex(
-        m => m.status !== 'critical' && m.status !== 'need-help'
+        m => m.status !== 'critical' && m.status !== 'need-help',
       );
       if (nonCriticalIndex >= 0) {
         this.familyMemberQueue.splice(nonCriticalIndex, 1);
@@ -586,7 +587,7 @@ class BackendEmergencyService {
     if (this.earthquakeEndpointUnavailable) {
       if (__DEV__) {
         logger.debug(
-          `Skipping earthquake data sync - endpoint unavailable${this.earthquakeEndpointDisableReason ? ` (${this.earthquakeEndpointDisableReason})` : ''}`
+          `Skipping earthquake data sync - endpoint unavailable${this.earthquakeEndpointDisableReason ? ` (${this.earthquakeEndpointDisableReason})` : ''}`,
         );
       }
       return;
@@ -610,19 +611,19 @@ class BackendEmergencyService {
         }
       } catch (error) {
         if (error instanceof APIError) {
-          const message = (error.message || '').toLowerCase();
+          const message = safeLowerCase(error.message);
           if (
             error.statusCode === 404 ||
-            message.includes('cannot post') ||
+            safeIncludes(message, 'cannot post') ||
             error.statusCode === 429 ||
-            message.includes('too many requests') ||
+            safeIncludes(message, 'too many requests') ||
             error.statusCode === 501 ||
             error.statusCode === 503
           ) {
             this.disableEarthquakeEndpoint(
-              error.statusCode === 429 || message.includes('too many requests')
+              error.statusCode === 429 || safeIncludes(message, 'too many requests')
                 ? 'rate-limited by backend'
-                : 'endpoint not available on backend'
+                : 'endpoint not available on backend',
             );
             return;
           }
@@ -674,6 +675,21 @@ class BackendEmergencyService {
   /**
    * Shutdown service
    */
+  /**
+   * ELITE: Send SOS signal to backend
+   * CRITICAL: Used by OfflineSyncService for offline SOS queue
+   */
+  async sendSOSSignal(data: any): Promise<void> {
+    await this.sendEmergencyMessage({
+      messageId: data.id || `sos_${Date.now()}`,
+      content: data.message || 'SOS - Acil Yardım!',
+      timestamp: data.timestamp || Date.now(),
+      type: 'sos',
+      priority: 'critical',
+      location: data.location,
+    });
+  }
+
   shutdown(): void {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);

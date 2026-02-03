@@ -15,10 +15,19 @@ import { createLogger } from '../../utils/logger';
 import { flashlightService } from '../../services/FlashlightService';
 import { whistleService } from '../../services/WhistleService';
 import * as haptics from '../../utils/haptics';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { ParamListBase } from '@react-navigation/native';
 
 const logger = createLogger('FlashlightWhistleScreen');
 
-export default function FlashlightWhistleScreen({ navigation }: any) {
+// ELITE: Type-safe navigation prop
+type FlashlightWhistleNavigationProp = StackNavigationProp<ParamListBase>;
+
+interface FlashlightWhistleScreenProps {
+  navigation: FlashlightWhistleNavigationProp;
+}
+
+export default function FlashlightWhistleScreen({ navigation }: FlashlightWhistleScreenProps) {
   const [flashlightOn, setFlashlightOn] = useState(false);
   const [sosMode, setSosMode] = useState(false);
   const [whistlePlaying, setWhistlePlaying] = useState(false);
@@ -36,12 +45,12 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       try {
         await flashlightService.initialize();
         await whistleService.initialize();
-        
+
         // Set camera ref if available
         if (cameraRef.current) {
           flashlightService.setCameraRef(cameraRef.current);
         }
-        
+
         setIsInitialized(true);
         logger.info('✅ Services initialized');
       } catch (error) {
@@ -49,14 +58,14 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
         Alert.alert(
           'Servis Hatası',
           'Bazı özellikler çalışmayabilir. Lütfen tekrar deneyin.',
-          [{ text: 'Tamam' }]
+          [{ text: 'Tamam' }],
         );
         setIsInitialized(true); // Still allow usage
       }
     };
-    
+
     initializeServices();
-    
+
     // Cleanup on unmount
     return () => {
       cleanup();
@@ -80,7 +89,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
         setFlashlightOn(isActive);
       }
     };
-    
+
     const interval = setInterval(checkFlashlightState, 500);
     return () => {
       isMounted = false;
@@ -98,7 +107,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
         setWhistlePlaying(isActive);
       }
     };
-    
+
     const interval = setInterval(checkWhistleState, 500);
     return () => {
       isMounted = false;
@@ -112,7 +121,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       // CRITICAL: Stop all animations first
       pulseScale.value = 1;
       whistlePulseScale.value = 1;
-      
+
       // CRITICAL: Stop all services
       if (flashlightOn || sosMode) {
         await flashlightService.stop();
@@ -140,7 +149,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
   // Handle flashlight toggle
   const handleFlashlightToggle = async () => {
     haptics.impactMedium();
-    
+
     try {
       if (flashlightOn || sosMode) {
         // Turn off
@@ -161,7 +170,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       Alert.alert(
         'Fener Hatası',
         'Fener açılamadı. Lütfen kamera izinlerini kontrol edin.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -169,7 +178,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
   // Handle SOS toggle
   const handleSOSToggle = async () => {
     haptics.impactMedium();
-    
+
     try {
       if (sosMode) {
         // Stop SOS
@@ -183,15 +192,15 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
         await flashlightService.flashSOSMorse();
         setSosMode(true);
         setFlashlightOn(false);
-        
+
         // Start pulse animation
         pulseScale.value = withRepeat(
           withSequence(
             withTiming(1.2, { duration: 500 }),
-            withTiming(1, { duration: 500 })
+            withTiming(1, { duration: 500 }),
           ),
           -1,
-          true
+          true,
         );
         logger.info('✅ SOS ON');
       }
@@ -200,7 +209,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       Alert.alert(
         'SOS Hatası',
         'SOS sinyali başlatılamadı. Lütfen tekrar deneyin.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -208,7 +217,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
   // Handle screen flashlight toggle
   const handleScreenFlashlightToggle = async () => {
     haptics.impactMedium();
-    
+
     try {
       if (screenFlashlightOn) {
         await flashlightService.turnOffScreenFlashlight();
@@ -224,7 +233,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       Alert.alert(
         'Ekran Feneri Hatası',
         'Ekran feneri açılamadı.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -232,7 +241,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
   // Handle whistle toggle
   const handleWhistleToggle = async () => {
     haptics.impactMedium();
-    
+
     try {
       if (whistlePlaying) {
         // Stop whistle
@@ -244,15 +253,15 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
         // Start whistle (SOS Morse pattern)
         await whistleService.playSOSWhistle('morse');
         setWhistlePlaying(true);
-        
+
         // Start pulse animation
         whistlePulseScale.value = withRepeat(
           withSequence(
             withTiming(1.15, { duration: 400 }),
-            withTiming(1, { duration: 400 })
+            withTiming(1, { duration: 400 }),
           ),
           -1,
-          true
+          true,
         );
         logger.info('✅ Whistle ON (SOS Morse)');
       }
@@ -261,7 +270,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       Alert.alert(
         'Düdük Hatası',
         'Düdük başlatılamadı. Lütfen ses izinlerini kontrol edin.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -269,26 +278,26 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
   // Handle emergency call
   const handleEmergencyCall = async (number: string) => {
     haptics.impactHeavy();
-    
+
     const phoneUrl = `tel:${number}`;
-    
+
     // Validate URL format
     if (!phoneUrl.match(/^tel:\d+$/)) {
       logger.error('❌ Invalid phone URL format:', phoneUrl);
       Alert.alert(
         'Hata',
         'Geçersiz telefon numarası formatı.',
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
       return;
     }
-    
+
     try {
       const canOpen = await Linking.canOpenURL(phoneUrl);
       if (!canOpen) {
         throw new Error('Cannot open phone dialer');
       }
-      
+
       await Linking.openURL(phoneUrl);
       logger.info(`✅ Emergency call initiated: ${number}`);
     } catch (error) {
@@ -296,7 +305,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
       Alert.alert(
         'Arama Hatası',
         `${number} aranırken bir hata oluştu. Lütfen manuel olarak arayın.`,
-        [{ text: 'Tamam' }]
+        [{ text: 'Tamam' }],
       );
     }
   };
@@ -336,7 +345,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
             <Ionicons name="flashlight" size={24} color={colors.accent.primary} />
             <Text style={styles.sectionTitle}>Fener</Text>
           </View>
-          
+
           {/* Main Flashlight Button */}
           <Pressable
             style={styles.mainButton}
@@ -349,10 +358,10 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
               end={{ x: 1, y: 1 }}
               style={styles.mainButtonGradient}
             >
-              <Ionicons 
-                name={flashlightOn ? "flash" : "flash-off"} 
-                size={72} 
-                color={flashlightOn ? "#fff" : colors.text.secondary} 
+              <Ionicons
+                name={flashlightOn ? "flash" : "flash-off"}
+                size={72}
+                color={flashlightOn ? "#fff" : colors.text.secondary}
               />
               <Text style={[styles.mainButtonText, !flashlightOn && styles.mainButtonTextOff]}>
                 {flashlightOn ? 'Fener Açık' : 'Feneri Aç'}
@@ -370,10 +379,10 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
             disabled={!isInitialized}
           >
             <Animated.View style={animatedStyle}>
-              <Ionicons 
-                name={sosMode ? "radio-button-on" : "radio-button-off"} 
-                size={28} 
-                color={sosMode ? colors.status.danger : colors.text.secondary} 
+              <Ionicons
+                name={sosMode ? "radio-button-on" : "radio-button-off"}
+                size={28}
+                color={sosMode ? colors.status.danger : colors.text.secondary}
               />
             </Animated.View>
             <View style={styles.secondaryButtonContent}>
@@ -392,10 +401,10 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
             onPress={handleScreenFlashlightToggle}
             disabled={!isInitialized}
           >
-            <Ionicons 
-              name={screenFlashlightOn ? "phone-portrait" : "phone-portrait-outline"} 
-              size={28} 
-              color={screenFlashlightOn ? colors.accent.primary : colors.text.secondary} 
+            <Ionicons
+              name={screenFlashlightOn ? "phone-portrait" : "phone-portrait-outline"}
+              size={28}
+              color={screenFlashlightOn ? colors.accent.primary : colors.text.secondary}
             />
             <View style={styles.secondaryButtonContent}>
               <Text style={[styles.secondaryButtonText, screenFlashlightOn && styles.secondaryButtonTextActive]}>
@@ -414,7 +423,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
             <Ionicons name="megaphone" size={24} color={colors.status.danger} />
             <Text style={styles.sectionTitle}>Düdük</Text>
           </View>
-          
+
           {/* Main Whistle Button */}
           <Pressable
             style={styles.mainButton}
@@ -428,10 +437,10 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
               style={styles.mainButtonGradient}
             >
               <Animated.View style={whistleAnimatedStyle}>
-                <Ionicons 
-                  name="megaphone" 
-                  size={72} 
-                  color={whistlePlaying ? "#fff" : colors.text.secondary} 
+                <Ionicons
+                  name="megaphone"
+                  size={72}
+                  color={whistlePlaying ? "#fff" : colors.text.secondary}
                 />
               </Animated.View>
               <Text style={[styles.mainButtonText, !whistlePlaying && styles.mainButtonTextOff]}>
@@ -458,7 +467,7 @@ export default function FlashlightWhistleScreen({ navigation }: any) {
             <Ionicons name="call" size={24} color={colors.status.danger} />
             <Text style={styles.sectionTitle}>Hızlı Erişim</Text>
           </View>
-          
+
           <View style={styles.quickAccessGrid}>
             {/* 112 - Acil Yardım */}
             <Pressable

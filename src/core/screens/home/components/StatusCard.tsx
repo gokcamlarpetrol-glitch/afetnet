@@ -1,180 +1,180 @@
 /**
- * STATUS CARD - Detailed Offline Features
- * 5-6 features with checkmarks, detailed descriptions
- * Premium indigo gradient, 80-100px height
+ * STATUS CARD - ELITE EDITION
+ * Detailed offline features with Reanimated 3 layout transitions.
+ * Premium indigo glassmorphism.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as haptics from '../../../utils/haptics';
-import { colors } from '../../../theme';
+import { colors, spacing } from '../../../theme';
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
+  Layout,
+  FadeInUp,
+  FadeOutUp,
+  useSharedValue,
+} from 'react-native-reanimated';
+import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurface';
 
 const FEATURES = [
-  { id: 1, text: 'Bluetooth Mesh Ağı (Aktif)', delay: 0 },
-  { id: 2, text: 'Offline Mesajlaşma', delay: 100 },
-  { id: 3, text: 'Enkaz Algılama Sistemi', delay: 200 },
-  { id: 4, text: 'Acil Durum Sinyalleri', delay: 300 },
-  { id: 5, text: 'Konum Paylaşımı (GPS)', delay: 400 },
+  { id: 1, text: 'Bluetooth Mesh Ağı (Aktif)', icon: 'logo-bluetooth' },
+  { id: 2, text: 'Offline Mesajlaşma', icon: 'chatbubbles' },
+  { id: 3, text: 'Enkaz Algılama Sistemi', icon: 'body' },
+  { id: 4, text: 'Acil Durum Sinyalleri', icon: 'radio' },
+  { id: 5, text: 'Konum Paylaşımı', icon: 'navigate' },
 ];
 
 export default function StatusCard() {
   const [expanded, setExpanded] = useState(false);
-  const fadeAnims = useRef(FEATURES.map(() => new Animated.Value(0))).current;
-  const heightAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    // Staggered fade-in animation (only when expanded)
-    if (expanded) {
-      const animations = fadeAnims.map((anim, index) =>
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: 400,
-          delay: FEATURES[index].delay,
-          useNativeDriver: true,
-        })
-      );
-
-      Animated.parallel(animations).start();
-    }
-  }, [expanded]);
+  const rotateValue = useSharedValue(0);
 
   const toggleExpanded = () => {
     haptics.impactLight();
     setExpanded(!expanded);
-    
-    Animated.timing(heightAnim, {
-      toValue: expanded ? 0 : 1,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
+    rotateValue.value = withSpring(expanded ? 0 : 180);
   };
 
+  const animatedArrowStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotateValue.value}deg` }],
+  }));
+
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={['rgba(99, 102, 241, 0.12)', 'rgba(79, 70, 229, 0.08)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradient}
-      >
-        {/* Header - Tıklanabilir */}
-        <TouchableOpacity onPress={toggleExpanded} activeOpacity={0.7}>
+    <Animated.View layout={Layout.springify()} style={styles.container}>
+      <PremiumMaterialSurface variant="B" style={styles.surface}>
+        <TouchableOpacity
+          onPress={toggleExpanded}
+          activeOpacity={0.7}
+          style={styles.touchable}
+        >
           <View style={styles.header}>
-            <View style={styles.statusDot} />
-            <Text style={styles.title}>Tam Offline Çalışma Desteği</Text>
-            <Ionicons 
-              name={expanded ? 'chevron-up' : 'chevron-down'} 
-              size={20} 
-              color={colors.text.primary} 
-            />
+            <View style={styles.statusBadge}>
+              <View style={styles.statusDot} />
+            </View>
+            <View style={styles.titleContainer}>
+              <Text style={styles.title}>Offline Mod: HAZIR</Text>
+              <Text style={styles.subtitle}>İnternetsiz İletişim Aktif</Text>
+            </View>
+            <Animated.View style={[styles.iconContainer, animatedArrowStyle]}>
+              <Ionicons name="chevron-down" size={20} color={colors.text.secondary} />
+            </Animated.View>
           </View>
         </TouchableOpacity>
 
-        {/* Features List - Sadece expanded ise göster */}
+        {/* Features List - Collapsible */}
         {expanded && (
-          <Animated.View 
-            style={[
-              styles.featuresList,
-              {
-                opacity: heightAnim,
-                maxHeight: heightAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, 200],
-                }),
-              },
-            ]}
-          >
+          <View style={styles.featuresList}>
+            <View style={styles.divider} />
             {FEATURES.map((feature, index) => (
               <Animated.View
                 key={feature.id}
-                style={[
-                  styles.featureItem,
-                  {
-                    opacity: fadeAnims[index],
-                    transform: [
-                      {
-                        translateX: fadeAnims[index].interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-20, 0],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
+                entering={FadeInUp.delay(index * 50).springify()}
+                exiting={FadeOutUp}
+                style={styles.featureItem}
               >
-                <Ionicons name="checkmark-circle" size={14} color={colors.status.success} />
+                <View style={styles.featureIcon}>
+                  <Ionicons name={feature.icon as any} size={14} color={colors.status.mesh} />
+                </View>
                 <Text style={styles.featureText}>{feature.text}</Text>
+                <Ionicons name="checkmark-circle" size={16} color={colors.status.success} />
               </Animated.View>
             ))}
-          </Animated.View>
+          </View>
         )}
-      </LinearGradient>
-    </View>
+      </PremiumMaterialSurface>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
+    marginBottom: spacing[4],
+    marginHorizontal: 4,
   },
-  gradient: {
-    padding: 12,
-    borderWidth: 0.5,
-    borderColor: 'rgba(99, 102, 241, 0.2)',
-    borderRadius: 16,
-    minHeight: 50,
-    backgroundColor: 'rgba(99, 102, 241, 0.05)',
+  surface: {
+    padding: 0,
+  },
+  touchable: {
+    padding: spacing[4],
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 0,
+    gap: 12,
+  },
+  statusBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.3)',
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: '#6366f1',
     shadowColor: '#6366f1',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
+    shadowOpacity: 0.8,
     shadowRadius: 6,
-    elevation: 6,
+    elevation: 4,
+  },
+  titleContainer: {
+    flex: 1,
   },
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-    flex: 1,
+    color: '#0F172A', // Navy for better readability
+    marginBottom: 2,
+    letterSpacing: 0.3,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#64748B', // Slate
+  },
+  iconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featuresList: {
-    gap: 6,
-    marginTop: 10,
-    overflow: 'hidden',
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[4],
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    marginBottom: 12,
+    marginTop: -4,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 1,
+    paddingVertical: 8,
+    gap: 12,
+  },
+  featureIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featureText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.text.primary,
-    letterSpacing: -0.1,
     flex: 1,
-    opacity: 0.9,
+    fontSize: 13,
+    color: '#334155',
+    fontWeight: '500',
   },
 });

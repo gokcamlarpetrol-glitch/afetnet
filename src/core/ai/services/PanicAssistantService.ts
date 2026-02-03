@@ -40,7 +40,7 @@ class PanicAssistantService {
    */
   async getEmergencyActions(
     scenario: DisasterScenario,
-    context?: EmergencyContext
+    context?: EmergencyContext,
   ): Promise<EmergencyAction[]> {
     // OpenAI ile dinamik aksiyonlar
     try {
@@ -64,7 +64,7 @@ class PanicAssistantService {
   private enrichActions(
     actions: EmergencyAction[],
     scenario: DisasterScenario,
-    context?: EmergencyContext
+    context?: EmergencyContext,
   ): EmergencyAction[] {
     return actions.map((action) => {
       const enriched: EmergencyAction = {
@@ -92,13 +92,13 @@ class PanicAssistantService {
    */
   private async getActionsWithAI(
     scenario: DisasterScenario,
-    context: EmergencyContext
+    context: EmergencyContext,
   ): Promise<EmergencyAction[]> {
-    const scenarioText = scenario === 'earthquake' ? 'Deprem' : 
-                        scenario === 'fire' ? 'Yangın' : 
-                        scenario === 'flood' ? 'Sel' : 'Afet';
+    const scenarioText = scenario === 'earthquake' ? 'Deprem' :
+      scenario === 'fire' ? 'Yangın' :
+        scenario === 'flood' ? 'Sel' : 'Afet';
 
-    const contextInfo = context.magnitude 
+    const contextInfo = context.magnitude
       ? `\n- Deprem Büyüklüğü: ${context.magnitude}
 - Konum: ${context.location || 'Bilinmiyor'}
 ${context.distance ? `- Mesafe: ${Math.round(context.distance)} km` : ''}`
@@ -190,18 +190,18 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
 
     // JSON parse et
     const parsed = this.parseAIResponse(aiResponse);
-    
-    return parsed.actions.map((action: any) => ({
-      id: action.id || String(Math.random()),
-      text: action.text || 'Aksiyon',
+
+    return parsed.actions.map((action: Record<string, unknown>) => ({
+      id: (action.id as string) || String(Math.random()),
+      text: (action.text as string) || 'Aksiyon',
       priority: typeof action.priority === 'number' ? action.priority : 1,
-      icon: this.validateIcon(action.icon),
-      phase: ['before', 'during', 'after', 'check'].includes(action.phase)
-        ? action.phase
+      icon: this.validateIcon(action.icon as string),
+      phase: ['before', 'during', 'after', 'check'].includes(action.phase as string)
+        ? action.phase as 'before' | 'during' | 'after' | 'check'
         : 'during',
-      details: action.details || undefined,
+      details: (action.details as string) || undefined,
       checklist: Array.isArray(action.checklist)
-        ? action.checklist.filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
+        ? (action.checklist as unknown[]).filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
         : undefined,
       expectedDurationMinutes: typeof action.expectedDurationMinutes === 'number'
         ? action.expectedDurationMinutes
@@ -213,7 +213,8 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
   /**
    * AI yanıtını parse et ve validate et
    */
-  private parseAIResponse(response: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private parseAIResponse(response: string): { actions: Record<string, unknown>[] } {
     try {
       // JSON'u bul
       const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -229,17 +230,17 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
       }
 
       // Her aksiyonu validate et
-      parsed.actions = parsed.actions.map((action: any, idx: number) => ({
-        id: action.id || String(idx + 1),
-        text: action.text || 'Aksiyon',
+      parsed.actions = parsed.actions.map((action: Record<string, unknown>, idx: number) => ({
+        id: (action.id as string) || String(idx + 1),
+        text: (action.text as string) || 'Aksiyon',
         priority: typeof action.priority === 'number' ? action.priority : idx + 1,
-        icon: this.validateIcon(action.icon),
-        phase: ['before', 'during', 'after', 'check'].includes(action.phase)
+        icon: this.validateIcon(action.icon as string),
+        phase: ['before', 'during', 'after', 'check'].includes(action.phase as string)
           ? action.phase
           : 'during',
-        details: action.details || undefined,
+        details: (action.details as string) || undefined,
         checklist: Array.isArray(action.checklist)
-          ? action.checklist.filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
+          ? (action.checklist as unknown[]).filter((item: unknown): item is string => typeof item === 'string').slice(0, 3)
           : undefined,
         expectedDurationMinutes: typeof action.expectedDurationMinutes === 'number'
           ? action.expectedDurationMinutes
@@ -247,7 +248,7 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
       }));
 
       // Priority'ye göre sırala
-      parsed.actions.sort((a: any, b: any) => a.priority - b.priority);
+      parsed.actions.sort((a: Record<string, unknown>, b: Record<string, unknown>) => (a.priority as number) - (b.priority as number));
 
       return parsed;
     } catch (error) {
@@ -261,11 +262,11 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
    */
   private validateIcon(icon: string): string {
     const validIcons = [
-      'shield-checkmark', 'warning', 'exit', 'medical', 
+      'shield-checkmark', 'warning', 'exit', 'medical',
       'call', 'location', 'people', 'alert-circle',
-      'home', 'water', 'flashlight'
+      'home', 'water', 'flashlight',
     ];
-    
+
     return validIcons.includes(icon) ? icon : 'shield-checkmark';
   }
 
@@ -274,7 +275,7 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
    */
   private getActionsWithRules(
     scenario: DisasterScenario,
-    context?: EmergencyContext
+    context?: EmergencyContext,
   ): EmergencyAction[] {
     if (scenario === 'earthquake') {
       const baseActions: EmergencyAction[] = [

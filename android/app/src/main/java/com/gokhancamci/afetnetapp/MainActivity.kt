@@ -1,4 +1,4 @@
-package com.gokhancamci.afetnetapp
+package com.afetnetebekesizacililetiim
 
 import android.os.Build
 import android.os.Bundle

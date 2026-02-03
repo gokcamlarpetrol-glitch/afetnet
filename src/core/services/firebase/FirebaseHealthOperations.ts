@@ -16,10 +16,10 @@ const TIMEOUT_MS = 10000; // 10 seconds
  */
 async function withTimeout<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
 ): Promise<T> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS)
+    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
   
   return Promise.race([operation(), timeoutPromise]);
@@ -31,7 +31,7 @@ async function withTimeout<T>(
 export async function saveHealthProfile(
   userDeviceId: string,
   profile: HealthProfileData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveHealthProfile');
@@ -50,7 +50,7 @@ export async function saveHealthProfile(
         ...profile,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'Health profile save'
+      'Health profile save',
     );
 
     if (__DEV__) {
@@ -79,7 +79,7 @@ export async function saveHealthProfile(
  */
 export async function loadHealthProfile(
   userDeviceId: string,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<HealthProfileData | null> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, cannot load health profile');
@@ -97,7 +97,7 @@ export async function loadHealthProfile(
     
     const snapshot = await withTimeout(
       () => getDoc(profileRef),
-      'Health profile load'
+      'Health profile load',
     );
     
     if (!snapshot.exists()) {
@@ -129,7 +129,7 @@ export async function loadHealthProfile(
 export async function saveICE(
   userDeviceId: string,
   iceData: ICEData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveICE');
@@ -148,7 +148,7 @@ export async function saveICE(
         ...iceData,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
-      'ICE data save'
+      'ICE data save',
     );
 
     if (__DEV__) {
@@ -177,7 +177,7 @@ export async function saveICE(
  */
 export async function loadICE(
   userDeviceId: string,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<ICEData | null> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, cannot load ICE');
@@ -195,7 +195,7 @@ export async function loadICE(
     
     const snapshot = await withTimeout(
       () => getDoc(iceRef),
-      'ICE data load'
+      'ICE data load',
     );
     
     if (!snapshot.exists()) {

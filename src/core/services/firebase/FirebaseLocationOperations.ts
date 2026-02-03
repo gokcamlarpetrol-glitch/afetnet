@@ -16,12 +16,12 @@ const TIMEOUT_MS = 10000; // 10 seconds
  */
 async function withTimeout<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
 ): Promise<T> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS)
+    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
-  
+
   return Promise.race([operation(), timeoutPromise]);
 }
 
@@ -31,7 +31,7 @@ async function withTimeout<T>(
 export async function saveLocationUpdate(
   userDeviceId: string,
   location: LocationUpdateData,
-  isInitialized: boolean
+  isInitialized: boolean,
 ): Promise<boolean> {
   if (!isInitialized) {
     logger.warn('FirebaseDataService not initialized, skipping saveLocationUpdate');
@@ -45,12 +45,30 @@ export async function saveLocationUpdate(
       return false;
     }
 
+    const timestamp = Date.now();
+    const historyRef = doc(db, 'devices', userDeviceId, 'locations', timestamp.toString());
+    const deviceRef = doc(db, 'devices', userDeviceId);
+
     await withTimeout(
-      () => setDoc(doc(db, 'devices', userDeviceId, 'locations', Date.now().toString()), {
-        ...location,
-        timestamp: new Date().toISOString(),
-      }, { merge: true }),
-      'Location update save'
+      async () => {
+        // Parallel writes: ONE for history, ONE for real-time status
+        await Promise.all([
+          setDoc(historyRef, {
+            ...location,
+            timestamp: new Date().toISOString(),
+          }, { merge: true }),
+
+          setDoc(deviceRef, {
+            location: {
+              ...location,
+              timestamp: timestamp, // Store as number for easy comparison
+            },
+            lastSeen: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }, { merge: true }),
+        ]);
+      },
+      'Location update save',
     );
 
     if (__DEV__) {
