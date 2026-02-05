@@ -151,8 +151,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     ORG_SECRET: process.env.ORG_SECRET || '',
     API_BASE_URL: process.env.API_BASE_URL || '', // DEPRECATED: Using Firebase
-    privacyPolicyUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/privacy-policy.html",
-    termsOfServiceUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/terms-of-service.html",
+    privacyPolicyUrl: "https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html",
+    termsOfServiceUrl: "https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/terms-of-service.html",
     supportEmail: "support@afetnet.app",
   },
 });
