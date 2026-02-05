@@ -53,7 +53,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lastUpdated}>Son Güncelleme: 12 Kasım 2025</Text>
+        <Text style={styles.lastUpdated}>Son Güncelleme: 5 Şubat 2026</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. GİRİŞ</Text>
