@@ -179,7 +179,11 @@ export function sanitizeJSON<T = any>(input: string): T | null {
 
     return parsed as T;
   } catch (error) {
-    logger.error('JSON sanitization error:', error);
+    // ELITE V2: Don't log as error - non-JSON input is expected and handled gracefully
+    // Only log in debug mode to reduce terminal noise
+    if (__DEV__) {
+      logger.debug('JSON parse skipped (input is not valid JSON)');
+    }
     return null;
   }
 }

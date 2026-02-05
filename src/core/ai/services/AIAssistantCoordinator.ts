@@ -11,6 +11,8 @@ import { useAIAssistantStore } from '../stores/aiAssistantStore';
 import { riskScoringService } from './RiskScoringService';
 import { preparednessPlanService } from './PreparednessPlanService';
 import { panicAssistantService } from './PanicAssistantService';
+import { offlineAIService } from './OfflineAIService';
+import { openAIService } from './OpenAIService';
 
 const logger = createLogger('AIAssistantCoordinator');
 
@@ -377,6 +379,204 @@ export const aiAssistantCoordinator = {
       store.setPanicAssistantLoading(false);
     }
   },
+
+  // ============================================================================
+  // ELITE HYBRID AI CHAT SYSTEM
+  // ============================================================================
+
+  /**
+   * ELITE: Hybrid AI Chat - Online/Offline Automatic Routing
+   * Uses offline knowledge base for instant responses
+   * Enhances with OpenAI when online for better answers
+   */
+  async chat(message: string): Promise<HybridAIResponse> {
+    const startTime = Date.now();
+
+    try {
+      // 1. Always get offline response first (instant, <200ms)
+      // ELITE: Using static import to prevent LoadBundleFromServerRequestError
+      const offlineResponse = await offlineAIService.getResponse(message);
+
+      // 2. Check if we should try online enhancement
+      const isOnline = await this.isOnline();
+      const shouldTryOnline = isOnline && offlineResponse.confidence < 0.8;
+
+      // 3. For critical emergencies, use offline immediately (speed is critical)
+      if (offlineResponse.emergencyLevel === 'critical') {
+        logger.info('🚨 Emergency query - using instant offline response');
+        return {
+          ...offlineResponse,
+          source: 'offline',
+          responseTime: Date.now() - startTime,
+        };
+      }
+
+      // 4. Try online enhancement if appropriate
+      if (shouldTryOnline) {
+        try {
+          const onlineResponse = await this.getOnlineResponse(message, offlineResponse);
+          if (onlineResponse) {
+            return {
+              ...onlineResponse,
+              source: 'hybrid',
+              offlineFallback: offlineResponse.answer,
+              responseTime: Date.now() - startTime,
+            };
+          }
+        } catch (onlineError) {
+          logger.warn('Online enhancement failed, using offline:', onlineError);
+        }
+      }
+
+      // 5. Return offline response
+      return {
+        ...offlineResponse,
+        responseTime: Date.now() - startTime,
+      };
+
+    } catch (error) {
+      logger.error('Chat error:', error);
+      return {
+        answer: 'Şu an yanıt oluşturulamadı. Acil durumlarda 112\'yi arayın.',
+        confidence: 0.5,
+        intent: 'UNKNOWN' as any,
+        source: 'offline',
+        emergencyLevel: 'normal',
+        responseTime: Date.now() - startTime,
+      };
+    }
+  },
+
+  /**
+   * Get online response from OpenAI
+   */
+  async getOnlineResponse(message: string, offlineContext: any): Promise<HybridAIResponse | null> {
+    try {
+      // ELITE: Using static import to prevent LoadBundleFromServerRequestError
+
+      if (!openAIService.isConfigured()) {
+        await openAIService.initialize();
+      }
+
+      if (!openAIService.isConfigured()) {
+        return null;
+      }
+
+      // Build context-aware prompt
+      const systemPrompt = `Sen AfetNet uygulamasının yapay zeka asistanısın. Türkiye'de deprem, afet güvenliği ve ilk yardım konularında uzman bir asistansın.
+
+Kullanıcının sorusu: "${message}"
+Tespit edilen niyet: ${offlineContext.intent}
+Acil durum seviyesi: ${offlineContext.emergencyLevel}
+
+Önemli kurallar:
+1. Türkçe yanıt ver
+2. Kısa ve öz ol (max 200 kelime)
+3. Acil durumlarda önce güvenlik talimatları ver
+4. Emoji kullan ama aşırıya kaçma
+5. AFAD ve resmi kaynakları referans ver
+6. Kesin olmayan bilgi verme`;
+
+      const response = await openAIService.chat([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ]);
+
+      // chat() returns string directly
+      if (response && typeof response === 'string' && response.length > 0) {
+        return {
+          answer: response,
+          confidence: 0.9,
+          intent: offlineContext.intent,
+          source: 'hybrid',
+          emergencyLevel: offlineContext.emergencyLevel,
+          suggestedActions: offlineContext.suggestedActions,
+          relatedTopics: offlineContext.relatedTopics,
+          responseTime: 0, // Will be set by caller
+        };
+      }
+
+      return null;
+    } catch (error) {
+      logger.warn('OpenAI request failed:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Check if device is online
+   */
+  async isOnline(): Promise<boolean> {
+    try {
+      const NetInfo = await import('@react-native-community/netinfo');
+      const state = await NetInfo.default.fetch();
+      return state.isConnected === true && state.isInternetReachable === true;
+    } catch (error) {
+      // Fallback: try a simple fetch
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+
+        await fetch('https://www.google.com/generate_204', {
+          method: 'HEAD',
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  },
+
+  /**
+   * Quick emergency check
+   */
+  isEmergencyQuery(message: string): boolean {
+    // ELITE: Using static import reference
+    return offlineAIService.isEmergency(message);
+  },
+
+  /**
+   * Get intent classification
+   */
+  classifyIntent(message: string) {
+    // ELITE: Using static import reference
+    return offlineAIService.classifyIntent(message);
+  },
+
+  /**
+   * Get knowledge base stats
+   */
+  getKnowledgeStats() {
+    // ELITE: Using static import reference
+    return offlineAIService.getStats();
+  },
 };
 
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+export interface HybridAIResponse {
+  answer: string;
+  detailedAnswer?: string;
+  confidence: number;
+  intent: string;
+  source: 'openai' | 'offline' | 'hybrid';
+  emergencyLevel: 'normal' | 'urgent' | 'critical';
+  suggestedActions?: SuggestedAction[];
+  relatedTopics?: string[];
+  responseTime: number;
+  offlineFallback?: string;
+}
+
+export interface SuggestedAction {
+  id: string;
+  label: string;
+  icon: string;
+  action: 'call' | 'navigate' | 'share' | 'info';
+  data?: string;
+}
 

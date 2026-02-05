@@ -37,6 +37,7 @@ export enum MeshMessageType {
   EMERGENCY_BEACON = 0x30, // Auto emergency beacon
   FAMILY_SEARCH = 0x31,    // Search for family member
   RESCUE_SIGNAL = 0x32,    // Professional rescue signal
+  HEALTH_SOS = 0x33,       // Health data broadcast during SOS
 
   // V3: Key Exchange (for encryption)
   KEY_EXCHANGE = 0x40,  // Public key exchange
@@ -320,6 +321,132 @@ export class MeshProtocol {
       speed: buffer.readUInt8(10),
       heading: buffer.readUInt16BE(11),
     };
+  }
+
+  // ===========================================================================
+  // V3: HEALTH SOS - Critical health data broadcast during emergencies
+  // ===========================================================================
+
+  /**
+   * Create Health SOS payload - Minimal critical health data
+   * Format: [initials:2][bloodType:1][allergyCount:1][conditionCount:1][medCount:1]
+   *         [allergies...N][conditions...N][medications...N]
+   * Max payload: ~100 bytes for BLE efficiency
+   */
+  static createHealthSOSPayload(
+    initials: string,
+    bloodType: string,
+    allergies: string[],
+    conditions: string[],
+    medications: string[]
+  ): Buffer {
+    // Blood type encoding
+    const bloodTypeMap: Record<string, number> = {
+      'A+': 1, 'A-': 2, 'B+': 3, 'B-': 4,
+      'AB+': 5, 'AB-': 6, 'O+': 7, 'O-': 8, '': 0
+    };
+
+    // Limit to 3 items each for payload size
+    const limitedAllergies = allergies.slice(0, 3).map(a => a.substring(0, 15));
+    const limitedConditions = conditions.slice(0, 3).map(c => c.substring(0, 15));
+    const limitedMeds = medications.slice(0, 3).map(m => m.substring(0, 15));
+
+    // Build dynamic payload
+    const parts: Buffer[] = [];
+
+    // Header: 6 bytes fixed
+    const header = Buffer.alloc(6);
+    const initChars = (initials || 'XX').substring(0, 2).toUpperCase();
+    header.write(initChars, 0, 2, 'utf-8');
+    header.writeUInt8(bloodTypeMap[bloodType] || 0, 2);
+    header.writeUInt8(limitedAllergies.length, 3);
+    header.writeUInt8(limitedConditions.length, 4);
+    header.writeUInt8(limitedMeds.length, 5);
+    parts.push(header);
+
+    // Allergies (length-prefixed strings)
+    for (const allergy of limitedAllergies) {
+      const allergyBuf = Buffer.from(allergy, 'utf-8');
+      const lenBuf = Buffer.alloc(1);
+      lenBuf.writeUInt8(allergyBuf.length, 0);
+      parts.push(lenBuf, allergyBuf);
+    }
+
+    // Conditions
+    for (const condition of limitedConditions) {
+      const condBuf = Buffer.from(condition, 'utf-8');
+      const lenBuf = Buffer.alloc(1);
+      lenBuf.writeUInt8(condBuf.length, 0);
+      parts.push(lenBuf, condBuf);
+    }
+
+    // Medications
+    for (const med of limitedMeds) {
+      const medBuf = Buffer.from(med, 'utf-8');
+      const lenBuf = Buffer.alloc(1);
+      lenBuf.writeUInt8(medBuf.length, 0);
+      parts.push(lenBuf, medBuf);
+    }
+
+    return Buffer.concat(parts);
+  }
+
+  /**
+   * Parse Health SOS payload
+   */
+  static parseHealthSOSPayload(buffer: Buffer): {
+    initials: string;
+    bloodType: string;
+    allergies: string[];
+    conditions: string[];
+    medications: string[];
+  } | null {
+    if (buffer.length < 6) return null;
+
+    const bloodTypeReverseMap: Record<number, string> = {
+      1: 'A+', 2: 'A-', 3: 'B+', 4: 'B-',
+      5: 'AB+', 6: 'AB-', 7: 'O+', 8: 'O-', 0: ''
+    };
+
+    const initials = buffer.slice(0, 2).toString('utf-8');
+    const bloodType = bloodTypeReverseMap[buffer.readUInt8(2)] || '';
+    const allergyCount = buffer.readUInt8(3);
+    const conditionCount = buffer.readUInt8(4);
+    const medCount = buffer.readUInt8(5);
+
+    let offset = 6;
+
+    // Parse allergies
+    const allergies: string[] = [];
+    for (let i = 0; i < allergyCount && offset < buffer.length; i++) {
+      const len = buffer.readUInt8(offset++);
+      if (offset + len <= buffer.length) {
+        allergies.push(buffer.slice(offset, offset + len).toString('utf-8'));
+        offset += len;
+      }
+    }
+
+    // Parse conditions
+    const conditions: string[] = [];
+    for (let i = 0; i < conditionCount && offset < buffer.length; i++) {
+      const len = buffer.readUInt8(offset++);
+      if (offset + len <= buffer.length) {
+        conditions.push(buffer.slice(offset, offset + len).toString('utf-8'));
+        offset += len;
+      }
+    }
+
+    // Parse medications
+    const medications: string[] = [];
+    for (let i = 0; i < medCount && offset < buffer.length; i++) {
+      const len = buffer.readUInt8(offset++);
+      if (offset + len <= buffer.length) {
+        medications.push(buffer.slice(offset, offset + len).toString('utf-8'));
+        offset += len;
+      }
+    }
+
+    return { initials, bloodType, allergies, conditions, medications };
   }
 
   // ===========================================================================

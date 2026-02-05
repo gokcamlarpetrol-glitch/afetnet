@@ -35,6 +35,7 @@ import * as haptics from '../../utils/haptics';
 import { batterySaverService } from '../../services/BatterySaverService';
 import { createLogger } from '../../utils/logger';
 import { accountDeletionService } from '../../services/AccountDeletionService';
+import { EmailAuthService } from '../../services/EmailAuthService';
 import { getDeviceId } from '../../utils/device';
 import { ActivityIndicator } from 'react-native';
 
@@ -83,7 +84,26 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   // AI Features State - Her zaman aktif
   const [aiFeaturesEnabled] = useState(true);
+  const [deviceId, setDeviceId] = useState<string>('...');
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
+
+  // ELITE: New Features (previously 'Yakında' - now ACTIVE!)
+  const pdrEnabled = useSettingsStore((state) => state.pdrEnabled);
+  const proximityAlertsEnabled = useSettingsStore((state) => state.proximityAlertsEnabled);
+  const aiHazardEnabled = useSettingsStore((state) => state.aiHazardEnabled);
+
+  // Health Sharing State
+  const [healthSharingEnabled, setHealthSharingEnabled] = useState(false);
+
+  // Load health sharing preference on mount
+  useEffect(() => {
+    const loadHealthSharingPref = async () => {
+      const { emergencyHealthSharingService } = await import('../../services/EmergencyHealthSharingService');
+      await emergencyHealthSharingService.initialize();
+      setHealthSharingEnabled(emergencyHealthSharingService.isHealthSharingEnabled());
+    };
+    loadHealthSharingPref();
+  }, []);
 
   const setNotificationsEnabled = useSettingsStore((state) => state.setNotifications);
   const setLocationEnabled = useSettingsStore((state) => state.setLocation);
@@ -96,12 +116,25 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const setNewsEnabled = useSettingsStore((state) => state.setNews);
 
+  // ELITE: New Features Setters
+  const setPdrEnabled = useSettingsStore((state) => state.setPdr);
+  const setProximityAlertsEnabled = useSettingsStore((state) => state.setProximityAlerts);
+  const setAiHazardEnabled = useSettingsStore((state) => state.setAiHazard);
+
+
   useEffect(() => {
     const interval = setInterval(() => {
       setMeshStats(useMeshStore.getState().stats);
     }, 500);
 
     // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
+
+    // CRITICAL FIX: Load device ID asynchronously
+    getDeviceId().then(id => {
+      setDeviceId(id ? id.substring(0, 8) : 'N/A');
+    }).catch(() => {
+      setDeviceId('N/A');
+    });
 
     return () => clearInterval(interval);
   }, []);
@@ -118,6 +151,54 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         { text: i18nService.getLocaleDisplayName('ru'), onPress: () => { i18nService.setLocale('ru'); setLanguage('ru'); } },
         { text: i18nService.t('common.cancel'), style: 'cancel' },
       ],
+    );
+  };
+
+  // ELITE: Şifre Değiştirme
+  const handleChangePassword = () => {
+    haptics.impactMedium();
+
+    Alert.prompt(
+      'Şifre Değiştir',
+      'Mevcut şifrenizi girin:',
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Devam',
+          onPress: (currentPassword) => {
+            if (!currentPassword || currentPassword.length < 8) {
+              Alert.alert('Hata', 'Geçerli bir şifre girin.');
+              return;
+            }
+
+            Alert.prompt(
+              'Yeni Şifre',
+              'Yeni şifrenizi girin (en az 8 karakter):',
+              [
+                { text: 'İptal', style: 'cancel' },
+                {
+                  text: 'Değiştir',
+                  onPress: async (newPassword) => {
+                    if (!newPassword || newPassword.length < 8) {
+                      Alert.alert('Hata', 'Şifre en az 8 karakter olmalıdır.');
+                      return;
+                    }
+
+                    try {
+                      await EmailAuthService.changePassword(currentPassword!, newPassword);
+                      Alert.alert('Başarılı', 'Şifreniz başarıyla değiştirildi.');
+                    } catch (error: any) {
+                      Alert.alert('Hata', error.message);
+                    }
+                  },
+                },
+              ],
+              'secure-text',
+            );
+          },
+        },
+      ],
+      'secure-text',
     );
   };
 
@@ -396,17 +477,39 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       icon: 'navigate',
       title: 'PDR Konum Takibi',
       subtitle: 'GPS olmadan adım sayarak konum belirleme',
-      type: 'text',
-      value: 'Yakında',
-      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
+      type: 'switch',
+      value: pdrEnabled,
+      onPress: () => {
+        haptics.impactLight();
+        const newValue = !pdrEnabled;
+        setPdrEnabled(newValue);
+        Alert.alert(
+          'PDR Konum Takibi',
+          newValue
+            ? 'PDR aktif edildi. GPS olmadan adım sensörü ile konum takibi yapılacak.'
+            : 'PDR kapatıldı.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'location',
       title: 'Yakınlık Uyarıları',
       subtitle: 'Yakındaki acil durumlar için otomatik bildirim',
-      type: 'text',
-      value: 'Yakında',
-      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
+      type: 'switch',
+      value: proximityAlertsEnabled,
+      onPress: () => {
+        haptics.impactLight();
+        const newValue = !proximityAlertsEnabled;
+        setProximityAlertsEnabled(newValue);
+        Alert.alert(
+          'Yakınlık Uyarıları',
+          newValue
+            ? 'Yakınlık uyarıları aktif edildi. Çevrenizdeki acil durumlar için bildirim alacaksınız.'
+            : 'Yakınlık uyarıları kapatıldı.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'battery-charging',
@@ -476,9 +579,20 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       icon: 'alert-circle',
       title: 'Tehlike Çıkarımı',
       subtitle: 'AI ile otomatik tehlike bölgesi tespiti',
-      type: 'text',
-      value: 'Yakında',
-      onPress: () => Alert.alert('Yakında', 'Bu özellik yakında eklenecek.'),
+      type: 'switch',
+      value: aiHazardEnabled,
+      onPress: () => {
+        haptics.impactLight();
+        const newValue = !aiHazardEnabled;
+        setAiHazardEnabled(newValue);
+        Alert.alert(
+          'AI Tehlike Çıkarımı',
+          newValue
+            ? 'AI tehlike algılama aktif edildi. Deprem sonrası potansiyel tehlike bölgeleri otomatik tespit edilecek.'
+            : 'AI tehlike algılama kapatıldı.',
+          [{ text: 'Tamam' }]
+        );
+      },
     },
     {
       icon: 'settings',
@@ -502,6 +616,17 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         parentNavigator.navigate('AllEarthquakes');
       },
     },
+    {
+      icon: 'shield-checkmark',
+      title: '⚡ Erken Uyarı ELITE',
+      subtitle: '24/7 koruma, hassasiyet, test modu',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('EEWSettings');
+      },
+    },
   ];
 
   const medicalSettings: SettingOption[] = [
@@ -514,6 +639,36 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         haptics.impactLight();
         const parentNavigator = navigation.getParent?.() || navigation;
         parentNavigator.navigate('HealthProfile');
+      },
+    },
+    {
+      icon: 'share-social',
+      title: 'Acil Sağlık Paylaşımı',
+      subtitle: 'SOS sırasında kritik sağlık bilgilerinizi paylaş',
+      type: 'switch',
+      value: healthSharingEnabled,
+      onPress: async () => {
+        haptics.impactLight();
+        const newValue = !healthSharingEnabled;
+        setHealthSharingEnabled(newValue);
+
+        // Update the service
+        const { emergencyHealthSharingService } = await import('../../services/EmergencyHealthSharingService');
+        await emergencyHealthSharingService.setEnabled(newValue);
+
+        if (newValue) {
+          Alert.alert(
+            'Acil Sağlık Paylaşımı',
+            'SOS aktif olduğunda, yakındaki AfetNet kullanıcılarına kan grubunuz, alerjileriniz ve kritik hastalıklarınız paylaşılacak.\n\n✅ Sadece SOS sırasında paylaşılır\n✅ Tam isminiz ve telefon numaranız paylaşılmaz\n✅ Hayat kurtarıcı bilgiler',
+            [{ text: 'Anladım' }]
+          );
+        } else {
+          Alert.alert(
+            'Acil Sağlık Paylaşımı',
+            'SOS sırasında sağlık bilgileri paylaşılmayacak.',
+            [{ text: 'Tamam' }]
+          );
+        }
       },
     },
     {
@@ -588,6 +743,12 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   ];
 
   const generalSettings = useMemo<SettingOption[]>(() => {
+    // Get store values for accessibility
+    const fontScale = useSettingsStore.getState().fontScale;
+    const highContrastEnabled = useSettingsStore.getState().highContrastEnabled;
+    const setFontScale = useSettingsStore.getState().setFontScale;
+    const setHighContrast = useSettingsStore.getState().setHighContrast;
+
     const items: SettingOption[] = [
       {
         icon: 'language',
@@ -643,40 +804,45 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
           );
         },
       },
+      // ELITE: Accessibility Features - Always visible (production ready)
+      {
+        icon: 'text',
+        title: 'Yazı Boyutu',
+        subtitle: `Mevcut: %${Math.round(fontScale * 100)}`,
+        type: 'arrow',
+        onPress: () => {
+          haptics.impactLight();
+          Alert.alert(
+            'Yazı Boyutu',
+            'Metin boyutunu seçin:',
+            [
+              { text: 'Normal (%100)', onPress: () => setFontScale(1.0) },
+              { text: 'Orta (%115)', onPress: () => setFontScale(1.15) },
+              { text: 'Büyük (%130)', onPress: () => setFontScale(1.3) },
+              { text: 'Çok Büyük (%150)', onPress: () => setFontScale(1.5) },
+              { text: 'İptal', style: 'cancel' },
+            ],
+          );
+        },
+      },
+      {
+        icon: 'contrast',
+        title: 'Yüksek Kontrast',
+        subtitle: 'Görme güçlüğü olanlar için yüksek kontrast modu',
+        type: 'switch',
+        value: highContrastEnabled,
+        onPress: () => {
+          haptics.impactLight();
+          const newValue = !highContrastEnabled;
+          setHighContrast(newValue);
+          Alert.alert(
+            'Yüksek Kontrast',
+            newValue ? 'Yüksek kontrast modu aktif edildi.' : 'Yüksek kontrast modu kapatıldı.',
+            [{ text: 'Tamam' }],
+          );
+        },
+      },
     ];
-
-    if (__DEV__) {
-      items.push(
-        {
-          icon: 'text',
-          title: 'Yazı Boyutu',
-          subtitle: 'Erişilebilirlik ayarları (dev)',
-          type: 'arrow',
-          onPress: () => {
-            Alert.alert(
-              'Yazı Boyutu',
-              'Bu özellik geliştirme modunda test ediliyor.',
-              [{ text: 'Tamam' }],
-            );
-          },
-        },
-
-        {
-          icon: 'contrast',
-          title: 'Yüksek Kontrast',
-          subtitle: 'Görünürlüğü artır (dev)',
-          type: 'switch',
-          value: false,
-          onPress: () => {
-            Alert.alert(
-              'Yüksek Kontrast',
-              'Bu özellik geliştirme modunda test ediliyor.',
-              [{ text: 'Tamam' }],
-            );
-          },
-        },
-      );
-    }
 
     return items;
   }, [currentLanguage, navigation]);
@@ -737,6 +903,14 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         parentNavigator.navigate('PsychologicalSupport');
       },
     },
+    // ELITE: Şifre Değiştirme
+    {
+      icon: 'key',
+      title: 'Şifre Değiştir',
+      subtitle: 'Hesap şifrenizi güncelleyin',
+      type: 'arrow',
+      onPress: handleChangePassword,
+    },
     {
       icon: 'trash',
       title: 'Hesabı Sil',
@@ -788,7 +962,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         {renderSection('Hakkında & Destek', aboutSettings, 8)}
 
         <Text style={styles.versionText}>v{ENV.APP_VERSION}</Text>
-        <Text style={styles.userIdText}>ID: {getDeviceId().then(id => id ? id.substring(0, 8) : 'Loading...')}</Text>
+        <Text style={styles.userIdText}>ID: {deviceId}</Text>
       </ScrollView>
     </ImageBackground>
   );

@@ -43,7 +43,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
 
     try {
       // 1. Get Device ID (needs to be robust)
-      let deviceId = bleMeshService.getMyDeviceId();
+      let deviceId: string | null = bleMeshService.getMyDeviceId();
       if (!deviceId) {
         // Fallback to storage directly if service not initialized in background context
         deviceId = await AsyncStorage.getItem('@afetnet:device_id');

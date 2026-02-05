@@ -25,27 +25,35 @@ const LOCATION_UPDATE_INTERVAL = 60000; // 1 minute
 const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 
 export interface FamilyMember {
-    id: string;
-    name: string;
-    phone?: string;
-    photo?: string;
-    location?: {
-        latitude: number;
-        longitude: number;
-        timestamp: number;
-        accuracy?: number;
-    };
-    batteryLevel?: number;
-    status: 'safe' | 'danger' | 'unknown' | 'offline';
-    lastSeen: number;
-    isOnline: boolean;
+  id: string;
+  name: string;
+  phone?: string;
+  photo?: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+    timestamp: number;
+    accuracy?: number;
+  };
+  // ELITE: Find My-grade Last Known Location (persisted when battery dies)
+  lastKnownLocation?: {
+    latitude: number;
+    longitude: number;
+    timestamp: number;
+    batteryLevelAtCapture: number;
+    source: 'gps' | 'mesh' | 'cloud' | 'manual';
+  };
+  batteryLevel?: number;
+  status: 'safe' | 'danger' | 'unknown' | 'offline';
+  lastSeen: number;
+  isOnline: boolean;
 }
 
 export interface FamilyGroup {
-    id: string;
-    name: string;
-    members: FamilyMember[];
-    createdAt: number;
+  id: string;
+  name: string;
+  members: FamilyMember[];
+  createdAt: number;
 }
 
 class FamilyTrackingService {
@@ -77,17 +85,19 @@ class FamilyTrackingService {
     if (this.isTracking) return;
 
     logger.info('Starting Family Tracking');
-    this.isTracking = true;
 
-    // Check and request background permissions
+    // Check and request background permissions BEFORE setting isTracking
     const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
     if (fgStatus !== 'granted') {
       const { status: reqStatus } = await Location.requestForegroundPermissionsAsync();
       if (reqStatus !== 'granted') {
         logger.warn('Foreground location permission denied');
-        return;
+        return; // Don't set isTracking
       }
     }
+
+    // CRITICAL: Only set isTracking after permissions are granted
+    this.isTracking = true;
 
     const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
     if (bgStatus !== 'granted') {
@@ -175,15 +185,37 @@ class FamilyTrackingService {
 
   /**
      * Get all family members
+     * ELITE: Returns lastKnownLocation coordinates when member is offline
      */
   getMembers(): FamilyMember[] {
-    // Mark stale members as offline
     const now = Date.now();
-    return this.members.map((m) => ({
-      ...m,
-      isOnline: now - m.lastSeen < STALE_THRESHOLD,
-      status: now - m.lastSeen > STALE_THRESHOLD ? 'offline' : m.status,
-    }));
+    return this.members.map((m) => {
+      const isOnline = now - m.lastSeen < STALE_THRESHOLD;
+      const memberStatus = now - m.lastSeen > STALE_THRESHOLD ? 'offline' : m.status;
+
+      // ELITE: If offline and we have lastKnownLocation, use those coordinates
+      // This is the "Find My" magic - battery died but we still show the last position
+      let effectiveLatitude = m.location?.latitude;
+      let effectiveLongitude = m.location?.longitude;
+
+      if (!isOnline && m.lastKnownLocation) {
+        effectiveLatitude = m.lastKnownLocation.latitude;
+        effectiveLongitude = m.lastKnownLocation.longitude;
+        logger.debug(`📍 Using lastKnownLocation for ${m.name} (captured at ${m.lastKnownLocation.batteryLevelAtCapture}%)`);
+      }
+
+      // ELITE: Use proper undefined check instead of || to handle 0 coordinates correctly
+      const finalLatitude = effectiveLatitude !== undefined ? effectiveLatitude : (m.location?.latitude ?? 0);
+      const finalLongitude = effectiveLongitude !== undefined ? effectiveLongitude : (m.location?.longitude ?? 0);
+
+      return {
+        ...m,
+        latitude: finalLatitude,
+        longitude: finalLongitude,
+        isOnline,
+        status: memberStatus,
+      };
+    });
   }
 
   /**
@@ -195,8 +227,9 @@ class FamilyTrackingService {
      */
   updateMemberLocation(
     memberId: string,
-    location: { latitude: number; longitude: number; timestamp?: number }, // Make timestamp optional for legacy calls
+    location: { latitude: number; longitude: number; timestamp?: number },
     batteryLevel?: number,
+    source: 'gps' | 'mesh' | 'cloud' | 'manual' = 'cloud',
   ) {
     const member = this.members.find((m) => m.id === memberId);
     if (member) {
@@ -205,8 +238,7 @@ class FamilyTrackingService {
       // ELITE: Only update if new data is newer than what we have
       const currentTimestamp = member.location?.timestamp || 0;
       if (newTimestamp < currentTimestamp) {
-        // Ignore stale update (e.g. old mesh packet arrived after new cloud update)
-        return;
+        return; // Ignore stale update
       }
 
       member.location = {
@@ -215,12 +247,23 @@ class FamilyTrackingService {
         timestamp: newTimestamp,
       };
       member.lastSeen = newTimestamp;
-      // Online/Offline status is determined by staleness in getMembers()
-      // But we can eagerly set it here for UI responsiveness
       member.isOnline = true;
 
       if (batteryLevel !== undefined) {
         member.batteryLevel = batteryLevel;
+
+        // ELITE: Auto-capture lastKnownLocation when battery is critically low
+        // This is the "Find My" feature: even if battery dies, we have the last location
+        if (batteryLevel <= 15) {
+          member.lastKnownLocation = {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timestamp: newTimestamp,
+            batteryLevelAtCapture: batteryLevel,
+            source: source,
+          };
+          logger.info(`📍 LAST KNOWN LOCATION CAPTURED for ${member.name} (Battery: ${batteryLevel}%)`);
+        }
       }
 
       // Notify callbacks
@@ -334,7 +377,10 @@ class FamilyTrackingService {
       const unsubscribe = await firebaseDataService.subscribeToDeviceLocation(
         member.id,
         (location) => {
-          if (location && location.latitude && location.longitude) {
+          // ELITE: Use typeof check instead of truthy check to allow 0 coordinates
+          if (location &&
+            typeof location.latitude === 'number' && !isNaN(location.latitude) &&
+            typeof location.longitude === 'number' && !isNaN(location.longitude)) {
             this.updateMemberLocation(
               member.id,
               {

@@ -153,6 +153,17 @@ class SOSBeaconService {
             const { meshNetworkService } = await import('../mesh');
             const { MeshMessageType } = await import('../mesh/MeshProtocol');
 
+            // V5: Ensure mesh is running before sending beacon
+            if (!meshNetworkService.getIsRunning()) {
+                logger.debug('Mesh not running, attempting to start for beacon...');
+                try {
+                    await meshNetworkService.start();
+                } catch (startError) {
+                    logger.warn('Failed to start mesh for beacon:', startError);
+                    // Continue anyway - may still work
+                }
+            }
+
             const beaconPayload = JSON.stringify({
                 type: 'SOS_BEACON',
                 id: signal.id,

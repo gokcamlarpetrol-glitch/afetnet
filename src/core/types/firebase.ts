@@ -12,7 +12,9 @@ export interface MessageData {
   toDeviceId: string;
   content: string;
   timestamp: number;
-  type?: 'text' | 'sos' | 'location' | 'status';
+  type?: 'text' | 'sos' | 'location' | 'status' | 'image' | 'voice';
+  status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  priority?: 'critical' | 'high' | 'normal' | 'low';
   metadata?: Record<string, unknown>;
 }
 

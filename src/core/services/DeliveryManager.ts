@@ -50,6 +50,7 @@ class DeliveryManager {
     private deliveryRecords: Map<string, DeliveryRecord> = new Map();
     private deliveryCallbacks: Map<string, DeliveryCallback[]> = new Map();
     private ackTimeouts: Map<string, NodeJS.Timeout> = new Map();
+    private ackMonitorTimer: NodeJS.Timeout | null = null; // V5: Store monitor timer for cleanup
     private isInitialized = false;
 
     /**
@@ -293,9 +294,12 @@ class DeliveryManager {
 
             logger.debug(`ACK timeout for ${messageId}, scheduling retry in ${delay}ms`);
 
-            setTimeout(() => {
+            // ELITE: Track retry timer for cleanup
+            const timer = setTimeout(() => {
+                this.ackTimeouts.delete(messageId);
                 this.retryFailed(messageId);
             }, delay);
+            this.ackTimeouts.set(messageId, timer);
         } else {
             // Mark as failed
             record.status = 'failed';
@@ -315,8 +319,13 @@ class DeliveryManager {
     }
 
     private startAckMonitor() {
+        // V5: Clear existing timer if any
+        if (this.ackMonitorTimer) {
+            clearInterval(this.ackMonitorTimer);
+        }
+
         // Check for stale pending messages every minute
-        setInterval(() => {
+        this.ackMonitorTimer = setInterval(() => {
             const now = Date.now();
 
             for (const record of this.deliveryRecords.values()) {
@@ -326,6 +335,30 @@ class DeliveryManager {
                 }
             }
         }, 60000);
+    }
+
+    /**
+     * V5: Cleanup resources - call this to prevent memory leaks
+     */
+    destroy(): void {
+        // Clear ack monitor timer
+        if (this.ackMonitorTimer) {
+            clearInterval(this.ackMonitorTimer);
+            this.ackMonitorTimer = null;
+        }
+
+        // Clear all ack timeouts
+        this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.ackTimeouts.clear();
+
+        // Clear callbacks
+        this.deliveryCallbacks.clear();
+
+        // Save records before destroying
+        this.saveRecords();
+
+        this.isInitialized = false;
+        logger.info('DeliveryManager destroyed');
     }
 
     private notifyCallbacks(messageId: string, status: DeliveryStatus) {

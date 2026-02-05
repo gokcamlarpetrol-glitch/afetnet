@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+      <string>com.expo.modules.backgroundtask.processing</string>
+    </array>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>CFBundleAllowMixedLocalizations</key>
@@ -44,6 +48,17 @@
     <string>11</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+      <string>about</string>
+      <string>tel</string>
+      <string>mailto</string>
+      <string>sms</string>
+      <string>http</string>
+      <string>https</string>
+      <string>maps</string>
+      <string>comgooglemaps</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -56,7 +71,7 @@
       <true/>
     </dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Allow AfetNet to connect to other devices for offline messaging.</string>
+    <string>AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.</string>
     <key>NSCameraUsageDescription</key>
@@ -88,6 +103,7 @@
       <string>location</string>
       <string>bluetooth-central</string>
       <string>bluetooth-peripheral</string>
+      <string>processing</string>
     </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>

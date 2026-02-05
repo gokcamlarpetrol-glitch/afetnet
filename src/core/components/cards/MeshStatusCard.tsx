@@ -17,9 +17,9 @@ interface MeshStatusCardProps {
   earthquakeCount?: number;
 }
 
-export default function MeshStatusCard({ 
-  peerCount, 
-  status, 
+const MeshStatusCard = React.memo(function MeshStatusCard({
+  peerCount,
+  status,
   onPress,
   messageCount = 0,
   earthquakeCount = 0,
@@ -34,10 +34,10 @@ export default function MeshStatusCard({
     >
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Ionicons 
-            name="git-network-outline" 
-            size={24} 
-            color={status === 'online' ? colors.status.online : colors.status.offline} 
+          <Ionicons
+            name="git-network-outline"
+            size={24}
+            color={status === 'online' ? colors.status.online : colors.status.offline}
           />
           <Text style={styles.title}>Mesh Ağı & Sistem</Text>
         </View>
@@ -67,18 +67,20 @@ export default function MeshStatusCard({
       <View style={styles.footer}>
         <Ionicons name="checkmark-circle" size={16} color={colors.status.success} />
         <Text style={styles.footerText}>OK</Text>
-        
+
         <Ionicons name="trending-up" size={16} color={colors.status.info} style={styles.footerIcon} />
         <Text style={styles.footerText}>Aktif</Text>
-        
+
         <View style={{ flex: 1 }} />
-        
+
         <Text style={styles.footerLink}>Detay</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.brand.primary} />
       </View>
     </Pressable>
   );
-}
+});
+
+export default MeshStatusCard;
 
 const styles = StyleSheet.create({
   container: {

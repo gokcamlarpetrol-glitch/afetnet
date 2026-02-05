@@ -15,12 +15,12 @@ export class KandilliHTMLProvider {
   async fetchRecent(): Promise<Earthquake[]> {
     try {
       // CRITICAL: Parse Kandilli HTML page as fallback when API endpoints fail
-      // ELITE: Try fewer URLs with shorter timeout for faster initial load
-      // Start with most reliable URLs first
+      // ELITE: lst0.asp is PRIMARY - gets more frequent updates and may publish before AFAD
+      // lst0.asp = Son 500 deprem (fastest updates)
+      // ELITE: Only try 2 URLs with short timeout to prevent blocking main fetch
       const urls = [
-        'https://www.koeri.boun.edu.tr/scripts/lst1.asp',  // Primary HTTPS (most reliable)
-        'http://www.koeri.boun.edu.tr/scripts/lst1.asp',   // HTTP fallback
-        'https://www.koeri.boun.edu.tr/scripts/lst0.asp',  // Alternative HTTPS
+        'http://www.koeri.boun.edu.tr/scripts/lst0.asp',   // PRIMARY: Son 500 deprem - fastest updates
+        'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTTPS fallback
       ];
 
       let lastError: Error | null = null;
@@ -28,13 +28,13 @@ export class KandilliHTMLProvider {
       for (const url of urls) {
         try {
           if (__DEV__) {
-            logger.debug(`📡 Kandilli HTML sayfası parse ediliyor: ${url}`);
+            logger.info(`📡 Kandilli HTML çekiliyor: ${url}`);
           }
 
           const controller = new AbortController();
-          // ELITE: Reduced timeout to 15s for faster initial load
-          // Kandilli HTML is fast when it works, so shorter timeout prevents delays
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout (reduced from 30s)
+          // ELITE: Reduced timeout to 8s to prevent blocking main earthquake fetch
+          // If Kandilli is slow, skip and use AFAD data only
+          const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
           const response = await fetch(url, {
             method: 'GET',
@@ -164,6 +164,9 @@ export class KandilliHTMLProvider {
         logger.debug(`📊 Kandilli HTML: ${lines.length} satır bulundu`);
       }
 
+      let parsedCount = 0;
+      let skippedCount = 0;
+
       for (const line of lines) {
         const trimmed = line.trim();
 
@@ -183,6 +186,7 @@ export class KandilliHTMLProvider {
           trimmed.startsWith('..................') ||
           trimmed.startsWith('.....') ||
           /^[^0-9]/.test(trimmed)) {
+          skippedCount++;
           continue;
         }
 
@@ -200,8 +204,16 @@ export class KandilliHTMLProvider {
           const timeStr = dateTimeMatch[2]; // HH:MM:SS
 
           // Extract coordinates and magnitude using regex (more reliable)
-          const coordsMatch = trimmed.match(/\s+(\d{2}\.\d{4})\s+(\d{2}\.\d{4})\s+(\d+\.?\d*)\s+/);
-          if (!coordsMatch) continue;
+          // ELITE: More flexible regex to handle varying decimal precision
+          // Example: "39.2335   29.0528       10.2" or "36.9675   29.4153        3.9"
+          const coordsMatch = trimmed.match(/\s+(\d{2}\.\d{2,5})\s+(\d{2}\.\d{2,5})\s+(\d+\.?\d*)\s+/);
+          if (!coordsMatch) {
+            if (__DEV__ && parsedCount < 2) {
+              logger.debug(`⚠️ Kandilli: Koordinat regex eşleşmedi: ${trimmed.substring(0, 80)}`);
+            }
+            skippedCount++;
+            continue;
+          }
 
           const latStr = coordsMatch[1];
           const lonStr = coordsMatch[2];
@@ -342,6 +354,16 @@ export class KandilliHTMLProvider {
             logger.debug('Kandilli HTML parse error for line:', trimmed.substring(0, 50));
           }
           continue;
+        }
+      }
+
+      // ELITE: Log parsing diagnostics
+      if (__DEV__) {
+        logger.debug(`📊 Kandilli parsing: ${earthquakes.length} başarılı, ${skippedCount} atlandı`);
+        if (earthquakes.length === 0 && lines.length > 10) {
+          // Log first few data lines for debugging
+          const dataLines = lines.filter(l => l.trim().match(/^\d{4}\./)).slice(0, 2);
+          dataLines.forEach((l, i) => logger.debug(`📝 Örnek satır ${i + 1}: ${l.substring(0, 100)}`));
         }
       }
 

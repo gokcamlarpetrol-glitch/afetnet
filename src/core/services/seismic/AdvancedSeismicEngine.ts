@@ -240,8 +240,21 @@ class AdvancedSeismicEngine {
         frequency,
         timestamp: Date.now(),
         confidence,
+        // ELITE: Properly set wave detection flags for EEWService
+        pWaveDetected: type === 'P-WAVE',
+        sWaveDetected: type === 'S-WAVE',
+        estimatedMagnitude: this.estimateMagnitudeFromAccel(accel, ratio),
       });
     }
+  }
+
+  // ELITE: Estimate magnitude from acceleration and STA/LTA ratio
+  private estimateMagnitudeFromAccel(accel: number, ratio: number): number {
+    // Rough magnitude estimation using PGA-Magnitude relationships
+    // Higher ratio typically indicates more significant event
+    const baseMag = 3.0 + Math.log10(Math.max(accel, 0.001)) * 1.5;
+    const ratioBoost = Math.min((ratio - 3.0) * 0.1, 1.0);
+    return Math.max(3.0, Math.min(8.0, baseMag + ratioBoost));
   }
 
 

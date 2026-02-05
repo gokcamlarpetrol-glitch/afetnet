@@ -12,12 +12,21 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('BLEMeshService');
 
-logger.warn('⚠️ BLEMeshService is deprecated. Use meshNetworkService instead.');
+// Note: Deprecation warning moved to constructor to avoid startup noise
+let hasShownDeprecationWarning = false;
 
 /**
  * @deprecated Use meshNetworkService directly
  */
 class BLEMeshService {
+  constructor() {
+    // ELITE: Only show deprecation warning once and only when actually used
+    if (!hasShownDeprecationWarning && __DEV__) {
+      logger.debug('BLEMeshService is deprecated. Use meshNetworkService instead.');
+      hasShownDeprecationWarning = true;
+    }
+  }
+
   async initialize() {
     return meshNetworkService.initialize();
   }

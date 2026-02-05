@@ -81,15 +81,15 @@ class GlobalEarthquakeAnalysisService {
         logger.error('Polling error:', error);
         // Continue polling even on error
       }
-      
+
       // ELITE: Adjust polling interval based on critical events
       // ELITE: Check if service is destroyed before scheduling next poll
       if (this.isDestroyed) {
         return;
       }
-      
+
       const interval = this.hasCriticalEvent ? this.CRITICAL_POLL_INTERVAL : this.POLL_INTERVAL;
-      
+
       // ELITE: Set new timeout with adaptive timing
       this.analysisInterval = setTimeout(() => {
         poll();
@@ -120,18 +120,18 @@ class GlobalEarthquakeAnalysisService {
         }
         return [];
       });
-      
+
       if (__DEV__ && usgsEvents.length > 0) {
         logger.info(`✅ USGS: ${usgsEvents.length} deprem verisi alındı (erken uyarı için)`);
       }
-      
+
       const emscEvents = await fetchFromEMSC().catch((error) => {
         if (__DEV__) {
           logger.debug('EMSC fetch failed (network error - expected):', error?.message || error);
         }
         return [];
       });
-      
+
       if (__DEV__ && emscEvents.length > 0) {
         logger.info(`✅ EMSC: ${emscEvents.length} deprem verisi alındı (erken uyarı için)`);
       }
@@ -178,14 +178,14 @@ class GlobalEarthquakeAnalysisService {
       this.hasCriticalEvent = criticalEvents.length > 0;
 
       // ELITE: Store recent events with memory management
-      const relevantEvents = allEvents.filter(event => 
+      const relevantEvents = allEvents.filter(event =>
         event && isRelevantForTurkey(event),
       );
-      
+
       // ELITE: Prevent memory leak - limit array size
       this.recentEvents = [...relevantEvents, ...this.recentEvents]
         .slice(0, this.MAX_RECENT_EVENTS);
-      
+
       // ELITE: Remove duplicates based on event ID
       const seenIds = new Set<string>();
       this.recentEvents = this.recentEvents.filter(e => {
@@ -240,7 +240,7 @@ class GlobalEarthquakeAnalysisService {
         event.etaToTurkey = eta;
 
         const isCritical = event.magnitude >= 4.0;
-        
+
         // ELITE: Use static import to avoid race conditions with dynamic import
         let prediction: TurkeyImpactPrediction;
         try {
@@ -250,7 +250,7 @@ class GlobalEarthquakeAnalysisService {
           // ELITE: Use static import instead of dynamic import to prevent race conditions
           prediction = ruleBasedTurkeyImpactPrediction(event);
         }
-        
+
         event.willAffectTurkey = prediction.willAffect;
         event.confidence = prediction.confidence;
 
@@ -290,13 +290,13 @@ class GlobalEarthquakeAnalysisService {
       clearTimeout(this.analysisInterval);
       this.analysisInterval = null;
     }
-    
+
     // ELITE: Clear recent events to free memory
     this.recentEvents = [];
     this.hasCriticalEvent = false;
     this.lastAFADCheckTime = 0;
     this.isInitialized = false;
-    
+
     if (__DEV__) {
       logger.info('GlobalEarthquakeAnalysisService stopped - all resources cleaned up');
     }
@@ -310,8 +310,8 @@ class GlobalEarthquakeAnalysisService {
     try {
       // ELITE: Get backend URL from ENV config (centralized)
       const { ENV } = await import('../config/env');
-      const backendUrl = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
-      
+      const backendUrl = ENV.API_BASE_URL || ''; // DEPRECATED: Using Firebase
+
       // ELITE: Validate backend URL
       if (!backendUrl || !backendUrl.startsWith('http')) {
         logger.warn('Invalid backend URL:', backendUrl);
@@ -321,7 +321,7 @@ class GlobalEarthquakeAnalysisService {
       // ELITE: Test backend health endpoint
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
+
       try {
         const response = await fetch(`${backendUrl}/health`, {
           method: 'GET',

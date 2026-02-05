@@ -1,0 +1,973 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for core/services/ai/KnowledgeBase.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">core/services/ai</a> KnowledgeBase.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>0/2</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/0</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/0</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>0/2</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a>
+<a name='L241'></a><a href='#L241'>241</a>
+<a name='L242'></a><a href='#L242'>242</a>
+<a name='L243'></a><a href='#L243'>243</a>
+<a name='L244'></a><a href='#L244'>244</a>
+<a name='L245'></a><a href='#L245'>245</a>
+<a name='L246'></a><a href='#L246'>246</a>
+<a name='L247'></a><a href='#L247'>247</a>
+<a name='L248'></a><a href='#L248'>248</a>
+<a name='L249'></a><a href='#L249'>249</a>
+<a name='L250'></a><a href='#L250'>250</a>
+<a name='L251'></a><a href='#L251'>251</a>
+<a name='L252'></a><a href='#L252'>252</a>
+<a name='L253'></a><a href='#L253'>253</a>
+<a name='L254'></a><a href='#L254'>254</a>
+<a name='L255'></a><a href='#L255'>255</a>
+<a name='L256'></a><a href='#L256'>256</a>
+<a name='L257'></a><a href='#L257'>257</a>
+<a name='L258'></a><a href='#L258'>258</a>
+<a name='L259'></a><a href='#L259'>259</a>
+<a name='L260'></a><a href='#L260'>260</a>
+<a name='L261'></a><a href='#L261'>261</a>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a>
+<a name='L269'></a><a href='#L269'>269</a>
+<a name='L270'></a><a href='#L270'>270</a>
+<a name='L271'></a><a href='#L271'>271</a>
+<a name='L272'></a><a href='#L272'>272</a>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
+ * KNOWLEDGE BASE - ELITE EDITION
+ * Comprehensive emergency data for on-device AI.
+ */
+&nbsp;
+export interface KnowledgeArticle {
+    id: string;
+    title: string;
+    content: string;
+    tags: string[];
+    category: 'first_aid' | 'earthquake' | 'fire' | 'general' | 'survival' | 'communication';
+}
+&nbsp;
+// Initial Knowledge Base
+export const initialKnowledgeBase: KnowledgeArticle[] = <span class="cstat-no" title="statement not covered" >[</span>
+  {
+    id: 'eq-001',
+    title: 'Deprem Anında Ne Yapmalı? (Çök-Kapan-Tutun)',
+    content: `1. Sakin olun, paniğe kapılmayın.
+2. Sağlam bir eşyanın (masa, sıra) altına veya yanına 'ÇÖK'ün.
+3. Başınızı ve boynunuzu koruyacak şekilde 'KAPAN'ın.
+4. Sarsıntı geçene kadar eşyadan 'TUTUN'un.
+5. Asansör ve merdivenleri KULLANMAYIN.
+6. Camlardan ve devrilebilecek eşyalardan uzak durun.`,
+    tags: ['deprem', 'sarsıntı', 'çök', 'kapan', 'tutun', 'güvenlik'],
+    category: 'earthquake',
+  },
+  {
+    id: 'med-001',
+    title: 'Kanamayı Durdurma (Turnike)',
+    content: `1. Kanamalı bölgeye temiz bir bezle doğrudan baskı uygulayın.
+2. Kanama durmuyorsa ve uzuvda ise, yara ile kalp arasına turnike uygulayın.
+3. Turnike olarak kemer veya en az 5cm genişliğinde bez kullanın.
+4. Turnikeyi sıkın ve kanama durana kadar gevşetmeyin.
+5. Turnike saatinizi not edin (Alna 'T' harfi ve saat yazılır).`,
+    tags: ['kanama', 'yaralanma', 'ilk yardım', 'turnike', 'kan'],
+    category: 'first_aid',
+  },
+  {
+    id: 'med-002',
+    title: 'Kalp Masajı (CPR)',
+    content: `1. Hasta tepkisiz ve nefes almıyorsa 112'yi arayın.
+2. Sert bir zemine yatırın.
+3. Göğüs kemiğinin alt yarısına el topuğunu yerleştirin.
+4. Dakikada 100-120 bası olacak hızda ve göğüs 5cm çökecek derinlikte bastırın.
+5. 30 bası / 2 soluk döngüsünü uygulayın.`,
+    tags: ['kalp', 'masaj', 'nefes', 'cpr', 'nabız', 'bayılma'],
+    category: 'first_aid',
+  },
+  {
+    id: 'fire-001',
+    title: 'Yangın Güvenliği',
+    content: `1. Duman varsa yere yakın emekleyerek ilerleyin.
+2. Kapalı kapılara dokunmadan önce elinizin tersiyle sıcaklığını kontrol edin.
+3. Asla asansör kullanmayın.
+4. Kıyafetiniz tutuşursa: DUR, YAT, YUVARLAN.`,
+    tags: ['yangın', 'ateş', 'duman', 'yanık', 'tahliye'],
+    category: 'fire',
+  },
+  {
+    id: 'eq-002',
+    title: 'Enkaz Altında İletişim',
+    content: `1. Enerjinizi koruyun, sürekli bağırmayın.
+2. Varsa düdük çalın veya metal bir cisme vurun.
+3. Ağzınızı tozdan korumak için kıyafetinizle kapatın.
+4. Dışarıdan ses duyduğunuzda tepki verin.`,
+    tags: ['enkaz', 'göçük', 'ses', 'düdük', 'yardım', 'kurtarma'],
+    category: 'earthquake',
+  },
+];
+&nbsp;
+// Elite Knowledge Base - Comprehensive Guides
+export const eliteKnowledgeBase: KnowledgeArticle[] = <span class="cstat-no" title="statement not covered" >[</span>
+  // --- SURVIVAL ---
+  {
+    id: 'surv-001',
+    title: 'Su Arıtma ve Temini',
+    content: `**1. Kaynatma:** Suyu en az 1-3 dakika fokurdayarak kaynatın. En güvenli yöntemdir.\n**2. Kimyasal Dezenfeksiyon:** 1 litre suya 2 damla kokusuz çamaşır suyu ekleyin, 30dk bekleyin. Hafif klor kokusu normaldir.\n**3. Güneşle Arıtma (SODIS):** Pet şişeyi 6 saat güneş altında bekletin (UV ışınları mikropları öldürür).\n**4. Yağmur Suyu:** Temiz bir kapla toplayın, mümkünse filtreleyin.`,
+    tags: ['su', 'içme', 'arıtma', 'kaynatma', 'susuzluk', 'survival'],
+    category: 'survival',
+  },
+  {
+    id: 'surv-002',
+    title: 'Vücut Isısını Koruma (Hipotermi)',
+    content: `**1. Kuru Kalın:** Islak kıyafetleri hemen çıkarın.\n**2. Katmanlı Giyinin:** Tek kalın kıyafet yerine, birçok ince katman giyin (Hava yalıtımı sağlar).\n**3. Başınızı Örtün:** Isı kaybının %30'u baştan olur.\n**4. Hareket Edin:** Titremek vücudun ısınma refleksidir, durmayın.`,
+    tags: ['soğuk', 'donma', 'hipotermi', 'ısınma', 'kıyafet'],
+    category: 'survival',
+  },
+  {
+    id: 'surv-003',
+    title: 'Barınak Yapımı',
+    content: `**1. Yer Seçimi:** Rüzgar almayan, su basma riski olmayan düz bir alan seçin.\n**2. Yalıtım:** Zemine yaprak/karton serin (Soğuk topraktan çeker).\n**3. Çatı:** Branda veya yağmurluk kullanarak rüzgarla 45 derece açılı bir eğim oluşturun.`,
+    tags: ['barınak', 'kamp', 'çadır', 'uyku', 'güvenlik'],
+    category: 'survival',
+  },
+&nbsp;
+  // --- COMMUNICATION ---
+  {
+    id: 'comm-001',
+    title: 'Şebeke Yokken İletişim',
+    content: `**1. AfetNet Mesh:** Bu uygulamayı kullanan diğer kişilerle otomatik ağ kurarsınız. Bluetooth'u açık tutun.\n**2. SMS:** Arama yerine SMS deneyin, daha az bant genişliği kullanır ve sıraya girer.\n**3. Sesli Mesaj Kutusu:** Ulaşamadığınız kişiye sesli mesaj bırakın, şebeke gelince iletilir.\n**4. Radyo:** Yerel frekansları dinleyerek resmi anonsları takip edin.`,
+    tags: ['internet', 'şebeke', 'telefon', 'iletişim', 'sms', 'mesh'],
+    category: 'communication',
+  },
+  {
+    id: 'comm-002',
+    title: 'Telefon Pil Ömrünü Uzatma',
+    content: `**1. Ekran:** Parlaklığı en düşüğe getirin.\n**2. Bağlantılar:** Wi-Fi ve Mobil Veriyi kapatın. Sadece Bluetooth (Mesh için) açık kalsın.\n**3. Arka Plan:** Tüm gereksiz uygulamaları kapatın.\n**4. Titreşim:** Kapatın, pil tüketir.\n**5. Sıcaklık:** Telefonu vücudunuza yakın tutarak soğuktan koruyun (Soğuk pil ömrünü azaltır).`,
+    tags: ['pil', 'batarya', 'şarj', 'tasarruf', 'telefon'],
+    category: 'communication',
+  },
+&nbsp;
+  // --- EARTHQUAKE SPECIFIC ---
+  {
+    id: 'eq-003',
+    title: 'Artçı Depremler',
+    content: `**Bilgi:** Ana depremden sonra günler/haftalarca sürebilir.\n**Ne Yapmalı?**\n1. Her sarsıntıda tekrar Çök-Kapan-Tutun yapın.\n2. Hasarlı binalara ASLA girmeyin.\n3. Sahile yakınsanız tsunami uyarısı için yüksek yere çıkın.\n4. Gaz kokusu alırsanız kibrit/çakmak yakmayın.`,
+    tags: ['artçı', 'sarsıntı', 'devam', 'deprem'],
+    category: 'earthquake',
+  },
+&nbsp;
+  // --- FIRST AID ---
+  {
+    id: 'med-003',
+    title: 'Kırık ve Çıkıklar',
+    content: `**1. Sabitleme:** Yaralı bölgeyi hareket ettirmeyin. Sert bir cisimle (tahta, karton) sabitleyin (Atel).\n**2. Pozisyon:** Kalp seviyesinden yukarıda tutarak şişmeyi azaltın.\n**3. Soğuk:** Varsa buz uygulayın (doğrudan tene değil, beze sararak).\n**4. Yerine Oturtmaya ÇALIŞMAYIN.**`,
+    tags: ['kırık', 'çıkık', 'burkulma', 'atel', 'ilk yardım', 'kemik'],
+    category: 'first_aid',
+  },
+  {
+    id: 'med-004',
+    title: 'Şok Belirtileri ve Müdahale',
+    content: `**Belirtiler:** Soluk cilt, hızlı nabız, susuzluk, bilinç bulanıklığı.\n**Müdahale:**\n1. Sırt üstü yatırın.\n2. Ayaklarını 30cm yukarı kaldırın.\n3. Üstünü örtün.\n4. Su vermeyin (Kusabilir).`,
+    tags: ['şok', 'bayılma', 'nabız', 'ilk yardım'],
+    category: 'first_aid',
+  },
+&nbsp;
+  // --- PSYCHOLOGY ---
+  {
+    id: 'psy-001',
+    title: 'Panik Atak Yönetimi',
+    content: `**1. Nefes:** 4 saniye al, 4 saniye tut, 4 saniye ver.\n**2. Odaklanma:** Etrafınızdaki 5 nesneyi sayın, 4 sesi dinleyin.\n**3. Telkin:** "Bu geçici bir durum, güvendeyim" deyin.\n**4. Temas:** Yere sağlam basın veya bir yere oturun.`,
+    tags: ['korku', 'panik', 'stres', 'psikoloji', 'sakinleşme'],
+    category: 'general',
+  },
+&nbsp;
+  // --- GLOBAL DISASTERS (ELITE) ---
+  {
+    id: 'nuc-001',
+    title: 'Nükleer/Radyasyon Tehlikesi',
+    content: `**1. Kapalı Alan:** Derhal en yakın beton binaya girin. Bodrum katı en güvenlisidir.\n**2. İzolasyon:** Pencereleri/kapıları sıkıca kapatın ve bantlayın. Havalandırmayı (klima) kapatın.\n**3. Temizlik:** Dışarıdan geldiyseniz kıyafetleri poşetleyip atın, bol su ve sabunla yıkanın.\n**4. Bekleme:** Yetkililer "çıkın" diyene kadar (en az 24-72 saat) dışarı çıkmayın. Radyasyon zamanla azalır.`,
+    tags: ['nükleer', 'radyasyon', 'sığınak', 'izolasyon', 'bomba'],
+    category: 'general',
+  },
+  {
+    id: 'bio-001',
+    title: 'Biyolojik/Kimyasal Tehdit',
+    content: `**1. Maske:** Varsa N95 maske, yoksa birkaç kat bezle ağzınızı/burnunuzu kapatın.\n**2. Yüksek Yer:** Kimyasal gazların çoğu havadan ağırdır, üst katlara çıkın (Nükleerin tersine).\n**3. Rüzgar:** Rüzgarı arkanıza değil, yanınıza alarak olay yerinden dik açıyla uzaklaşın.\n**4. Dekontaminasyon:** Kıyafetleri çıkarın, gözlerinizi/cildinizi bol suyla 15dk yıkayın.`,
+    tags: ['kimyasal', 'biyolojik', 'gaz', 'zehir', 'maske'],
+    category: 'general',
+  },
+  {
+    id: 'tsu-001',
+    title: 'Tsunami Uyarısı',
+    content: `**1. Doğal Uyarı:** Deniz aniden çekilirse veya "jet uçağı" sesi duyarsanız BEKLEMEYİN.\n**2. Tahliye:** Kıyıdan olabildiğince uzağa ve YÜKSEĞE (en az 30m) çıkın.\n**3. Nehirler:** Tsunami nehir yataklarından içeriye km'lerce girebilir, nehir kenarlarından uzak durun.\n**4. Süre:** İlk dalga en büyüğü olmayabilir, tehlike saatlerce sürebilir.`,
+    tags: ['tsunami', 'dalga', 'deniz', 'sel', 'sahil'],
+    category: 'general',
+  },
+  {
+    id: 'vol-001',
+    title: 'Volkanik Kül Yağışı',
+    content: `**1. Solunum:** Kül cam tozuna benzer, ciğerleri parçalar. Mutlaka maske/ıslak bez takın.\n**2. Göz:** Kontakt lensleri çıkarın, varsa koruyucu gözlük takın.\n**3. Motor:** Araba motorunu çalıştırmayın, hava filtresini tıkar.\n**4. Barınak:** Çatılarda biriken kül (ıslanırsa betona dönüşür) çökme yapabilir, dikkatli olun.`,
+    tags: ['volkan', 'kül', 'yanardağ', 'solunum'],
+    category: 'general',
+  },
+  {
+    id: 'ext-001',
+    title: 'Aşırı Sıcak (Heatwave)',
+    content: `**1. Hidrasyon:** Susamayı beklemeden su için.\n**2. Soğutma:** Bileklere, boyna ve kasıklara soğuk kompres yapın.\n**3. Güneş Çarpması:** Bilinç kaybı, ateş (40°C), kuru cilt varsa ACİL tıbbi yardım gerekir.\n**4. Saatler:** 11:00-15:00 arası gölgeden çıkmayın.`,
+    tags: ['sıcak', 'güneş', 'çarpma', 'su', 'yaz'],
+    category: 'survival',
+  },
+  {
+    id: 'ext-002',
+    title: 'Kar Fırtınası/Tipi',
+    content: `**1. Araçta:** Motoru saatte 10dk çalıştırın (karbonmonoksit için egzozu açık tutun).\n**2. Görünürlük:** Antene renkli bez bağlayın.\n**3. Yürüyüş:** Görüş mesafesi sıfıra indiyse YÜRÜMEYİN, kaybolursunuz. Kuytu bir yere sığının.\n**4. Hipotermi:** Uyku bastırırsa uyumayın, birbirinizi uyanık tutun.`,
+    tags: ['kar', 'fırtına', 'kış', 'donma', 'tipi'],
+    category: 'survival',
+  },
+  // --- SPECIALIZED SURVIVAL SCENARIOS (ELITE EXPANSION) ---
+  {
+    id: 'scen-001',
+    title: 'Enkaz Altında Psikoloji ve Hayatta Kalma',
+    content: `**1. Enerji Tasarrufu:** Asla sürekli bağırmayın. Enerjinizi tüketir ve oksijeni harcar.\n**2. Ses Verme:** Metal bir cisme (kalorifer borusu vb.) ritmik olarak vurun (3 vuruş, bekle, 3 vuruş).\n**3. Pozisyon:** Cenin pozisyonunda kalın, hayati organlarınızı koruyun.\n**4. Umut:** Kurtarma ekipleri gelene kadar (günler sürse bile) umudunuzu kaybetmeyin. İnsan vücudu susuzluğa 3 gün dayanabilir.`,
+    tags: ['enkaz', 'göçük', 'psikoloji', 'ses', 'ritim'],
+    category: 'earthquake',
+  },
+  {
+    id: 'scen-002',
+    title: 'Gaz Kokusu Alınca (Acil Protokol)',
+    content: `**1. DOKUNMA:** Lamba düğmesine, telefona veya elektrikli hiçbir şeye dokunmayın. Kıvılcım çıkarabilir.\n**2. HAVALANDIR:** Pencereleri ve kapıları ardına kadar açın.\n**3. KAÇ:** Binayı hemen terk edin.\n**4. ARA:** Güvenli bir mesafeye (sokağın başına) gidince 187 Doğalgaz Acil'i arayın.`,
+    tags: ['gaz', 'koku', 'sızıntı', 'patlama', 'doğalgaz'],
+    category: 'fire',
+  },
+  {
+    id: 'scen-003',
+    title: 'Bebeklerde Tıkanma (Heimlich)',
+    content: `**1. Pozisyon:** Bebeği yüzü koyun kolunuzun üzerine yatırın, çenesinden destekleyin.\n**2. Vuruş:** İki kürek kemiğinin ortasına el topuğunuzla 5 kez süpürür tarzda vurun.\n**3. Kontrol:** Cisim çıktı mı bakın. Çıkmadıysa sırt üstü çevirip göğüs kafesine 5 kez iki parmakla bastırın.\n**4. Tekrar:** Cisim çıkana veya bebek ağlayana kadar devam edin.`,
+    tags: ['bebek', 'tıkanma', 'boğulma', 'heimlich', 'nefes', 'çocuk'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-004',
+    title: 'Bebeklerde Kalp Masajı (CPR)',
+    content: `**1. Kontrol:** Ayak tabanına vurarak tepki veriyor mu bakın.\n**2. Masaj Yeri:** İki meme ucunu birleştiren hayali çizginin hemen altı.\n**3. Tekniği:** Sadece iki parmağınızı (işaret ve orta) kullanın.\n**4. Hız:** Dakikada 100-120 bası. Göğüs kafesi 4cm çökmeli.\n**5. Oran:** 30 bası, 2 kurtarıcı nefes (Ağız ve burnu aynı anda kaplayacak şekilde üfleyin).`,
+    tags: ['bebek', 'cpr', 'kalp', 'masaj', 'ilk yardım'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-005',
+    title: 'Ciddi Kesik ve Uzuv Kopması',
+    content: `**1. Kopan Parça:** Temiz bir poşete koyun. O poşeti de BUZ DOLU başka bir poşete koyun (Doğrudan buza temas etmesin, doku donar).\n**2. Turnike:** Kopan yerin 5-10cm üzerine turnike uygulayın. Asla gevşetmeyin.\n**3. Zaman:** Turnikeyi uyguladığınız saati alnına yazın.\n**4. Şok:** Yaralıyı sırt üstü yatırıp ayaklarını kaldırın.`,
+    tags: ['kesik', 'kopma', 'uzuv', 'turnike', 'kanama'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-006',
+    title: 'Yanık Tedavisi (İlk Müdahale)',
+    content: `**1. Soğut:** Yanık bölgeyi en az 10-20 dakika AKAN SOĞUK SU (buzlu değil) altında tutun.\n**2. Çıkarma:** Yapışmamış kıyafetleri ve takıları (şişme riskine karşı) hemen takın.\n**3. Kaplama:** Temiz, tüysüz bir bezle veya streç filmle gevşekçe sarın.\n**4. ASLA:** Diş macunu, yoğurt, salça sürmeyin. Enfeksiyon riskini artırır.`,
+    tags: ['yanık', 'ateş', 'haşlanma', 'sıcak', 'su'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-007',
+    title: 'Asansörde Mahsur Kalma (Deprem)',
+    content: `**1. Panik Yok:** Asansörlerin havalandırması vardır, havasız kalmazsınız.\n**2. Kat Düğmeleri:** Tüm kat düğmelerine basın.\n**3. Kapı:** Kapıyı zorlayarak açmaya çalışmayın, boşluğa düşebilirsiniz.\n**4. İletişim:** Alarm butonuna basın veya metal bir cisimle kapıya vurarak ses verin.`,
+    tags: ['asansör', 'mahsur', 'kapalı', 'alan', 'kurtarma'],
+    category: 'earthquake',
+  },
+  {
+    id: 'scen-008',
+    title: 'Evcil Hayvanlar (Afet Anı)',
+    content: `**1. Saklanma:** Korktuklarında saklanırlar (Yatak altı vb.). Zorla çıkarmaya çalışırken ısırabilirler, dikkatli olun.\n**2. Taşıma:** Önceden hazırlanmış taşıma kutusuna (box) koyun.\n**3. Kayıp:** Tasmalarına mutlaka telefon numaranızı yazın.\n**4. Mama:** Tahliye çantanızda onlar için de 3 günlük kuru mama bulundurun.`,
+    tags: ['kedi', 'köpek', 'hayvan', 'evcil', 'mama'],
+    category: 'general',
+  },
+  {
+    id: 'scen-009',
+    title: 'Sel Sularında Araç Kullanımı',
+    content: `**1. GİRME:** Suyun derinliğini bilmiyorsanız asla girmeyin. 30cm su aracı yüzdürebilir.\n**2. Stop Ederse:** Aracı hemen terk edip yüksek bir yere çıkın.\n**3. Kapı Açılmazsa:** Camı kırarak çıkın (Koltuk başlığı demirini kullanın).\n**4. Akıntı:** Akıntıya karşı yürümeyin, sürüklenebilirsiniz.`,
+    tags: ['sel', 'su', 'araç', 'araba', 'boğulma'],
+    category: 'general',
+  },
+  {
+    id: 'scen-010',
+    title: 'Elektrik Çarpması',
+    content: `**1. DOKUNMA:** Yaralıya elektriği kesmeden dokunmayın.\n**2. Şalter:** Ana şalteri indirin.\n**3. İletken Olmayan Cisim:** Elektrik kaynağını tahta sopa veya plastik bir süpürge sapı ile yaralıdan uzaklaştırın.\n**4. CPR:** Elektrik kesildikten sonra nefes almıyorsa kalp masajına başlayın.`,
+    tags: ['elektrik', 'çarpma', 'akım', 'kablo', 'priz'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-011',
+    title: 'Burun Kanaması',
+    content: `**1. Baş Pozisyonu:** Başı ASLA geriye atmayın (Kan genize kaçar). Hafifçe öne eğin.\n**2. Baskı:** Burun kanatlarına (yumuşak kısım) 5-10 dakika kesintisiz baskı yapın.\n**3. Buz:** Burun köküne buz tatbik edin.\n**4. Temizleme:** Kanama durunca sümkürmeyin.`,
+    tags: ['burun', 'kanama', 'kan', 'baş', 'eğme'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-012',
+    title: 'Sara (Epilepsi) Nöbeti',
+    content: `**1. Tutma:** Hastayı sabitlemeye veya hareketlerini engellemeye çalışmayın.\n**2. Güvenlik:** Başını çarpabileceği sert cisimleri uzaklaştırın, başının altına yastık/ceket koyun.\n**3. Ağız:** Ağzına kaşık, parmak vb. sokmaya ÇALIŞMAYIN.\n**4. Süre:** Nöbet bitince yan çevirin (Recovery position) ve dinlenmesine izin verin.`,
+    tags: ['sara', 'epilepsi', 'nöbet', 'kriz', 'bayılma'],
+    category: 'first_aid',
+  },
+  {
+    id: 'scen-013',
+    title: 'Su Kesintisinde Hijyen',
+    content: `**1. Eller:** Bebek mendili veya kolonya ile sık sık temizleyin.\n**2. Tuvalet:** Sifonu çekmeyin. Poşet geçirerek kullanın ve poşeti ağzını bağlayarak atın.\n**3. Bulaşık:** Kağıt tabak/bardak kullanın.\n**4. İçme Suyu:** Stoktaki suyu sadece içmek için kullanın, yıkama için değil.`,
+    tags: ['su', 'kesinti', 'hijyen', 'tuvalet', 'temizlik'],
+    category: 'survival',
+  },
+  {
+    id: 'scen-014',
+    title: 'Psikolojik İlk Yardım (Çocuklar)',
+    content: `**1. Dürüstlük:** "Bir şey yok" demeyin. "Korkunçtu ama geçti, şimdi güvendeyiz" deyin.\n**2. Temas:** Sarılmak en iyi ilaçtır.\n**3. Rutin:** Mümkünse uyku/yemek saatlerini koruyun.\n**4. Oyun:** Oyun oynamalarına izin verin, travmayı oyunla atarlar.`,
+    tags: ['çocuk', 'psikoloji', 'korku', 'travma', 'oyun'],
+    category: 'general',
+  },
+  {
+    id: 'scen-015',
+    title: 'Hipotermi (Donma) Belirtileri',
+    content: `**1. Titreme:** Vücut ısısı düşünce başlar.\n**2. Durma:** Titreme aniden durursa DURUM KRİTİKTİR.\n**3. Uyuşukluk:** Konuşma bozulur, uyku hali başlar.\n**4. Müdahale:** Kuru kıyafet giydirin, vücut ısısıyla (sarılın) ısıtın. ASLA sıcak suyla veya ovalayarak ısıtmayın.`,
+    tags: ['donma', 'soğuk', 'hipotermi', 'titreme', 'kış'],
+    category: 'first_aid',
+  },
+];
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-02-04T23:48:43.842Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

@@ -26,6 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useEarthquakeAlert } from '../../hooks/useEarthquakeAlert';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 const SOUND_TYPES = [
@@ -96,6 +97,23 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
     setNotificationShowPreview,
     setNotificationGroupByMagnitude,
   } = useSettingsStore();
+
+  // ELITE: Earthquake alert hook for test functionality
+  const { testAlert, alertCount, isMonitoring } = useEarthquakeAlert();
+  const [isTestingAlert, setIsTestingAlert] = useState(false);
+
+  const handleTestAlert = async () => {
+    haptics.notificationWarning();
+    setIsTestingAlert(true);
+    try {
+      await testAlert();
+      Alert.alert('✅ Test Başarılı', 'Deprem uyarısı test bildirimi gönderildi.');
+    } catch (e) {
+      Alert.alert('❌ Hata', 'Test bildirimi gönderilemedi.');
+    } finally {
+      setIsTestingAlert(false);
+    }
+  };
 
   const [quietStartInput, setQuietStartInput] = useState(quietHoursStart);
   const [quietEndInput, setQuietEndInput] = useState(quietHoursEnd);
@@ -676,6 +694,57 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
           )}
         </View>
 
+        {/* ELITE: Test Notification Button */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Bildirim Testi</Text>
+
+          <View style={styles.testAlertCard}>
+            <View style={styles.testAlertHeader}>
+              <View style={styles.testAlertIconContainer}>
+                <Ionicons name="flash" size={24} color="#fff" />
+              </View>
+              <View style={styles.testAlertInfo}>
+                <Text style={styles.testAlertTitle}>Uyarı Testi</Text>
+                <Text style={styles.testAlertSubtitle}>
+                  Deprem bildirimi nasıl görüneceğini test edin
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={[styles.testAlertButton, isTestingAlert && styles.testAlertButtonDisabled]}
+              onPress={handleTestAlert}
+              disabled={isTestingAlert}
+            >
+              <LinearGradient
+                colors={isTestingAlert ? ['#9ca3af', '#6b7280'] : ['#f43f5e', '#e11d48']}
+                style={styles.testAlertButtonGradient}
+              >
+                {isTestingAlert ? (
+                  <Text style={styles.testAlertButtonText}>Test Gönderiliyor...</Text>
+                ) : (
+                  <>
+                    <Ionicons name="send" size={18} color="#fff" />
+                    <Text style={styles.testAlertButtonText}>Test Bildirimi Gönder</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </Pressable>
+
+            <View style={styles.testAlertStats}>
+              <View style={styles.testAlertStat}>
+                <Text style={styles.testAlertStatValue}>{alertCount}</Text>
+                <Text style={styles.testAlertStatLabel}>Toplam Uyarı</Text>
+              </View>
+              <View style={styles.testAlertStatDivider} />
+              <View style={styles.testAlertStat}>
+                <View style={[styles.monitoringDot, isMonitoring && styles.monitoringDotActive]} />
+                <Text style={styles.testAlertStatLabel}>{isMonitoring ? 'İzleniyor' : 'Pasif'}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
         {/* Bilgi Kartı */}
         <View style={styles.infoCard}>
           <Ionicons name="information-circle" size={24} color={colors.status.info} />
@@ -982,6 +1051,94 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text.secondary,
     lineHeight: 20,
+  },
+  // ELITE: Test Alert Styles
+  testAlertCard: {
+    backgroundColor: colors.background.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  testAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+  testAlertIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#f43f5e',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  testAlertInfo: {
+    flex: 1,
+  },
+  testAlertTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  testAlertSubtitle: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  testAlertButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  testAlertButtonDisabled: {
+    opacity: 0.6,
+  },
+  testAlertButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    gap: 8,
+  },
+  testAlertButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  testAlertStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  testAlertStat: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  testAlertStatValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  testAlertStatLabel: {
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  testAlertStatDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: colors.border.light,
+  },
+  monitoringDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.text.tertiary,
+  },
+  monitoringDotActive: {
+    backgroundColor: '#22c55e',
   },
 });
 

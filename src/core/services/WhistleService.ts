@@ -2,8 +2,14 @@
  * WHISTLE SERVICE - Emergency Whistle for Trapped Victims
  * 4000Hz high-frequency whistle sound - most audible under rubble
  * 3 modes: SOS Morse, Continuous, Vibration+Sound
+ * 
+ * @note expo-av is used for SDK 53/54 compatibility
+ * Migration to expo-audio planned for SDK 55+
+ * Current implementation includes haptic fallback for reliability
  */
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - expo-av deprecated but still functional in SDK 53/54 beta
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { logger } from '../utils/logger';
@@ -146,10 +152,10 @@ class WhistleService {
         // Reset position and play
         await this.sound.setPositionAsync(0);
         await this.sound.playAsync();
-        
+
         // Wait for duration
         await this.wait(duration);
-        
+
         // Stop sound
         await this.sound.stopAsync();
         await this.sound.setPositionAsync(0);
@@ -198,9 +204,9 @@ class WhistleService {
           volume: 1.0,
         },
       );
-      
+
       this.sound = sound;
-      
+
       // CRITICAL: Start pattern based on mode - don't await to allow stop() to work
       // Patterns will check isPlaying flag and stop when needed
       if (mode === 'morse') {

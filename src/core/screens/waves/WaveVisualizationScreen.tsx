@@ -22,7 +22,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 // @ts-ignore - useFocusEffect is available in @react-navigation/native but TypeScript types may be outdated
@@ -47,11 +49,26 @@ import { aiEarthquakePredictionService, type AIPredictionResult } from '../../se
 import { riskScoringService } from '../../ai/services/RiskScoringService';
 import { SensorReading } from '../../services/EnsembleDetectionService';
 import SeismographVisualization from './components/SeismographVisualization';
+import WaveformGraph from './components/WaveformGraph';
+import MapView, { Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
+import WavePropagationOverlay from '../../components/map/WavePropagationOverlay';
 import * as Notifications from 'expo-notifications';
 
 const logger = createLogger('WaveVisualizationScreen');
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
+
+// ELITE: Dark map style for premium seismic visualization
+const darkMapStyle = [
+  { elementType: 'geometry', stylers: [{ color: '#0a0f1a' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#5c6b7a' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0f1a' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a202c' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#2d3748' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0d1829' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
 
 interface WaveData {
   earthquake: {
@@ -88,6 +105,7 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
     lastDataTime: number;
   } | null>(null);
   const [realTimeSeismicData, setRealTimeSeismicData] = useState<number[]>([]); // CRITICAL: Real-time accelerometer data for sismograf
+  const [wavePulse, setWavePulse] = useState(0); // ELITE: Continuous wave pulse animation (0-1 cycles forever)
 
   // CRITICAL: AI Analysis State - Life-saving early warning system
   const [aiPrediction, setAiPrediction] = useState<AIPredictionResult | null>(null);
@@ -149,6 +167,19 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
     };
 
     requestPermissions();
+  }, []);
+
+  // ELITE: Continuous wave pulse animation - waves NEVER stop spreading
+  // CRITICAL: This creates the always-alive effect that professional seismic apps have
+  useEffect(() => {
+    const pulseInterval = setInterval(() => {
+      setWavePulse((prev) => {
+        const next = prev + 0.02; // Increment by 2% each tick
+        return next >= 1 ? 0 : next; // Reset to 0 when reaching 1
+      });
+    }, 60); // 60ms = ~16fps smooth animation
+
+    return () => clearInterval(pulseInterval);
   }, []);
 
   // Calculate waves for all earthquakes
@@ -1076,671 +1107,815 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-      }
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>P ve S Dalgası</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      {/* CRITICAL: Real-time Monitoring Status Indicator */}
-      {/* ELITE: Always show monitoring status - 7/24 continuous monitoring */}
-      <View style={styles.monitoringStatusContainer}>
-        <View style={[
-          styles.monitoringStatusBadge,
-          (seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0)
-            ? styles.monitoringStatusActive
-            : styles.monitoringStatusInactive
-        ]}>
-          <View style={[
-            styles.monitoringStatusDot,
-            (seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0) && styles.monitoringStatusDotActive
-          ]} />
-          <Text style={styles.monitoringStatusText}>
-            {(seismicMonitoringStatus?.isRunning || seismicMonitoringStatus?.totalReadings > 0)
-              ? '📡 SÜREKLI İZLEME AKTİF (7/24)'
-              : '🔄 İzleme Başlatılıyor...'}
-          </Text>
-        </View>
-        {/* ELITE: Always show monitoring stats for transparency */}
-        <View style={styles.monitoringStatsContainer}>
-          <Text style={styles.monitoringStatsText}>
-            {seismicMonitoringStatus?.totalReadings.toLocaleString() || 0} okuma • {seismicMonitoringStatus?.confirmedEvents || 0} tespit
-            {seismicMonitoringStatus && seismicMonitoringStatus.lastDataTime < 5000
-              ? ' • Canlı'
-              : seismicMonitoringStatus && seismicMonitoringStatus.lastDataTime < 60000
-                ? ` • ${Math.round(seismicMonitoringStatus.lastDataTime / 1000)}s önce`
-                : ' • Bekleniyor...'}
-          </Text>
-        </View>
-      </View>
-
-      {/* CRITICAL: AI-Powered Analysis Card - Life-saving Early Warning */}
-      {/* ELITE: P/S dalgasını yapay zekaya entegre ettik, mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz */}
-      {(aiPrediction || aiAnalysisLoading || riskScore !== null) && (
-        <View style={styles.aiAnalysisContainer}>
-          <LinearGradient
-            colors={
-              aiPrediction?.urgency === 'critical'
-                ? ['#dc2626', '#991b1b']
-                : aiPrediction?.urgency === 'high'
-                  ? ['#f59e0b', '#d97706']
-                  : ['#3b82f6', '#2563eb']
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.aiAnalysisCard}
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      {/* ELITE: Ultra-Premium Seismic Monitoring Header - MyShake/ShakeAlert Inspired */}
+      <LinearGradient
+        colors={['#0a0f1a', '#0d1320', '#101828']}
+        style={styles.headerGradient}
+      >
+        <View style={styles.premiumHeader}>
+          {/* Left: Minimal Back Button */}
+          <TouchableOpacity
+            style={styles.premiumBackButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
           >
-            <View style={styles.aiAnalysisGlassOverlay} />
+            <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.8)" />
+          </TouchableOpacity>
 
-            {/* AI Analysis Header */}
-            <View style={styles.aiAnalysisHeader}>
-              <View style={styles.aiAnalysisTitleContainer}>
-                <Ionicons name="sparkles" size={20} color="#fff" />
-                <Text style={styles.aiAnalysisTitle}>AI Analiz</Text>
-                {aiAnalysisLoading && (
-                  <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
-                )}
+          {/* Center: Professional Seismic Title with Waveform Icon */}
+          <View style={styles.premiumHeaderCenter}>
+            <View style={styles.seismicTitleRow}>
+              <View style={styles.seismicIcon}>
+                <Ionicons name="pulse" size={16} color="#22c55e" />
               </View>
-              {riskScore !== null && (
-                <View style={styles.riskScoreBadge}>
-                  <Text style={styles.riskScoreText}>Risk: {riskScore.toFixed(0)}</Text>
-                </View>
-              )}
+              <Text style={styles.seismicTitle}>SİSMİK İZLEME</Text>
             </View>
+          </View>
 
-            {/* AI Analysis Info Text */}
-            <View style={styles.aiAnalysisInfoContainer}>
-              <Text style={styles.aiAnalysisInfoText}>
-                P/S dalgasını yapay zekaya entegre ettik. Mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz.
-              </Text>
-            </View>
+          {/* Right: Live Status Badge */}
+          <View style={styles.premiumLiveBadge}>
+            <View style={styles.premiumLiveDot} />
+            <Text style={styles.premiumLiveText}>7/24</Text>
+          </View>
+        </View>
+      </LinearGradient>
 
-            {/* AI Prediction Results */}
-            {aiPrediction && (
-              <View style={styles.aiPredictionContent}>
-                {/* Urgency Badge */}
-                <View style={styles.urgencyBadge}>
-                  <Ionicons
-                    name={
-                      aiPrediction.urgency === 'critical'
-                        ? 'warning'
-                        : aiPrediction.urgency === 'high'
-                          ? 'alert-circle'
-                          : 'information-circle'
-                    }
-                    size={16}
-                    color="#fff"
-                  />
-                  <Text style={styles.urgencyText}>
-                    {aiPrediction.urgency === 'critical'
-                      ? 'KRİTİK'
-                      : aiPrediction.urgency === 'high'
-                        ? 'YÜKSEK'
-                        : aiPrediction.urgency === 'medium'
-                          ? 'ORTA'
-                          : 'DÜŞÜK'}
-                  </Text>
-                </View>
+      <ScrollView
+        style={styles.scrollContent}
+        contentContainerStyle={styles.scrollContentContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#3b82f6"
+            colors={['#3b82f6']}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
 
-                {/* Prediction Details */}
-                <View style={styles.predictionDetails}>
-                  <View style={styles.predictionRow}>
-                    <Text style={styles.predictionLabel}>Tahmin:</Text>
-                    <Text style={styles.predictionValue}>
-                      {aiPrediction.willOccur ? '✅ Deprem Bekleniyor' : '❌ Deprem Beklenmiyor'}
-                    </Text>
-                  </View>
+        {/* CRITICAL: Real-time Monitoring Status Indicator */}
+        {/* ELITE: Always show monitoring status - 7/24 continuous monitoring */}
+        <View style={styles.monitoringStatusContainer}>
+          <View style={[
+            styles.monitoringStatusBadge,
+            (seismicMonitoringStatus?.isRunning || (seismicMonitoringStatus?.totalReadings ?? 0) > 0)
+              ? styles.monitoringStatusActive
+              : styles.monitoringStatusInactive
+          ]}>
+            <View style={[
+              styles.monitoringStatusDot,
+              (seismicMonitoringStatus?.isRunning || (seismicMonitoringStatus?.totalReadings ?? 0) > 0) && styles.monitoringStatusDotActive
+            ]} />
+            <Text style={styles.monitoringStatusText}>
+              {(seismicMonitoringStatus?.isRunning || (seismicMonitoringStatus?.totalReadings ?? 0) > 0)
+                ? '📡 SÜREKLI İZLEME AKTİF (7/24)'
+                : '🔄 İzleme Başlatılıyor...'}
+            </Text>
+          </View>
+        </View>
 
-                  <View style={styles.predictionRow}>
-                    <Text style={styles.predictionLabel}>Güven:</Text>
-                    <Text style={styles.predictionValue}>{aiPrediction.confidence}%</Text>
-                  </View>
+        {/* CRITICAL: AI-Powered Analysis Card - Life-saving Early Warning */}
+        {/* ELITE: P/S dalgasını yapay zekaya entegre ettik, mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz */}
+        {(aiPrediction || aiAnalysisLoading || riskScore !== null) && (
+          <View style={styles.aiAnalysisContainer}>
+            <LinearGradient
+              colors={
+                aiPrediction?.urgency === 'critical'
+                  ? ['#dc2626', '#991b1b']
+                  : aiPrediction?.urgency === 'high'
+                    ? ['#f59e0b', '#d97706']
+                    : ['#3b82f6', '#2563eb']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.aiAnalysisCard}
+            >
+              <View style={styles.aiAnalysisGlassOverlay} />
 
-                  {aiPrediction.willOccur && (
-                    <>
-                      <View style={styles.predictionRow}>
-                        <Text style={styles.predictionLabel}>Büyüklük:</Text>
-                        <Text style={styles.predictionValue}>
-                          M{aiPrediction.estimatedMagnitude.toFixed(1)}
-                        </Text>
-                      </View>
-
-                      <View style={styles.predictionRow}>
-                        <Text style={styles.predictionLabel}>Süre:</Text>
-                        <Text style={styles.predictionValue}>
-                          {Math.round(aiPrediction.timeAdvance)} saniye içinde
-                        </Text>
-                      </View>
-                    </>
+              {/* AI Analysis Header */}
+              <View style={styles.aiAnalysisHeader}>
+                <View style={styles.aiAnalysisTitleContainer}>
+                  <Ionicons name="sparkles" size={20} color="#fff" />
+                  <Text style={styles.aiAnalysisTitle}>AI Analiz</Text>
+                  {aiAnalysisLoading && (
+                    <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
                   )}
                 </View>
-
-                {/* Recommended Action */}
-                {aiPrediction.recommendedAction && (
-                  <View style={styles.recommendedActionContainer}>
-                    <Text style={styles.recommendedActionText}>
-                      {aiPrediction.recommendedAction}
-                    </Text>
+                {riskScore !== null && (
+                  <View style={styles.riskScoreBadge}>
+                    <Text style={styles.riskScoreText}>Risk: {riskScore.toFixed(0)}</Text>
                   </View>
                 )}
-
-                {/* Factor Breakdown */}
-                <View style={styles.factorBreakdown}>
-                  <Text style={styles.factorBreakdownTitle}>Analiz Faktörleri:</Text>
-                  <View style={styles.factorRow}>
-                    <Text style={styles.factorLabel}>Sismik Aktivite:</Text>
-                    <View style={styles.factorBarContainer}>
-                      <View
-                        style={[
-                          styles.factorBar,
-                          {
-                            width: `${aiPrediction.factors.seismicActivity * 100}%`,
-                            backgroundColor: '#10b981',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.factorValue}>
-                      {(aiPrediction.factors.seismicActivity * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-
-                  <View style={styles.factorRow}>
-                    <Text style={styles.factorLabel}>Öncü Sinyaller:</Text>
-                    <View style={styles.factorBarContainer}>
-                      <View
-                        style={[
-                          styles.factorBar,
-                          {
-                            width: `${aiPrediction.factors.precursorSignals * 100}%`,
-                            backgroundColor: '#3b82f6',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.factorValue}>
-                      {(aiPrediction.factors.precursorSignals * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-
-                  <View style={styles.factorRow}>
-                    <Text style={styles.factorLabel}>Tarihsel Desen:</Text>
-                    <View style={styles.factorBarContainer}>
-                      <View
-                        style={[
-                          styles.factorBar,
-                          {
-                            width: `${aiPrediction.factors.historicalPattern * 100}%`,
-                            backgroundColor: '#f59e0b',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.factorValue}>
-                      {(aiPrediction.factors.historicalPattern * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-
-                  <View style={styles.factorRow}>
-                    <Text style={styles.factorLabel}>Ensemble Konsensüs:</Text>
-                    <View style={styles.factorBarContainer}>
-                      <View
-                        style={[
-                          styles.factorBar,
-                          {
-                            width: `${aiPrediction.factors.ensembleConsensus * 100}%`,
-                            backgroundColor: '#8b5cf6',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.factorValue}>
-                      {(aiPrediction.factors.ensembleConsensus * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-                </View>
               </View>
-            )}
 
-            {/* Loading State */}
-            {aiAnalysisLoading && !aiPrediction && (
-              <View style={styles.aiLoadingContainer}>
-                <ActivityIndicator size="large" color="#fff" />
-                <Text style={styles.aiLoadingText}>AI analiz yapılıyor...</Text>
-              </View>
-            )}
-
-            {/* No Prediction State */}
-            {!aiAnalysisLoading && !aiPrediction && riskScore !== null && (
-              <View style={styles.aiNoPredictionContainer}>
-                <Ionicons name="checkmark-circle" size={24} color="rgba(255, 255, 255, 0.7)" />
-                <Text style={styles.aiNoPredictionText}>
-                  Şu anda deprem riski tespit edilmedi
+              {/* AI Analysis Info Text */}
+              <View style={styles.aiAnalysisInfoContainer}>
+                <Text style={styles.aiAnalysisInfoText}>
+                  P/S dalgasını yapay zekaya entegre ettik. Mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz.
                 </Text>
               </View>
-            )}
-          </LinearGradient>
-        </View>
-      )}
 
-      {/* ELITE: Premium Wave Visualization with Glassmorphism */}
-      <View style={styles.visualizationContainer}>
-        <LinearGradient
-          colors={['#0f172a', '#1e293b', '#334155']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.visualizationCard}
-        >
-          {/* Glassmorphism overlay */}
-          <View style={styles.glassOverlay} />
+              {/* AI Prediction Results */}
+              {aiPrediction && (
+                <View style={styles.aiPredictionContent}>
+                  {/* Urgency Badge */}
+                  <View style={styles.urgencyBadge}>
+                    <Ionicons
+                      name={
+                        aiPrediction.urgency === 'critical'
+                          ? 'warning'
+                          : aiPrediction.urgency === 'high'
+                            ? 'alert-circle'
+                            : 'information-circle'
+                      }
+                      size={16}
+                      color="#fff"
+                    />
+                    <Text style={styles.urgencyText}>
+                      {aiPrediction.urgency === 'critical'
+                        ? 'KRİTİK'
+                        : aiPrediction.urgency === 'high'
+                          ? 'YÜKSEK'
+                          : aiPrediction.urgency === 'medium'
+                            ? 'ORTA'
+                            : 'DÜŞÜK'}
+                    </Text>
+                  </View>
 
-          {/* Premium glow effect */}
-          <View style={styles.glowEffect} />
-          {/* Epicenter and User Location */}
-          <View style={styles.locationContainer}>
-            <View style={styles.epicenterMarker}>
-              <View style={styles.epicenterDot} />
-              <Text style={styles.epicenterLabel}>Merkez Üssü</Text>
+                  {/* Prediction Details */}
+                  <View style={styles.predictionDetails}>
+                    <View style={styles.predictionRow}>
+                      <Text style={styles.predictionLabel}>Tahmin:</Text>
+                      <Text style={styles.predictionValue}>
+                        {aiPrediction.willOccur ? '✅ Deprem Bekleniyor' : '❌ Deprem Beklenmiyor'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.predictionRow}>
+                      <Text style={styles.predictionLabel}>Güven:</Text>
+                      <Text style={styles.predictionValue}>{aiPrediction.confidence}%</Text>
+                    </View>
+
+                    {aiPrediction.willOccur && (
+                      <>
+                        <View style={styles.predictionRow}>
+                          <Text style={styles.predictionLabel}>Büyüklük:</Text>
+                          <Text style={styles.predictionValue}>
+                            M{aiPrediction.estimatedMagnitude.toFixed(1)}
+                          </Text>
+                        </View>
+
+                        <View style={styles.predictionRow}>
+                          <Text style={styles.predictionLabel}>Süre:</Text>
+                          <Text style={styles.predictionValue}>
+                            {Math.round(aiPrediction.timeAdvance)} saniye içinde
+                          </Text>
+                        </View>
+                      </>
+                    )}
+                  </View>
+
+                  {/* Recommended Action */}
+                  {aiPrediction.recommendedAction && (
+                    <View style={styles.recommendedActionContainer}>
+                      <Text style={styles.recommendedActionText}>
+                        {aiPrediction.recommendedAction}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Factor Breakdown */}
+                  <View style={styles.factorBreakdown}>
+                    <Text style={styles.factorBreakdownTitle}>Analiz Faktörleri:</Text>
+                    <View style={styles.factorRow}>
+                      <Text style={styles.factorLabel}>Sismik Aktivite:</Text>
+                      <View style={styles.factorBarContainer}>
+                        <View
+                          style={[
+                            styles.factorBar,
+                            {
+                              width: `${aiPrediction.factors.seismicActivity * 100}%`,
+                              backgroundColor: '#10b981',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.factorValue}>
+                        {(aiPrediction.factors.seismicActivity * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+
+                    <View style={styles.factorRow}>
+                      <Text style={styles.factorLabel}>Öncü Sinyaller:</Text>
+                      <View style={styles.factorBarContainer}>
+                        <View
+                          style={[
+                            styles.factorBar,
+                            {
+                              width: `${aiPrediction.factors.precursorSignals * 100}%`,
+                              backgroundColor: '#3b82f6',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.factorValue}>
+                        {(aiPrediction.factors.precursorSignals * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+
+                    <View style={styles.factorRow}>
+                      <Text style={styles.factorLabel}>Tarihsel Desen:</Text>
+                      <View style={styles.factorBarContainer}>
+                        <View
+                          style={[
+                            styles.factorBar,
+                            {
+                              width: `${aiPrediction.factors.historicalPattern * 100}%`,
+                              backgroundColor: '#f59e0b',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.factorValue}>
+                        {(aiPrediction.factors.historicalPattern * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+
+                    <View style={styles.factorRow}>
+                      <Text style={styles.factorLabel}>Ensemble Konsensüs:</Text>
+                      <View style={styles.factorBarContainer}>
+                        <View
+                          style={[
+                            styles.factorBar,
+                            {
+                              width: `${aiPrediction.factors.ensembleConsensus * 100}%`,
+                              backgroundColor: '#8b5cf6',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.factorValue}>
+                        {(aiPrediction.factors.ensembleConsensus * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Loading State */}
+              {aiAnalysisLoading && !aiPrediction && (
+                <View style={styles.aiLoadingContainer}>
+                  <ActivityIndicator size="large" color="#fff" />
+                  <Text style={styles.aiLoadingText}>AI analiz yapılıyor...</Text>
+                </View>
+              )}
+
+              {/* No Prediction State */}
+              {!aiAnalysisLoading && !aiPrediction && riskScore !== null && (
+                <View style={styles.aiNoPredictionContainer}>
+                  <Ionicons name="checkmark-circle" size={24} color="rgba(255, 255, 255, 0.7)" />
+                  <Text style={styles.aiNoPredictionText}>
+                    Şu anda deprem riski tespit edilmedi
+                  </Text>
+                </View>
+              )}
+            </LinearGradient>
+          </View>
+        )}
+
+        {/* ELITE: REAL MAP - Gerçek Harita Üzerinde Deprem ve Dalga Görselleştirmesi */}
+        <View style={styles.mapContainer}>
+          {/* Map Header with clear info */}
+          <View style={styles.mapHeader}>
+            <View style={styles.mapTitleRow}>
+              <Ionicons name="map" size={18} color="#3b82f6" />
+              <Text style={styles.mapTitle}>Canlı Deprem Haritası</Text>
             </View>
-            <View style={styles.userMarker}>
-              <Ionicons name="person" size={20} color="#3b82f6" />
-              <Text style={styles.userLabel}>Siz</Text>
-            </View>
-          </View>
-
-          {/* Wave Propagation Circles - ELITE: Multiple concentric circles for realistic wave propagation */}
-          <View style={styles.waveContainer}>
-            {/* P-Wave Circles (multiple rings for realistic effect) */}
-            {[0, 1, 2].map((ring) => {
-              const ringProgress = Math.max(0, Math.min(1, animationProgress - ring * 0.2));
-              const ringScale = ringProgress;
-              const ringOpacity = ringProgress > 0 ? (1 - ringProgress) * 0.6 : 0;
-
-              return (
-                <Animated.View
-                  key={`p-wave-${ring}`}
-                  style={[
-                    styles.waveCircle,
-                    styles.pWaveCircle,
-                    {
-                      width: SCREEN_WIDTH * 0.8 * ringScale,
-                      height: SCREEN_WIDTH * 0.8 * ringScale,
-                      opacity: ringOpacity,
-                      borderWidth: ring === 0 ? 3 : 2,
-                    },
-                  ]}
-                />
-              );
-            })}
-
-            {/* S-Wave Circles (multiple rings for realistic effect) */}
-            {[0, 1, 2].map((ring) => {
-              const ringProgress = Math.max(0, Math.min(1, (animationProgress - 0.3) - ring * 0.15));
-              const ringScale = ringProgress;
-              const ringOpacity = ringProgress > 0 ? ringProgress * 0.8 : 0;
-
-              return (
-                <Animated.View
-                  key={`s-wave-${ring}`}
-                  style={[
-                    styles.waveCircle,
-                    styles.sWaveCircle,
-                    {
-                      width: SCREEN_WIDTH * 0.8 * ringScale,
-                      height: SCREEN_WIDTH * 0.8 * ringScale,
-                      opacity: ringOpacity,
-                      borderWidth: ring === 0 ? 3 : 2,
-                    },
-                  ]}
-                />
-              );
-            })}
-          </View>
-
-          {/* Distance Line */}
-          <View style={styles.distanceLine}>
-            <View style={styles.distanceLineInner} />
-            <Text style={styles.distanceText}>
-              {Math.round(currentWave.calculation.epicentralDistance)} km
-            </Text>
-          </View>
-        </LinearGradient>
-      </View>
-
-      {/* ELITE: Seismograph Visualization */}
-      {/* CRITICAL: Always show sismograf - 7/24 continuous monitoring for life-saving early warnings */}
-      {/* Sismograf her zaman aktif olmalı - dalgaları sürekli analiz edip bildirim göndermeli */}
-      <SeismographVisualization
-        pWaveArrivalTime={currentWave?.calculation.pWaveArrivalTime || 0}
-        sWaveArrivalTime={currentWave?.calculation.sWaveArrivalTime || 0}
-        elapsed={elapsed}
-        magnitude={currentWave?.earthquake.magnitude || 0}
-        isAnimating={isAnimating}
-        isMonitoringActive={true} // CRITICAL: Always active - 7/24 monitoring
-        realTimeData={realTimeSeismicData.length > 0 ? realTimeSeismicData : undefined}
-      />
-
-      {/* ELITE: Premium Info Card with Glassmorphism */}
-      <View style={styles.infoCard}>
-        {/* Glassmorphism overlay */}
-        <View style={styles.cardGlassOverlay} />
-        <View style={styles.infoHeader}>
-          <View style={styles.magnitudeBadge}>
-            <Text style={styles.magnitudeText}>
-              M{currentWave.earthquake.magnitude.toFixed(1)}
-            </Text>
-          </View>
-          <View style={styles.infoHeaderRight}>
-            <Ionicons name="location" size={16} color={colors.text.secondary} />
-            <Text style={styles.locationText}>{currentWave.earthquake.location}</Text>
-          </View>
-        </View>
-
-        {/* ELITE: Wave Arrival Times with Premium Gradient Design */}
-        <View style={styles.timesContainer}>
-          <LinearGradient
-            colors={['#3b82f6', '#2563eb']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.timeCard}
-          >
-            <View style={styles.timeCardGlassOverlay} />
-            <Ionicons name="radio" size={20} color="#fff" style={styles.timeIcon} />
-            <Text style={styles.timeLabel}>P-Dalga</Text>
-            <Text style={[styles.timeValue, styles.pWaveValue]}>
-              {timeUntilPWave > 0
-                ? `${Math.round(timeUntilPWave)}s`
-                : 'Geldi'}
-            </Text>
-            <Text style={styles.timeSubtext}>
-              {currentWave.calculation.pWaveArrivalTime.toFixed(1)}s
-            </Text>
-            <Text style={styles.timeVelocity}>
-              {currentWave.calculation.pWaveVelocity.toFixed(1)} km/s
-            </Text>
-          </LinearGradient>
-
-          <LinearGradient
-            colors={['#ef4444', '#dc2626']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.timeCard}
-          >
-            <View style={styles.timeCardGlassOverlay} />
-            <Ionicons name="warning" size={20} color="#fff" style={styles.timeIcon} />
-            <Text style={styles.timeLabel}>S-Dalga</Text>
-            <Text style={[styles.timeValue, styles.sWaveTime]}>
-              {timeUntilSWave > 0
-                ? `${Math.round(timeUntilSWave)}s`
-                : 'Geldi'}
-            </Text>
-            <Text style={styles.timeSubtext}>
-              {currentWave.calculation.sWaveArrivalTime.toFixed(1)}s
-            </Text>
-            <Text style={styles.timeVelocity}>
-              {currentWave.calculation.sWaveVelocity.toFixed(1)} km/s
-            </Text>
-          </LinearGradient>
-
-          <LinearGradient
-            colors={['#f59e0b', '#d97706']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.timeCard}
-          >
-            <View style={styles.timeCardGlassOverlay} />
-            <Ionicons name="time" size={20} color="#fff" style={styles.timeIcon} />
-            <Text style={styles.timeLabel}>Uyarı Süresi</Text>
-            <Text style={[styles.timeValue, styles.warningTime]}>
-              {Math.round(currentWave.calculation.warningTime)}s
-            </Text>
-            <Text style={styles.timeSubtext}>
-              ±{currentWave.calculation.warningTimeUncertainty.toFixed(1)}s
-            </Text>
-            <Text style={styles.timeVelocity}>
-              {currentWave.calculation.epicentralDistance.toFixed(0)} km uzaklık
-            </Text>
-          </LinearGradient>
-        </View>
-
-        {/* ELITE: Intensity and PGA with Premium Design */}
-        <View style={styles.intensityContainer}>
-          <View style={styles.intensityCard}>
-            <View style={styles.intensityHeader}>
-              <Ionicons name="pulse" size={18} color={colors.text.secondary} />
-              <Text style={styles.intensityLabel}>Beklenen Şiddet (MMI)</Text>
-            </View>
-            <View style={styles.intensityValueContainer}>
-              <Text style={styles.intensityValue}>
-                {currentWave.calculation.estimatedIntensity.toFixed(1)}
-              </Text>
-              <Text style={styles.intensityUncertainty}>
-                ±{currentWave.calculation.intensityUncertainty.toFixed(1)}
+            <View style={styles.mapInfoBadge}>
+              <Text style={styles.mapInfoText}>
+                {Math.round(currentWave.calculation.epicentralDistance)} km uzakta
               </Text>
             </View>
-            <View style={styles.intensityBar}>
-              <LinearGradient
-                colors={
-                  currentWave.calculation.estimatedIntensity >= 7
-                    ? ['#dc2626', '#991b1b']
-                    : currentWave.calculation.estimatedIntensity >= 5
-                      ? ['#f59e0b', '#d97706']
-                      : ['#10b981', '#059669']
+          </View>
+
+          {/* Real MapView with earthquake and user locations */}
+          <View style={styles.mapWrapper}>
+            <MapView
+              style={styles.map}
+              provider={PROVIDER_DEFAULT}
+              initialRegion={{
+                // Center on earthquake location with fallback
+                latitude: currentWave.earthquake.latitude,
+                longitude: currentWave.earthquake.longitude,
+                // Fixed safe delta values (max 5 degrees to prevent crash)
+                latitudeDelta: Math.min(
+                  Math.max(
+                    Math.abs(currentWave.earthquake.latitude - (userLocation?.latitude || currentWave.earthquake.latitude)) * 2.5 + 0.5,
+                    1
+                  ),
+                  5
+                ),
+                longitudeDelta: Math.min(
+                  Math.max(
+                    Math.abs(currentWave.earthquake.longitude - (userLocation?.longitude || currentWave.earthquake.longitude)) * 2.5 + 0.5,
+                    1
+                  ),
+                  5
+                ),
+              }}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+              customMapStyle={darkMapStyle}
+            >
+              {/* Animated P-Wave Circles */}
+              {[0, 0.33, 0.66].map((offset, i) => {
+                const progress = (wavePulse + offset) % 1;
+                const radiusKm = currentWave.calculation.epicentralDistance * progress;
+                const radiusMeters = radiusKm * 1000;
+                return (
+                  <Circle
+                    key={`p-wave-${i}`}
+                    center={{
+                      latitude: currentWave.earthquake.latitude,
+                      longitude: currentWave.earthquake.longitude,
+                    }}
+                    radius={radiusMeters}
+                    strokeColor={`rgba(59, 130, 246, ${(1 - progress) * 0.6})`}
+                    strokeWidth={2}
+                    fillColor="transparent"
+                  />
+                );
+              })}
+
+              {/* Animated S-Wave Circles */}
+              {[0.1, 0.45].map((offset, i) => {
+                const progress = ((wavePulse * 0.6) + offset) % 1;
+                const radiusKm = currentWave.calculation.epicentralDistance * progress * 0.8;
+                const radiusMeters = radiusKm * 1000;
+                return (
+                  <Circle
+                    key={`s-wave-${i}`}
+                    center={{
+                      latitude: currentWave.earthquake.latitude,
+                      longitude: currentWave.earthquake.longitude,
+                    }}
+                    radius={radiusMeters}
+                    strokeColor={`rgba(239, 68, 68, ${(1 - progress) * 0.7})`}
+                    strokeWidth={3}
+                    fillColor="transparent"
+                  />
+                );
+              })}
+
+              {/* Earthquake Epicenter Marker */}
+              <Marker
+                coordinate={{
+                  latitude: currentWave.earthquake.latitude,
+                  longitude: currentWave.earthquake.longitude,
+                }}
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <View style={styles.epicenterMarker}>
+                  <View style={styles.epicenterRing} />
+                  <View style={styles.epicenterCore} />
+                </View>
+              </Marker>
+
+              {/* User Location Marker */}
+              {userLocation && (
+                <Marker
+                  coordinate={{
+                    latitude: userLocation.latitude,
+                    longitude: userLocation.longitude,
+                  }}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                >
+                  <View style={styles.userMarker}>
+                    <View style={styles.userMarkerDot} />
+                    <Text style={styles.userMarkerLabel}>SİZ</Text>
+                  </View>
+                </Marker>
+              )}
+            </MapView>
+
+            {/* Wave Legend Overlay */}
+            <View style={styles.mapLegendOverlay}>
+              <View style={styles.legendRow}>
+                <View style={[styles.legendDot, { backgroundColor: '#3b82f6' }]} />
+                <Text style={styles.legendText}>P-Dalga (hızlı)</Text>
+              </View>
+              <View style={styles.legendRow}>
+                <View style={[styles.legendDot, { backgroundColor: '#ef4444' }]} />
+                <Text style={styles.legendText}>S-Dalga (yıkıcı)</Text>
+              </View>
+            </View>
+
+            {/* Epicenter Info Overlay */}
+            <View style={styles.epicenterInfoOverlay}>
+              <View style={styles.epicenterInfoRow}>
+                <View style={[styles.epicenterInfoDot, { backgroundColor: '#ef4444' }]} />
+                <Text style={styles.epicenterInfoText}>Deprem Merkezi</Text>
+              </View>
+              <Text style={styles.epicenterInfoMag}>M{currentWave.earthquake.magnitude.toFixed(1)}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ELITE: Premium 3-Axis Seismograph Display - Always Active */}
+        {/* CRITICAL: Sismograf HİÇ DURMAMALI - 7/24 sürekli dalga görselleştirmesi */}
+        <View style={styles.seismographCard}>
+          <LinearGradient
+            colors={['#0a0f18', '#0d1420', '#101828']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.seismographGradient}
+          >
+            {/* Header with HONEST status badge */}
+            <View style={styles.seismographHeader}>
+              <View style={styles.seismographTitleRow}>
+                <Text style={styles.seismographTitle}>Sismograf</Text>
+                <Text style={styles.seismographSubtitle}>
+                  {realTimeSeismicData.length > 0 ? 'Gerçek Zamanlı Sensör Verisi' : 'Simülasyon Modu'}
+                </Text>
+              </View>
+              <View style={[
+                styles.liveDataBadge,
+                realTimeSeismicData.length === 0 && {
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  borderColor: 'rgba(245, 158, 11, 0.3)'
                 }
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={[
-                  styles.intensityBarFill,
-                  {
-                    width: `${(currentWave.calculation.estimatedIntensity / 12) * 100}%`,
-                  },
-                ]}
+              ]}>
+                <View style={[
+                  styles.liveDataDot,
+                  realTimeSeismicData.length === 0 && { backgroundColor: '#f59e0b' }
+                ]} />
+                <Text style={[
+                  styles.liveDataText,
+                  realTimeSeismicData.length === 0 && { color: '#f59e0b' }
+                ]}>
+                  {realTimeSeismicData.length > 0 ? 'CANLI VERİ' : 'SİMÜLASYON'}
+                </Text>
+              </View>
+            </View>
+
+            {/* 3-Axis Waveform Display - Z/N/E components - REAL SENSOR DATA */}
+            <View style={styles.waveformContainer}>
+              <WaveformGraph
+                magnitude={currentWave?.earthquake.magnitude || 3.0}
+                isActive={true}
+                showPWave={true}
+                showSWave={true}
+                pWaveProgress={1}
+                sWaveProgress={1}
+                label="Z"
+                color="#22c55e"
+                realSensorData={realTimeSeismicData} // CRITICAL: Real accelerometer data
+              />
+              <WaveformGraph
+                magnitude={(currentWave?.earthquake.magnitude || 3.0) * 0.8}
+                isActive={true}
+                showPWave={true}
+                showSWave={true}
+                pWaveProgress={1}
+                sWaveProgress={1}
+                label="N"
+                color="#3b82f6"
+                realSensorData={realTimeSeismicData} // CRITICAL: Real accelerometer data
+              />
+              <WaveformGraph
+                magnitude={(currentWave?.earthquake.magnitude || 3.0) * 0.6}
+                isActive={true}
+                showPWave={true}
+                showSWave={true}
+                pWaveProgress={1}
+                sWaveProgress={1}
+                label="E"
+                color="#f59e0b"
+                realSensorData={realTimeSeismicData} // CRITICAL: Real accelerometer data
               />
             </View>
-            <Text style={styles.intensityDescription}>
-              {currentWave.calculation.estimatedIntensity >= 7
-                ? 'Şiddetli sarsıntı bekleniyor'
-                : currentWave.calculation.estimatedIntensity >= 5
-                  ? 'Orta şiddette sarsıntı bekleniyor'
-                  : 'Hafif sarsıntı bekleniyor'}
-            </Text>
-          </View>
 
-          <View style={styles.pgaCard}>
-            <View style={styles.pgaHeader}>
-              <Ionicons name="speedometer" size={18} color={colors.text.secondary} />
-              <Text style={styles.pgaLabel}>PGA (Zemin İvmesi)</Text>
+            {/* Amplitude Scale */}
+            <View style={styles.amplitudeScale}>
+              <Text style={styles.amplitudeText}>Max: {(currentWave?.earthquake.magnitude || 3.0) > 4 ? '±' + ((currentWave?.earthquake.magnitude || 3.0) * 0.3).toFixed(1) : '±0.02'} m/s²</Text>
             </View>
-            <View style={styles.pgaValueContainer}>
-              <Text style={styles.pgaValue}>
-                {currentWave.calculation.estimatedPGA.toFixed(3)}
-              </Text>
-              <Text style={styles.pgaUnit}>g</Text>
-            </View>
-            <Text style={styles.pgaUncertainty}>
-              ±{currentWave.calculation.pgaUncertainty.toFixed(3)}g
-            </Text>
-            <Text style={styles.pgaDescription}>
-              {currentWave.calculation.estimatedPGA >= 0.5
-                ? 'Çok yüksek zemin ivmesi'
-                : currentWave.calculation.estimatedPGA >= 0.2
-                  ? 'Yüksek zemin ivmesi'
-                  : currentWave.calculation.estimatedPGA >= 0.1
-                    ? 'Orta zemin ivmesi'
-                    : 'Düşük zemin ivmesi'}
-            </Text>
-          </View>
-        </View>
-
-        {/* ELITE: Quality Indicator and Additional Details */}
-        <View style={styles.qualityContainer}>
-          <LinearGradient
-            colors={
-              currentWave.calculation.quality === 'excellent'
-                ? ['#10b981', '#059669']
-                : currentWave.calculation.quality === 'good'
-                  ? ['#3b82f6', '#2563eb']
-                  : currentWave.calculation.quality === 'fair'
-                    ? ['#f59e0b', '#d97706']
-                    : ['#ef4444', '#dc2626']
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.qualityBadge}
-          >
-            <View style={styles.qualityBadgeGlassOverlay} />
-            <Ionicons
-              name={
-                currentWave.calculation.quality === 'excellent'
-                  ? 'checkmark-circle'
-                  : currentWave.calculation.quality === 'good'
-                    ? 'checkmark-circle'
-                    : 'warning'
-              }
-              size={18}
-              color="#fff"
-            />
-            <Text style={styles.qualityText}>
-              {currentWave.calculation.quality === 'excellent'
-                ? 'Mükemmel'
-                : currentWave.calculation.quality === 'good'
-                  ? 'İyi'
-                  : currentWave.calculation.quality === 'fair'
-                    ? 'Orta'
-                    : 'Düşük'} Kalite
-            </Text>
-            <Text style={styles.qualityConfidence}>
-              {currentWave.calculation.confidence}% güven
-            </Text>
           </LinearGradient>
-          <View style={styles.methodContainer}>
-            <Ionicons name="calculator" size={14} color={colors.text.secondary} />
-            <Text style={styles.methodText}>
-              {currentWave.calculation.calculationMethod === 'elite'
-                ? 'Elite'
-                : currentWave.calculation.calculationMethod === 'advanced'
-                  ? 'Gelişmiş'
-                  : currentWave.calculation.calculationMethod === 'site_adjusted'
-                    ? 'Site Düzeltmeli'
-                    : currentWave.calculation.calculationMethod === 'regional'
-                      ? 'Bölgesel'
-                      : 'Standart'} Hesaplama
-            </Text>
+        </View>
+
+        {/* ELITE: Premium Info Card with Glassmorphism */}
+        <View style={styles.infoCard}>
+          {/* Glassmorphism overlay */}
+          <View style={styles.cardGlassOverlay} />
+          <View style={styles.infoHeader}>
+            <View style={styles.magnitudeBadge}>
+              <Text style={styles.magnitudeText}>
+                M{currentWave.earthquake.magnitude.toFixed(1)}
+              </Text>
+            </View>
+            <View style={styles.infoHeaderRight}>
+              <Ionicons name="location" size={16} color={colors.text.secondary} />
+              <Text style={styles.locationText}>{currentWave.earthquake.location}</Text>
+            </View>
+          </View>
+
+          {/* ELITE: Wave Arrival Times with Premium Gradient Design */}
+          <View style={styles.timesContainer}>
+            <LinearGradient
+              colors={['#3b82f6', '#2563eb']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.timeCard}
+            >
+              <View style={styles.timeCardGlassOverlay} />
+              <Ionicons name="radio" size={20} color="#fff" style={styles.timeIcon} />
+              <Text style={styles.timeLabel}>P-Dalga</Text>
+              <Text style={[styles.timeValue, styles.pWaveValue]}>
+                {timeUntilPWave > 0
+                  ? `${Math.round(timeUntilPWave)}s`
+                  : 'Geldi'}
+              </Text>
+              <Text style={styles.timeSubtext}>
+                {currentWave.calculation.pWaveArrivalTime.toFixed(1)}s
+              </Text>
+              <Text style={styles.timeVelocity}>
+                {currentWave.calculation.pWaveVelocity.toFixed(1)} km/s
+              </Text>
+            </LinearGradient>
+
+            <LinearGradient
+              colors={['#ef4444', '#dc2626']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.timeCard}
+            >
+              <View style={styles.timeCardGlassOverlay} />
+              <Ionicons name="warning" size={20} color="#fff" style={styles.timeIcon} />
+              <Text style={styles.timeLabel}>S-Dalga</Text>
+              <Text style={[styles.timeValue, styles.sWaveTime]}>
+                {timeUntilSWave > 0
+                  ? `${Math.round(timeUntilSWave)}s`
+                  : 'Geldi'}
+              </Text>
+              <Text style={styles.timeSubtext}>
+                {currentWave.calculation.sWaveArrivalTime.toFixed(1)}s
+              </Text>
+              <Text style={styles.timeVelocity}>
+                {currentWave.calculation.sWaveVelocity.toFixed(1)} km/s
+              </Text>
+            </LinearGradient>
+
+            <LinearGradient
+              colors={['#f59e0b', '#d97706']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.timeCard}
+            >
+              <View style={styles.timeCardGlassOverlay} />
+              <Ionicons name="time" size={20} color="#fff" style={styles.timeIcon} />
+              <Text style={styles.timeLabel}>Uyarı Süresi</Text>
+              <Text style={[styles.timeValue, styles.warningTime]}>
+                {Math.round(currentWave.calculation.warningTime)}s
+              </Text>
+              <Text style={styles.timeSubtext}>
+                ±{currentWave.calculation.warningTimeUncertainty.toFixed(1)}s
+              </Text>
+              <Text style={styles.timeVelocity}>
+                {currentWave.calculation.epicentralDistance.toFixed(0)} km uzaklık
+              </Text>
+            </LinearGradient>
+          </View>
+
+          {/* ELITE: Intensity and PGA with Premium Design */}
+          <View style={styles.intensityContainer}>
+            <View style={styles.intensityCard}>
+              <View style={styles.intensityHeader}>
+                <Ionicons name="pulse" size={18} color={colors.text.secondary} />
+                <Text style={styles.intensityLabel}>Beklenen Şiddet (MMI)</Text>
+              </View>
+              <View style={styles.intensityValueContainer}>
+                <Text style={styles.intensityValue}>
+                  {currentWave.calculation.estimatedIntensity.toFixed(1)}
+                </Text>
+                <Text style={styles.intensityUncertainty}>
+                  ±{currentWave.calculation.intensityUncertainty.toFixed(1)}
+                </Text>
+              </View>
+              <View style={styles.intensityBar}>
+                <LinearGradient
+                  colors={
+                    currentWave.calculation.estimatedIntensity >= 7
+                      ? ['#dc2626', '#991b1b']
+                      : currentWave.calculation.estimatedIntensity >= 5
+                        ? ['#f59e0b', '#d97706']
+                        : ['#10b981', '#059669']
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[
+                    styles.intensityBarFill,
+                    {
+                      width: `${(currentWave.calculation.estimatedIntensity / 12) * 100}%`,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.intensityDescription}>
+                {currentWave.calculation.estimatedIntensity >= 7
+                  ? 'Şiddetli sarsıntı bekleniyor'
+                  : currentWave.calculation.estimatedIntensity >= 5
+                    ? 'Orta şiddette sarsıntı bekleniyor'
+                    : 'Hafif sarsıntı bekleniyor'}
+              </Text>
+            </View>
+
+            <View style={styles.pgaCard}>
+              <View style={styles.pgaHeader}>
+                <Ionicons name="speedometer" size={18} color={colors.text.secondary} />
+                <Text style={styles.pgaLabel}>PGA (Zemin İvmesi)</Text>
+              </View>
+              <View style={styles.pgaValueContainer}>
+                <Text style={styles.pgaValue}>
+                  {currentWave.calculation.estimatedPGA.toFixed(3)}
+                </Text>
+                <Text style={styles.pgaUnit}>g</Text>
+              </View>
+              <Text style={styles.pgaUncertainty}>
+                ±{currentWave.calculation.pgaUncertainty.toFixed(3)}g
+              </Text>
+              <Text style={styles.pgaDescription}>
+                {currentWave.calculation.estimatedPGA >= 0.5
+                  ? 'Çok yüksek zemin ivmesi'
+                  : currentWave.calculation.estimatedPGA >= 0.2
+                    ? 'Yüksek zemin ivmesi'
+                    : currentWave.calculation.estimatedPGA >= 0.1
+                      ? 'Orta zemin ivmesi'
+                      : 'Düşük zemin ivmesi'}
+              </Text>
+            </View>
+          </View>
+
+          {/* ELITE: Quality Indicator and Additional Details */}
+          <View style={styles.qualityContainer}>
+            <LinearGradient
+              colors={
+                currentWave.calculation.quality === 'excellent'
+                  ? ['#10b981', '#059669']
+                  : currentWave.calculation.quality === 'good'
+                    ? ['#3b82f6', '#2563eb']
+                    : currentWave.calculation.quality === 'fair'
+                      ? ['#f59e0b', '#d97706']
+                      : ['#ef4444', '#dc2626']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.qualityBadge}
+            >
+              <View style={styles.qualityBadgeGlassOverlay} />
+              <Ionicons
+                name={
+                  currentWave.calculation.quality === 'excellent'
+                    ? 'checkmark-circle'
+                    : currentWave.calculation.quality === 'good'
+                      ? 'checkmark-circle'
+                      : 'warning'
+                }
+                size={18}
+                color="#fff"
+              />
+              <Text style={styles.qualityText}>
+                {currentWave.calculation.quality === 'excellent'
+                  ? 'Mükemmel'
+                  : currentWave.calculation.quality === 'good'
+                    ? 'İyi'
+                    : currentWave.calculation.quality === 'fair'
+                      ? 'Orta'
+                      : 'Düşük'} Kalite
+              </Text>
+              <Text style={styles.qualityConfidence}>
+                {currentWave.calculation.confidence}% güven
+              </Text>
+            </LinearGradient>
+            <View style={styles.methodContainer}>
+              <Ionicons name="calculator" size={14} color={colors.text.secondary} />
+              <Text style={styles.methodText}>
+                {currentWave.calculation.calculationMethod === 'elite'
+                  ? 'Elite'
+                  : currentWave.calculation.calculationMethod === 'advanced'
+                    ? 'Gelişmiş'
+                    : currentWave.calculation.calculationMethod === 'site_adjusted'
+                      ? 'Site Düzeltmeli'
+                      : currentWave.calculation.calculationMethod === 'regional'
+                        ? 'Bölgesel'
+                        : 'Standart'} Hesaplama
+              </Text>
+            </View>
+          </View>
+
+          {/* ELITE: Additional Technical Details */}
+          <View style={styles.technicalDetailsContainer}>
+            <View style={styles.technicalDetail}>
+              <Ionicons name="location" size={14} color={colors.text.secondary} />
+              <Text style={styles.technicalDetailLabel}>Bölge:</Text>
+              <Text style={styles.technicalDetailValue}>
+                {currentWave.calculation.region === 'nafz'
+                  ? 'Kuzey Anadolu Fay Hattı'
+                  : currentWave.calculation.region === 'eafz'
+                    ? 'Doğu Anadolu Fay Hattı'
+                    : currentWave.calculation.region === 'aegean'
+                      ? 'Ege Bölgesi'
+                      : currentWave.calculation.region === 'marmara'
+                        ? 'Marmara Bölgesi'
+                        : currentWave.calculation.region === 'mediterranean'
+                          ? 'Akdeniz Kıyısı'
+                          : currentWave.calculation.region === 'blacksea'
+                            ? 'Karadeniz Kıyısı'
+                            : 'Anadolu Plakası'}
+              </Text>
+            </View>
+            <View style={styles.technicalDetail}>
+              <Ionicons name="layers" size={14} color={colors.text.secondary} />
+              <Text style={styles.technicalDetailLabel}>Derinlik:</Text>
+              <Text style={styles.technicalDetailValue}>
+                {currentWave.earthquake.depth.toFixed(1)} km
+              </Text>
+            </View>
+            <View style={styles.technicalDetail}>
+              <Ionicons name="pulse" size={14} color={colors.text.secondary} />
+              <Text style={styles.technicalDetailLabel}>PGV:</Text>
+              <Text style={styles.technicalDetailValue}>
+                {currentWave.calculation.estimatedPGV.toFixed(1)} cm/s
+              </Text>
+            </View>
+            <View style={styles.technicalDetail}>
+              <Ionicons name="home" size={14} color={colors.text.secondary} />
+              <Text style={styles.technicalDetailLabel}>VS30:</Text>
+              <Text style={styles.technicalDetailValue}>
+                {currentWave.calculation.vs30.toFixed(0)} m/s
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* ELITE: Additional Technical Details */}
-        <View style={styles.technicalDetailsContainer}>
-          <View style={styles.technicalDetail}>
-            <Ionicons name="location" size={14} color={colors.text.secondary} />
-            <Text style={styles.technicalDetailLabel}>Bölge:</Text>
-            <Text style={styles.technicalDetailValue}>
-              {currentWave.calculation.region === 'nafz'
-                ? 'Kuzey Anadolu Fay Hattı'
-                : currentWave.calculation.region === 'eafz'
-                  ? 'Doğu Anadolu Fay Hattı'
-                  : currentWave.calculation.region === 'aegean'
-                    ? 'Ege Bölgesi'
-                    : currentWave.calculation.region === 'marmara'
-                      ? 'Marmara Bölgesi'
-                      : currentWave.calculation.region === 'mediterranean'
-                        ? 'Akdeniz Kıyısı'
-                        : currentWave.calculation.region === 'blacksea'
-                          ? 'Karadeniz Kıyısı'
-                          : 'Anadolu Plakası'}
-            </Text>
+        {/* Other Earthquakes List */}
+        {waveData.length > 1 && (
+          <View style={styles.listContainer}>
+            <Text style={styles.listTitle}>Diğer Depremler</Text>
+            {waveData
+              .filter((w) => w.earthquake.id !== currentWave.earthquake.id)
+              .slice(0, 5)
+              .map((wave) => (
+                <TouchableOpacity
+                  key={wave.earthquake.id}
+                  style={styles.listItem}
+                  onPress={() => {
+                    setSelectedWave(wave);
+                    haptics.impactLight();
+                  }}
+                >
+                  <View style={styles.listItemLeft}>
+                    <Text style={styles.listItemMagnitude}>
+                      M{wave.earthquake.magnitude.toFixed(1)}
+                    </Text>
+                    <Text style={styles.listItemLocation}>
+                      {wave.earthquake.location}
+                    </Text>
+                  </View>
+                  <View style={styles.listItemRight}>
+                    <Text style={styles.listItemWarningTime}>
+                      {Math.round(wave.calculation.warningTime)}s
+                    </Text>
+                    <Text style={styles.listItemDistance}>
+                      {Math.round(wave.calculation.epicentralDistance)} km
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
           </View>
-          <View style={styles.technicalDetail}>
-            <Ionicons name="layers" size={14} color={colors.text.secondary} />
-            <Text style={styles.technicalDetailLabel}>Derinlik:</Text>
-            <Text style={styles.technicalDetailValue}>
-              {currentWave.earthquake.depth.toFixed(1)} km
-            </Text>
-          </View>
-          <View style={styles.technicalDetail}>
-            <Ionicons name="pulse" size={14} color={colors.text.secondary} />
-            <Text style={styles.technicalDetailLabel}>PGV:</Text>
-            <Text style={styles.technicalDetailValue}>
-              {currentWave.calculation.estimatedPGV.toFixed(1)} cm/s
-            </Text>
-          </View>
-          <View style={styles.technicalDetail}>
-            <Ionicons name="home" size={14} color={colors.text.secondary} />
-            <Text style={styles.technicalDetailLabel}>VS30:</Text>
-            <Text style={styles.technicalDetailValue}>
-              {currentWave.calculation.vs30.toFixed(0)} m/s
-            </Text>
-          </View>
-        </View>
-      </View>
+        )}
 
-      {/* Other Earthquakes List */}
-      {waveData.length > 1 && (
-        <View style={styles.listContainer}>
-          <Text style={styles.listTitle}>Diğer Depremler</Text>
-          {waveData
-            .filter((w) => w.earthquake.id !== currentWave.earthquake.id)
-            .slice(0, 5)
-            .map((wave) => (
-              <TouchableOpacity
-                key={wave.earthquake.id}
-                style={styles.listItem}
-                onPress={() => {
-                  setSelectedWave(wave);
-                  haptics.impactLight();
-                }}
-              >
-                <View style={styles.listItemLeft}>
-                  <Text style={styles.listItemMagnitude}>
-                    M{wave.earthquake.magnitude.toFixed(1)}
-                  </Text>
-                  <Text style={styles.listItemLocation}>
-                    {wave.earthquake.location}
-                  </Text>
-                </View>
-                <View style={styles.listItemRight}>
-                  <Text style={styles.listItemWarningTime}>
-                    {Math.round(wave.calculation.warningTime)}s
-                  </Text>
-                  <Text style={styles.listItemDistance}>
-                    {Math.round(wave.calculation.epicentralDistance)} km
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+        {/* Animation Controls */}
+        <View style={styles.controlsContainer}>
+          <TouchableOpacity
+            style={[styles.controlButton, !isAnimating && styles.controlButtonActive]}
+            onPress={handleStartAnimation}
+          >
+            <Ionicons name="play" size={20} color="#fff" />
+            <Text style={styles.controlButtonText}>Başlat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, isAnimating && styles.controlButtonActive]}
+            onPress={handleStopAnimation}
+          >
+            <Ionicons name="stop" size={20} color="#fff" />
+            <Text style={styles.controlButtonText}>Durdur</Text>
+          </TouchableOpacity>
         </View>
-      )}
-
-      {/* Animation Controls */}
-      <View style={styles.controlsContainer}>
-        <TouchableOpacity
-          style={[styles.controlButton, !isAnimating && styles.controlButtonActive]}
-          onPress={handleStartAnimation}
-        >
-          <Ionicons name="play" size={20} color="#fff" />
-          <Text style={styles.controlButtonText}>Başlat</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.controlButton, isAnimating && styles.controlButtonActive]}
-          onPress={handleStopAnimation}
-        >
-          <Ionicons name="stop" size={20} color="#fff" />
-          <Text style={styles.controlButtonText}>Durdur</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -1810,27 +1985,163 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
   },
+  safeArea: {
+    flex: 1,
+    backgroundColor: ((colors as any).background?.primary) || '#0a0e1a',
+  },
+  headerGradient: {
+    paddingBottom: 8,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 60,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    flex: 1,
-    fontSize: 24,
-    fontWeight: '800',
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  headerSpacer: {
+  backButtonInner: {
     width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  headerRight: {
+    width: 44,
+    alignItems: 'flex-end',
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ef4444',
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#ef4444',
+    letterSpacing: 1,
+  },
+  // ELITE: Premium Header Styles - MyShake/ShakeAlert Inspired
+  premiumHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  premiumBackButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  premiumHeaderCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  seismicTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  seismicIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+  },
+  seismicTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  premiumLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+  },
+  premiumLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#22c55e',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  premiumLiveText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#22c55e',
+    letterSpacing: 0.5,
+  },
+  scrollContent: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    paddingBottom: 40,
   },
   visualizationContainer: {
     padding: 16,
@@ -1953,6 +2264,232 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#fff',
     fontWeight: '600',
+  },
+  // ELITE: Professional Radar Visualization Styles - USGS ShakeAlert Inspired
+  radarGrid: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radarRing: {
+    position: 'absolute',
+    borderRadius: 1000,
+    borderWidth: 1,
+    borderColor: 'rgba(100, 116, 139, 0.3)',
+    backgroundColor: 'transparent',
+  },
+  radarCrosshairH: {
+    position: 'absolute',
+    width: '100%',
+    height: 1,
+    backgroundColor: 'rgba(100, 116, 139, 0.2)',
+  },
+  radarCrosshairV: {
+    position: 'absolute',
+    width: 1,
+    height: '100%',
+    backgroundColor: 'rgba(100, 116, 139, 0.2)',
+  },
+  radarEpicenter: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  epicenterPulse: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderWidth: 2,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  epicenterCore: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#ef4444',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  epicenterRadarLabel: {
+    position: 'absolute',
+    top: 28,
+    fontSize: 9,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.7)',
+    letterSpacing: 1,
+  },
+  pWaveFront: {
+    position: 'absolute',
+    borderRadius: 1000,
+    borderWidth: 3,
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  sWaveFront: {
+    position: 'absolute',
+    borderRadius: 1000,
+    borderWidth: 4,
+    borderColor: '#ef4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  userRadarMarker: {
+    position: 'absolute',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  userRadarDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#22c55e',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  userRadarLabel: {
+    marginTop: 4,
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#22c55e',
+    letterSpacing: 0.5,
+  },
+  distanceScale: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  distanceScaleText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.8)',
+    letterSpacing: 0.3,
+  },
+  waveLegend: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  // ELITE: Premium 3-Axis Seismograph Card Styles
+  seismographCard: {
+    margin: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  seismographGradient: {
+    padding: 16,
+  },
+  seismographHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  seismographTitleRow: {
+    flex: 1,
+  },
+  seismographTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+  seismographSubtitle: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 2,
+  },
+  liveDataBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+  },
+  liveDataDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#22c55e',
+    marginRight: 6,
+  },
+  liveDataText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#22c55e',
+    letterSpacing: 0.5,
+  },
+  waveformContainer: {
+    marginTop: 4,
+  },
+  amplitudeScale: {
+    alignItems: 'flex-end',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  amplitudeText: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontFamily: 'monospace',
   },
   infoCard: {
     margin: 16,
@@ -2579,6 +3116,127 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
+  },
+
+  // ELITE: Real Map Styles
+  mapContainer: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 20,
+    backgroundColor: '#0a0f1a',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(10, 15, 26, 0.95)',
+  },
+  mapTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mapTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  mapInfoBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  mapInfoText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  mapWrapper: {
+    height: SCREEN_WIDTH * 0.65,
+    position: 'relative',
+  },
+  map: {
+    flex: 1,
+  },
+  epicenterRing: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#ef4444',
+    opacity: 0.6,
+  },
+  userMarkerDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#22c55e',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+  },
+  userMarkerLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 2,
+    textShadowColor: '#000000',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  mapLegendOverlay: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    backgroundColor: 'rgba(10, 15, 26, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 4,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  epicenterInfoOverlay: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(10, 15, 26, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  epicenterInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  epicenterInfoDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  epicenterInfoText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  epicenterInfoMag: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#ef4444',
+    marginTop: 2,
   },
 });
 

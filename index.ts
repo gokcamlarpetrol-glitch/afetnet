@@ -16,6 +16,42 @@ setupNativeModuleMocks();
 // Simple global setup
 global.Buffer = Buffer;
 
+// ============================================================================
+// EARLY TASK MANAGER DEFINITIONS (CRITICAL - must be defined before app starts)
+// ============================================================================
+// Background tasks MUST be defined at top-level, outside of any component,
+// before the app is registered. Otherwise iOS will execute tasks before they're defined.
+
+import * as TaskManager from 'expo-task-manager';
+
+const TASK_EEW_FETCH = 'AFETNET_EEW_BACKGROUND_FETCH';
+const TASK_EEW_LOCATION = 'AFETNET_EEW_LOCATION_TASK';
+
+// Define EEW background fetch task
+TaskManager.defineTask(TASK_EEW_FETCH, async () => {
+  try {
+    // Minimal background check - full logic is in BackgroundEEWService
+    console.log('[BackgroundTask] EEW fetch triggered');
+    return 2; // BackgroundFetchResult.NewData
+  } catch {
+    return 3; // BackgroundFetchResult.Failed
+  }
+});
+
+// Define location task (keeps app alive for EEW monitoring)
+TaskManager.defineTask(TASK_EEW_LOCATION, async ({ data, error }) => {
+  if (error) {
+    console.log('[BackgroundTask] Location task error:', error);
+    return;
+  }
+  if (data) {
+    const { locations } = data as { locations: unknown[] };
+    if (locations?.length > 0) {
+      console.log('[BackgroundTask] Background location update received');
+    }
+  }
+});
+
 
 // ============================================================================
 // SIMPLIFIED PUSHNOTIFICATIONIOS PROTECTION

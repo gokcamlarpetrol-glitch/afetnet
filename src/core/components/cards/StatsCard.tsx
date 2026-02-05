@@ -15,7 +15,7 @@ interface StatsCardProps {
   color?: string;
 }
 
-export default function StatsCard({ icon, value, label, color = colors.brand.primary }: StatsCardProps) {
+const StatsCard = React.memo(function StatsCard({ icon, value, label, color = colors.brand.primary }: StatsCardProps) {
   return (
     <View style={styles.container}>
       <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
@@ -25,7 +25,9 @@ export default function StatsCard({ icon, value, label, color = colors.brand.pri
       <Text style={styles.label}>{label}</Text>
     </View>
   );
-}
+});
+
+export default StatsCard;
 
 const styles = StyleSheet.create({
   container: {

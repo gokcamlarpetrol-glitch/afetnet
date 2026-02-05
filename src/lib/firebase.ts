@@ -5,7 +5,16 @@
 
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage, Messaging } from 'firebase/messaging';
-import { getAuth, signInAnonymously, Auth, User } from 'firebase/auth'; // ELITE: Auth imports
+import {
+  initializeAuth,
+  getAuth,
+  signInAnonymously,
+  Auth,
+  User,
+  // @ts-expect-error - getReactNativePersistence is available in firebase/auth but not in typings
+  getReactNativePersistence
+} from 'firebase/auth'; // ELITE: Auth imports with persistence
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../core/utils/logger';
 
 const logger = createLogger('FirebaseLib');
@@ -52,6 +61,32 @@ export function initializeFirebase(): FirebaseApp | null {
 }
 
 /**
+ * ELITE: Get or initialize Auth instance with persistence
+ * Uses initializeAuth with AsyncStorage for proper session persistence
+ */
+function getOrInitializeAuth(app: FirebaseApp): Auth {
+  if (authInstance) return authInstance;
+
+  try {
+    // ELITE: Initialize auth with AsyncStorage persistence
+    // This prevents the "Auth state will default to memory persistence" warning
+    authInstance = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch (error: any) {
+    // If auth is already initialized (hot reload, etc.), get existing instance
+    if (error?.code === 'auth/already-initialized') {
+      authInstance = getAuth(app);
+    } else {
+      // Fallback to getAuth if initializeAuth fails
+      authInstance = getAuth(app);
+    }
+  }
+
+  return authInstance;
+}
+
+/**
  * ELITE: Anonymous Authentication
  * Enables writing to shared collections (news summaries) without user signup
  */
@@ -60,17 +95,31 @@ export async function signInAnonymouslyAsync(): Promise<User | null> {
     const app = initializeFirebase();
     if (!app) return null;
 
-    if (!authInstance) {
-      authInstance = getAuth(app);
-    }
+    const auth = getOrInitializeAuth(app);
 
-    const userCredential = await signInAnonymously(authInstance);
+    const userCredential = await signInAnonymously(auth);
     if (__DEV__) {
       logger.info('✅ Signed in anonymously:', userCredential.user.uid);
     }
     return userCredential.user;
-  } catch (error) {
-    logger.error('Anonymous sign-in failed:', error);
+  } catch (error: any) {
+    // ELITE: Network errors are expected in simulators - don't show error to user
+    const errorCode = error?.code || '';
+    const errorMessage = error?.message || '';
+
+    if (errorCode === 'auth/network-request-failed' ||
+      errorMessage.includes('network') ||
+      errorMessage.includes('Network')) {
+      // Silent fail for network errors - expected in simulators
+      if (__DEV__) {
+        logger.debug('Anonymous sign-in skipped (network unavailable)');
+      }
+    } else {
+      // Log other errors but don't crash
+      if (__DEV__) {
+        logger.debug('Anonymous sign-in failed:', errorCode || errorMessage);
+      }
+    }
     return null;
   }
 }

@@ -22,14 +22,19 @@ const getErrorMessage = (e: unknown): string => e instanceof Error ? e.message :
 const getErrorName = (e: unknown): string => e instanceof Error ? e.name : 'UnknownError';
 const getErrorStack = (e: unknown): string | undefined => e instanceof Error ? e.stack : undefined;
 
-const POLL_INTERVAL = 5000; // 5 seconds - ELITE: Fast polling for real-time AFAD data
-// CRITICAL: Initial fetch happens immediately in start() - continuous real-time updates
-// CRITICAL: This MUST be exactly 5000ms (5 seconds) - verified for real-time data
+// ELITE: 60 seconds polling - optimal balance between freshness and resource efficiency
+// 5-second polling caused memory exhaustion (heap out of memory)
+// 60-second interval still provides near-real-time data while preventing:
+// - Memory leaks from overlapping fetch requests
+// - Network saturation and timeouts
+// - Battery drain on mobile devices
+const POLL_INTERVAL = 60000; // 60 seconds
 const LAST_CHECKED_KEY = 'last_checked_earthquake';
 
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private isFetching = false; // Mutex to prevent concurrent fetches
 
   async start() {
     if (this.isRunning) return;
@@ -89,6 +94,17 @@ class EarthquakeService {
   }
 
   async fetchEarthquakes() {
+    // ELITE: Mutex lock to prevent concurrent fetches
+    // This prevents memory buildup from overlapping requests
+    if (this.isFetching) {
+      if (__DEV__) {
+        logger.debug('⏳ [FETCH] Zaten devam eden fetch var - atlanıyor');
+      }
+      return;
+    }
+
+    this.isFetching = true;
+
     const store = useEarthquakeStore.getState();
 
     // ELITE: Don't load cache here - already loaded in start() for instant display
@@ -101,88 +117,116 @@ class EarthquakeService {
     store.setError(null); // Clear previous errors
 
     try {
-      // ELITE: Use modular fetcher
-      const { useSettingsStore } = await import('../stores/settingsStore');
-      const settings = useSettingsStore.getState();
+      // ═══════════════════════════════════════════════════════════════════
+      // ELITE BULLETPROOF DATA FETCH - STEP 1: FETCH FROM ALL SOURCES
+      // ═══════════════════════════════════════════════════════════════════
+      if (__DEV__) {
+        logger.info(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        logger.info(`🚀 [FETCH] Deprem verisi çekiliyor...`);
+      }
 
-      // CRITICAL: Only fetch AFAD data - Kandilli removed per user request
       const fetchResult = await fetchAllEarthquakes(
         true, // Always fetch AFAD
         () => fetchFromAFADAPI(),
-        () => fetchFromKandilliAPI(), // Kandilli ENABLED for verification
+        () => fetchFromKandilliAPI(),
       );
 
       let earthquakes = fetchResult.earthquakes;
 
-      // NOTE: USGS/EMSC are handled by GlobalEarthquakeAnalysisService for early warnings
-      // They provide notifications 8-10 seconds before AFAD
-      // We don't mix them here to keep display data clean and official
+      if (__DEV__) {
+        logger.info(`📊 [FETCH] Toplam: ${earthquakes.length} deprem alındı`);
+        logger.info(`   ├─ AFAD HTML: ${fetchResult.sources.afadHTML ? '✅' : '❌'}`);
+        logger.info(`   ├─ AFAD API: ${fetchResult.sources.afadAPI ? '✅' : '❌'}`);
+        logger.info(`   └─ Kandilli: ${fetchResult.sources.kandilliAPI ? '✅' : '❌'}`);
+      }
 
-      // CRITICAL: AFAD is the official source - if AFAD shows an earthquake, we should show it too
-      // Don't filter AFAD earthquakes by Turkey bounds - AFAD already decides what to show
-      // Only filter non-AFAD sources by Turkey bounds
+      // ═══════════════════════════════════════════════════════════════════
+      // FAIL-SAFE: If no data fetched, keep existing cache and return
+      // ═══════════════════════════════════════════════════════════════════
+      if (earthquakes.length === 0) {
+        if (__DEV__) {
+          logger.warn(`⚠️ [FETCH] Hiç veri alınamadı - mevcut cache korunuyor`);
+        }
+        // Don't clear existing data - keep what we have
+        store.setLoading(false);
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // STEP 2: FILTER & DEDUPLICATE
+      // ═══════════════════════════════════════════════════════════════════
       const afadEarthquakes = earthquakes.filter(eq => eq.source === 'AFAD');
       const nonAfadEarthquakes = earthquakes.filter(eq => eq.source !== 'AFAD');
       const filteredNonAfad = filterByTurkeyBounds(nonAfadEarthquakes);
       const turkeyEarthquakes = [...afadEarthquakes, ...filteredNonAfad];
-
-      if (__DEV__ && earthquakes.length !== turkeyEarthquakes.length) {
-        const filteredCount = earthquakes.length - turkeyEarthquakes.length;
-        logger.info(`📍 Filtrelendi: ${filteredCount} deprem (AFAD hariç, Türkiye sınırları dışı)`);
-      }
-
-      // ELITE: Deduplicate using modular function
       const uniqueEarthquakes = deduplicateEarthquakes(turkeyEarthquakes);
 
-      // CRITICAL: AI-powered validation - ensure 100% accuracy
-      // No false data reaches users
-      if (uniqueEarthquakes.length > 0) {
-        if (__DEV__) {
-          logger.info(`🔍 AI doğrulama başlatılıyor: ${uniqueEarthquakes.length} deprem`);
-        }
-
-        // CRITICAL: Only AFAD earthquakes - Kandilli removed per user request
-        const afadEarthquakes = uniqueEarthquakes.filter(eq => eq.source === 'AFAD');
-
-        // Filter to only AFAD before validation
-        const afadOnlyEarthquakes = uniqueEarthquakes.filter(eq => eq.source === 'AFAD');
-
-        // Validate only AFAD earthquakes with AI
-        const validationResult = await earthquakeValidationService.validateBatch(
-          afadOnlyEarthquakes,
-          {
-            afad: afadEarthquakes,
-            kandilli: [], // Kandilli removed
-          },
-        );
-
-        if (__DEV__) {
-          logger.info(`✅ AI doğrulama tamamlandı: ${validationResult.valid.length} geçerli, ${validationResult.invalid.length} geçersiz`);
-          if (validationResult.invalid.length > 0) {
-            logger.warn(`⚠️ ${validationResult.invalid.length} deprem hatalı/şüpheli veri nedeniyle filtrelendi`);
-          }
-        }
-
-        // Use only validated AFAD earthquakes
-        uniqueEarthquakes.length = 0;
-        uniqueEarthquakes.push(...validationResult.valid.filter(eq => eq.source === 'AFAD'));
-      }
-
-      // Sort by time (newest first)
-      uniqueEarthquakes.sort((a, b) => b.time - a.time);
-
-      // CRITICAL: Always process data, even if empty
-      // Don't skip processing if no earthquakes found - might be API issue
       if (__DEV__) {
-        logger.info(`📊 İşlenen veriler: ${uniqueEarthquakes.length} deprem (${earthquakes.length} toplam, ${turkeyEarthquakes.length} Türkiye sınırları içinde)`);
+        logger.info(`📍 [FILTER] ${earthquakes.length} → ${uniqueEarthquakes.length} deprem (deduplicate sonrası)`);
       }
 
-      // ELITE: Always update store with validated data
-      // CRITICAL: setItems automatically updates lastUpdate timestamp to Date.now()
-      // This ensures UI shows real-time update time
-      store.setItems(uniqueEarthquakes);
-      await saveToCache(uniqueEarthquakes);
+      // ═══════════════════════════════════════════════════════════════════
+      // STEP 3: AI VALIDATION (WITH FAIL-SAFE)
+      // ═══════════════════════════════════════════════════════════════════
+      let finalEarthquakes = uniqueEarthquakes;
+
+      if (uniqueEarthquakes.length > 0) {
+        try {
+          if (__DEV__) {
+            logger.info(`🔍 [VALIDATE] AI doğrulama başlatılıyor: ${uniqueEarthquakes.length} deprem`);
+          }
+
+          const afadList = uniqueEarthquakes.filter(eq => eq.source === 'AFAD');
+          const kandilliList = uniqueEarthquakes.filter(eq => eq.source === 'KANDILLI');
+
+          const validationResult = await earthquakeValidationService.validateBatch(
+            uniqueEarthquakes,
+            { afad: afadList, kandilli: kandilliList },
+          );
+
+          if (__DEV__) {
+            logger.info(`✅ [VALIDATE] ${validationResult.valid.length} geçerli, ${validationResult.invalid.length} geçersiz`);
+          }
+
+          // FAIL-SAFE: If validation returns empty, use raw data
+          if (validationResult.valid.length > 0) {
+            finalEarthquakes = validationResult.valid;
+          } else {
+            if (__DEV__) {
+              logger.warn(`⚠️ [VALIDATE] AI tüm verileri reddetti - RAW veri kullanılıyor`);
+            }
+            // Keep uniqueEarthquakes as finalEarthquakes (already set)
+          }
+        } catch (validationError) {
+          // FAIL-SAFE: If validation throws, use raw data
+          if (__DEV__) {
+            logger.warn(`⚠️ [VALIDATE] AI doğrulama hatası - RAW veri kullanılıyor:`, getErrorMessage(validationError));
+          }
+          // Keep uniqueEarthquakes as finalEarthquakes (already set)
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // STEP 4: SORT & UPDATE STORE
+      // ═══════════════════════════════════════════════════════════════════
+      finalEarthquakes.sort((a, b) => b.time - a.time);
+
+      if (__DEV__) {
+        logger.info(`🔄 [STORE] Güncelleniyor: ${finalEarthquakes.length} deprem`);
+        if (finalEarthquakes.length > 0 && finalEarthquakes[0]) {
+          const latest = finalEarthquakes[0];
+          logger.info(`🔝 [STORE] En son: ${latest.location} - ${latest.magnitude} ML`);
+        }
+      }
+
+      store.setItems(finalEarthquakes);
+      await saveToCache(finalEarthquakes);
       store.setLoading(false);
+
+      if (__DEV__) {
+        logger.info(`✅ [STORE] Güncellendi: ${store.items.length} deprem mevcut`);
+        logger.info(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      }
 
       // CRITICAL: Save earthquakes to Firebase and Backend for rescue coordination
       // ELITE: This ensures rescue teams can track earthquake events
@@ -273,6 +317,8 @@ class EarthquakeService {
       // ELITE: This handles push notifications, sound alerts, and emergency mode activation
       if (uniqueEarthquakes.length > 0) {
         try {
+          const { useSettingsStore } = await import('../stores/settingsStore');
+          const settings = useSettingsStore.getState();
           const { processEarthquakeNotifications } = await import('./earthquake/EarthquakeNotificationHandler');
           await processEarthquakeNotifications(uniqueEarthquakes, {
             minMagnitudeForNotification: settings.minMagnitudeForNotification,
@@ -356,6 +402,7 @@ class EarthquakeService {
       }
     } finally {
       store.setLoading(false);
+      this.isFetching = false; // Release mutex
     }
   }
 

@@ -47,7 +47,7 @@ class BackendPushService {
     try {
       // ELITE: Get backend URL from ENV config (centralized)
       const { ENV } = await import('../config/env');
-      this.baseUrl = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
+      this.baseUrl = ENV.API_BASE_URL || ''; // DEPRECATED: Using Firebase
 
       if (__DEV__) {
         logger.info(`Backend URL: ${this.baseUrl}`);

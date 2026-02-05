@@ -13,11 +13,14 @@ import NewMessageScreen from '../screens/messages/NewMessageScreen';
 import ConversationScreen from '../screens/messages/ConversationScreen';
 import SOSConversationScreen from '../screens/messages/SOSConversationScreen';
 
-// Lazy Load Heavy Screens
+// Lazy Load Heavy Screens - CRITICAL: Must have proper default export
 const DisasterMapScreen = React.lazy(() => import('../screens/map/DisasterMapScreen'));
-const WaveVisualizationScreen = React.lazy(() => import('../screens/waves/WaveVisualizationScreen'));
 const MeshNetworkScreen = React.lazy(() => import('../screens/mesh/MeshNetworkScreen'));
-const LocalAIAssistantScreen = React.lazy(() => import('../screens/ai/LocalAIAssistantScreen'));
+// CRITICAL: Eager import for AI Assistant screen to prevent lazy loading navigation issues
+import LocalAIAssistantScreen from '../screens/ai/LocalAIAssistantScreen';
+
+// CRITICAL: Eager import for P/S Wave screen to prevent lazy loading issues
+import WaveVisualizationScreen from '../screens/waves/WaveVisualizationScreen';
 
 // Other Screens (Keep eager for now or lazy if needed)
 import DrillModeScreen from '../screens/drill/DrillModeScreen';
@@ -38,13 +41,22 @@ import NotificationSettingsScreen from '../screens/settings/NotificationSettings
 import DisasterPreparednessScreen from '../screens/preparedness/DisasterPreparednessScreen';
 import AssemblyPointsScreen from '../screens/assembly/AssemblyPointsScreen';
 import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
-import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen'; // ELITE: Import Onboarding
 import { LoginScreen } from '../screens/auth/LoginScreen'; // ELITE: Auth Screen
 import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen'; // ELITE: Email Register
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen'; // ELITE: Password Reset
 import DesignSystemScreen from '../screens/design/DesignSystemScreen';
 import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
 import MyQRScreen from '../screens/profile/MyQRScreen';
+
+// ELITE: Settings Sub-Screens
+import OfflineMapSettingsScreen from '../screens/settings/OfflineMapSettingsScreen';
+import AdvancedSettingsScreen from '../screens/settings/AdvancedSettingsScreen';
+import AboutScreen from '../screens/settings/AboutScreen';
+import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
+import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
+import SecurityScreen from '../screens/settings/SecurityScreen';
+import EEWSettingsScreen from '../screens/settings/EEWSettingsScreen'; // ELITE: Ultra-Fast EEW Settings
+import RescueTeamScreen from '../screens/rescue/RescueTeamScreen';
 
 const Stack = createStackNavigator();
 
@@ -86,8 +98,8 @@ export default function MainNavigator() {
   // The LoginScreen handles the sign-in flow with Apple/Google
 
   if (!user) {
-    // ELITE: Show OnboardingScreen first - it includes login slide at the end
-    // This ensures users see the onboarding experience before authenticating
+    // ELITE: Show Login screen for authentication
+    // Onboarding is handled by App.tsx before reaching MainNavigator
     return (
       <Suspense fallback={<LoadingFallback />}>
         <Stack.Navigator
@@ -97,7 +109,6 @@ export default function MainNavigator() {
             cardStyle: { backgroundColor: '#000' },
           }}
         >
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <Stack.Screen name="EmailRegister" component={EmailRegisterScreen} options={{ headerShown: false }} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
@@ -122,52 +133,60 @@ export default function MainNavigator() {
       >
         <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
 
-
-        <Stack.Screen name="Risk" component={RiskScoreScreen} options={{ headerShown: true, title: 'Risk Analizi' }} />
-        <Stack.Screen name="AllEarthquakes" component={AllEarthquakesScreen} options={{ headerShown: true, title: 'Tüm Depremler' }} />
+        {/* ELITE: All screens use headerShown: false because they have custom headers */}
+        <Stack.Screen name="Risk" component={RiskScoreScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AllEarthquakes" component={AllEarthquakesScreen} options={{ headerShown: false }} />
         <Stack.Screen name="EarthquakeDetail" component={EarthquakeDetailScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="DisasterMap" component={DisasterMapScreen} options={{ headerShown: true, title: 'Afet Haritası' }} />
+        <Stack.Screen name="DisasterMap" component={DisasterMapScreen} options={{ headerShown: false }} />
 
-
-
-        <Stack.Screen name="DrillMode" component={DrillModeScreen} options={{ headerShown: true, title: 'Tatbikat Modu' }} />
-        <Stack.Screen name="UserReports" component={UserReportsScreen} options={{ headerShown: true, title: 'Kullanıcı Raporları' }} />
-        <Stack.Screen name="VolunteerModule" component={VolunteerModuleScreen} options={{ headerShown: true, title: 'Gönüllü Modülü' }} />
+        <Stack.Screen name="DrillMode" component={DrillModeScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="UserReports" component={UserReportsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="VolunteerModule" component={VolunteerModuleScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="AddFamilyMember" component={AddFamilyMemberScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="FamilyGroupChat" component={FamilyGroupChatScreen} options={{ headerShown: true, title: 'Aile Sohbeti' }} />
+        <Stack.Screen name="FamilyGroupChat" component={FamilyGroupChatScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="HealthProfile" component={HealthProfileScreen} options={{ headerShown: true, title: 'Sağlık Profili' }} />
-        <Stack.Screen name="MedicalInformation" component={MedicalInformationScreen} options={{ headerShown: true, title: 'Tıbbi Bilgiler' }} />
+        <Stack.Screen name="HealthProfile" component={HealthProfileScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MedicalInformation" component={MedicalInformationScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="NewMessage" component={NewMessageScreen} options={{ headerShown: true, title: 'Yeni Mesaj' }} />
-        <Stack.Screen name="Conversation" component={ConversationScreen} options={{ headerShown: true, title: 'Sohbet' }} />
-        <Stack.Screen name="SOSConversation" component={SOSConversationScreen} options={{ headerShown: true, title: 'SOS Sohbeti' }} />
+        <Stack.Screen name="NewMessage" component={NewMessageScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Conversation" component={ConversationScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="SOSConversation" component={SOSConversationScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="NewsDetail" component={NewsDetailScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllNews" component={AllNewsScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="RiskScore" component={RiskScoreScreen} options={{ headerShown: true, title: 'Risk Skoru' }} />
+        <Stack.Screen name="RiskScore" component={RiskScoreScreen} options={{ headerShown: false }} />
         <Stack.Screen name="PreparednessPlan" component={PreparednessPlanScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="PanicAssistant" component={PanicAssistantScreen} options={{ headerShown: true, title: 'Afet Rehberi' }} />
+        <Stack.Screen name="PanicAssistant" component={PanicAssistantScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="LocalAIAssistant" component={LocalAIAssistantScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="WaveVisualization" component={WaveVisualizationScreen} options={{ headerShown: true, title: 'Dalga Görselleştirme' }} />
+        <Stack.Screen name="WaveVisualization" component={WaveVisualizationScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="EarthquakeSettings" component={EarthquakeSettingsScreen} options={{ headerShown: true, title: 'Deprem Ayarları' }} />
-        <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ headerShown: true, title: 'Bildirim Ayarları' }} />
+        <Stack.Screen name="EarthquakeSettings" component={EarthquakeSettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ headerShown: false }} />
 
-
-        <Stack.Screen name="DisasterPreparedness" component={DisasterPreparednessScreen} options={{ headerShown: true, title: 'Afet Hazırlığı' }} />
-        <Stack.Screen name="AssemblyPoints" component={AssemblyPointsScreen} options={{ headerShown: true, title: 'Toplanma Alanları' }} />
-        <Stack.Screen name="AddAssemblyPoint" component={AddAssemblyPointScreen} options={{ headerShown: true, title: 'Toplanma Alanı Ekle' }} />
-        <Stack.Screen name="FlashlightWhistle" component={FlashlightWhistleScreen} options={{ headerShown: true, title: 'Fener ve Düdük' }} />
-        <Stack.Screen name="PsychologicalSupport" component={PsychologicalSupportScreen} options={{ headerShown: true, title: 'Psikolojik Destek' }} />
+        <Stack.Screen name="DisasterPreparedness" component={DisasterPreparednessScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AssemblyPoints" component={AssemblyPointsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AddAssemblyPoint" component={AddAssemblyPointScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="FlashlightWhistle" component={FlashlightWhistleScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="PsychologicalSupport" component={PsychologicalSupportScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="MeshNetwork" component={MeshNetworkScreen} options={{ headerShown: false }} />
         <Stack.Screen name="DesignSystem" component={DesignSystemScreen} options={{ headerShown: false }} />
         <Stack.Screen name="MyQR" component={MyQRScreen} options={{ headerShown: false }} />
+
+        {/* ELITE: Settings Sub-Screens */}
+        <Stack.Screen name="OfflineMapSettings" component={OfflineMapSettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AdvancedSettings" component={AdvancedSettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Security" component={SecurityScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="EEWSettings" component={EEWSettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="RescueTeam" component={RescueTeamScreen} options={{ headerShown: false }} />
+
 
       </Stack.Navigator>
     </Suspense>

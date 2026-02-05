@@ -49,8 +49,9 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
   if (defaultValue === '' && !missingKeys.has(key) && !warnedKeys.has(key)) {
     missingKeys.add(key);
     if (__DEV__) {
-      // Only warn for critical keys (API keys, secrets)
-      const isCritical = key.includes('KEY') || key.includes('SECRET') || key.includes('API');
+      // Only warn for critical keys (API keys, secrets) - exclude deprecated ones
+      const isCritical = (key.includes('KEY') || key.includes('SECRET') || key.includes('API'))
+        && !key.includes('API_BASE_URL'); // API_BASE_URL is deprecated - Firebase used instead
       if (isCritical) {
         logger.warn(`⚠️ [ENV] ${key} not found - using default value. Add to EAS secrets for production.`);
       }
@@ -113,18 +114,19 @@ export const ENV = {
   EEW_NATIVE_ALARM: getEnvVar('EEW_NATIVE_ALARM', 'false') === 'true',
 
   // URLs
-  PRIVACY_POLICY_URL: getEnvVar('PRIVACY_POLICY_URL', 'https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html'),
-  TERMS_OF_SERVICE_URL: getEnvVar('TERMS_OF_SERVICE_URL', 'https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html'),
+  PRIVACY_POLICY_URL: getEnvVar('PRIVACY_POLICY_URL', 'https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html'),
+  TERMS_OF_SERVICE_URL: getEnvVar('TERMS_OF_SERVICE_URL', 'https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/terms-of-service.html'),
   SUPPORT_EMAIL: getEnvVar('SUPPORT_EMAIL', 'support@afetnet.app'),
 
-  // Backend API
-  API_BASE_URL: getEnvVar('API_BASE_URL', 'https://afetnet-backend.onrender.com'),
+  // Backend API - DEPRECATED: Using Firebase instead
+  // Render backend was suspended, Firebase handles all backend needs
+  API_BASE_URL: getEnvVar('API_BASE_URL', ''),
 
   // EEW WebSocket URLs
   EEW_WS_TR_PRIMARY: getEnvVar('EEW_WS_TR_PRIMARY', 'wss://eew.afad.gov.tr/ws'),
   EEW_WS_TR_FALLBACK: getEnvVar('EEW_WS_TR_FALLBACK', 'wss://eew.kandilli.org/ws'),
   EEW_WS_GLOBAL_PRIMARY: getEnvVar('EEW_WS_GLOBAL_PRIMARY', 'wss://earthquake.usgs.gov/ws/eew'),
-  EEW_PROXY_WS: getEnvVar('EEW_PROXY_WS', 'wss://afetnet-backend.onrender.com/eew'),
+  EEW_PROXY_WS: getEnvVar('EEW_PROXY_WS', ''), // DEPRECATED: Using polling mode
 
   // Map Tiles
   MAP_TILE_URL: getEnvVar('MAP_TILE_URL', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),

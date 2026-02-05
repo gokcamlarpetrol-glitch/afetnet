@@ -14,7 +14,8 @@ import { colors } from '../../../theme';
 const logger = createLogger('FeatureGrid');
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const CARD_WIDTH = (SCREEN_WIDTH - 52) / 2; // 2 columns, 20px padding + 12px gap
+// ELITE: iPad-aware card sizing - max 180px per card prevents overly wide cards on iPad
+const CARD_WIDTH = Math.min((SCREEN_WIDTH - 52) / 2, 180); // 2 columns, capped for iPad
 const CARD_HEIGHT = 120;
 
 interface Feature {
@@ -33,13 +34,13 @@ interface Feature {
 const FEATURES: Feature[] = [
   // Row 1
   {
-    id: 'map',
-    icon: 'map',
-    title: 'Harita',
-    // Serene Blue
-    gradient: ['#60a5fa', '#3b82f6'],
-    iconColor: '#eff6ff',
-    screen: 'Map',
+    id: 'protection',
+    icon: 'shield-checkmark',
+    title: 'Koruma',
+    // Security Navy
+    gradient: ['#1e40af', '#1e3a8a'],
+    iconColor: '#dbeafe',
+    screen: 'EEWSettings',
   },
   {
     id: 'waves',

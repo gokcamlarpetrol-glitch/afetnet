@@ -14,7 +14,18 @@ export interface FamilyMember {
     latitude: number;
     longitude: number;
     timestamp?: number;
+    accuracy?: number; // ELITE: GPS accuracy in meters
   };
+  // ELITE: Find My-grade Last Known Location (persisted when battery dies)
+  lastKnownLocation?: {
+    latitude: number;
+    longitude: number;
+    timestamp: number;
+    batteryLevelAtCapture: number; // Battery level when location was saved
+    source: 'gps' | 'mesh' | 'cloud' | 'manual'; // How was this captured
+  };
+  batteryLevel?: number; // ELITE: Real-time battery percentage (0-100)
+  isOnline?: boolean; // ELITE: Currently online/reachable
   deviceId?: string; // BLE mesh device ID
   // ELITE: Extended fields for better member management
   relationship?: string; // Relationship type (anne, baba, kardes, etc.)

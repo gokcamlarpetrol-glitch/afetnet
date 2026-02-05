@@ -40,6 +40,9 @@ export async function fetchAllEarthquakes(
   fetchFromAFAD: () => Promise<Earthquake[]>,
   fetchFromKandilli: () => Promise<Earthquake[]>,
 ): Promise<FetchResult> {
+  if (__DEV__) {
+    logger.info(`🚀 fetchAllEarthquakes() başlatıldı (sourceAFAD: ${sourceAFAD})`);
+  }
   const result: FetchResult = {
     earthquakes: [],
     sources: {
@@ -262,20 +265,30 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
 
 /**
  * Fetch from Kandilli API
+ * ELITE: Uses KandilliHTMLProvider with lst0.asp (Son 500 deprem) as PRIMARY source
  */
 export async function fetchFromKandilliAPI(): Promise<Earthquake[]> {
-  try {
-    const { kandilliProvider } = await import('../providers/KandilliProvider');
-    const earthquakes = await kandilliProvider.fetchRecent();
+  if (__DEV__) {
+    logger.info('📡 Kandilli fetch başlatılıyor (KandilliHTMLProvider)...');
+  }
 
-    if (__DEV__ && earthquakes.length > 0) {
-      logger.info(`✅ Kandilli'den ${earthquakes.length} deprem verisi alındı`);
+  try {
+    // ELITE: Use KandilliHTMLProvider which has lst0.asp as primary
+    // lst0.asp = Son 500 deprem (fastest updates, may publish before AFAD)
+    const earthquakes = await kandilliHTMLProvider.fetchRecent();
+
+    if (__DEV__) {
+      if (earthquakes.length > 0) {
+        logger.info(`✅ Kandilli'den ${earthquakes.length} deprem verisi alındı (lst0.asp)`);
+      } else {
+        logger.warn('⚠️ Kandilli: 0 deprem döndü (KandilliHTMLProvider)');
+      }
     }
 
     return earthquakes;
   } catch (error: unknown) {
     if (__DEV__) {
-      logger.debug('Kandilli fetch error:', getErrorMessage(error));
+      logger.error('❌ Kandilli fetch hatası:', getErrorMessage(error));
     }
     return [];
   }

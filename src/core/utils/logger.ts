@@ -2,9 +2,37 @@
  * LOGGER SERVICE - ELITE EDITION
  * Production-safe logging with custom crash tracking integration
  * ELITE: Uses custom FirebaseCrashlyticsService instead of native module
+ * ELITE V2: Added log level control to reduce terminal noise
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+// ELITE: Log level priority for filtering
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+// ELITE: Configurable minimum log level
+// Set to 'info' by default to reduce debug noise
+// Can be overridden by setting LOG_LEVEL environment variable
+const getMinLogLevel = (): LogLevel => {
+  // In production, only show warnings and errors
+  if (!__DEV__) return 'warn';
+  // In dev, show info and above by default (reduces debug spam)
+  return 'info';
+};
+
+let currentMinLogLevel: LogLevel = getMinLogLevel();
+
+// ELITE: Allow runtime log level changes for debugging
+export const setLogLevel = (level: LogLevel) => {
+  currentMinLogLevel = level;
+};
+
+export const getLogLevel = (): LogLevel => currentMinLogLevel;
 
 // ELITE: Crashlytics service interface for type safety
 interface CrashlyticsServiceInterface {
@@ -97,6 +125,11 @@ class Logger {
     this.addBreadcrumb(`[${level.toUpperCase()}] ${logMessage}`);
 
     if (__DEV__) {
+      // ELITE: Only log if level is at or above minimum level
+      if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[currentMinLogLevel]) {
+        return; // Skip logs below minimum level
+      }
+
       // Development: Full console logging
       const formattedMessage = `[${timestamp}] ${logMessage}`;
       switch (level) {

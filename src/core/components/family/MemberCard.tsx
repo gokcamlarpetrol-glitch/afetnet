@@ -127,7 +127,11 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
     );
   };
 
-  const hasLocation = member.latitude !== 0 && member.longitude !== 0;
+  // ELITE: Check for valid location - prefer member.location, fallback to member.latitude/longitude
+  const effectiveLatitude = member.location?.latitude ?? member.latitude;
+  const effectiveLongitude = member.location?.longitude ?? member.longitude;
+  const hasLocation = effectiveLatitude !== 0 && effectiveLongitude !== 0 &&
+    !isNaN(effectiveLatitude) && !isNaN(effectiveLongitude);
   const lastSeenText = formatLastSeen(member.lastSeen);
 
   const cardContent = (
@@ -142,6 +146,19 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
         <View style={styles.memberHeader}>
           <View style={styles.memberInfo}>
             <Text style={styles.memberName}>{member.name}</Text>
+            {/* ELITE: Relationship Badge */}
+            {member.relationship && (
+              <View style={styles.relationshipBadge}>
+                <Ionicons
+                  name={getRelationshipIcon(member.relationship)}
+                  size={12}
+                  color="#64748b"
+                />
+                <Text style={styles.relationshipText}>
+                  {getRelationshipLabel(member.relationship)}
+                </Text>
+              </View>
+            )}
             <Text style={styles.memberTime}>{lastSeenText}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: color + '20' }]}>
@@ -155,7 +172,7 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
           <View style={styles.locationRow}>
             <Ionicons name="location" size={16} color={colors.text.tertiary} />
             <Text style={styles.locationText}>
-              Konum: {member.latitude.toFixed(4)}, {member.longitude.toFixed(4)}
+              Konum: {effectiveLatitude.toFixed(4)}, {effectiveLongitude.toFixed(4)}
             </Text>
           </View>
         )}
@@ -189,11 +206,40 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
 
 function getStatusRenderInfo(status: FamilyMember['status']) {
   switch (status) {
-  case 'safe': return { color: colors.status.success, text: 'Güvende' };
-  case 'need-help': return { color: colors.status.warning, text: 'Yardım Gerekiyor' };
-  case 'critical': return { color: colors.status.danger, text: 'ACİL DURUM' };
-  default: return { color: colors.text.tertiary, text: 'Bilinmiyor' };
+    case 'safe': return { color: colors.status.success, text: 'Güvende' };
+    case 'need-help': return { color: colors.status.warning, text: 'Yardım Gerekiyor' };
+    case 'critical': return { color: colors.status.danger, text: 'ACİL DURUM' };
+    default: return { color: colors.text.tertiary, text: 'Bilinmiyor' };
   }
+}
+
+// ELITE: Helper functions for relationship display
+function getRelationshipIcon(relationship: string): keyof typeof Ionicons.glyphMap {
+  const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
+    anne: 'woman',
+    baba: 'man',
+    es: 'heart',
+    kardes: 'people',
+    cocuk: 'happy',
+    akraba: 'home',
+    arkadas: 'person',
+    diger: 'help-circle',
+  };
+  return icons[relationship] || 'person';
+}
+
+function getRelationshipLabel(relationship: string): string {
+  const labels: Record<string, string> = {
+    anne: 'Anne',
+    baba: 'Baba',
+    es: 'Eş',
+    kardes: 'Kardeş',
+    cocuk: 'Çocuk',
+    akraba: 'Akraba',
+    arkadas: 'Arkadaş',
+    diger: 'Diğer',
+  };
+  return labels[relationship] || relationship;
 }
 
 const styles = StyleSheet.create({
@@ -315,5 +361,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  // ELITE: Relationship Badge Styles
+  relationshipBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  relationshipText: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
   },
 });

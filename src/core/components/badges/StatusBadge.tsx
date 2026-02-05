@@ -14,34 +14,34 @@ interface StatusBadgeProps {
 
 function getStatusConfig(status: string) {
   switch (status) {
-  case 'online':
-    return {
-      color: colors.status.online,
-      text: 'CANLI',
-      backgroundColor: colors.status.online + '20',
-    };
-  case 'offline':
-    return {
-      color: colors.status.offline,
-      text: 'OFFLINE',
-      backgroundColor: colors.status.offline + '20',
-    };
-  case 'active':
-    return {
-      color: colors.status.success,
-      text: 'AKTİF',
-      backgroundColor: colors.status.success + '20',
-    };
-  default:
-    return {
-      color: colors.text.muted,
-      text: 'UNKNOWN',
-      backgroundColor: colors.background.tertiary,
-    };
+    case 'online':
+      return {
+        color: colors.status.online,
+        text: 'CANLI',
+        backgroundColor: colors.status.online + '20',
+      };
+    case 'offline':
+      return {
+        color: colors.status.offline,
+        text: 'OFFLINE',
+        backgroundColor: colors.status.offline + '20',
+      };
+    case 'active':
+      return {
+        color: colors.status.success,
+        text: 'AKTİF',
+        backgroundColor: colors.status.success + '20',
+      };
+    default:
+      return {
+        color: colors.text.muted,
+        text: 'UNKNOWN',
+        backgroundColor: colors.background.tertiary,
+      };
   }
 }
 
-export default function StatusBadge({ status, text }: StatusBadgeProps) {
+const StatusBadge = React.memo(function StatusBadge({ status, text }: StatusBadgeProps) {
   const config = getStatusConfig(status);
 
   return (
@@ -52,7 +52,9 @@ export default function StatusBadge({ status, text }: StatusBadgeProps) {
       </Text>
     </View>
   );
-}
+});
+
+export default StatusBadge;
 
 const styles = StyleSheet.create({
   container: {

@@ -512,17 +512,27 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     }, 100);
   }, []);
 
-  // ELITE: WebView'i sadece "Orijinal Haber" sekmesi aktif olduğunda yükle
+  // ELITE PRELOAD: WebView'i component mount olduğunda HEMEN yükle (bekletmeden)
+  // Böylece kullanıcı "Orijinal Haber" sekmesine tıkladığında WebView ANINDA hazır olacak
   useEffect(() => {
-    if (!hasValidUrl || activeTab !== 'original') {
-      if (activeTab !== 'original') {
-        logger.debug('AI Özeti sekmesi aktif, WebView yüklenmiyor');
-        return;
-      }
+    if (!hasValidUrl) {
       if (webViewStatus !== 'unavailable') {
         setWebViewStatus('unavailable');
       }
       return undefined;
+    }
+
+    // ELITE PRELOAD: URL'i mount olduğunda HEMEN ayarla (bekletmeden)
+    if (article.url && article.url.trim() !== '#') {
+      try {
+        const urlObj = new URL(article.url.trim());
+        if (['http:', 'https:'].includes(urlObj.protocol)) {
+          setInAppBrowserUrl(article.url.trim());
+          logger.info('🚀 PRELOAD: WebView URL hazır:', article.url);
+        }
+      } catch (e) {
+        logger.warn('PRELOAD: URL validation failed:', e);
+      }
     }
 
     // WebView zaten yüklenmişse tekrar yükleme
@@ -530,7 +540,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       return undefined;
     }
 
-    // WebView'i hemen yükle (tab değişikliğini bekleme)
+    // ELITE PRELOAD: WebView'i HEMEN yükle
     let isMounted = true;
     let timeoutId: NodeJS.Timeout | null = null;
 
@@ -679,9 +689,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
         clearTimeout(timeoutId);
       }
     };
-    // ELITE: webViewStatus excluded to prevent infinite render loop
-    // activeTab included to load WebView when switching to Original tab
-  }, [hasValidUrl, article.url, activeTab]);
+    // ELITE PRELOAD: webViewStatus excluded to prevent infinite render loop
+    // activeTab REMOVED - WebView now loads on mount for instant availability
+  }, [hasValidUrl, article.url]);
 
   // ELITE: Modal açıldığında WebView'i yükle
   useEffect(() => {
@@ -1331,10 +1341,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       {/* ELITE: Header ve tabs her zaman gösterilir */}
       <>
         {/* Header */}
-        <LinearGradient
-          colors={[colors.gradients.header[0], colors.gradients.header[1]]}
-          style={[styles.header, { paddingTop: insets.top + 12 }]}
-        >
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
@@ -1344,7 +1351,9 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               }
             }}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
+            <View style={styles.backButtonCircle}>
+              <Ionicons name="arrow-back" size={20} color="#0F172A" />
+            </View>
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
@@ -1354,9 +1363,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           </View>
 
           <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-            <Ionicons name="share-outline" size={24} color={colors.text.primary} />
+            <View style={styles.shareButtonCircle}>
+              <Ionicons name="share-outline" size={20} color="#0F172A" />
+            </View>
           </TouchableOpacity>
-        </LinearGradient>
+        </View>
 
         {/* Article Title */}
         <View style={styles.titleContainer}>
@@ -1418,12 +1429,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 
       {/* Content */}
       {activeTab === 'summary' ? (
-        <ImageBackground
-          source={require('../../../assets/images/premium/agenda_refined_bg.png')}
-          style={{ flex: 1 }}
-          imageStyle={{ opacity: 0.85 }}
-          resizeMode="cover"
-        >
+        <View style={{ flex: 1, backgroundColor: '#FDFBF7' }}>
           <ScrollView
             ref={scrollViewRef}
             style={styles.content}
@@ -1466,7 +1472,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               </>
             )}
           </ScrollView>
-        </ImageBackground>
+        </View>
       ) : (
         // ELITE: Orijinal Haber - Inline WebView gösterimi (modal değil, sekme içinde)
         <>
@@ -1836,19 +1842,19 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
-    paddingTop: 0, // ELITE: Tam ekran, üstte boşluk yok
+    backgroundColor: '#FDFBF7', // ELITE: Premium cream background
+    paddingTop: 0,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 0, // insets.top dinamik olarak ekleniyor
-    paddingBottom: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.light,
-    minHeight: 32, // ELITE: Minimum touch target height
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 8,
+    backgroundColor: '#FDFBF7', // ELITE: Match screen background
+    borderBottomWidth: 0, // ELITE: Remove border for cleaner look
+    minHeight: 44,
   },
   backButton: {
     width: 32,
@@ -1870,23 +1876,41 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   shareButton: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareButtonCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   titleContainer: {
     paddingHorizontal: 20,
-    paddingTop: 0,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.light,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#FDFBF7',
+    borderBottomWidth: 0,
   },
   title: {
-    ...typography.h2,
-    color: colors.text.primary,
-    marginBottom: 4,
-    lineHeight: 32,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 8,
+    lineHeight: 28,
+    letterSpacing: -0.3,
   },
   meta: {
     flexDirection: 'row',
@@ -1915,9 +1939,10 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: colors.background.secondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.light,
+    backgroundColor: '#FDFBF7',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 12,
   },
   tab: {
     flex: 1,
@@ -1925,20 +1950,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   tabActive: {
-    borderBottomColor: colors.accent.primary,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderColor: 'rgba(59, 130, 246, 0.3)',
   },
   tabText: {
-    ...typography.body,
-    color: colors.text.secondary,
+    fontSize: 14,
+    color: '#64748B',
     fontWeight: '600',
   },
   tabTextActive: {
-    color: colors.accent.primary,
+    color: '#3B82F6',
     fontWeight: '700',
   },
   content: {
@@ -1946,8 +1974,8 @@ const styles = StyleSheet.create({
   },
   contentPadding: {
     paddingHorizontal: 20,
-    paddingTop: 0,
-    paddingBottom: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
   },
   fallbackScroll: {
     flex: 1,
@@ -1965,12 +1993,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   summaryCard: {
-    backgroundColor: colors.background.card,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.border.light,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 0,
     marginBottom: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -1979,14 +2011,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   summaryTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   summaryText: {
-    ...typography.body,
-    color: colors.text.primary,
-    lineHeight: 24,
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: '400',
+    color: '#334155',
+    lineHeight: 26,
+    letterSpacing: 0.1,
   },
   emptySummaryContainer: {
     flexDirection: 'row',

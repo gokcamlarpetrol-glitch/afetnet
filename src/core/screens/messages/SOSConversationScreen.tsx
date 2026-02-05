@@ -346,7 +346,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
           colors={['rgba(239, 68, 68, 0.85)', 'rgba(220, 38, 38, 0.95)']}
           style={styles.header}
         >
-          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Pressable onPress={() => navigation?.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
           <View style={styles.headerContent}>

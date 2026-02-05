@@ -51,6 +51,8 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
   const [myDeviceId, setMyDeviceId] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const statusUpdateTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // ELITE: Use ref for async subscription cleanup
+  const unsubscribeHybridRef = useRef<(() => void) | null>(null);
   const { members } = useFamilyStore();
 
   useEffect(() => {
@@ -77,11 +79,9 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
     });
 
     // Listen for new messages via Hybrid Service
-    let unsubscribeHybrid: (() => void) | null = null;
-
     const setupSubscription = async () => {
       const { hybridMessageService } = await import('../../services/HybridMessageService');
-      unsubscribeHybrid = await hybridMessageService.subscribeToMessages(async (message) => {
+      const unsub = await hybridMessageService.subscribeToMessages(async (message) => {
         // ELITE: Update UI with hybrid message
         setMessages((prev) => {
           // Deduplicate
@@ -99,6 +99,7 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
           return [...prev, groupMsg];
         });
       });
+      unsubscribeHybridRef.current = unsub;
     };
 
     setupSubscription().catch(err => {
@@ -106,7 +107,11 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
     });
 
     return () => {
-      if (unsubscribeHybrid) unsubscribeHybrid();
+      // ELITE: Safe cleanup using ref
+      if (unsubscribeHybridRef.current) {
+        unsubscribeHybridRef.current();
+        unsubscribeHybridRef.current = null;
+      }
       // ELITE: Cleanup all status update timeouts on unmount
       statusUpdateTimeoutsRef.current.forEach((timeout) => {
         clearTimeout(timeout);

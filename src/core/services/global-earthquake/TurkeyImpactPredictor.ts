@@ -21,32 +21,32 @@ export interface TurkeyImpactPrediction {
  * Calculate distance from earthquake to Turkey border
  */
 export function calculateDistanceToTurkey(lat: number, lon: number): number {
-  if (typeof lat !== 'number' || typeof lon !== 'number' || 
-      isNaN(lat) || isNaN(lon) ||
-      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+  if (typeof lat !== 'number' || typeof lon !== 'number' ||
+    isNaN(lat) || isNaN(lon) ||
+    lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     logger.warn('Invalid coordinates for distance calculation:', { lat, lon });
     return 1000;
   }
 
   const turkeyCenter = { lat: 39.0, lon: 35.0 };
-  
+
   const R = 6371; // Earth radius in km
   const dLat = toRad(lat - turkeyCenter.lat);
   const dLon = toRad(lon - turkeyCenter.lon);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(turkeyCenter.lat)) *
-      Math.cos(toRad(lat)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos(toRad(lat)) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
-  
+
   if (isNaN(distance) || distance < 0 || distance > 20000) {
     logger.warn('Invalid distance calculation result:', distance);
     return 1000;
   }
-  
+
   return distance;
 }
 
@@ -55,22 +55,22 @@ export function calculateDistanceToTurkey(lat: number, lon: number): number {
  */
 export function calculateETAForTurkey(distanceKm: number, depthKm: number): number {
   if (typeof distanceKm !== 'number' || typeof depthKm !== 'number' ||
-      isNaN(distanceKm) || isNaN(depthKm) ||
-      distanceKm < 0 || distanceKm > 20000 || depthKm < 0 || depthKm > 1000) {
+    isNaN(distanceKm) || isNaN(depthKm) ||
+    distanceKm < 0 || distanceKm > 20000 || depthKm < 0 || depthKm > 1000) {
     logger.warn('Invalid inputs for ETA calculation:', { distanceKm, depthKm });
     return 0;
   }
 
   const S_WAVE_VELOCITY = 3.5; // km/s
-  
+
   const effectiveDistance = Math.sqrt(distanceKm * distanceKm + depthKm * depthKm);
   const eta = Math.round(effectiveDistance / S_WAVE_VELOCITY);
-  
+
   if (isNaN(eta) || eta < 0 || eta > 3600) {
     logger.warn('Invalid ETA calculation result:', eta);
     return 0;
   }
-  
+
   return eta;
 }
 
@@ -97,18 +97,18 @@ export async function predictTurkeyImpact(event: GlobalEarthquakeEvent): Promise
   try {
     // ELITE: Get backend URL from ENV config (centralized)
     const { ENV } = await import('../../config/env');
-    const backendUrl = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
-    
+    const backendUrl = ENV.API_BASE_URL || ''; // DEPRECATED: Using Firebase
+
     if (!backendUrl || !backendUrl.startsWith('http')) {
       if (__DEV__) {
         logger.warn('Invalid backend URL, using fallback prediction');
       }
       return ruleBasedTurkeyImpactPrediction(event);
     }
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
+
     try {
       const response = await fetch(`${backendUrl}/api/eew/predict-turkey-impact`, {
         method: 'POST',
@@ -132,10 +132,10 @@ export async function predictTurkeyImpact(event: GlobalEarthquakeEvent): Promise
 
       if (response.ok) {
         const data = await response.json();
-        
+
         if (data && typeof data === 'object') {
           const prediction = data.prediction || data;
-          
+
           if (prediction && typeof prediction === 'object') {
             return {
               willAffect: Boolean(prediction.willAffect),
@@ -216,8 +216,8 @@ export function ruleBasedTurkeyImpactPrediction(event: GlobalEarthquakeEvent): T
  */
 function estimateAffectedRegions(lat: number, lon: number): string[] {
   if (typeof lat !== 'number' || typeof lon !== 'number' ||
-      isNaN(lat) || isNaN(lon) ||
-      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    isNaN(lat) || isNaN(lon) ||
+    lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     return ['Türkiye Geneli'];
   }
 

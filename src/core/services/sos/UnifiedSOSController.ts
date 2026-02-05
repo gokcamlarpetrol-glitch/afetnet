@@ -98,9 +98,16 @@ class UnifiedSOSController {
         // Start countdown
         store.startCountdown(reason, message);
 
-        // Update signal with device ID
-        if (store.currentSignal) {
-            store.currentSignal.userId = this.deviceId;
+        // V5: Safe access to currentSignal with null check
+        const currentSignal = useSOSStore.getState().currentSignal;
+        if (currentSignal) {
+            // Update signal with device ID using immer-style update
+            useSOSStore.setState(state => ({
+                currentSignal: state.currentSignal ? {
+                    ...state.currentSignal,
+                    userId: this.deviceId
+                } : null
+            }));
         }
 
         // Get initial location

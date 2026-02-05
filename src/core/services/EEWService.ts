@@ -39,12 +39,12 @@ class EEWService {
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private maxAttemptsReachedLogged = false; // Track if we've already logged max attempts
 
-  // WebSocket URLs
+  // WebSocket URLs (Note: WebSocket disabled, using polling mode)
   private wsUrls = {
     TR_PRIMARY: 'wss://eew.afad.gov.tr/ws',
     TR_FALLBACK: 'wss://eew.kandilli.org/ws',
     GLOBAL_PRIMARY: 'wss://earthquake.usgs.gov/ws/eew',
-    PROXY: 'wss://afetnet-backend.onrender.com/eew',
+    // PROXY removed - Render backend deprecated, using Firebase
   };
 
   // Get AFAD poll URL (dynamically generated for last 24 hours)
@@ -84,49 +84,56 @@ class EEWService {
     // CRITICAL: Listen to SeismicSensorService for REAL early warnings (P-wave detection)
     // This is the TRUE early warning - detects earthquakes BEFORE they happen
     // AFAD API only provides data AFTER earthquake occurs (late notification)
+    // 
+    // ELITE: Like Deprem Ağı, we now send alerts on P-WAVE ONLY for maximum speed!
+    // P-wave detection is enough for early warning - S-wave confirmation is optional
     try {
       const { seismicSensorService } = await import('./SeismicSensorService');
 
       // Listen for P-wave detections (earliest possible warning)
-      // NOTE: SeismicSensorService now handles EEW triggering directly via triggerEEW()
-      // This listener is kept as fallback but with stricter validation
+      // ELITE UPGRADE: P-wave ONLY is enough! No S-wave confirmation needed.
+      // This matches Deprem Ağı's approach for 17-60 second early warnings
       seismicSensorService.onDetection((event: any) => {
-        // CRITICAL: Require both P and S wave detection for high confidence
-        // P-wave alone is not enough - need S-wave confirmation
-        if (!event.pWaveDetected || !event.sWaveDetected) {
+        // ELITE: P-wave detection alone is enough for early warning!
+        // S-wave confirmation is OPTIONAL - we don't wait for it
+        if (!event.pWaveDetected) {
           if (__DEV__) {
-            logger.debug('P or S wave not detected - insufficient confidence for EEW');
+            logger.debug('P wave not detected - waiting for P-wave');
           }
           return;
         }
 
-        // CRITICAL: Require HIGH confidence for %100 accuracy (reduce false positives)
-        // Higher threshold ensures reliable warnings
-        if (event.confidence < 75) {
+        // ELITE: Lower confidence threshold for faster response (like Deprem Ağı)
+        // 60% is enough when combined with multi-user verification
+        // False positives are acceptable if it saves lives!
+        if (event.confidence < 60) {
           if (__DEV__) {
-            logger.debug(`P-wave detection confidence too low: ${event.confidence}% < 75% (requires 75%+ for %100 accuracy)`);
+            logger.debug(`P-wave detection confidence low: ${event.confidence}% < 60%`);
           }
           return;
         }
 
-        // CRITICAL: Minimum 10 seconds warning time guarantee for %100 accuracy
-        // This ensures users have enough time to react safely
-        const timeAdvance = event.timeAdvance || 10;
-        if (timeAdvance < 10) {
-          if (__DEV__) {
-            logger.debug(`P-wave detection warning time too short: ${timeAdvance}s < 10s (requires minimum 10s for %100 accuracy)`);
-          }
-          return;
-        }
+        // ELITE: NO MINIMUM WARNING TIME! 
+        // Even 1 second warning can save lives!
+        // Deprem Ağı sends alerts regardless of warning time
+        const timeAdvance = event.timeAdvance || 0;
 
-        // CRITICAL: P-wave detected - this is REAL early warning (before earthquake!)
-        if (__DEV__) {
-          logger.info(`🌊 REAL EARLY WARNING: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`);
-        }
+        // CRITICAL: P-wave detected - IMMEDIATE early warning!
+        logger.info(`🌊⚡ INSTANT EEW: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`);
 
-        // NOTE: SeismicSensorService.triggerEEW() will handle the actual EEW notification
-        // This listener is kept as fallback but should rarely trigger
-        // (SeismicSensorService handles it directly)
+        // ELITE: Trigger EEW immediately - don't wait for anything!
+        this.processEEWEvent({
+          id: `pwave-${Date.now()}`,
+          latitude: event.latitude || 0,
+          longitude: event.longitude || 0,
+          magnitude: event.estimatedMagnitude || 4.0,
+          depth: event.depth || 10,
+          region: event.region || 'Yerel Algılama',
+          source: 'P_WAVE_DETECTION',
+          issuedAt: Date.now(),
+          etaSec: timeAdvance,
+          certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',
+        }).catch(err => logger.error('EEW processing failed:', err));
       });
 
       if (__DEV__) {
@@ -224,11 +231,9 @@ class EEWService {
 
     if (region === 'TR') {
       urls.push(this.wsUrls.TR_PRIMARY);
-      urls.push(this.wsUrls.PROXY);
       urls.push(this.wsUrls.TR_FALLBACK);
     } else {
       urls.push(this.wsUrls.GLOBAL_PRIMARY);
-      urls.push(this.wsUrls.PROXY);
     }
 
     for (const url of urls) {
@@ -717,23 +722,17 @@ class EEWService {
       alertTitle += ' [ELITE]';
     }
 
-    // CRITICAL: Minimum 10 seconds warning time guarantee for %100 accuracy
-    // Only send EEW if we can guarantee at least 10 seconds warning
-    // This ensures users have enough time to react safely
+    // ELITE: REMOVED 10-second minimum warning restriction!
+    // Deprem Ağı sends alerts regardless of warning time
+    // Even 1 second of warning can save lives!
+    // 
+    // OLD: Required minimum 10 seconds warning
+    // NEW: Send alert INSTANTLY, even for 0-second warning
     const guaranteedWarningTime = Math.max(0, minWarningTime);
-    if (guaranteedWarningTime < 10 && event.source !== 'P_WAVE_DETECTION') {
-      if (__DEV__) {
-        logger.debug(`EEW warning time too short: ${guaranteedWarningTime}s < 10s - skipping notification (requires minimum 10s for %100 accuracy)`);
-      }
-      return;
-    }
 
-    // CRITICAL: For P-wave detection, ensure minimum 10 seconds for %100 accuracy
-    if (event.source === 'P_WAVE_DETECTION' && guaranteedWarningTime < 10) {
-      if (__DEV__) {
-        logger.debug(`P-wave detection warning time too short: ${guaranteedWarningTime}s < 10s - skipping notification (requires minimum 10s for %100 accuracy)`);
-      }
-      return;
+    // ELITE: Log warning time for debugging, but NEVER skip notification!
+    if (guaranteedWarningTime < 5) {
+      logger.info(`⚡ ULTRA-FAST EEW: Only ${guaranteedWarningTime}s warning - sending INSTANT alert!`);
     }
 
     // ELITE: Real-time data verification before sending notification

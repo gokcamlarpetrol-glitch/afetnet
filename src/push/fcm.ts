@@ -7,11 +7,11 @@ import { createLogger } from '../core/utils/logger';
 
 const logger = createLogger('FCMPush');
 
-const BACKEND_URL = process.env.API_BASE_URL || 'https://afetnet-backend.onrender.com';
+const BACKEND_URL = process.env.API_BASE_URL || ''; // DEPRECATED: Using Firebase
 
 interface TokenRegistrationResponse {
-    success: boolean;
-    message?: string;
+  success: boolean;
+  message?: string;
 }
 
 /**
@@ -87,11 +87,11 @@ export async function unregisterToken(token: string): Promise<boolean> {
 export async function updateNotificationPreferences(
   token: string,
   preferences: {
-        earthquakeAlerts?: boolean;
-        sosAlerts?: boolean;
-        newsUpdates?: boolean;
-        minMagnitude?: number;
-    },
+    earthquakeAlerts?: boolean;
+    sosAlerts?: boolean;
+    newsUpdates?: boolean;
+    minMagnitude?: number;
+  },
 ): Promise<boolean> {
   if (!token) return false;
 

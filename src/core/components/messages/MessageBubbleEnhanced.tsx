@@ -160,7 +160,14 @@ export const MessageBubbleEnhanced: React.FC<MessageBubbleEnhancedProps> = ({
             tension: 40,
             useNativeDriver: true,
         }).start();
-    }, [enterAnim]);
+
+        // ELITE: Cleanup animations on unmount to prevent memory leaks
+        return () => {
+            enterAnim.stopAnimation();
+            swipeAnim.stopAnimation();
+            scaleAnim.stopAnimation();
+        };
+    }, [enterAnim, swipeAnim, scaleAnim]);
 
     // Long press handler
     const handleLongPress = useCallback(() => {

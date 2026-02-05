@@ -168,16 +168,19 @@ class IdentityService {
           lastSyncAt: Date.now(),
         };
 
-        // Save to Firestore
-        await setDoc(userRef, {
+        // Save to Firestore - ELITE V2: Filter out undefined values to prevent Firebase errors
+        const userData: Record<string, any> = {
           qrId: qrId,
           deviceId: currentDeviceId,
           displayName: this.identity.displayName,
-          email: this.identity.email,
-          photoURL: this.identity.photoURL,
           createdAt: new Date(),
           lastLoginAt: new Date(),
-        }, { merge: true });
+        };
+        // Only add optional fields if they have values
+        if (this.identity.email) userData.email = this.identity.email;
+        if (this.identity.photoURL) userData.photoURL = this.identity.photoURL;
+
+        await setDoc(userRef, userData, { merge: true });
       }
 
       // Cache locally

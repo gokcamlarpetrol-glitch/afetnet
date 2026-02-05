@@ -28,6 +28,7 @@ import * as Location from 'expo-location';
 import GlassButton from '../../components/buttons/GlassButton';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
 import { useMeshStore } from '../../stores/meshStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
 import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
@@ -55,6 +56,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   // Use Zustand hooks - they handle referential equality automatically
   const members = useFamilyStore((state) => state.members);
 
+  // ELITE: Settings integration for location control
+  const locationEnabled = useSettingsStore((state) => state.locationEnabled);
+
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const locationShareIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isSharingLocationRef = useRef(false); // ELITE: Ref to track sharing state in interval
@@ -65,6 +69,14 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [editName, setEditName] = useState('');
+  // ELITE: Extended edit modal states
+  const [editRelationship, setEditRelationship] = useState<string | null>(null);
+  const [editPhone, setEditPhone] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  // ELITE: Search and detail modal
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -313,6 +325,17 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   }, []); // Empty deps - listener uses refs and store.getState()
 
   const startLocationSharing = useCallback(async () => {
+    // ELITE: Check if location is enabled in settings
+    if (!useSettingsStore.getState().locationEnabled) {
+      Alert.alert(
+        'Konum Kapalı',
+        'Konum paylaşımı için Ayarlar > Konum Servisi\'ni aktif edin.',
+        [{ text: 'Tamam' }]
+      );
+      setIsSharingLocation(false);
+      return;
+    }
+
     // ELITE: Clear any existing interval before starting a new one
     if (locationShareIntervalRef.current) {
       clearInterval(locationShareIntervalRef.current);
@@ -961,19 +984,19 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const getStatusColor = (status: FamilyMember['status']) => {
     switch (status) {
-    case 'safe': return '#10b981';
-    case 'need-help': return '#f59e0b';
-    case 'critical': return '#ef4444';
-    default: return colors.text.tertiary;
+      case 'safe': return '#10b981';
+      case 'need-help': return '#f59e0b';
+      case 'critical': return '#ef4444';
+      default: return colors.text.tertiary;
     }
   };
 
   const getStatusText = (status: FamilyMember['status']) => {
     switch (status) {
-    case 'safe': return 'Güvende';
-    case 'need-help': return 'Yardım Gerekiyor';
-    case 'critical': return 'ACİL DURUM';
-    default: return 'Bilinmiyor';
+      case 'safe': return 'Güvende';
+      case 'need-help': return 'Yardım Gerekiyor';
+      case 'critical': return 'ACİL DURUM';
+      default: return 'Bilinmiyor';
     }
   };
 
@@ -990,6 +1013,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const handleEditMember = (member: FamilyMember) => {
     setEditingMember(member);
     setEditName(member.name || '');
+    setEditRelationship(member.relationship || null);
+    setEditPhone(member.phoneNumber || '');
+    setEditNotes(member.notes || '');
     setShowEditModal(true);
   };
 
@@ -1010,15 +1036,30 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       return;
     }
 
+    // ELITE: Validate phone number if provided
+    if (editPhone.trim()) {
+      const phoneRegex = /^(\+90|0)?[5][0-9]{9}$/;
+      if (!phoneRegex.test(editPhone.replace(/\s/g, ''))) {
+        Alert.alert('Hata', 'Geçersiz telefon numarası formatı.');
+        return;
+      }
+    }
+
     try {
       await useFamilyStore.getState().updateMember(editingMember.id, {
         name: editName.trim(),
+        relationship: editRelationship || undefined,
+        phoneNumber: editPhone.trim() || undefined,
+        notes: editNotes.trim() || undefined,
         updatedAt: Date.now(),
       });
       haptics.notificationSuccess();
       setShowEditModal(false);
       setEditingMember(null);
       setEditName('');
+      setEditRelationship(null);
+      setEditPhone('');
+      setEditNotes('');
     } catch (error) {
       logger.error('Failed to update member:', error);
       Alert.alert('Hata', 'Üye güncellenemedi. Lütfen tekrar deneyin.');
@@ -1348,7 +1389,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         </View>
       </Modal>
 
-      {/* Edit Member Modal */}
+      {/* Edit Member Modal - ELITE EXPANDED */}
       <Modal
         visible={showEditModal}
         transparent
@@ -1357,16 +1398,22 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           setShowEditModal(false);
           setEditingMember(null);
           setEditName('');
+          setEditRelationship(null);
+          setEditPhone('');
+          setEditNotes('');
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
             <Pressable
               style={styles.modalCloseButton}
               onPress={() => {
                 setShowEditModal(false);
                 setEditingMember(null);
                 setEditName('');
+                setEditRelationship(null);
+                setEditPhone('');
+                setEditNotes('');
               }}
             >
               <Ionicons name="close" size={28} color={colors.text.primary} />
@@ -1374,21 +1421,96 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
             <Text style={styles.modalTitle}>Üyeyi Düzenle</Text>
             <Text style={styles.modalSubtitle}>
-              Üye ismini değiştirin
+              Üye bilgilerini güncelleyin
             </Text>
 
-            <View style={styles.editInputContainer}>
-              <Text style={styles.editInputLabel}>İsim</Text>
-              <TextInput
-                style={styles.editInput}
-                placeholder="Üye ismi"
-                placeholderTextColor={colors.text.tertiary}
-                value={editName}
-                onChangeText={setEditName}
-                autoFocus
-                maxLength={50}
-              />
-            </View>
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {/* İsim */}
+              <View style={styles.editInputContainer}>
+                <Text style={styles.editInputLabel}>İsim *</Text>
+                <TextInput
+                  style={styles.editInput}
+                  placeholder="Üye ismi"
+                  placeholderTextColor={colors.text.tertiary}
+                  value={editName}
+                  onChangeText={setEditName}
+                  maxLength={50}
+                />
+              </View>
+
+              {/* İlişki Türü */}
+              <View style={styles.editInputContainer}>
+                <Text style={styles.editInputLabel}>İlişki Türü</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                  {[
+                    { id: 'anne', label: 'Anne', icon: 'woman' },
+                    { id: 'baba', label: 'Baba', icon: 'man' },
+                    { id: 'es', label: 'Eş', icon: 'heart' },
+                    { id: 'kardes', label: 'Kardeş', icon: 'people' },
+                    { id: 'cocuk', label: 'Çocuk', icon: 'happy' },
+                    { id: 'akraba', label: 'Akraba', icon: 'home' },
+                    { id: 'arkadas', label: 'Arkadaş', icon: 'person' },
+                    { id: 'diger', label: 'Diğer', icon: 'help-circle' },
+                  ].map((rel) => (
+                    <Pressable
+                      key={rel.id}
+                      style={[
+                        styles.relationshipChip,
+                        editRelationship === rel.id && styles.relationshipChipActive
+                      ]}
+                      onPress={() => {
+                        haptics.impactLight();
+                        setEditRelationship(editRelationship === rel.id ? null : rel.id);
+                      }}
+                    >
+                      <Ionicons
+                        name={rel.icon as keyof typeof Ionicons.glyphMap}
+                        size={16}
+                        color={editRelationship === rel.id ? '#fff' : '#64748b'}
+                      />
+                      <Text style={[
+                        styles.relationshipChipText,
+                        editRelationship === rel.id && styles.relationshipChipTextActive
+                      ]}>{rel.label}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Telefon */}
+              <View style={styles.editInputContainer}>
+                <Text style={styles.editInputLabel}>Telefon (Opsiyonel)</Text>
+                <TextInput
+                  style={styles.editInput}
+                  placeholder="05551234567"
+                  placeholderTextColor={colors.text.tertiary}
+                  value={editPhone}
+                  onChangeText={(text) => setEditPhone(text.replace(/[^\d+\s]/g, '').substring(0, 20))}
+                  keyboardType="phone-pad"
+                  maxLength={20}
+                />
+              </View>
+
+              {/* Notlar */}
+              <View style={styles.editInputContainer}>
+                <Text style={styles.editInputLabel}>Notlar (Opsiyonel)</Text>
+                <TextInput
+                  style={[styles.editInput, { minHeight: 80, textAlignVertical: 'top' }]}
+                  placeholder="Ek bilgiler..."
+                  placeholderTextColor={colors.text.tertiary}
+                  value={editNotes}
+                  onChangeText={(text) => setEditNotes(text.substring(0, 500))}
+                  multiline
+                  numberOfLines={3}
+                  maxLength={500}
+                />
+                {editNotes.length > 0 && (
+                  <Text style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right', marginTop: 4 }}>
+                    {editNotes.length}/500
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
 
             <View style={styles.modalButtons}>
               <Pressable
@@ -1397,6 +1519,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                   setShowEditModal(false);
                   setEditingMember(null);
                   setEditName('');
+                  setEditRelationship(null);
+                  setEditPhone('');
+                  setEditNotes('');
                 }}
               >
                 <Text style={styles.modalButtonTextCancel}>İptal</Text>
@@ -1807,6 +1932,31 @@ const styles = StyleSheet.create({
   modalButtonTextSave: {
     ...typography.body,
     fontWeight: '600',
+    color: '#fff',
+  },
+  // ELITE: Relationship Chip Styles
+  relationshipChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(100,116,139,0.2)',
+    marginRight: 8,
+    gap: 6,
+  },
+  relationshipChipActive: {
+    backgroundColor: colors.brand.primary,
+    borderColor: colors.brand.primary,
+  },
+  relationshipChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#64748b',
+  },
+  relationshipChipTextActive: {
     color: '#fff',
   },
 });

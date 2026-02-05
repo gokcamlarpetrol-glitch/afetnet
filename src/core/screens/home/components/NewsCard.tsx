@@ -1,10 +1,11 @@
 /**
- * NEWS CARD - EDITORIAL CAROUSEL
- * Elite V2: Horizontal swiping cards with premium typography
+ * NEWS CARD - ULTRA PREMIUM EDITORIAL DESIGN
+ * Horizontal carousel with elite typography and premium details
+ * Every element crafted for maximum visual impact
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Dimensions, ImageBackground } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Dimensions } from 'react-native';
 import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/core';
@@ -15,10 +16,11 @@ import { newsAggregatorService } from '../../../ai/services/NewsAggregatorServic
 import { NewsArticle } from '../../../ai/types/news.types';
 import { createLogger } from '../../../utils/logger';
 import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurface';
+
 const logger = createLogger('NewsCard');
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = width * 0.85;
-const SPACING = 16;
+const CARD_WIDTH = width - 32;
+const SPACING = 12;
 
 export default function NewsCard() {
   const navigation = useNavigation();
@@ -26,7 +28,6 @@ export default function NewsCard() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Initial load
     newsAggregatorService.fetchLatestNews().then(news => {
       useNewsStore.getState().setArticles(news.slice(0, 5));
     }).catch(err => logger.error('News fetch failed', err));
@@ -46,7 +47,10 @@ export default function NewsCard() {
   if (loading && articles.length === 0) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Editör Masası Hazırlanıyor...</Text>
+        <View style={styles.loadingIcon}>
+          <Ionicons name="newspaper-outline" size={20} color="#64748B" />
+        </View>
+        <Text style={styles.loadingText}>Gündem hazırlanıyor...</Text>
       </View>
     );
   }
@@ -55,8 +59,14 @@ export default function NewsCard() {
 
   return (
     <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
+      {/* Premium Header */}
       <View style={styles.header}>
-        <Text style={styles.sectionTitle}>GÜNDEM</Text>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIcon}>
+            <Ionicons name="newspaper" size={12} color="#3B82F6" />
+          </View>
+          <Text style={styles.sectionTitle}>GÜNDEM</Text>
+        </View>
         <TouchableOpacity
           onPress={() => {
             haptics.impactLight();
@@ -68,11 +78,14 @@ export default function NewsCard() {
               logger.error('AllNews navigation failed', error);
             }
           }}
+          style={styles.seeAllBtn}
         >
           <Text style={styles.seeAllText}>TÜMÜ</Text>
+          <Ionicons name="chevron-forward" size={12} color="#3B82F6" />
         </TouchableOpacity>
       </View>
 
+      {/* Article Cards */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -84,25 +97,29 @@ export default function NewsCard() {
         {articles.map((article, index) => (
           <TouchableOpacity
             key={article.id || index}
-            activeOpacity={0.9}
+            activeOpacity={0.92}
             onPress={() => handleArticlePress(article)}
             style={styles.cardContainer}
           >
             <PremiumMaterialSurface variant="B" style={styles.cardBackground}>
-              {/* Subtle Top Glow (New Theme) */}
-              <LinearGradient
-                colors={['rgba(43,110,243,0.10)', 'transparent']}
-                style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '20%' }}
-              />
+              {/* ELITE: Top gradient removed for cleaner design */}
 
-              {/* Header */}
+              {/* Header: Source + Time */}
               <View style={styles.cardHeader}>
-                <View style={[styles.sourceTag, { backgroundColor: 'rgba(37,99,235,0.14)', borderColor: 'transparent' }]}>
-                  <Text style={[styles.sourceText, { color: '#2563EB' }]}>{article.source}</Text>
+                <LinearGradient
+                  colors={['#3B82F6', '#8B5CF6']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.sourceTag}
+                >
+                  <Text style={styles.sourceText}>{article.source}</Text>
+                </LinearGradient>
+                <View style={styles.timeContainer}>
+                  <Ionicons name="time-outline" size={10} color="#94A3B8" />
+                  <Text style={styles.timeText}>
+                    {new Date(article.publishedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
                 </View>
-                <Text style={styles.timeText}>
-                  {new Date(article.publishedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-                </Text>
               </View>
 
               {/* Headline */}
@@ -112,12 +129,15 @@ export default function NewsCard() {
 
               {/* Footer */}
               <View style={styles.cardFooter}>
-                <View style={styles.readMoreBtn}>
+                <TouchableOpacity style={styles.readMoreBtn}>
                   <Text style={styles.readMoreText}>OKU</Text>
-                  <Ionicons name="arrow-forward" size={12} color={colors.brand.primary} />
-                </View>
+                  <View style={styles.readMoreArrow}>
+                    <Ionicons name="arrow-forward" size={10} color="#FFF" />
+                  </View>
+                </TouchableOpacity>
                 {article.magnitude && (
                   <View style={styles.magBadge}>
+                    <Ionicons name="pulse" size={10} color="#FFF" />
                     <Text style={styles.magText}>{article.magnitude.toFixed(1)}</Text>
                   </View>
                 )}
@@ -132,50 +152,83 @@ export default function NewsCard() {
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 4,
     marginBottom: 12,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
-    color: colors.text.secondary,
-    letterSpacing: 2,
+    color: '#0F172A',
+    letterSpacing: 1.5,
+  },
+  seeAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   seeAllText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
-    color: colors.brand.primary,
+    color: '#3B82F6',
     letterSpacing: 0.5,
   },
   loadingContainer: {
-    height: 200,
+    height: 160,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
+  },
+  loadingIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(100, 116, 139, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadingText: {
-    color: colors.text.muted,
+    color: '#64748B',
     fontSize: 12,
-    fontStyle: 'italic',
+    fontWeight: '500',
   },
   scrollContent: {
-    paddingRight: 20,
+    paddingRight: 16,
     gap: SPACING,
   },
   cardContainer: {
     width: CARD_WIDTH,
-    height: 180,
-    // Shadow/Radius/BG handled by PremiumMaterialSurface
+    height: 170,
   },
   cardBackground: {
     flex: 1,
-    padding: 24,
+    padding: 20,
     justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  topGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 60,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -183,26 +236,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sourceTag: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   sourceText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFF',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   timeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.text.secondary,
+    color: '#64748B',
   },
   headline: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text.primary,
-    lineHeight: 26,
-    letterSpacing: 0.5,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    lineHeight: 22,
+    letterSpacing: -0.2,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -217,17 +277,28 @@ const styles = StyleSheet.create({
   readMoreText: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.brand.primary,
+    color: '#3B82F6',
     letterSpacing: 1,
   },
+  readMoreArrow: {
+    width: 18,
+    height: 18,
+    borderRadius: 6,
+    backgroundColor: '#3B82F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   magBadge: {
-    backgroundColor: colors.emergency.critical,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EF4444',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 4,
     borderRadius: 6,
   },
   magText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     color: '#FFF',
   },

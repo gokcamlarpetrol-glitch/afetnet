@@ -60,7 +60,7 @@ class PresenceService {
                 return;
             }
 
-            const db = getDatabase(app);
+            const db = getDatabase(app, 'https://afetnet-4a6b6-default-rtdb.europe-west1.firebasedatabase.app');
             this.myStatusRef = ref(db, `presence/${cloudUid}`);
 
             // Set up app state listener
@@ -165,7 +165,7 @@ class PresenceService {
                 return () => { };
             }
 
-            const db = getDatabase(app);
+            const db = getDatabase(app, 'https://afetnet-4a6b6-default-rtdb.europe-west1.firebasedatabase.app');
             const statusRef = ref(db, `presence/${userId}`);
 
             // Add to listeners
@@ -224,7 +224,7 @@ class PresenceService {
             const app = initializeFirebase();
             if (!app) return null;
 
-            const db = getDatabase(app);
+            const db = getDatabase(app, 'https://afetnet-4a6b6-default-rtdb.europe-west1.firebasedatabase.app');
             const statusRef = ref(db, `presence/${userId}`);
 
             return new Promise((resolve) => {

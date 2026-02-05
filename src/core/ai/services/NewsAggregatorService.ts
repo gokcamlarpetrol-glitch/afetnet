@@ -129,6 +129,11 @@ class NewsAggregatorService {
   private cachedDeviceId: string | null = null;
   private deviceIdPromise: Promise<string | null> | null = null;
 
+  // ELITE COST OPTIMIZATION: In-flight request tracking
+  // Aynı haber için eş zamanlı isteklerde yalnızca BİR API çağrısı yapılır
+  // Diğer istekler aynı Promise'i bekler - BÜYÜK MALİYET TASARRUFU
+  private inFlightRequests = new Map<string, Promise<string>>();
+
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
     logger.info('NewsAggregatorService initialized');
@@ -874,7 +879,21 @@ class NewsAggregatorService {
         location: eq.location,
       }));
     } catch (error) {
-      logger.error('Failed to convert earthquakes to news:', error);
+      // ELITE: Handle LoadBundleFromServerRequestError gracefully
+      // This is a transient Firebase error that occurs during bundle loading
+      const errorMessage = getErrorMessage(error);
+      const isBundleError = errorMessage.includes('LoadBundleFromServerRequestError') ||
+        errorMessage.includes('Could not load bundle') ||
+        errorMessage.includes('bundle');
+
+      if (isBundleError) {
+        // This is expected during certain Firebase conditions - log as warning, not error
+        if (__DEV__) {
+          logger.warn('Earthquake data temporarily unavailable (bundle loading)');
+        }
+      } else {
+        logger.error('Failed to convert earthquakes to news:', error);
+      }
       return [];
     }
   }
@@ -898,6 +917,19 @@ class NewsAggregatorService {
 
     const cacheKey = this.resolveArticleKey(article);
     const now = Date.now();
+
+    // ELITE COST OPTIMIZATION: In-flight request deduplication
+    // Eğer bu haber için zaten bir API çağrısı yapılıyorsa, bekle ve sonucu kullan
+    const inFlightPromise = this.inFlightRequests.get(cacheKey);
+    if (inFlightPromise) {
+      logger.info('🔄 In-flight request found, waiting for existing summary generation:', cacheKey);
+      try {
+        return await inFlightPromise;
+      } catch (error) {
+        logger.warn('In-flight request failed, will try again:', error);
+        // Continue to try again if in-flight request failed
+      }
+    }
 
     try {
       // In-memory cache
@@ -1011,133 +1043,156 @@ class NewsAggregatorService {
 
       logger.info('✅ OpenAI is configured, generating AI summary...');
 
-      // CRITICAL: Generate new summary only if not exists in cloud (cost optimization)
-      // This ensures only ONE summary per article is created, shared across all users
+      // ELITE COST OPTIMIZATION: Wrap API call in in-flight request tracking
+      // Bu sayede aynı anda aynı haberi isteyen TÜM kullanıcılar tek bir API çağrısını bekleyecek
+      const generateSummaryPromise = this.generateAndCacheSummary(article, cacheKey);
+      this.inFlightRequests.set(cacheKey, generateSummaryPromise);
 
-      // CRITICAL: Limit article summary length to prevent overly long prompts
-      const maxSummaryLength = 5000; // Increased limit for full article source
-
-      // CRITICAL: Validate and sanitize article data
-      const articleTitle = (article.title && typeof article.title === 'string')
-        ? article.title.trim().substring(0, 500) // Max 500 chars for title
-        : 'Haber';
-
-      if (__DEV__) {
-        logger.info('🤖 Generating NEW shared summary (will be cached for all users):', articleTitle);
+      try {
+        const result = await generateSummaryPromise;
+        return result;
+      } finally {
+        // CRITICAL: Her durumda in-flight request'i temizle
+        this.inFlightRequests.delete(cacheKey);
       }
-      const articleSummary = (article.summary && typeof article.summary === 'string')
-        ? article.summary.trim()
-        : '';
-      const articleSource = (article.source && typeof article.source === 'string')
-        ? article.source.trim()
-        : 'Bilinmeyen Kaynak';
+    } catch (error) {
+      logger.error('Failed to summarize article:', error);
+      this.inFlightRequests.delete(cacheKey);
+      return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
+    }
+  }
 
-      const truncatedSummary = articleSummary.length > maxSummaryLength
-        ? articleSummary.substring(0, maxSummaryLength) + '...'
-        : (articleSummary || articleTitle);
+  /**
+   * ELITE: Generate and cache summary - separated for in-flight tracking
+   */
+  private async generateAndCacheSummary(article: NewsArticle, cacheKey: string): Promise<string> {
+    const now = Date.now();
 
-      // ELITE UPDATE: "Haberin Tamamı" niteliğinde kapsamlı prompt
-      // Kullanıcı isteği: "özeti okudugu zaman haberin tamamını okumasına gerek kalmamalı"
-      const prompt = `Aşağıdaki haberi Türkçe olarak, bir gazetecinin kaleminden çıkmış "tam teşekküllü bir rapor" gibi yeniden yaz.
+    // CRITICAL: Generate new summary only if not exists in cloud (cost optimization)
+    // This ensures only ONE summary per article is created, shared across all users
 
-KESİN KURALLAR:
-1. "Özet" gibi yazma, "Haber Raporu" gibi yaz. Okuyan kişi "acaba detaylarda ne var?" diye merak etmemeli.
-2. Haberdeki TÜM detayları (isimler, sayılar, saatler, yerler, kurum açıklamaları) metne dahil et.
-3. 5N1K kuralını eksiksiz uygula: Ne, Nerede, Ne Zaman, Nasıl, Neden, Kim.
-4. Deprem ise: Büyüklük, Derinlik, Tam Konum, Tarih/Saat, Hissedilen İller, AFAD/Kandilli verileri - hepsini madde madde değil akıcı bir metin içinde ver.
-5. Asla "haber detaylarına göre...", "haberde belirtildiğine göre..." gibi ifadeler kullanma. Doğrudan olayı anlat.
-6. Metin doyurucu ve uzun (en az 6-8 cümle) olsun. Eksik bilgi kalmasın.
+    // CRITICAL: Limit article summary length to prevent overly long prompts
+    const maxSummaryLength = 5000; // Increased limit for full article source
+
+    // CRITICAL: Validate and sanitize article data
+    const articleTitle = (article.title && typeof article.title === 'string')
+      ? article.title.trim().substring(0, 500) // Max 500 chars for title
+      : 'Haber';
+
+    if (__DEV__) {
+      logger.info('🤖 Generating NEW shared summary (will be cached for all users):', articleTitle);
+    }
+    const articleSummary = (article.summary && typeof article.summary === 'string')
+      ? article.summary.trim()
+      : '';
+    const articleSource = (article.source && typeof article.source === 'string')
+      ? article.source.trim()
+      : 'Bilinmeyen Kaynak';
+
+    const truncatedSummary = articleSummary.length > maxSummaryLength
+      ? articleSummary.substring(0, maxSummaryLength) + '...'
+      : (articleSummary || articleTitle);
+
+    // ELITE ULTRA UPDATE: "Haberin Eksiksiz Tam Raporu" - Okuyucu asla kaynağa gitmesin
+    const prompt = `Aşağıdaki haberi Türkçe olarak, TÜM detaylarıyla EKSIKSIZ bir "tam haber raporu" olarak yeniden yaz.
+
+KRİTİK KURALLAR (MUTLAKA UYULMASI GEREKEN):
+1. KISA YAZMA! En az 12-15 cümle olmalı. Eksik bırakma, uzun ve doyurucu bir metin oluştur.
+2. Haberdeki TÜM bilgileri dahil et: isimler, sayılar, tarih/saat, konum detayları, kurum açıklamaları, mahkeme kararları vs.
+3. 5N1K kuralını KESİNLİKLE uygula: Ne oldu, Nerede oldu, Ne zaman oldu, Nasıl oldu, Neden oldu, Kim(ler) dahil.
+4. Deprem haberi ise: Büyüklük, Derinlik (km), Tam Konum (il/ilçe), Tarih ve Saat, Hissedilen iller, Hasar/yaralı bilgisi, AFAD/Kandilli verileri - HEPSİNİ dahil et.
+5. Mahkeme/dava haberi ise: Dava konusu, taraflar, karar detayları, gerekçe, sonuçlar - HEPSİNİ dahil et.
+6. Hiçbir bilgiyi atlama. Özet değil, KAPSAMLI RAPOR yaz.
+7. Akıcı, profesyonel gazetecilik diliyle yaz. Madde işareti kullanma, paragraf halinde yaz.
+8. "Haber detaylarına göre...", "Haberde belirtildiğine göre..." gibi ifadeler KULLANMA. Doğrudan anlat.
+9. Başlığı tekrarlama, doğrudan içeriğe geç.
 
 HABER VERİLERİ:
 Başlık: ${articleTitle}
-${truncatedSummary ? `Detaylar: ${truncatedSummary}` : ''}
+${truncatedSummary ? `İçerik: ${truncatedSummary}` : ''}
 ${articleSource ? `Kaynak: ${articleSource}` : ''}
-${(article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude)) ? `Büyüklük: ${article.magnitude}` : ''}
+${(article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude)) ? `Deprem Büyüklüğü: ${article.magnitude}` : ''}
 ${(article.location && typeof article.location === 'string') ? `Konum: ${article.location.trim()}` : ''}`;
 
-      const systemPrompt = `Sen AfetNet'in baş editörüsün. Görevin, sınırlı veriden bile en kapsamlı ve doyurucu haberi oluşturmak. Okuyucunun kaynağa gitmesine gerek bırakmayacak kadar detaylı, net ve güven verici bir dil kullan.`;
+    const systemPrompt = `Sen Türkiye'nin en saygın haber ajansının baş editörüsün. Görevin: verilen haberi okuyucunun kaynağa GİTMESİNE GEREK KALMAYACAK şekilde TAM ve EKSİKSİZ yazıya dökmek. Kısa yazma, her detayı dahil et. Profesyonel, güvenilir ve akıcı bir dil kullan. Minimum 12-15 cümle.`;
 
-      let summary: string;
-      try {
-        // ELITE: Kapsamlı rapor için token limitini artırdım
-        summary = await openAIService.generateText(prompt, {
-          systemPrompt,
-          maxTokens: 400, // ELITE: Daha uzun ve detaylı içerik için artırıldı (200 -> 400)
-          temperature: 0.3, // Daha tutarlı olması için 0.4 -> 0.3
-          serviceName: 'NewsAggregatorService',
-        });
+    let summary: string;
+    try {
+      // ELITE: Ultra-kapsamlı rapor için token limitini artırdım
+      summary = await openAIService.generateText(prompt, {
+        systemPrompt,
+        maxTokens: 600, // ELITE: Eksiksiz içerik için 400 -> 600
+        temperature: 0.25, // Daha tutarlı raporlar için 0.3 -> 0.25
+        serviceName: 'NewsAggregatorService',
+      });
 
-        // CRITICAL: Validate AI response
-        if (!summary || typeof summary !== 'string') {
-          logger.warn('AI returned invalid summary type, using fallback');
-          return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
-        }
-      } catch (aiError) {
-        logger.error('OpenAI API error:', aiError);
+      // CRITICAL: Validate AI response
+      if (!summary || typeof summary !== 'string') {
+        logger.warn('AI returned invalid summary type, using fallback');
         return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
       }
-
-      // Clean HTML tags from AI response
-      summary = this.cleanHTML(summary);
-
-      // CRITICAL: Validate and limit summary length
-      if (!summary || summary.trim().length === 0) {
-        logger.warn('AI returned empty summary, using fallback');
-        return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
-      }
-
-      // Ensure summary is not too long (max 2000 characters)
-      const MAX_SUMMARY_LENGTH = 2000;
-      if (summary.length > MAX_SUMMARY_LENGTH) {
-        // Truncate at sentence boundary
-        const truncated = summary.substring(0, MAX_SUMMARY_LENGTH);
-        const lastSentenceEnd = Math.max(
-          truncated.lastIndexOf('.'),
-          truncated.lastIndexOf('!'),
-          truncated.lastIndexOf('?'),
-        );
-
-        if (lastSentenceEnd > MAX_SUMMARY_LENGTH * 0.8) {
-          summary = truncated.substring(0, lastSentenceEnd + 1);
-        } else {
-          // Truncate at word boundary
-          const lastSpace = truncated.lastIndexOf(' ');
-          if (lastSpace > MAX_SUMMARY_LENGTH * 0.8) {
-            summary = truncated.substring(0, lastSpace) + '...';
-          } else {
-            summary = truncated + '...';
-          }
-        }
-
-        logger.warn('AI summary was too long, truncated to', summary.length, 'characters');
-      }
-
-      // CRITICAL: Save to cache and cloud (shared across all users)
-      this.summaryCache.set(cacheKey, { summary, timestamp: now });
-
-      // CRITICAL: Persist locally with error handling
-      try {
-        await this.persistSummaryLocally(cacheKey, summary, this.SUMMARY_CACHE_TTL);
-      } catch (localError) {
-        logger.warn('Failed to persist summary locally:', localError);
-        // Continue even if local persistence fails
-      }
-
-      // CRITICAL: Persist to cloud with error handling (non-blocking)
-      if (article.id && typeof article.id === 'string' && article.id.trim().length > 0) {
-        this.persistSummaryToCloud(article, summary, this.SUMMARY_CACHE_TTL).catch((error) => {
-          logger.warn('Failed to persist summary to cloud:', error);
-        });
-      }
-
-      if (__DEV__) {
-        logger.info('✅ Generated NEW shared summary (cached for all users):', articleTitle);
-      }
-      return summary;
-    } catch (error) {
-      logger.error('Failed to summarize article:', error);
+    } catch (aiError) {
+      logger.error('OpenAI API error:', aiError);
       return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
     }
+
+    // Clean HTML tags from AI response
+    summary = this.cleanHTML(summary);
+
+    // CRITICAL: Validate and limit summary length
+    if (!summary || summary.trim().length === 0) {
+      logger.warn('AI returned empty summary, using fallback');
+      return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
+    }
+
+    // Ensure summary is not too long (max 2000 characters)
+    const MAX_SUMMARY_LENGTH = 2000;
+    if (summary.length > MAX_SUMMARY_LENGTH) {
+      // Truncate at sentence boundary
+      const truncated = summary.substring(0, MAX_SUMMARY_LENGTH);
+      const lastSentenceEnd = Math.max(
+        truncated.lastIndexOf('.'),
+        truncated.lastIndexOf('!'),
+        truncated.lastIndexOf('?'),
+      );
+
+      if (lastSentenceEnd > MAX_SUMMARY_LENGTH * 0.8) {
+        summary = truncated.substring(0, lastSentenceEnd + 1);
+      } else {
+        // Truncate at word boundary
+        const lastSpace = truncated.lastIndexOf(' ');
+        if (lastSpace > MAX_SUMMARY_LENGTH * 0.8) {
+          summary = truncated.substring(0, lastSpace) + '...';
+        } else {
+          summary = truncated + '...';
+        }
+      }
+
+      logger.warn('AI summary was too long, truncated to', summary.length, 'characters');
+    }
+
+    // CRITICAL: Save to cache and cloud (shared across all users)
+    this.summaryCache.set(cacheKey, { summary, timestamp: now });
+
+    // CRITICAL: Persist locally with error handling
+    try {
+      await this.persistSummaryLocally(cacheKey, summary, this.SUMMARY_CACHE_TTL);
+    } catch (localError) {
+      logger.warn('Failed to persist summary locally:', localError);
+      // Continue even if local persistence fails
+    }
+
+    // CRITICAL: Persist to cloud with error handling (non-blocking)
+    if (article.id && typeof article.id === 'string' && article.id.trim().length > 0) {
+      this.persistSummaryToCloud(article, summary, this.SUMMARY_CACHE_TTL).catch((error) => {
+        logger.warn('Failed to persist summary to cloud:', error);
+      });
+    }
+
+    if (__DEV__) {
+      logger.info('✅ Generated NEW shared summary (cached for all users):', articleTitle);
+    }
+    return summary;
   }
 
   /**
@@ -1152,11 +1207,6 @@ ${(article.location && typeof article.location === 'string') ? `Konum: ${article
       return 'Yeni haber';
     }
 
-    // CRITICAL: Use shared summarizeArticle which already implements:
-    // 1. In-memory cache check
-    // 2. Local cache check  
-    // 3. Cloud cache check (shared across all users)
-    // 4. Generate only if not exists (shared for all users)
     // This ensures ZERO duplicate API calls - one summary per article for ALL users
     const summary = await this.summarizeArticle(article);
 

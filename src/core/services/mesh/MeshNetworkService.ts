@@ -732,9 +732,11 @@ class MeshNetworkService {
   };
 
   private processIncomingPacket(packet: MeshPacket, rssi: number): void {
-    // Deduplication
+    // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
+    // Skip if duplicate (checkAndAdd returns false when ID already existed)
     const msgId = packet.header.messageId.toString();
     if (!this.seenMessageIds.checkAndAdd(msgId)) {
+      // This is correct! If checkAndAdd returns false, it was already seen
       return;
     }
 

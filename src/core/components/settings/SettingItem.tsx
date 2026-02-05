@@ -17,7 +17,7 @@ interface SettingItemProps {
   isLast?: boolean; // New prop to hide border for last item
 }
 
-export function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPress, index, isLast }: SettingItemProps) {
+export const SettingItem = React.memo(function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPress, index, isLast }: SettingItemProps) {
   const handlePress = () => {
     haptics.impactLight();
     if (onPress) {
@@ -77,7 +77,7 @@ export function SettingItem({ icon, title, subtitle, type = 'arrow', value, onPr
       </Pressable>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

@@ -1,21 +1,69 @@
 /**
- * EEW MODULE - ELITE EDITION
- * Re-exports all EEW functionality
+ * EEW MODULE - BARREL EXPORTS
  * 
- * This is the main entry point for modular EEW services.
+ * Central export point for all EEW (Early Earthquake Warning) services
+ * Import from this file instead of individual service files
+ * 
+ * @example
+ * import { eewManager, EEWEvent, multiSourceEEWService } from '@/core/services/eew';
+ * 
+ * @version 1.0.0
+ * @elite true
  */
 
-// WebSocket management
-export * as EEWWebSocketManager from './EEWWebSocketManager';
-export type { WebSocketConfig, WebSocketState } from './EEWWebSocketManager';
+// ============================================================
+// TYPES & INTERFACES
+// ============================================================
 
-// Polling
-export * as EEWPoller from './EEWPoller';
-export type { PollConfig, PollerState } from './EEWPoller';
+export type {
+    EEWEvent,
+    RawEarthquakeData,
+} from './EEWEventProcessor';
 
-// Event processing
-export * as EEWEventProcessor from './EEWEventProcessor';
-export type { EEWEvent, RawEarthquakeData } from './EEWEventProcessor';
+// ============================================================
+// EVENT PROCESSING
+// ============================================================
 
-// Re-export main service for backward compatibility
-export { eewService } from '../EEWService';
+export {
+    normalizeEvent,
+    normalizeEvents,
+    isEventSeen,
+    markEventSeen,
+    clearSeenEvents,
+    enhanceWithWaveCalculation,
+    filterSignificantEvents,
+} from './EEWEventProcessor';
+
+// ============================================================
+// POLLING
+// ============================================================
+
+export type {
+    PollConfig,
+    PollerState,
+} from './EEWPoller';
+
+export {
+    start as startPoller,
+    stop as stopPoller,
+    pollNow,
+    isRunning as isPollerRunning,
+    getState as getPollerState,
+} from './EEWPoller';
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+export type {
+    WebSocketConfig,
+    WebSocketState,
+} from './EEWWebSocketManager';
+
+export {
+    connect as connectWebSocket,
+    disconnect as disconnectWebSocket,
+    getState as getWebSocketState,
+    isConnected as isWebSocketConnected,
+    send as sendWebSocket,
+} from './EEWWebSocketManager';

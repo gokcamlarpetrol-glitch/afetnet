@@ -32,6 +32,7 @@ import {
   EmergencyReason,
   ChannelStatus,
 } from '../services/sos';
+import { emergencyHealthSharingService } from '../services/EmergencyHealthSharingService';
 
 // ============================================================================
 // PROPS
@@ -78,6 +79,16 @@ export default function SOSModal({
       unifiedSOSController.triggerSOS(reason, message);
     }
   }, [visible, isActive, isCountingDown, reason, message]);
+
+  // Start health data broadcast when SOS becomes active
+  useEffect(() => {
+    if (isActive) {
+      // Start broadcasting health data via BLE mesh
+      emergencyHealthSharingService.startBroadcast().catch((err) => {
+        console.debug('Health broadcast start error:', err);
+      });
+    }
+  }, [isActive]);
 
   // Pulse animation
   useEffect(() => {
@@ -154,12 +165,14 @@ export default function SOSModal({
   const handleCancel = useCallback(() => {
     haptics.impactLight();
     unifiedSOSController.cancelSOS();
+    emergencyHealthSharingService.stopBroadcast(); // Stop health broadcast
     onClose();
   }, [onClose]);
 
   const handleStop = useCallback(() => {
     haptics.impactMedium();
     unifiedSOSController.cancelSOS();
+    emergencyHealthSharingService.stopBroadcast(); // Stop health broadcast
     onClose();
   }, [onClose]);
 

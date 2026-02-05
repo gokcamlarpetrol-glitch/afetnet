@@ -61,7 +61,7 @@ class GlobalErrorHandler {
    */
   initialize() {
     if (this.isInitialized) {
-      logger.warn('Global error handler already initialized');
+      logger?.warn('Global error handler already initialized');
       return;
     }
 
@@ -79,7 +79,7 @@ class GlobalErrorHandler {
           try {
             originalErrorHandler(error, isFatal);
           } catch (handlerError) {
-            logger.error('Original error handler failed:', handlerError);
+            logger?.error('Original error handler failed:', handlerError);
           }
         }
       });
@@ -102,7 +102,7 @@ class GlobalErrorHandler {
           try {
             originalRejectionHandler(event);
           } catch (handlerError) {
-            logger.error('Original rejection handler failed:', handlerError);
+            logger?.error('Original rejection handler failed:', handlerError);
           }
         }
       };
@@ -172,7 +172,7 @@ class GlobalErrorHandler {
     }
 
     this.isInitialized = true;
-    logger.info('✅ Global error handler initialized');
+    logger?.info('✅ Global error handler initialized');
   }
 
   /**

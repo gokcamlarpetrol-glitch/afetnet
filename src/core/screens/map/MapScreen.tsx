@@ -42,8 +42,12 @@ import { MapFiltersControl } from './components/MapFiltersControl';
 import { FaultLineOverlay } from './components/FaultLineOverlay';
 import { EvacuationOverlay } from './components/EvacuationOverlay';
 import { IncidentReportModal } from './components/IncidentReportModal';
+import { RiskOverlay, RiskLegend } from './components/RiskOverlay';
 import { SeismicAlertBanner } from '../../components/design-system/SeismicAlertBanner';
 import { trustMapStyle, trustDarkMapStyle } from '../../theme/mapStyles'; // Updated import
+// NOTE: Premium overlays (WavePropagation, AssemblyPoints, TsunamiZone) removed 
+// due to react-native-maps index bounds crash. These features will be added 
+// in a future update with proper lazy loading implementation.
 
 import { clusterMarkers, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
 import { useViewportData } from '../../hooks/useViewportData';
@@ -76,7 +80,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const insets = useSafeAreaInsets();
 
   // GLOBAL MAP STATE
-  const { filters, setFilters, mode, setMode, mapStyle: currentMapStyle, setMapStyle } = useMapStore();
+  const { filters, setFilters, mode, setMode, mapStyle: currentMapStyle, setMapStyle, is3DMode, toggle3DMode } = useMapStore();
 
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
@@ -133,6 +137,43 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       unsubscribeRescue();
       unsubscribeMesh();
     };
+  }, []);
+
+  // ELITE: Real-Time Family Location Tracking
+  // Automatically refresh family member locations based on configured interval
+  useEffect(() => {
+    const mapState = useMapStore.getState();
+    if (!mapState.realTimeTracking) return;
+
+    const intervalMs = mapState.familyTrackingInterval * 1000;
+
+    const refreshFamilyLocations = async () => {
+      try {
+        // Trigger FamilyTrackingService to share our location
+        const { familyTrackingService } = await import('../../services/FamilyTrackingService');
+
+        // CRITICAL: Start tracking first (activates background updates + Firebase subs)
+        await familyTrackingService.startTracking();
+
+        // Share our own location with family (via mesh + cloud)
+        await familyTrackingService.shareMyLocation();
+
+        // Get latest members from service (with stale check applied)
+        // Note: We use store directly to avoid type mismatch between service and store types
+        setFamilyMembers(useFamilyStore.getState().members);
+        logger.debug('Real-time family locations refreshed');
+      } catch (err) {
+        logger.warn('Family location refresh error:', err);
+      }
+    };
+
+    // Initial refresh
+    refreshFamilyLocations();
+
+    // Set up interval
+    const intervalId = setInterval(refreshFamilyLocations, intervalMs);
+
+    return () => clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -235,7 +276,14 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
     const familyMarkers = familyMembers.filter(m => {
       const lat = m.location?.latitude ?? m.latitude;
       const lng = m.location?.longitude ?? m.longitude;
-      return typeof lat === 'number' && typeof lng === 'number';
+      // ELITE: Filter out invalid coordinates
+      // - Must be numbers
+      // - Must not be 0,0 (null island - indicates missing data)
+      // - Must be within valid GPS ranges
+      const isValidLat = typeof lat === 'number' && !isNaN(lat) && lat >= -90 && lat <= 90;
+      const isValidLng = typeof lng === 'number' && !isNaN(lng) && lng >= -180 && lng <= 180;
+      const isNotNullIsland = !(lat === 0 && lng === 0); // Exclude 0,0 which means no location
+      return isValidLat && isValidLng && isNotNullIsland;
     }).map(member => ({
       ...member,
       id: `fm-${member.id}`,
@@ -323,8 +371,8 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        mapType={currentMapStyle === 'dark' ? 'standard' : 'standard'}
-        customMapStyle={mapStyleJSON}
+        mapType={currentMapStyle === 'satellite' ? 'satellite' : currentMapStyle === 'hybrid' ? 'hybrid' : currentMapStyle === 'terrain' ? 'terrain' : 'standard'}
+        customMapStyle={currentMapStyle === 'satellite' || currentMapStyle === 'hybrid' ? undefined : mapStyleJSON}
         showsUserLocation
         showsMyLocationButton={false}
         showsCompass={false}
@@ -349,6 +397,12 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           }
         }}
       >
+        {/* ELITE: Risk Zones Overlay */}
+        <RiskOverlay
+          visible={layers.hazardZones}
+          userLocation={userLocation}
+        />
+
         {/* 2. FAULT LINES OVERLAY */}
         {filters.showFaultLines && <FaultLineOverlay />}
 
@@ -381,21 +435,37 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           />
         )}
 
-        {/* Family Members */}
+        {/* Family Members - FIND MY GRADE */}
         {layers.family && clusteredMarkers.family.map((item: ClusterableMarker | Cluster) => {
           if (isCluster(item)) return <ClusterMarker key={item.id} cluster={item} onPress={handleClusterPress} />;
-          const familyItem = item as ClusterableMarker & { name?: string; status?: string; avatarUrl?: string };
+          const familyItem = item as ClusterableMarker & {
+            name?: string;
+            status?: string;
+            avatarUrl?: string;
+            lastSeen?: number;
+            batteryLevel?: number;
+            isOnline?: boolean;
+            lastKnownLocation?: { timestamp: number };
+          };
+
+          // ELITE: Determine if showing last known location
+          const isLastKnownLocation = !familyItem.isOnline && !!familyItem.lastKnownLocation;
+
           return (
             <Marker
               key={familyItem.id}
               coordinate={{ latitude: familyItem.latitude, longitude: familyItem.longitude }}
               onPress={() => handleMarkerPress(familyItem)}
-              anchor={{ x: 0.5, y: 0.5 }}
+              anchor={{ x: 0.5, y: 0.7 }} // Adjusted for name label
             >
               <FamilyMarker
                 name={familyItem.name || 'Bilinmiyor'}
                 status={(familyItem.status || 'unknown') as 'safe' | 'need-help' | 'critical' | 'unknown'}
                 avatarUrl={familyItem.avatarUrl}
+                lastSeen={familyItem.lastSeen}
+                batteryLevel={familyItem.batteryLevel}
+                isOnline={familyItem.isOnline}
+                isLastKnownLocation={isLastKnownLocation}
               />
             </Marker>
           );
@@ -420,6 +490,15 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           </Marker>
         ))}
 
+        {/* 4a. TRAPPED USERS (Enkaz Altındakiler) */}
+        {layers.trappedUsers && trappedUsers.map((user) => (
+          <TrappedUserMarker
+            key={`trapped-${user.id}`}
+            user={user}
+            onPress={(u) => handleMarkerPress(u as unknown as ClusterableMarker)}
+          />
+        ))}
+
         {/* 5. OFFLINE MESH PEERS (New) */}
         {layers.meshNetwork && meshPeers.map((peer) => {
           if (!peer.location) return null; // Skip peers without location
@@ -440,6 +519,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             </Marker>
           );
         })}
+
+        {/* NOTE: Premium overlays (AssemblyPoints, TsunamiZone, WavePropagation) 
+            removed for stability. Will be re-added with lazy loading in future update. */}
       </MapView>
 
       {/* 6. RESCUE COMPASS HUD (Elite) */}
@@ -476,6 +558,97 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           poisCount={offlineLocations.length}
           trappedUsersCount={trappedUsers.length}
         />
+      </View>
+
+      {/* ELITE: Evacuation Mode Active Banner */}
+      {mode === 'evacuation' && userLocation && (
+        <View style={[styles.evacuationBanner, { bottom: insets.bottom + 100 }]}>
+          <LinearGradient
+            colors={['rgba(220, 38, 38, 0.95)', 'rgba(153, 27, 27, 0.95)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.evacuationBannerGradient}
+          >
+            <View style={styles.evacuationBannerContent}>
+              <Ionicons name="warning" size={24} color="#fff" />
+              <View style={styles.evacuationBannerText}>
+                <Text style={styles.evacuationBannerTitle}>TAHLİYE MODU AKTİF</Text>
+                <Text style={styles.evacuationBannerSubtitle}>
+                  En yakın toplanma alanı: {(() => {
+                    const assemblyPoints = offlineLocations.filter(l => l.type === 'assembly');
+                    if (assemblyPoints.length === 0) return 'Bilinmiyor';
+                    const nearest = assemblyPoints.sort((a, b) =>
+                      calculateDistance(userLocation.latitude, userLocation.longitude, a.latitude, a.longitude) -
+                      calculateDistance(userLocation.latitude, userLocation.longitude, b.latitude, b.longitude)
+                    )[0];
+                    const dist = calculateDistance(userLocation.latitude, userLocation.longitude, nearest.latitude, nearest.longitude);
+                    return `${nearest.name} (${formatDistance(dist)})`;
+                  })()}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              style={styles.evacuationCloseBtn}
+              onPress={() => setMode('view')}
+            >
+              <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
+            </Pressable>
+          </LinearGradient>
+        </View>
+      )}
+
+      {/* ELITE: Map Type Toggle (Satellite/Hybrid/Terrain/Standard) */}
+      <View style={[styles.mapTypeToggle, { top: insets.top + 75, right: 16 }]}>
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            currentMapStyle === 'standard' && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactLight(); setMapStyle('standard'); }}
+        >
+          <Ionicons name="map-outline" size={18} color={currentMapStyle === 'standard' ? '#fff' : '#1F4E79'} />
+        </Pressable>
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            currentMapStyle === 'satellite' && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactLight(); setMapStyle('satellite'); }}
+        >
+          <Ionicons name="globe-outline" size={18} color={currentMapStyle === 'satellite' ? '#fff' : '#1F4E79'} />
+        </Pressable>
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            currentMapStyle === 'hybrid' && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactLight(); setMapStyle('hybrid'); }}
+        >
+          <Ionicons name="layers-outline" size={18} color={currentMapStyle === 'hybrid' ? '#fff' : '#1F4E79'} />
+        </Pressable>
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            currentMapStyle === 'terrain' && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactLight(); setMapStyle('terrain'); }}
+        >
+          <Ionicons name="trail-sign-outline" size={18} color={currentMapStyle === 'terrain' ? '#fff' : '#1F4E79'} />
+        </Pressable>
+
+        {/* ELITE: Separator */}
+        <View style={{ width: 1, height: 24, backgroundColor: 'rgba(31, 78, 121, 0.2)', marginHorizontal: 4 }} />
+
+        {/* ELITE: 3D Mode Toggle */}
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            is3DMode && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactMedium(); toggle3DMode(); }}
+        >
+          <Ionicons name="cube-outline" size={18} color={is3DMode ? '#fff' : '#1F4E79'} />
+        </Pressable>
       </View>
 
 
@@ -595,5 +768,70 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     zIndex: 10,
+  },
+  // ELITE: Map Type Toggle Styles
+  mapTypeToggle: {
+    position: 'absolute',
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    zIndex: 20,
+  },
+  mapTypeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  mapTypeButtonActive: {
+    backgroundColor: '#1F4E79',
+  },
+  // ELITE: Evacuation Mode Banner Styles
+  evacuationBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 100,
+  },
+  evacuationBannerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 16,
+    shadowColor: '#dc2626',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  evacuationBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  evacuationBannerText: {
+    flex: 1,
+  },
+  evacuationBannerTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 1,
+  },
+  evacuationBannerSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 2,
+  },
+  evacuationCloseBtn: {
+    padding: 8,
+    marginLeft: 8,
   },
 });

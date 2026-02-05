@@ -162,7 +162,7 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
           <Text style={styles.paragraph}>
             Sorularınız için:{'\n\n'}
             E-posta: legal@afetnet.app{'\n'}
-            Web: https://gokhancamci.github.io/AfetNet1/docs/terms-of-service.html
+            Web: https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/terms-of-service.html
           </Text>
         </View>
 

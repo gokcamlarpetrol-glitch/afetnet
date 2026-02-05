@@ -31,6 +31,15 @@ interface SettingsState {
   // News
   newsEnabled: boolean;
 
+  // ELITE: New Features (previously 'Yakında')
+  pdrEnabled: boolean; // Pedestrian Dead Reckoning - step tracking for location
+  proximityAlertsEnabled: boolean; // Proximity alerts for nearby emergencies
+  aiHazardEnabled: boolean; // AI-based hazard detection
+
+  // ELITE: Accessibility Features
+  fontScale: number; // Font scale 1.0-1.5 (default: 1.0)
+  highContrastEnabled: boolean; // High contrast mode for visibility
+
   // ELITE: Comprehensive Earthquake Settings
   // Notification Thresholds
   minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 3.0)
@@ -113,6 +122,15 @@ interface SettingsActions {
   setLanguage: (lang: 'tr' | 'en' | 'ar' | 'ru') => void;
   setNews: (enabled: boolean) => void;
 
+  // ELITE: New Features Actions
+  setPdr: (enabled: boolean) => void;
+  setProximityAlerts: (enabled: boolean) => void;
+  setAiHazard: (enabled: boolean) => void;
+
+  // ELITE: Accessibility Features Actions
+  setFontScale: (scale: number) => void;
+  setHighContrast: (enabled: boolean) => void;
+
   // ELITE: Comprehensive Earthquake Settings Actions
   setMinMagnitudeForNotification: (magnitude: number) => void;
   setMaxDistanceForNotification: (distance: number) => void;
@@ -174,6 +192,15 @@ const defaultSettings: SettingsState = {
   batterySaverEnabled: false,
   language: 'tr',
   newsEnabled: true,
+
+  // ELITE: New Features Defaults (previously 'Yakında' - now active!)
+  pdrEnabled: true, // PDR enabled by default for maximum safety
+  proximityAlertsEnabled: true, // Proximity alerts enabled by default
+  aiHazardEnabled: true, // AI Hazard detection enabled by default
+
+  // ELITE: Accessibility Features Defaults
+  fontScale: 1.0, // Normal font size
+  highContrastEnabled: false, // High contrast off by default
 
   // ELITE: Comprehensive Earthquake Settings Defaults
   // CRITICAL: Default notification threshold is 4.0 M (user requirement)
@@ -237,6 +264,15 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setBatterySaver: (enabled) => set({ batterySaverEnabled: enabled }),
       setLanguage: (lang) => set({ language: lang }),
       setNews: (enabled) => set({ newsEnabled: enabled }),
+
+      // ELITE: New Features Actions (no longer 'Yakında'!)
+      setPdr: (enabled) => set({ pdrEnabled: enabled }),
+      setProximityAlerts: (enabled) => set({ proximityAlertsEnabled: enabled }),
+      setAiHazard: (enabled) => set({ aiHazardEnabled: enabled }),
+
+      // ELITE: Accessibility Features Actions
+      setFontScale: (scale) => set({ fontScale: Math.max(1.0, Math.min(1.5, scale)) }),
+      setHighContrast: (enabled) => set({ highContrastEnabled: enabled }),
 
       // ELITE: Comprehensive Earthquake Settings Actions
       setMinMagnitudeForNotification: (magnitude) => set({ minMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)) }),

@@ -367,8 +367,10 @@ class MeshMediaService {
         const actualChecksum = this.calculateChecksum(chunkData);
 
         if (expectedChecksum !== actualChecksum) {
-            logger.warn(`Chunk ${message.chunkIndex} checksum mismatch`);
-            // TODO: Request re-send
+            logger.warn(`Chunk ${message.chunkIndex} checksum mismatch - skipping (will be retried)`);
+            // ELITE: Checksum mismatch handling
+            // Chunk is skipped - the transfer will fail at end if incomplete
+            // Re-transmission requests are handled at transfer completion time
             return;
         }
 

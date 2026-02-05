@@ -28,13 +28,13 @@ const HapticInput: React.FC<HapticInputProps> = memo(({
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
-  const handleFocus = useCallback((e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleFocus = useCallback((e: Parameters<NonNullable<TextInputProps['onFocus']>>[0]) => {
     haptics.selectionChanged();
     setIsFocused(true);
     onFocus?.(e);
   }, [onFocus]);
 
-  const handleBlur = useCallback((e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+  const handleBlur = useCallback((e: Parameters<NonNullable<TextInputProps['onBlur']>>[0]) => {
     haptics.impactLight();
     setIsFocused(false);
     onBlur?.(e);

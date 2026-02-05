@@ -24,6 +24,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { EmailAuthService } from '../../services/EmailAuthService';
 import * as Haptics from 'expo-haptics';
+import { Linking } from 'react-native';
+
+// ELITE: Email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
 
 export const EmailRegisterScreen = () => {
     const navigation = useNavigation<any>();
@@ -36,6 +41,7 @@ export const EmailRegisterScreen = () => {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleRegister = async () => {
+        // ELITE: Enhanced validation
         if (!displayName.trim()) {
             Alert.alert('Uyarı', 'Lütfen adınızı girin.');
             return;
@@ -44,12 +50,17 @@ export const EmailRegisterScreen = () => {
             Alert.alert('Uyarı', 'Lütfen e-posta ve şifrenizi girin.');
             return;
         }
+        // ELITE: Email format validation
+        if (!EMAIL_REGEX.test(email.trim())) {
+            Alert.alert('Uyarı', 'Lütfen geçerli bir e-posta adresi girin.');
+            return;
+        }
         if (password !== confirmPassword) {
             Alert.alert('Uyarı', 'Şifreler eşleşmiyor.');
             return;
         }
-        if (password.length < 6) {
-            Alert.alert('Uyarı', 'Şifre en az 6 karakter olmalıdır.');
+        if (password.length < MIN_PASSWORD_LENGTH) {
+            Alert.alert('Uyarı', `Şifre en az ${MIN_PASSWORD_LENGTH} karakter olmalıdır.`);
             return;
         }
 
@@ -63,10 +74,11 @@ export const EmailRegisterScreen = () => {
                 displayName: displayName.trim(),
             });
 
+            // ELITE: Success with navigation to login
             Alert.alert(
                 'Kayıt Başarılı',
                 'Hesabınız oluşturuldu. E-posta adresinize doğrulama bağlantısı gönderdik.',
-                [{ text: 'Tamam' }]
+                [{ text: 'Giriş Yap', onPress: () => navigation.navigate('Login') }]
             );
         } catch (error: any) {
             Alert.alert('Kayıt Hatası', error.message);
@@ -85,7 +97,19 @@ export const EmailRegisterScreen = () => {
         navigation.navigate('Login');
     };
 
-    const passwordValid = password.length >= 6;
+    // ELITE: Open external links
+    const handleOpenTerms = () => {
+        Haptics.selectionAsync();
+        Linking.openURL('https://afetnet.com/kullanim-kosullari');
+    };
+
+    const handleOpenPrivacy = () => {
+        Haptics.selectionAsync();
+        Linking.openURL('https://afetnet.com/gizlilik-politikasi');
+    };
+
+    const passwordValid = password.length >= MIN_PASSWORD_LENGTH;
+    const emailValid = EMAIL_REGEX.test(email.trim());
     const passwordsMatch = password === confirmPassword && password.length > 0;
 
     return (
@@ -205,7 +229,7 @@ export const EmailRegisterScreen = () => {
                                 size={12}
                                 color={passwordValid ? '#4CAF50' : 'rgba(255,255,255,0.3)'}
                             />
-                            <Text style={[styles.reqText, passwordValid && styles.reqMet]}>En az 6 karakter</Text>
+                            <Text style={[styles.reqText, passwordValid && styles.reqMet]}>En az {MIN_PASSWORD_LENGTH} karakter</Text>
                         </View>
                         <View style={styles.reqRow}>
                             <Ionicons
@@ -239,9 +263,13 @@ export const EmailRegisterScreen = () => {
                     </TouchableOpacity>
                 </View>
 
-                {/* Terms */}
+                {/* Terms - ELITE: Clickable links */}
                 <Text style={styles.terms}>
-                    Kayıt olarak Kullanım Koşulları ve Gizlilik Politikasını kabul etmiş olursunuz.
+                    Kayıt olarak{' '}
+                    <Text style={styles.termsLink} onPress={handleOpenTerms}>Kullanım Koşulları</Text>
+                    {' '}ve{' '}
+                    <Text style={styles.termsLink} onPress={handleOpenPrivacy}>Gizlilik Politikası</Text>
+                    'nı kabul etmiş olursunuz.
                 </Text>
             </ScrollView>
         </KeyboardAvoidingView>
@@ -377,7 +405,11 @@ const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.35)',
         textAlign: 'center',
         marginTop: 20,
-        lineHeight: 15,
+        lineHeight: 16,
+    },
+    termsLink: {
+        color: 'rgba(255, 255, 255, 0.7)',
+        textDecorationLine: 'underline',
     },
 });
 

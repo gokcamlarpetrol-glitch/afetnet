@@ -34,6 +34,9 @@ import { identityService } from '../../services/IdentityService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase } from '@react-navigation/native';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('MyQRScreen');
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const QR_SIZE = Math.min(SCREEN_WIDTH - 100, 280);
@@ -106,7 +109,7 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
                 title: 'AfetNet Kişi Bilgisi',
             });
         } catch (error) {
-            console.error('Share error:', error);
+            logger.error('Share error:', error);
             Alert.alert('Hata', 'Paylaşım başarısız. Lütfen tekrar deneyin.');
         }
     }, [qrPayload]);

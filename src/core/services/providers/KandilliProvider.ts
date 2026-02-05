@@ -1,6 +1,7 @@
 /**
  * KANDILLI PROVIDER
  * Boğaziçi Üniversitesi Kandilli Rasathanesi
+ * ELITE V2: Added circuit breaker pattern to prevent repeated failures
  */
 
 import { Earthquake } from '../../stores/earthquakeStore';
@@ -8,11 +9,44 @@ import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('KandilliProvider');
 
+// ELITE: Circuit breaker configuration to prevent spam logs when Kandilli is down
+interface CircuitBreakerState {
+  consecutiveFailures: number;
+  lastFailureTime: number;
+  isOpen: boolean; // true = circuit is open (blocking requests)
+}
+
+const CIRCUIT_BREAKER: CircuitBreakerState = {
+  consecutiveFailures: 0,
+  lastFailureTime: 0,
+  isOpen: false,
+};
+
+const MAX_CONSECUTIVE_FAILURES = 3;
+const CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown
+
 export class KandilliProvider {
   name = 'Kandilli';
 
   async fetchRecent(): Promise<Earthquake[]> {
     try {
+      // ELITE V2: Circuit breaker check - skip if too many recent failures
+      const now = Date.now();
+      if (CIRCUIT_BREAKER.isOpen) {
+        // Check if cooldown period has passed
+        if (now - CIRCUIT_BREAKER.lastFailureTime < CIRCUIT_COOLDOWN_MS) {
+          // Still in cooldown - silently skip (no log spam)
+          return [];
+        } else {
+          // Cooldown passed - reset circuit breaker and try again
+          CIRCUIT_BREAKER.isOpen = false;
+          CIRCUIT_BREAKER.consecutiveFailures = 0;
+          if (__DEV__) {
+            logger.info('🔌 Kandilli circuit breaker reset - tekrar deneniyor');
+          }
+        }
+      }
+
       // ELITE: Try multiple Kandilli endpoints (real-time data sources)
       // ELITE: Optimized endpoint order for fastest initial load
       // Start with HTTPS endpoints first (more reliable in modern networks)
@@ -129,14 +163,18 @@ export class KandilliProvider {
 
           // CRITICAL: If we got valid filtered data, return immediately (don't try other endpoints)
           if (filtered.length > 0) {
+            // ELITE V2: Reset circuit breaker on success
+            CIRCUIT_BREAKER.consecutiveFailures = 0;
+            CIRCUIT_BREAKER.isOpen = false;
+
             if (__DEV__) {
-              logger.info(`✅ Kandilli başarılı: ${filtered.length} deprem alındı (endpoint: ${url}, deneme: ${attemptCount}/${maxAttempts})`);
+              logger.info(`✅ Kandilli başarılı: ${filtered.length} deprem alındı`);
             }
             return filtered;
           } else {
             // No earthquakes after filtering - might be empty or parse error
             if (__DEV__) {
-              logger.warn(`⚠️ Kandilli parse sonucu boş: ${url} (deneme: ${attemptCount}/${maxAttempts}, parse edilen: ${earthquakes.length})`);
+              logger.debug(`⚠️ Kandilli parse sonucu boş: ${url}`);
             }
             // Continue to next endpoint
             throw new Error('No earthquakes after filtering');
@@ -169,11 +207,19 @@ export class KandilliProvider {
         }
       }
 
-      // All endpoints failed - silent fail (expected in some network conditions)
-      // Don't spam logs - this is normal if Kandilli is down or network is slow
-      if (__DEV__) {
-        logger.debug(`⚠️ Tüm Kandilli endpoint'leri başarısız oldu (${attemptCount}/${maxAttempts} deneme):`, lastError?.message || 'Unknown error');
+      // ELITE V2: All endpoints failed - track for circuit breaker
+      CIRCUIT_BREAKER.consecutiveFailures++;
+      CIRCUIT_BREAKER.lastFailureTime = Date.now();
+
+      // Open circuit if too many failures
+      if (CIRCUIT_BREAKER.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        CIRCUIT_BREAKER.isOpen = true;
+        if (__DEV__) {
+          logger.warn(`🔌 Kandilli circuit breaker açıldı - ${CIRCUIT_COOLDOWN_MS / 1000 / 60} dakika bekleniyor`);
+        }
       }
+
+      // Silent fail (expected in some network conditions)
       return [];
     } catch (error: unknown) {
       if (__DEV__) {

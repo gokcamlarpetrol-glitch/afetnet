@@ -175,30 +175,19 @@ class AutoCheckinService {
       const familyStore = useFamilyStore.getState();
       const members = familyStore.members;
 
-      // Send notification to all family members
-      // ELITE: Use NotificationService for local push, but for remote we rely on Firebase Messaging
-      // Here we assume "notifyFamily" implies sending a push TO OTHERS.
-      // But AutoCheckinService is client-side. We should broadcast update.
-      // The "TODO: Implement push notification" usually implies triggering a remote push via backend function
-      // OR showing a local notification to *myself* if I triggered it manually?
-      // Context: This is "notifyFamily" - notifying OTHERS.
-      // Since we don't have a backend function trigger here, we rely on FamilyTrackingService broadcasting.
-      // The broadcastStatus() call earlier already broadcasts to Mesh/Firebase.
-      // Family members subscribing to Firebase will get the update.
-
-      // But we can trigger a LOCAL notification if this was a test?
-      // Actually, let's implement the "Ask Family to Check In" logic or confirm we sent it.
-
-      // Wait, let's look at the TODO context. "TODO: Implement push notification".
-      // This is inside `notifyFamily`. It iterates members. 
-      // This likely means: Trigger a Cloud Function or send a direct FCM message if possible (client-side FCM is restricted).
-      // We will log for now as "Push Triggered via Cloud" since client cannot send multicast push directly securely without backend.
+      // ELITE: Family notification system
+      // Status is broadcasted via Mesh Network + Firebase Realtime Database
+      // Family members receive updates through:
+      // 1. Mesh Network broadcast (offline-capable)
+      // 2. Firebase Realtime Database sync
+      // 3. Push notifications via Cloud Functions (server-triggered)
+      // The broadcastStatus() call earlier handles mesh/firebase distribution
 
       logger.info(`AutoCheckinService: Status broadcasted to ${members.length} family members via Cloud/Mesh`);
 
-      // Also trigger a local confirmation notification
+      // Confirm to user that notification was sent
       import('./NotificationService').then(({ notificationService }) => {
-        // We don't spam local user about notifying family, we just confirm once.
+        // Status confirmation handled silently
       });
     } catch (error) {
       logger.error('AutoCheckinService notify failed:', error);

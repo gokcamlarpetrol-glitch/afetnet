@@ -13,10 +13,10 @@ import { useCompass } from '../../hooks/useCompass';
 import { calculateBearing, formatDistance } from '../../utils/mapUtils';
 
 interface RescueCompassProps {
-    userLocation: { latitude: number; longitude: number } | null;
-    targetLocation: { latitude: number; longitude: number } | null;
-    targetName: string;
-    visible: boolean;
+  userLocation: { latitude: number; longitude: number } | null;
+  targetLocation: { latitude: number; longitude: number } | null;
+  targetName: string;
+  visible: boolean;
 }
 
 const { width } = Dimensions.get('window');
@@ -140,7 +140,7 @@ export function RescueCompass({ userLocation, targetLocation, targetName, visibl
         <View style={styles.footer}>
           <Ionicons name="information-circle-outline" size={14} color={colors.text.tertiary} />
           <Text style={styles.footerText}>
-                        Telefonu yatay tutarak kalibre edin
+            Telefonu yatay tutarak kalibre edin
           </Text>
         </View>
       </View>
@@ -157,8 +157,8 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   const Δλ = (lon2 - lon1) * Math.PI / 180;
 
   const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) *
-        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c;
@@ -167,10 +167,10 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 120, // Sit above bottom sheet
+    bottom: 280, // ELITE: Sit well above bottom sheet and map controls
     alignSelf: 'center',
-    width: width * 0.9,
-    maxWidth: 400,
+    width: width * 0.85,
+    maxWidth: 360,
     zIndex: 50,
     pointerEvents: 'none', // Allow touches to pass through to map if needed, but buttons need touch
     // Actually we want touches on this panel to be blocked/handled? 

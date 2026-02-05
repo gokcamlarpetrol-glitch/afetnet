@@ -7,7 +7,7 @@
  * - Backend Reachability (Ping)
  */
 
-import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState, NetInfoSubscription } from '@react-native-community/netinfo';
 import { createLogger } from '../utils/logger';
 import { meshNetworkService } from './mesh/MeshNetworkService';
 
@@ -20,13 +20,15 @@ class ConnectionManager {
   private _isInternetReachable: boolean = false;
   private _connectionType: string | null = null;
   private listeners: ((mode: ConnectionMode) => void)[] = [];
+  // ELITE: Track NetInfo subscription for cleanup
+  private netInfoSubscription: NetInfoSubscription | null = null;
 
   constructor() {
     this.startMonitoring();
   }
 
   private startMonitoring() {
-    NetInfo.addEventListener((state: NetInfoState) => {
+    this.netInfoSubscription = NetInfo.addEventListener((state: NetInfoState) => {
       const prevMode = this.getConnectionMode();
 
       this._isConnected = state.isConnected ?? false;
@@ -84,6 +86,18 @@ class ConnectionManager {
 
   private notifyListeners(mode: ConnectionMode) {
     this.listeners.forEach(l => l(mode));
+  }
+
+  /**
+   * ELITE: Cleanup resources - call on app shutdown
+   */
+  destroy(): void {
+    if (this.netInfoSubscription) {
+      this.netInfoSubscription();
+      this.netInfoSubscription = null;
+    }
+    this.listeners = [];
+    logger.info('ConnectionManager destroyed');
   }
 }
 

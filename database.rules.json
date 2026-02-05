@@ -34,6 +34,60 @@
                 }
             }
         },
+        "seismic_reports": {
+            ".write": "auth != null",
+            ".read": true,
+            "$reportId": {
+                ".validate": "newData.hasChildren(['userId', 'timestamp', 'location', 'detection'])",
+                "userId": {
+                    ".validate": "newData.isString() && newData.val().length > 0"
+                },
+                "timestamp": {
+                    ".validate": "newData.isNumber() && newData.val() <= now"
+                },
+                "location": {
+                    "latitude": {
+                        ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+                    },
+                    "longitude": {
+                        ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+                    }
+                },
+                "detection": {
+                    "peakAcceleration": {
+                        ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
+                    },
+                    "confidence": {
+                        ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+                    },
+                    "duration": {
+                        ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300000"
+                    }
+                }
+            }
+        },
+        "active_events": {
+            ".read": true,
+            ".write": "auth != null && auth.token.admin === true",
+            ".indexOn": [
+                "lastUpdateTime"
+            ],
+            "$eventId": {
+                ".validate": "newData.hasChildren(['id', 'epicenter', 'reportCount'])"
+            }
+        },
+        "user_settings": {
+            "$userId": {
+                ".read": "auth != null && auth.uid === $userId",
+                ".write": "auth != null && auth.uid === $userId"
+            }
+        },
+        "rate_limits": {
+            "$userId": {
+                ".read": "auth != null && auth.uid === $userId",
+                ".write": "auth != null && auth.uid === $userId && (!data.exists() || data.val() < now - 5000)"
+            }
+        },
         ".read": false,
         ".write": false
     }

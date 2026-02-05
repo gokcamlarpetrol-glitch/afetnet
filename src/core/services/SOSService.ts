@@ -372,12 +372,25 @@ class SOSService {
   }
 
   /**
-   * Send to Backend - ELITE Implementation
+   * Send to Backend - ELITE V2 Implementation
    * CRITICAL: Rescue team coordination
+   * V2: Auto-initialize if not ready
    */
   private async sendToBackend(signal: SOSSignal): Promise<void> {
     try {
       const { backendEmergencyService } = await import('./BackendEmergencyService');
+
+      // V2: Auto-initialize if not ready (critical for SOS)
+      if (!backendEmergencyService.initialized) {
+        logger.warn('BackendEmergencyService not initialized for SOS, attempting auto-init...');
+        try {
+          await backendEmergencyService.initialize();
+        } catch (initError) {
+          logger.error('Backend auto-init failed for SOS:', initError);
+          // Continue - other channels still working
+        }
+      }
+
       if (backendEmergencyService.initialized) {
         await backendEmergencyService.sendEmergencyMessage({
           messageId: signal.id,
@@ -402,27 +415,58 @@ class SOSService {
   }
 
   /**
-   * Send to Firebase - ELITE Implementation
+   * Send to Firebase - ELITE V2 Implementation
    * CRITICAL: Cloud backup and real-time sync
+   * V2: Auto-initialize if not ready
    */
   private async sendToFirebase(signal: SOSSignal): Promise<void> {
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
+
+      // V2: Auto-initialize if not ready (critical for SOS)
+      if (!firebaseDataService.isInitialized) {
+        logger.warn('FirebaseDataService not initialized for SOS, attempting auto-init...');
+        try {
+          await firebaseDataService.initialize();
+        } catch (initError) {
+          logger.error('Firebase auto-init failed for SOS:', initError);
+          // Continue - BLE mesh is still working
+        }
+      }
+
       if (firebaseDataService.isInitialized) {
         // Save SOS as emergency message
         const { getDeviceId } = await import('../utils/device');
         const deviceId = await getDeviceId();
 
-        await firebaseDataService.saveMessage(deviceId, {
+        const saved = await firebaseDataService.saveMessage(deviceId, {
           id: signal.id,
           fromDeviceId: signal.userId,
           toDeviceId: 'emergency',
           content: signal.message,
           timestamp: signal.timestamp,
           type: 'sos',
-        }).catch((error) => {
-          logger.error('Failed to save SOS to Firebase:', error);
+          status: 'sent',
+          priority: 'critical',
+          // V2: Include location for rescue teams
+          ...(signal.location && {
+            metadata: {
+              latitude: signal.location.latitude,
+              longitude: signal.location.longitude,
+              accuracy: signal.location.accuracy,
+              trapped: signal.trapped,
+              batteryLevel: signal.batteryLevel,
+            }
+          }),
         });
+
+        if (saved) {
+          logger.info('✅ SOS saved to Firebase successfully');
+        } else {
+          logger.warn('SOS Firebase save returned false');
+        }
+      } else {
+        logger.warn('FirebaseDataService still not initialized after auto-init attempt - SOS continues via mesh');
       }
     } catch (error) {
       logger.error('Failed to send SOS to Firebase:', error);
@@ -648,6 +692,9 @@ class SOSService {
   stopSOSSignal(): void {
     logger.info('🛑 ELITE SOS: Stopping signal...');
 
+    // V2: Track analytics BEFORE clearing signal (fixes duration calculation bug)
+    this.trackSOSStopped();
+
     this.isActive = false;
     this.currentSignal = null;
 
@@ -672,8 +719,7 @@ class SOSService {
       this.locationBatteryCheckInterval = null;
     }
 
-    // ELITE: Track analytics
-    this.trackSOSStopped();
+    // V2: Analytics already tracked before signal cleared
 
     logger.info('✅ ELITE SOS: Signal stopped');
   }

@@ -1,47 +1,54 @@
 /**
- * HOME HEADER - ELITE EDITION
- * Status indicators with subtle pulse animations.
+ * HOME HEADER - ULTRA PREMIUM ELITE DESIGN V2
+ * Single row layout with perfect alignment
+ * Every pixel crafted for maximum impact
  */
 
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from '../../../components/SafeBlurView';
-import { useMeshStore } from '../../../stores/meshStore';
-import { bleMeshService } from '../../../services/BLEMeshService';
-import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
   withSequence,
   withTiming,
+  FadeInDown,
+  interpolate,
 } from 'react-native-reanimated';
-
-import { colors } from '../../../theme';
 
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<any>();
 
   // Greeting Logic
   const hour = new Date().getHours();
   let greetingText = 'İyi Günler';
-  if (hour < 6) greetingText = 'İyi Geceler';
-  else if (hour < 12) greetingText = 'Günaydın';
-  else if (hour > 18) greetingText = 'İyi Akşamlar';
+  let greetingIcon = 'sunny';
+  if (hour < 6) {
+    greetingText = 'İyi Geceler';
+    greetingIcon = 'moon';
+  } else if (hour < 12) {
+    greetingText = 'Günaydın';
+    greetingIcon = 'sunny';
+  } else if (hour > 18) {
+    greetingText = 'İyi Akşamlar';
+    greetingIcon = 'moon-outline';
+  }
 
-  // Real Data
-  const meshPeers = useMeshStore((state) => state.peers);
-  const isMeshRunning = bleMeshService.getIsRunning();
-  const peerCount = Object.keys(meshPeers).length;
-
-  // Status Pulse Animation
-  const statusOpacity = useSharedValue(0.5);
+  // Shimmer animation
+  const shimmer = useSharedValue(0);
+  const pulseOpacity = useSharedValue(0.5);
 
   useEffect(() => {
-    statusOpacity.value = withRepeat(
+    shimmer.value = withRepeat(
+      withTiming(1, { duration: 3000 }),
+      -1,
+      true,
+    );
+
+    pulseOpacity.value = withRepeat(
       withSequence(
         withTiming(1, { duration: 1500 }),
         withTiming(0.5, { duration: 1500 }),
@@ -51,165 +58,212 @@ export default function HomeHeader() {
     );
   }, []);
 
-  const animatedStatusStyle = useAnimatedStyle(() => ({
-    opacity: statusOpacity.value,
+  const shimmerStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(shimmer.value, [0, 0.5, 1], [0.85, 1, 0.85]),
+  }));
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
   }));
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+    <Animated.View
+      entering={FadeInDown.duration(600).springify()}
+      style={[styles.container, { paddingTop: insets.top + 8 }]}
+    >
+      {/* ROW 1: Logo + User Name */}
       <View style={styles.topRow}>
-        <View>
-          <Text style={styles.greeting}>AFETNET</Text>
-          <Text style={styles.subtitle}>TRUSTED SURVIVAL SYSTEM</Text>
+        {/* Logo */}
+        <View style={styles.logoContainer}>
+          <View style={styles.logoTextContainer}>
+            <Text style={styles.logoLetter}>A</Text>
+            <Text style={styles.logoLetter}>F</Text>
+            <Text style={styles.logoLetter}>E</Text>
+            <Text style={styles.logoLetter}>T</Text>
+            <Animated.View style={shimmerStyle}>
+              <LinearGradient
+                colors={['#10B981', '#3B82F6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.highlightGradient}
+              >
+                <Text style={styles.logoLetterHighlight}>N</Text>
+                <Text style={styles.logoLetterHighlight}>E</Text>
+                <Text style={styles.logoLetterHighlight}>T</Text>
+              </LinearGradient>
+            </Animated.View>
+          </View>
+
+          {/* Accent Line */}
+          <LinearGradient
+            colors={['#10B981', '#3B82F6', '#8B5CF6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.accentLine}
+          />
         </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          {/* Mesh Status Icon */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MeshNetwork')}
-            style={styles.meshButton}
-          >
-            <Ionicons
-              name={isMeshRunning ? "radio" : "radio-outline"}
-              size={20}
-              color={isMeshRunning ? "#10B981" : colors.text.secondary}
-            />
-            {isMeshRunning && (
-              <View style={styles.activeDot} />
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.rightSide}>
-            <Text style={styles.welcomeText}>
-              {greetingText}, <Text style={styles.userName}>Gökhan</Text>
-            </Text>
-            <View style={styles.locationContainer}>
-              <Text style={styles.locationText}>
-                İstanbul • <Text style={styles.riskText}>Risk Düşük</Text>
-              </Text>
-            </View>
+        {/* User Info */}
+        <View style={styles.userInfo}>
+          <View style={styles.greetingRow}>
+            <Ionicons name={greetingIcon as any} size={12} color="#F59E0B" />
+            <Text style={styles.greetingText}>{greetingText}</Text>
           </View>
+          <Text style={styles.userName}>Gökhan</Text>
         </View>
       </View>
 
+      {/* ROW 2: Tagline + Location/Status (SAME LINE) */}
+      <View style={styles.bottomRow}>
+        {/* Left: Tagline */}
+        <View style={styles.taglineContainer}>
+          <View style={styles.taglineIcon}>
+            <Ionicons name="shield-checkmark" size={9} color="#10B981" />
+          </View>
+          <Text style={styles.taglineText}>Hayat Kurtaran Teknoloji</Text>
+        </View>
 
-    </View>
+        {/* Right: Location + Status */}
+        <View style={styles.statusContainer}>
+          <View style={styles.locationBadge}>
+            <Ionicons name="location" size={9} color="#64748B" />
+            <Text style={styles.locationText}>İstanbul</Text>
+          </View>
+          <View style={styles.dividerDot} />
+          <View style={styles.statusBadge}>
+            <Animated.View style={[styles.statusDot, pulseStyle]} />
+            <Text style={styles.statusText}>Güvenli</Text>
+          </View>
+        </View>
+      </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 0,
+    marginBottom: 12,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  logoContainer: {
+    alignItems: 'flex-start',
+  },
+  logoTextContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8, // Reduced from 24
-    marginTop: -10, // Pull up closer to status bar
   },
-  greeting: {
-    fontSize: 32,
-    fontWeight: '300', // Slightly thicker than 200 for navy on cream
-    color: colors.text.primary, // Navy
-    letterSpacing: 2,
-    fontVariant: ['small-caps'],
-    // Removed shadows for cleaner look
+  logoLetter: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: 0.5,
   },
-  subtitle: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.text.secondary, // Slate 600
-    letterSpacing: 3,
-    marginTop: 6,
-    opacity: 0.8,
+  highlightGradient: {
+    flexDirection: 'row',
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
   },
-  rightSide: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+  logoLetterHighlight: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  accentLine: {
+    height: 2.5,
+    width: 50,
+    borderRadius: 1.25,
     marginTop: 4,
   },
-  welcomeText: {
-    fontSize: 12,
-    color: colors.text.secondary,
+  userInfo: {
+    alignItems: 'flex-end',
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  greetingText: {
+    fontSize: 11,
     fontWeight: '500',
-    marginBottom: 2,
+    color: '#64748B',
   },
   userName: {
-    color: colors.text.primary,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginTop: 1,
+    letterSpacing: -0.3,
   },
-  locationContainer: {
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  taglineContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
   },
-  locationText: {
+  taglineIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taglineText: {
     fontSize: 11,
-    color: colors.text.secondary,
-    fontWeight: '500',
-  },
-  riskText: {
-    color: '#10B981',
     fontWeight: '600',
+    color: '#64748B',
+    letterSpacing: 0.2,
   },
   statusContainer: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.05)', // Gentle border
-    backgroundColor: 'rgba(255, 255, 255, 0.4)', // Light glass
-    shadowColor: colors.shadow.color,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  statusBlur: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    gap: 6,
   },
-  statusItem: {
+  locationBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 3,
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    // Removed heavy shadows from dot
+  locationText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  dividerDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#CBD5E1',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#10B981',
   },
   statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.text.primary, // Navy
-    letterSpacing: 1,
-  },
-  divider: {
-    marginHorizontal: 20,
-  },
-  meshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.05)',
-  },
-  activeDot: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10B981',
-    borderWidth: 1,
-    borderColor: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10B981',
   },
 });

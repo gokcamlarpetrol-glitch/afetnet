@@ -211,7 +211,7 @@ class CrowdsourcingVerificationService {
   private async sendToBackend(packet: SensorDataPacket): Promise<void> {
     // ELITE: Get API base URL from ENV config (centralized)
     const { ENV } = await import('../config/env');
-    const apiBase = ENV.API_BASE_URL || 'https://afetnet-backend.onrender.com';
+    const apiBase = ENV.API_BASE_URL || ''; // DEPRECATED: Using Firebase
 
     const response = await fetch(`${apiBase}/api/sensor-data`, {
       method: 'POST',

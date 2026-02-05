@@ -507,12 +507,20 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
                       <View style={styles.pointDetails}>
                         {point.distance !== undefined && (
-                          <View style={styles.detailItem}>
-                            <Ionicons name="navigate" size={14} color={colors.text.tertiary} />
-                            <Text style={styles.detailText}>
-                              {formatDistance(point.distance)}
-                            </Text>
-                          </View>
+                          <>
+                            <View style={styles.detailItem}>
+                              <Ionicons name="navigate" size={14} color={colors.text.tertiary} />
+                              <Text style={styles.detailText}>
+                                {formatDistance(point.distance)}
+                              </Text>
+                            </View>
+                            <View style={styles.detailItem}>
+                              <Ionicons name="walk" size={14} color={colors.status.success} />
+                              <Text style={[styles.detailText, { color: colors.status.success }]}>
+                                ~{Math.ceil((point.distance / 1000) * 12)} dk
+                              </Text>
+                            </View>
+                          </>
                         )}
 
                         <View style={styles.detailItem}>
@@ -573,6 +581,70 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
             );
           })}
         </ScrollView>
+      </View>
+
+      {/* Safety Tips Banner */}
+      <View style={styles.safetyTipsBanner}>
+        <View style={styles.safetyTipsHeader}>
+          <Ionicons name="shield-checkmark" size={20} color="#22c55e" />
+          <Text style={styles.safetyTipsTitle}>Toplanma İpuçları</Text>
+        </View>
+        <View style={styles.safetyTipsList}>
+          <Text style={styles.safetyTipItem}>• Yanınıza su ve temel ihtiyaçlarınızı alın</Text>
+          <Text style={styles.safetyTipItem}>• Hasarlı binalardan uzak durun</Text>
+          <Text style={styles.safetyTipItem}>• Ailenize haber verin</Text>
+          <Text style={styles.safetyTipItem}>• Elektrik ve gaz kaynaklarından uzaklaşın</Text>
+        </View>
+      </View>
+
+      {/* Emergency Resources */}
+      <View style={styles.emergencyResourcesContainer}>
+        <Text style={styles.emergencyResourcesTitle}>Acil Numaralar</Text>
+        <View style={styles.emergencyResourcesRow}>
+          <Pressable
+            style={styles.emergencyResource}
+            onPress={() => Linking.openURL('tel:112')}
+          >
+            <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fee2e2' }]}>
+              <Ionicons name="medical" size={18} color="#ef4444" />
+            </View>
+            <Text style={styles.emergencyResourceLabel}>112</Text>
+            <Text style={styles.emergencyResourceName}>Acil</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.emergencyResource}
+            onPress={() => Linking.openURL('tel:110')}
+          >
+            <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fef3c7' }]}>
+              <Ionicons name="flame" size={18} color="#f59e0b" />
+            </View>
+            <Text style={styles.emergencyResourceLabel}>110</Text>
+            <Text style={styles.emergencyResourceName}>İtfaiye</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.emergencyResource}
+            onPress={() => Linking.openURL('tel:155')}
+          >
+            <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dbeafe' }]}>
+              <Ionicons name="shield" size={18} color="#3b82f6" />
+            </View>
+            <Text style={styles.emergencyResourceLabel}>155</Text>
+            <Text style={styles.emergencyResourceName}>Polis</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.emergencyResource}
+            onPress={() => Linking.openURL('tel:122')}
+          >
+            <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dcfce7' }]}>
+              <Ionicons name="call" size={18} color="#22c55e" />
+            </View>
+            <Text style={styles.emergencyResourceLabel}>122</Text>
+            <Text style={styles.emergencyResourceName}>AFAD</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Info Banner */}
@@ -854,5 +926,81 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     flex: 1,
     lineHeight: 18,
+  },
+  // Safety Tips Styles
+  safetyTipsBanner: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    padding: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.2)',
+  },
+  safetyTipsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  safetyTipsTitle: {
+    ...typography.body,
+    color: '#22c55e',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  safetyTipsList: {
+    gap: 4,
+  },
+  safetyTipItem: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  // Emergency Resources Styles
+  emergencyResourcesContainer: {
+    backgroundColor: colors.background.secondary,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.primary,
+  },
+  emergencyResourcesTitle: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+    fontWeight: '600',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  emergencyResourcesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  emergencyResource: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  emergencyResourceIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  emergencyResourceLabel: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  emergencyResourceName: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+    fontSize: 11,
   },
 });

@@ -1395,19 +1395,22 @@ Yapısal Not: ${context.building.description}`;
 
       let jsonStr = jsonMatch[0];
 
-      // ELITE: Fix truncated JSON by attempting to close unclosed brackets/braces
-      // This handles cases where maxTokens limit cuts off the response
+      // ELITE: Fix common JSON parsing issues
+      // 1. Remove trailing commas before } or ]
+      jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+
+      // 2. Fix truncated JSON by closing unclosed brackets/braces
       const openBraces = (jsonStr.match(/\{/g) || []).length;
       const closeBraces = (jsonStr.match(/\}/g) || []).length;
       const openBrackets = (jsonStr.match(/\[/g) || []).length;
       const closeBrackets = (jsonStr.match(/\]/g) || []).length;
 
-      // Close unclosed structures
-      if (openBraces > closeBraces) {
-        jsonStr += '}'.repeat(openBraces - closeBraces);
-      }
+      // Close unclosed structures in correct order (brackets first, then braces)
       if (openBrackets > closeBrackets) {
         jsonStr += ']'.repeat(openBrackets - closeBrackets);
+      }
+      if (openBraces > closeBraces) {
+        jsonStr += '}'.repeat(openBraces - closeBraces);
       }
 
       // ELITE: Try to parse, if it fails, try to extract valid JSON substring
@@ -1422,7 +1425,16 @@ Yapısal Not: ${context.building.description}`;
         if (firstBrace >= 0) {
           for (let i = jsonStr.length; i > firstBrace + 10; i--) {
             try {
-              const candidate = jsonStr.substring(firstBrace, i);
+              let candidate = jsonStr.substring(firstBrace, i);
+              // Remove trailing commas before attempting parse
+              candidate = candidate.replace(/,\s*([}\]])/g, '$1');
+              // Try to close any unclosed structures
+              const ob = (candidate.match(/\{/g) || []).length;
+              const cb = (candidate.match(/\}/g) || []).length;
+              const oB = (candidate.match(/\[/g) || []).length;
+              const cB = (candidate.match(/\]/g) || []).length;
+              if (oB > cB) candidate += ']'.repeat(oB - cB);
+              if (ob > cb) candidate += '}'.repeat(ob - cb);
               parsed = JSON.parse(candidate);
               break;
             } catch {
@@ -1431,9 +1443,11 @@ Yapısal Not: ${context.building.description}`;
           }
         }
 
-        // If still no valid JSON, throw original error
+        // If still no valid JSON, try a minimal valid structure
         if (!parsed) {
-          throw parseError;
+          // Return base score without AI enrichment rather than throwing
+          logger.debug('AI enrichment JSON could not be parsed, using base recommendations');
+          return score;
         }
       }
 

@@ -43,10 +43,8 @@ export function processAFADEvents(events: any[]): Earthquake[] {
     return [];
   }
 
-  // Log first 10 earthquakes in dev mode
-  if (__DEV__) {
-    logAFADEvents(sortedEvents);
-  }
+  // ELITE V2: Removed verbose logging - reduces terminal spam
+  // Only log summary at the end instead of 10 earthquakes every 5 seconds
 
   // Validate and transform earthquake data
   const earthquakes: Earthquake[] = [];

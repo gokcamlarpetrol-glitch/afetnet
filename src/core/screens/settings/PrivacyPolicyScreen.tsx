@@ -170,7 +170,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.paragraph}>
             Gizlilik ile ilgili sorularınız için:{'\n\n'}
             E-posta: privacy@afetnet.app{'\n'}
-            Web: https://gokhancamci.github.io/AfetNet1/docs/privacy-policy.html
+            Web: https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html
           </Text>
         </View>
 

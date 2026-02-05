@@ -35,17 +35,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-font",
     "expo-localization",
-    [
-      "@config-plugins/react-native-ble-plx",
-      {
-        "isBackgroundEnabled": true,
-        "modes": [
-          "peripheral",
-          "central"
-        ],
-        "bluetoothAlwaysPermission": "Allow AfetNet to connect to other devices for offline messaging."
-      }
-    ],
+    // SDK 54: expo-av replacement packages
+    "expo-audio",
+    "expo-video",
+    // SDK 54: expo-background-fetch replacement
+    "expo-background-task",
+    // NOTE: react-native-ble-plx now works natively in SDK 54+ without config plugin
     // "expo-torch", // NOTE: expo-torch doesn't have a config plugin, but works as native module
     // "expo-maps", // Disabled - react-native-maps kullanılıyor (development build gerekli)
     [
@@ -74,6 +69,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     buildNumber: "11", // Incremented for security update
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
+    usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
     jsEngine: "hermes", // Redundant but explicit
 
     infoPlist: {
@@ -98,6 +94,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-peripheral",
       ],
       ITSAppUsesNonExemptEncryption: false,
+      // ELITE: Required URL schemes for WebView and deep linking
+      LSApplicationQueriesSchemes: [
+        "about",
+        "tel",
+        "mailto",
+        "sms",
+        "http",
+        "https",
+        "maps",
+        "comgooglemaps",
+      ],
     },
     // Entitlements - Development için minimal
     // Apple Developer Portal'da capabilities aktif edilmedikçe çoğu entitlement hata verir
@@ -143,7 +150,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     ORG_SECRET: process.env.ORG_SECRET || '',
-    API_BASE_URL: process.env.API_BASE_URL || 'https://afetnet-backend.onrender.com',
+    API_BASE_URL: process.env.API_BASE_URL || '', // DEPRECATED: Using Firebase
     privacyPolicyUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/privacy-policy.html",
     termsOfServiceUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/terms-of-service.html",
     supportEmail: "support@afetnet.app",

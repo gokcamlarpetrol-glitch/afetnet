@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { hasCompletedOnboarding, setOnboardingCompleted } from '../../utils/onboardingStorage';
+import { useOnboardingStore } from '../../stores/onboardingStore';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('OnboardingScreen');
@@ -24,74 +25,84 @@ const IMAGE_ASSETS = {
   familySafety: require('../../../../assets/images/onboarding/family_safety.png'),
   sos: require('../../../../assets/images/onboarding/sos.png'),
   toolkit: require('../../../../assets/images/onboarding/toolkit.png'),
+  settingsControl: require('../../../../assets/images/onboarding/settings_control.png'),
 };
 
 const SLIDE_DATA = [
   {
     id: '1',
     title: "P-Dalga\nİstihbaratı",
-    desc: "Deprem başladığında ilk gelen zararsız P-dalgasını tespit eden gelişmiş sensör ağımız, yıkıcı S-dalgası size ulaşmadan 3-60 saniye önce sizi uyarır. Bu kritik saniyeler; masanın altına sığınmanız, gazı kapatmanız ve ailenizi korumanız için yeterlidir. Japonya Erken Uyarı Sistemi teknolojisiyle donatılmış, gerçek zamanlı sismik izleme.",
+    desc: "Deprem başladığında ilk gelen zararsız P-dalgasını tespit eden yapay zeka destekli sensör ağımız, yıkıcı S-dalgası size ulaşmadan 3-60 saniye önce sizi uyarır. AFAD, Kandilli, USGS ve EMSC'den 4 kaynaktan çapraz doğrulama. 🔬 On-device AI ile gerçek zamanlı sismik izleme - Japonya Erken Uyarı Sistemi standartlarında.",
     image: IMAGE_ASSETS.seismic,
     action: 'notification',
     buttonText: 'Hayat Kurtaran Bildirimleri Aç',
+    badge: '4 KAYNAK',
   },
   {
     id: '2',
-    title: "Hassas Konum\nKurtarır",
-    desc: "Enkaz altında kaldığınızda, kurtarma ekipleri sizi bulmak için her saniye yarışır. AfetNet, GPS + WiFi + Hücresel üçlü konum triangülasyonu ile metrelik hassasiyette konumunuzu kaydeder. Son bilinen konumunuz, bataryanız bitse bile kurtarma koordinasyon merkezine iletilir. AFAD ve 112 ile entegre çalışır.",
+    title: "Hassas Konum +\nPDR Teknolojisi",
+    desc: "Enkaz altında kaldığınızda GPS çalışmaz. AfetNet'in eşsiz PDR (Pedestrian Dead Reckoning) teknolojisi, telefonunuzun sensörleriyle adımlarınızı takip eder. GPS + WiFi + Hücresel triangülasyon + PDR = metrelik hassasiyet. Son konumunuz bataryanız bitse bile AFAD ve 112'ye iletilir.",
     image: IMAGE_ASSETS.location,
     action: 'location',
     buttonText: 'Konum Erişimi Ver',
+    badge: 'GPS+PDR',
   },
   {
     id: '3',
-    title: "Yapay Zeka\nHaber Doğrulama",
-    desc: "Afet anında sosyal medyada yayılan asılsız haberler panik yaratır. AfetNet'in gelişmiş AI algoritması, AFAD, Kandilli ve uluslararası sismoloji merkezlerinden gelen verileri çapraz doğrular. Yalnızca %99.7 doğruluk oranına sahip doğrulanmış bilgileri görürsünüz. Sahte deprem haberleri, yanlış tahliye çağrıları ve manipüle edilmiş görüntüler otomatik filtrelenir.",
+    title: "Yapay Zeka\nDoğrulama & Tehlike",
+    desc: "Afet anında sosyal medyada yayılan asılsız haberler panik yaratır. AfetNet AI'ı, resmi kaynaklardan gelen verileri çapraz doğrular (%99.7 doğruluk). Ayrıca deprem büyüklüğüne göre otomatik tehlike haritası oluşturur: göçebilecek binalar, patlayabilecek gaz hatları, çökebilecek viyadükler.",
     image: IMAGE_ASSETS.verification,
     action: null,
     buttonText: 'Anladım, Devam Et',
+    badge: 'AI TEHLİKE HARİTASI',
   },
   {
     id: '4',
     title: "Kişisel Afet\nRehberiniz",
-    desc: "24/7 yanınızda olan yapay zeka asistanınız: Evinizin deprem risk skorunu hesaplar, kişisel acil durum çantası önerir, en yakın toplanma alanını gösterir ve ailenize özel tahliye rotası oluşturur. Panik anında sakin kalmanızı sağlayan nefes egzersizleri, ilk yardım rehberleri ve enkaz altı hayatta kalma taktikleri sunar.",
+    desc: "24/7 yanınızda olan yapay zeka asistanınız: Evinizin deprem risk skorunu hesaplar, kişisel acil durum çantası önerir, en yakın toplanma alanını gösterir ve ailenize özel tahliye rotası oluşturur. Panik anında sakin kalmanızı sağlayan nefes egzersizleri, ilk yardım rehberleri ve enkaz altı hayatta kalma taktikleri. 🧠 Türkçe doğal dil anlama.",
     image: IMAGE_ASSETS.aiAssistant,
     action: null,
     buttonText: 'Rehberimi Tanıyorum',
+    badge: 'TÜRKÇE AI',
   },
   {
     id: '5',
-    title: "Mesh Network\nŞebekesiz İletişim",
-    desc: "Büyük depremlerde GSM kuleleri çöker, internet kesilir. Ama AfetNet çalışmaya devam eder! Bluetooth Low Energy mesh teknolojisi sayesinde, yakındaki AfetNet kullanıcıları arasında zincir oluşturarak mesajlarınızı kilometrelerce öteye taşır. İnternet olmadan bile ailenize 'Güvendeyim' mesajı gönderebilir, yakındaki kurtarma ekiplerinden yardım isteyebilirsiniz.",
+    title: "Mesh Network +\nYakınlık Uyarıları",
+    desc: "GSM çöktüğünde AfetNet çalışır! Bluetooth mesh ile yakındaki kullanıcılar arasında mesajlar kilometrelerce taşınır. 🆕 Yakınlık Uyarıları: Sizin algılamadığınız bir tehlike yakınınızdaki kullanıcı tarafından bildirildiğinde anında uyarılırsınız. Store & Forward + otomatik relay ile hiçbir mesaj kaybolmaz.",
     image: IMAGE_ASSETS.meshNetwork,
     action: 'bluetooth',
     buttonText: 'Mesh Ağını Aktifleştir',
+    badge: '🆕 YAKINLIK UYARILARI',
   },
   {
     id: '6',
     title: "Aile Güvenlik\nÇemberi",
-    desc: "Deprem anında en büyük endişe: Sevdikleriniz nerede? Aile Çemberi özelliği ile tüm aile üyelerinizin gerçek zamanlı konumunu harita üzerinde görün. Her üye tek tuşla 'Güvendeyim', 'Yardıma İhtiyacım Var' veya 'ACİL' durumu bildirebilir. Çocuklarınızın okulu, eşinizin işyeri - herkesin durumunu anında öğrenin. Grup sohbeti ile organize olun.",
+    desc: "Deprem anında en büyük endişe: Sevdikleriniz nerede? Aile Çemberi ile tüm aile üyelerinin gerçek zamanlı konumunu görün. Tek tuşla 'Güvendeyim', 'Yardıma İhtiyacım Var' durumu bildirin. ☁️ Firebase bulut senkronizasyonu ile cihaz değişse bile verileriniz korunur. QR kod ile 10 saniyede aile üyesi ekleyin.",
     image: IMAGE_ASSETS.familySafety,
     action: 'camera_contacts',
     buttonText: 'Ailemi Ekle',
+    badge: 'BULUT SENKRONİZASYON',
   },
   {
     id: '7',
-    title: "Tek Tuşla\nSOS Çağrısı",
-    desc: "Enkaz altındayken parmağınızı bile oynatamayabilirsiniz. AfetNet'in akıllı SOS sistemi: Widget ile kilit ekranından, ses komutuyla veya sarsıntı algılayarak otomatik olarak acil durum çağrısı başlatır. Konumunuz, sağlık bilgileriniz ve acil durum kişileriniz anında 112'ye, AFAD'a, ailenize ve yakındaki gönüllü kurtarma ekiplerine iletilir.",
+    title: "Akıllı SOS +\nWidget & Watch",
+    desc: "Enkaz altında parmağınızı oynatamayabilirsiniz. AfetNet akıllı SOS: Widget ile kilit ekranından, Apple Watch'tan, ses komutuyla veya sarsıntı algılayarak otomatik acil çağrı. Konumunuz, sağlık bilgileriniz ve ICE kişileriniz anında 112, AFAD, ailenize ve gönüllü kurtarma ekiplerine iletilir. ⌚ Tüm platformlarda!",
     image: IMAGE_ASSETS.sos,
     action: null,
     buttonText: 'Hayatımı Koruyorum',
+    badge: 'WİDGET + WATCH',
   },
   {
     id: '8',
     title: "Dijital Hayatta\nKalma Seti",
-    desc: "Cepteizde olan her şey: LED fener (SOS mors kodu ile), ultrasonik düdük (kurtarma ekiplerinin duyabileceği), çevrimdışı haritalar (internet olmadan çalışan), pusula, ilk yardım rehberi, acil durum radyo frekansları ve enkaz altı hayatta kalma rehberi. Tüm araçlar tek uygulamada, internet gerektirmeden çalışır. Telefonunuz hayatta kalma aracınız olsun.",
+    desc: "Telefonunuz hayatta kalma aracınız: LED fener (SOS mors kodu), ultrasonik düdük (kurtarma ekiplerinin frekansı), çevrimdışı haritalar, pusula, ilk yardım rehberi, acil durum radyo frekansları ve enkaz altı hayatta kalma rehberi. İnternet gerekmez! Hepsi tek uygulamada, offline çalışır.",
     image: IMAGE_ASSETS.toolkit,
     action: null,
-    buttonText: 'Deneyime Başla',
+    buttonText: 'Araçları Keşfet',
+    badge: 'OFFLİNE ÇALIŞIR',
   },
 ];
+
 
 // ELITE: Total slide count for pagination
 const TOTAL_SLIDES = SLIDE_DATA.length;
@@ -104,14 +115,11 @@ export const OnboardingScreen = () => {
   const handleNext = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const nextPage = currentPage + 1;
-    // ELITE: Navigate to Login when reaching end of slides
+    // ELITE: Complete onboarding - CoreApp will switch to MainNavigator
     if (nextPage >= TOTAL_SLIDES) {
       await setOnboardingCompleted();
-      // Navigate to separate Login screen for proper navigation stack
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
+      // Set store state to trigger navigation in CoreApp
+      useOnboardingStore.getState().setCompleted(true);
       return;
     }
     pagerRef.current?.setPage(nextPage);
@@ -127,15 +135,12 @@ export const OnboardingScreen = () => {
     const checkOnboardingStatus = async () => {
       const hasCompleted = await hasCompletedOnboarding();
       if (hasCompleted) {
-        // ELITE: Navigate directly to Login if onboarding completed
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
+        // ELITE: Complete via store - CoreApp will switch to MainNavigator
+        useOnboardingStore.getState().setCompleted(true);
       }
     };
     checkOnboardingStatus();
-  }, [navigation]);
+  }, []);
 
   const handlePermissionRequest = async (type: string | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -243,6 +248,13 @@ export const OnboardingScreen = () => {
                 key={`text-${index}`}
                 style={styles.textWrapper}
               >
+                {/* ELITE: Premium Badge */}
+                {slide.badge && (
+                  <View style={styles.badgeContainer}>
+                    <Text style={styles.badgeText}>{slide.badge}</Text>
+                  </View>
+                )}
+
                 {/* ELITE: Luxury Magazine Typography */}
                 <Text style={styles.eyebrow}>AFETNET</Text>
                 <Text style={styles.title}>{slide.title}</Text>
@@ -344,6 +356,23 @@ const styles = StyleSheet.create({
   textWrapper: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  // ELITE: Premium Badge - Glassmorphism style
+  badgeContainer: {
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.4)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginBottom: 16,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(212, 175, 55, 0.95)',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   // ELITE: Luxury Magazine Eyebrow
   eyebrow: {

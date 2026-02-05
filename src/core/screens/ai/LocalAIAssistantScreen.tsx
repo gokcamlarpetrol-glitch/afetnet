@@ -1,85 +1,161 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { localAIService } from '../../services/ai/LocalAIService';
+import { aiAssistantCoordinator, HybridAIResponse } from '../../ai/services/AIAssistantCoordinator';
+import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 import * as haptics from '../../utils/haptics';
 
 // ELITE: Typed navigation and interfaces
 type LocalAINavigationProp = StackNavigationProp<Record<string, object>>;
-
-// ELITE: Decision node for AI conversation tree
-interface DecisionNode {
-  id: string;
-  question: string;
-  options?: string[];
-  next?: DecisionNode;
-}
 
 interface Message {
   id: string;
   text: string;
   sender: 'user' | 'ai';
   timestamp: number;
-  decisionNode?: DecisionNode;
-  suggestions?: string[];
-  isOnline?: boolean;
+  source?: 'openai' | 'offline' | 'hybrid';
+  emergencyLevel?: 'normal' | 'urgent' | 'critical';
+  responseTime?: number;
+  suggestedActions?: SuggestedAction[];
 }
 
+interface SuggestedAction {
+  id: string;
+  label: string;
+  icon: string;
+  action: 'call' | 'navigate' | 'share' | 'info';
+  data?: string;
+}
+
+// ELITE: Expanded quick scenarios for all emergency situations
 const QUICK_SCENARIOS = [
-  { id: 's1', label: 'Gaz Kokusu', icon: 'flame', intent: 'Gaz sızıntısı var ne yapmalıyım?' },
-  { id: 's2', label: 'Enkaz', icon: 'cube', intent: 'Enkaz altındayım' },
-  { id: 's3', label: 'Bebek Boğulma', icon: 'medkit', intent: 'Bebek boğuluyor heimlich' },
-  { id: 's4', label: 'Toplanma', icon: 'people', intent: 'Toplanma alanı neresi?' },
+  // Critical Emergency
+  { id: 's1', label: '🚨 Deprem!', icon: 'pulse', intent: 'Deprem oluyor ne yapmalıyım?' },
+  { id: 's2', label: '🏚️ Enkaz', icon: 'cube', intent: 'Enkaz altındayım yardım edin' },
+  { id: 's3', label: '🔥 Yangın', icon: 'flame', intent: 'Yangın var ne yapmalıyım?' },
+  { id: 's4', label: '🌊 Sel', icon: 'water', intent: 'Sel baskını var ne yapmalıyım?' },
+
+  // First Aid
+  { id: 's5', label: '🩹 İlk Yardım', icon: 'medkit', intent: 'İlk yardım nasıl yapılır?' },
+  { id: 's6', label: '🩸 Kanama', icon: 'water', intent: 'Kanama durdurmak için ne yapmalıyım?' },
+  { id: 's7', label: '💔 CPR', icon: 'heart-dislike', intent: 'CPR nasıl yapılır?' },
+  { id: 's8', label: '🦴 Kırık', icon: 'bandage', intent: 'Kırık durumunda ne yapmalı?' },
+
+  // Safety & Preparation
+  { id: 's9', label: '📍 Toplanma', icon: 'location', intent: 'Toplanma alanı neresi?' },
+  { id: 's10', label: '📋 Hazırlık', icon: 'list', intent: 'Depreme nasıl hazırlanmalıyım?' },
+  { id: 's11', label: '🎒 Çanta', icon: 'briefcase', intent: 'Acil durum çantasında ne olmalı?' },
+  { id: 's12', label: '👨‍👩‍👧 Aile', icon: 'people', intent: 'Aile acil durum planı nasıl yapılır?' },
+
+  // Psychological Support
+  { id: 's13', label: '😰 Panik', icon: 'heart', intent: 'Panik atak geçiriyorum ne yapmalıyım?' },
+  { id: 's14', label: '👧 Çocuk', icon: 'happy', intent: 'Çocuğumu nasıl sakinleştiririm?' },
+
+  // Specific Situations
+  { id: 's15', label: '💨 Gaz', icon: 'cloud', intent: 'Gaz sızıntısı var ne yapmalıyım?' },
+  { id: 's16', label: '⚡ Elektrik', icon: 'flash', intent: 'Elektrik çarpması durumunda ne yapmalı?' },
 ];
 
 export default function LocalAIAssistantScreen({ navigation }: { navigation: LocalAINavigationProp }) {
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Message[]>([
-    { id: 'welcome', text: 'Merhaba! Ben Afet Asistanı. Hem online hem offline modda hizmetinizdeyim.', sender: 'ai', timestamp: Date.now() },
+    {
+      id: 'welcome',
+      text: '👋 Merhaba! Ben AfetNet Yapay Zeka Asistanı.\n\n🌍 **Deprem & Afet Güvenliği**\nDeprem öncesi, sırası ve sonrası yapılması gerekenler\n\n🏥 **İlk Yardım Rehberi**\nKanama, kırık, yanık, CPR ve acil müdahale\n\n📋 **Hazırlık Planı**\nAcil durum çantası, aile planı, toplanma alanları\n\n💚 **Psikolojik Destek**\nPanik yönetimi, çocukları sakinleştirme\n\n✅ Hem **online** hem **offline** modda çalışıyorum!\n\n👆 Yukarıdaki hızlı erişim butonlarını kullanın veya sorunuzu yazın.',
+      sender: 'ai',
+      timestamp: Date.now(),
+      source: 'offline',
+    },
   ]);
   const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isOnlineMode, setIsOnlineMode] = useState(true); // Mock connectivity
+  const [isOnlineMode, setIsOnlineMode] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
-  // Initial check
+  // ELITE: Check actual network connectivity
   useEffect(() => {
-    // In real app, listen to NetInfo
+    checkConnectivity();
   }, []);
 
-  const toggleConnectivity = () => {
+  const checkConnectivity = async () => {
+    try {
+      const online = await aiAssistantCoordinator.isOnline();
+      setIsOnlineMode(online);
+    } catch {
+      setIsOnlineMode(false);
+    }
+  };
+
+  const toggleConnectivity = async () => {
     haptics.selectionChanged();
-    setIsOnlineMode(!isOnlineMode);
+    await checkConnectivity();
   };
 
   const handleSend = async (textOverride?: string) => {
     const text = textOverride || inputText.trim();
     if (!text) return;
 
-    const userMsg: Message = { id: Math.random().toString(), text, sender: 'user', timestamp: Date.now() };
+    const userMsg: Message = {
+      id: Math.random().toString(),
+      text,
+      sender: 'user',
+      timestamp: Date.now()
+    };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
+    setIsTyping(true);
     haptics.impactLight();
 
     setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
 
     try {
-      // Call Hybrid Service
-      const response = await localAIService.query(text, undefined, !isOnlineMode);
+      // ELITE: Use new hybrid AI coordinator
+      const response: HybridAIResponse = await aiAssistantCoordinator.chat(text);
 
       const aiMsg: Message = {
         id: Math.random().toString(),
-        text: response.text,
+        text: response.answer,
         sender: 'ai',
         timestamp: Date.now(),
-        isOnline: response.isOnline !== false, // default true unless explicitly false
+        source: response.source,
+        emergencyLevel: response.emergencyLevel,
+        responseTime: response.responseTime,
+        suggestedActions: response.suggestedActions,
       };
+
+      // ELITE: Emergency haptic feedback
+      if (response.emergencyLevel === 'critical') {
+        haptics.notificationError();
+      } else if (response.emergencyLevel === 'urgent') {
+        haptics.notificationWarning();
+      } else {
+        haptics.notificationSuccess();
+      }
+
       setMessages(prev => [...prev, aiMsg]);
+
+      // ELITE: Track AI conversation metrics
+      firebaseAnalyticsService.logEvent('ai_conversation', {
+        source: response.source,
+        response_time_ms: response.responseTime,
+        emergency_level: response.emergencyLevel,
+        query_length: text.length,
+      });
     } catch (e) {
-      setMessages(prev => [...prev, { id: Math.random().toString(), text: 'Bir hata oluştu.', sender: 'ai', timestamp: Date.now() }]);
+      haptics.notificationError();
+      setMessages(prev => [...prev, {
+        id: Math.random().toString(),
+        text: '⚠️ Bir hata oluştu. Acil durumlarda 112\'yi arayın.',
+        sender: 'ai',
+        timestamp: Date.now(),
+        emergencyLevel: 'urgent',
+      }]);
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -87,7 +163,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     haptics.impactMedium();
     if (isListening) {
       setIsListening(false);
-      handleSend("Sesli komut simülasyonu: Yardım edin!");
+      handleSend("Deprem oluyor ne yapmalıyım?");
     } else {
       setIsListening(true);
     }
@@ -95,25 +171,43 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === 'user';
+    const isEmergency = item.emergencyLevel === 'critical';
+    const isUrgent = item.emergencyLevel === 'urgent';
+
     return (
-      <View style={{ marginBottom: 20 }}>
-        <View style={[styles.messageBubble, isUser ? styles.messageUser : styles.messageAi]}>
-          <Text style={[styles.messageText, isUser ? styles.messageTextUser : styles.messageTextAi]}>{item.text}</Text>
-          {!isUser && (
+      <View style={{ marginBottom: 16 }}>
+        <View style={[
+          styles.messageBubble,
+          isUser ? styles.messageUser : styles.messageAi,
+          isEmergency && styles.messageEmergency,
+          isUrgent && styles.messageUrgent,
+        ]}>
+          <Text style={[
+            styles.messageText,
+            isUser ? styles.messageTextUser : styles.messageTextAi
+          ]}>{item.text}</Text>
+
+          {/* Source indicator */}
+          {!isUser && item.source && (
             <View style={styles.sourceTag}>
-              <Ionicons name={item.isOnline ? "cloud-done" : "save"} size={10} color={item.isOnline ? "#10b981" : "#f59e0b"} />
-              <Text style={[styles.sourceText, { color: item.isOnline ? "#059669" : "#d97706" }]}>
-                {item.isOnline ? "AI (Canlı)" : "Offline Veri"}
+              <Ionicons
+                name={item.source === 'openai' ? 'cloud' : item.source === 'hybrid' ? 'globe' : 'save'}
+                size={10}
+                color={item.source === 'offline' ? '#f59e0b' : '#10b981'}
+              />
+              <Text style={[styles.sourceText, {
+                color: item.source === 'offline' ? '#d97706' : '#059669'
+              }]}>
+                {item.source === 'openai' ? 'GPT-4' : item.source === 'hybrid' ? 'Hibrit' : 'Offline'}
+                {item.responseTime ? ` • ${item.responseTime}ms` : ''}
               </Text>
             </View>
           )}
         </View>
-        {!isUser && item.timestamp === messages[messages.length - 1].timestamp && (
-          <Text style={styles.timestamp}>Şimdi</Text>
-        )}
       </View>
     );
   };
+
 
   return (
     <ImageBackground
@@ -170,6 +264,13 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
           offset: 100 * index,
           index,
         })}
+        // ELITE: Typing indicator
+        ListFooterComponent={isTyping ? (
+          <View style={[styles.messageBubble, styles.messageAi, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+            <ActivityIndicator size="small" color="#8b5cf6" />
+            <Text style={[styles.messageTextAi, { opacity: 0.7 }]}>Düşünüyorum...</Text>
+          </View>
+        ) : null}
       />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -219,6 +320,10 @@ const styles = StyleSheet.create({
   messageText: { fontSize: 15, lineHeight: 24 },
   messageTextUser: { color: '#fff' },
   messageTextAi: { color: '#4c1d95' },
+  // ELITE: Emergency state styles
+  messageEmergency: { backgroundColor: '#fef2f2', borderWidth: 2, borderColor: '#ef4444' },
+  messageUrgent: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#f59e0b' },
+
 
   sourceTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, opacity: 0.8 },
   sourceText: { fontSize: 10, fontWeight: '700' },

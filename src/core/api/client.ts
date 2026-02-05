@@ -33,16 +33,27 @@ interface RequestOptions {
 
 export class APIClient {
   private baseURL: string;
+  private isDisabled: boolean = false;
 
   constructor(baseURL: string = API_BASE_URL) {
-    // ELITE: Validate baseURL
+    // ELITE: Handle empty baseURL gracefully (Firebase is now backend)
     if (!baseURL || typeof baseURL !== 'string' || !baseURL.startsWith('http')) {
-      throw new Error('Invalid API base URL');
+      // Don't throw error - just disable API calls and use Firebase
+      this.baseURL = '';
+      this.isDisabled = true;
+      console.info('[APIClient] Legacy API disabled - using Firebase backend');
+    } else {
+      this.baseURL = baseURL.replace(/\/$/, ''); // Remove trailing slash
     }
-    this.baseURL = baseURL.replace(/\/$/, ''); // Remove trailing slash
   }
 
   async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+    // ELITE: Return empty object if API is disabled (using Firebase instead)
+    if (this.isDisabled) {
+      console.debug('[APIClient] Request skipped - using Firebase backend');
+      return {} as T;
+    }
+
     const {
       method = 'GET',
       body,
@@ -57,75 +68,105 @@ export class APIClient {
     }
 
     const url = `${this.baseURL}${sanitizedEndpoint}`;
-    const timestamp = Date.now().toString();
 
-    // Prepare request
-    const requestHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'X-Timestamp': timestamp,
-      'X-App-Version': ENV.APP_VERSION,
-      ...headers,
-    };
+    // ELITE: Retry with exponential backoff for transient failures
+    const MAX_RETRIES = 3;
+    const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+    let lastError: APIError | null = null;
 
-    // HMAC signature (simplified - in production use proper crypto)
-    if (API_SECRET) {
-      const payload = JSON.stringify(body || {});
-      const signature = await this.generateSignature(timestamp, payload);
-      requestHeaders['X-Signature'] = signature;
-    }
-
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      const response = await fetch(url, {
-        method,
-        headers: requestHeaders,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        // ELITE: Try to parse error response for better error messages
-        const errorBody = await response.text(); // Get raw error body
-        let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-        try {
-          const jsonError = JSON.parse(errorBody);
-          errorMessage = jsonError.message || jsonError.error || errorMessage;
-        } catch {
-          // If not JSON, use raw text
-          errorMessage = errorBody || errorMessage;
-        }
-        throw new APIError(errorMessage, response.status);
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      // Exponential backoff: 0ms, 1000ms, 2000ms
+      if (attempt > 0) {
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
 
-      // ELITE: Handle empty responses gracefully
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const data = await response.json();
-        return data as T;
-      } else {
-        // Non-JSON response (e.g., 204 No Content)
+      const timestamp = Date.now().toString();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-Timestamp': timestamp,
+        'X-App-Version': ENV.APP_VERSION,
+        ...headers,
+      };
+
+      // HMAC signature
+      if (API_SECRET) {
+        const payload = JSON.stringify(body || {});
+        const signature = await this.generateSignature(timestamp, payload);
+        requestHeaders['X-Signature'] = signature;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: requestHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+          try {
+            const jsonError = JSON.parse(errorBody);
+            errorMessage = jsonError.message || jsonError.error || errorMessage;
+          } catch {
+            errorMessage = errorBody || errorMessage;
+          }
+
+          const error = new APIError(errorMessage, response.status);
+
+          // Check if retryable
+          if (RETRYABLE_STATUS_CODES.includes(response.status) && attempt < MAX_RETRIES - 1) {
+            lastError = error;
+            continue; // Retry
+          }
+
+          throw error;
+        }
+
+        // Success
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          return await response.json() as T;
+        }
         return {} as T;
-      }
-    } catch (error: unknown) {
-      clearTimeout(timeoutId);
 
-      if (error instanceof APIError) {
-        throw error; // Re-throw custom API errors
-      } else if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          throw new APIError('Request timeout', 408); // Use 408 for timeout
+      } catch (error: unknown) {
+        clearTimeout(timeoutId);
+
+        if (error instanceof APIError) {
+          // Non-retryable API error
+          if (!RETRYABLE_STATUS_CODES.includes(error.statusCode || 0)) {
+            throw error;
+          }
+          lastError = error;
+        } else if (error instanceof Error) {
+          if (error.name === 'AbortError') {
+            lastError = new APIError('Request timeout', 408);
+          } else {
+            // Network errors are retryable
+            lastError = new APIError(error.message, 0, error);
+          }
+        } else {
+          lastError = new APIError('Unknown error', 0, error);
         }
-        throw new APIError(error.message, 0, error); // Wrap generic errors
-      }
 
-      throw new APIError('Unknown error', 0, error); // Catch all other errors
+        // Continue to next retry if not last attempt
+        if (attempt === MAX_RETRIES - 1) {
+          throw lastError;
+        }
+      }
     }
+
+    // Should never reach here, but TypeScript wants a return
+    throw lastError || new APIError('Request failed after retries', 0);
   }
 
   private async generateSignature(timestamp: string, payload: string): Promise<string> {

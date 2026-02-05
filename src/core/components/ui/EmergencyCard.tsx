@@ -13,7 +13,7 @@ const severityColorMap = {
   info: palette.status.info,
 };
 
-export default function EmergencyCard({ alert }: EmergencyCardProps) {
+const EmergencyCard = React.memo(function EmergencyCard({ alert }: EmergencyCardProps) {
   const severityText = alert.severity === 'danger' ? 'Tehlikeli' : alert.severity === 'warning' ? 'Uyarı' : 'Bilgi';
 
   return (
@@ -31,7 +31,9 @@ export default function EmergencyCard({ alert }: EmergencyCardProps) {
       <Text style={styles.timestamp}>{new Date(alert.timestamp).toLocaleTimeString('tr-TR')}</Text>
     </View>
   );
-}
+});
+
+export default EmergencyCard;
 
 const styles = StyleSheet.create({
   container: {

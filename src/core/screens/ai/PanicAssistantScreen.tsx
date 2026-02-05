@@ -195,33 +195,88 @@ export default function PanicAssistantScreen() {
     );
   };
 
+  // ELITE: Earthquake step-by-step guide
+  const EARTHQUAKE_STEPS = [
+    { id: 1, title: 'ÇÖMEL', icon: 'body', color: '#ef4444', desc: 'Hemen yere çömelip el ve dizlerinizin üzerine inin.' },
+    { id: 2, title: 'KAPAN', icon: 'shield', color: '#f59e0b', desc: 'Sağlam bir masa veya mobilyanın altına girin. Kapı eşiği yanıltıcı.' },
+    { id: 3, title: 'TUTUN', icon: 'hand-left', color: '#10b981', desc: 'Sarsıntı durana kadar yerinizde kalın ve tutunun.' },
+    { id: 4, title: 'BEKLE', icon: 'time', color: '#3b82f6', desc: 'Artçılar bitene kadar sabırlı olun, panik yapmayın.' },
+  ];
+
+  // ELITE: Hazard-specific content
+  const HAZARD_CONTENT: Record<HazardType, { title: string; steps: string[] }> = {
+    earthquake: { title: 'Deprem', steps: ['Çömel-Kapan-Tutun', '112\'yi arayın', 'Gaz vanasını kapatın', 'Toplanma alanına gidin'] },
+    medical: { title: 'Tıbbi Acil', steps: [] },
+    nuclear: { title: 'Nükleer Tehlike', steps: ['İç mekana geçin', 'Kapı ve camları kapatın', 'İyot tableti alın', 'Radyo haberleri dinleyin'] },
+    biohazard: { title: 'Biyolojik Tehdit', steps: ['Maske takın', 'El hijyenine dikkat', 'Kalabalıktan uzak durun', 'Sağlık kuruluşuna başvurun'] },
+    tsunami: { title: 'Tsunami', steps: ['Yüksek yere çıkın', 'Kıyıdan uzaklaşın', 'Dalga geçene kadar bekleyin', '6 saat boyunca geri dönmeyin'] },
+    fire: { title: 'Yangın', steps: ['Eğilerek ilerleyin', 'Sıcak kapıya dokunmayın', 'Islak bez kullanın', 'Pencereden sinyal verin'] },
+    extreme_weather: { title: 'Aşırı Hava', steps: ['İç mekanda kalın', 'Pencerelerden uzak durun', 'Acil kit hazırlayın', 'Yetkililerden haber bekleyin'] },
+  };
+
   const renderEarthquakeContent = () => {
     if (panicAssistantLoading) return <ActivityIndicator color="#fb7185" size="large" style={{ marginTop: 50 }} />;
-    if (!panicAssistant) return <Text style={styles.emptyText}>Bekleniyor...</Text>;
+
     return (
       <View style={styles.contentSection}>
-        <View style={styles.progressCard}>
-          <Text style={styles.progressTitle}>DEPREM PLANI</Text>
-          <Text style={styles.progressSubtitle}>{panicAssistant.progressPercentage}% Tamamlandı</Text>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${panicAssistant.progressPercentage}%` }]} />
-          </View>
+        {/* Step-by-step cards */}
+        <Text style={styles.sectionHeader}>ACİL EYLEM PLANI</Text>
+        <View style={{ gap: 12 }}>
+          {EARTHQUAKE_STEPS.map((step, index) => (
+            <Animated.View
+              key={step.id}
+              style={[styles.stepCard, { borderLeftColor: step.color }]}
+            >
+              <View style={[styles.stepNumber, { backgroundColor: step.color }]}>
+                <Text style={styles.stepNumberText}>{index + 1}</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <View style={styles.stepHeader}>
+                  <Ionicons name={step.icon as any} size={20} color={step.color} />
+                  <Text style={[styles.stepTitle, { color: step.color }]}>{step.title}</Text>
+                </View>
+                <Text style={styles.stepDesc}>{step.desc}</Text>
+              </View>
+            </Animated.View>
+          ))}
         </View>
 
-        <Text style={styles.sectionHeader}>Adımlar</Text>
-        {panicAssistant.actions.slice(0, 5).map(action => (
-          <TouchableOpacity key={action.id} style={styles.actionRow} onPress={() => haptics.impactLight()}>
-            <View style={[styles.iconBox, { backgroundColor: action.completed ? '#ecfdf5' : '#fff1f2' }]}>
-              <Ionicons name={action.completed ? 'checkmark' : 'alert-outline'} size={18} color={action.completed ? '#10b981' : '#fb7185'} />
+        {/* Progress Card */}
+        {panicAssistant && (
+          <View style={[styles.progressCard, { marginTop: 20 }]}>
+            <Text style={styles.progressTitle}>HAZIRLIK DURUMU</Text>
+            <Text style={styles.progressSubtitle}>{panicAssistant.progressPercentage}% Tamamlandı</Text>
+            <View style={styles.progressBarBg}>
+              <View style={[styles.progressBarFill, { width: `${panicAssistant.progressPercentage}%` }]} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.actionText, action.completed && { textDecorationLine: 'line-through', opacity: 0.4 }]}>{action.text}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
+          </View>
+        )}
       </View>
     );
   };
+
+  // ELITE: Render content for other hazards
+  const renderOtherHazardContent = () => {
+    const content = HAZARD_CONTENT[activeHazard];
+    if (!content || content.steps.length === 0) return null;
+
+    return (
+      <View style={styles.contentSection}>
+        <Text style={styles.sectionHeader}>{content.title.toUpperCase()} REHBERİ</Text>
+        <View style={{ gap: 12 }}>
+          {content.steps.map((step, index) => (
+            <View key={index} style={styles.hazardStep}>
+              <View style={styles.hazardStepNumber}>
+                <Text style={styles.hazardStepNumberText}>{index + 1}</Text>
+              </View>
+              <Text style={styles.hazardStepText}>{step}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
 
   return (
     <ImageBackground
@@ -265,6 +320,7 @@ export default function PanicAssistantScreen() {
         <View style={{ marginTop: 0 }}>
           {activeHazard === 'earthquake' && renderEarthquakeContent()}
           {activeHazard === 'medical' && renderMedicalContent()}
+          {!['earthquake', 'medical'].includes(activeHazard) && renderOtherHazardContent()}
         </View>
       </ScrollView>
 
@@ -320,4 +376,19 @@ const styles = StyleSheet.create({
   optionText: { color: '#e11d48', fontWeight: '600', fontSize: 15 },
   resetBtn: { marginTop: 16, alignSelf: 'center', padding: 10 },
   resetBtnText: { color: '#f43f5e', fontWeight: '600', fontSize: 13, letterSpacing: 0.5 },
+
+  // ELITE: Step card styles
+  stepCard: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 18, gap: 14, borderLeftWidth: 4 },
+  stepNumber: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  stepNumberText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  stepContent: { flex: 1 },
+  stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  stepTitle: { fontSize: 16, fontWeight: '800', letterSpacing: 1 },
+  stepDesc: { fontSize: 13, color: '#64748b', lineHeight: 18 },
+
+  // ELITE: Hazard step styles
+  hazardStep: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 16, gap: 14 },
+  hazardStepNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#fecdd3', alignItems: 'center', justifyContent: 'center' },
+  hazardStepNumberText: { color: '#be123c', fontSize: 13, fontWeight: '700' },
+  hazardStepText: { fontSize: 15, fontWeight: '500', color: '#525252', flex: 1 },
 });

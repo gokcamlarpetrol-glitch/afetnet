@@ -14,14 +14,14 @@ const logger = createLogger('NotificationPermissionHandler');
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined' | 'unavailable';
 
 export interface PermissionResult {
-    status: PermissionStatus;
-    canAskAgain: boolean;
-    iosSettings?: {
-        alert: boolean;
-        badge: boolean;
-        sound: boolean;
-        criticalAlert: boolean;
-    };
+  status: PermissionStatus;
+  canAskAgain: boolean;
+  iosSettings?: {
+    alert: boolean;
+    badge: boolean;
+    sound: boolean;
+    criticalAlert: boolean;
+  };
 }
 
 /**
@@ -170,7 +170,7 @@ export async function getExpoPushToken(): Promise<string | null> {
 
     // Get Expo push token
     const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: process.env.EXPO_PUBLIC_PROJECT_ID,
+      projectId: '072f1217-172a-40ce-af23-3fc0ad3f7f09', // EAS Project ID
     });
 
     return tokenData.data;

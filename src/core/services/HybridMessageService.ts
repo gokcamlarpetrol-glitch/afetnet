@@ -25,7 +25,7 @@
 import { createLogger } from '../utils/logger';
 import { connectionManager } from './ConnectionManager';
 import { meshNetworkService } from './mesh/MeshNetworkService';
-import { MeshMessageType } from './mesh/MeshProtocol';
+import { MeshMessageType, MeshPriority } from './mesh/MeshProtocol';
 import { identityService } from './IdentityService';
 import { deliveryManager } from './DeliveryManager';
 import { cryptoService } from './CryptoService';
@@ -469,10 +469,9 @@ class HybridMessageService {
 
   /**
    * M5: Evict oldest low-priority messages
+   * ELITE: Fixed splice index shifting - remove from highest index first
    */
   private evictOldMessages(count: number): number {
-    let evicted = 0;
-
     // Sort by priority (low first) then by timestamp (oldest first)
     const sortedIndices = this.queue
       .map((msg, index) => ({ msg, index }))
@@ -482,16 +481,21 @@ class HybridMessageService {
         return a.msg.timestamp - b.msg.timestamp; // Older first
       });
 
-    for (let i = 0; i < Math.min(count, sortedIndices.length); i++) {
-      const toRemove = sortedIndices[i];
-      if (toRemove.msg.priority !== 'critical') {
-        this.queue.splice(toRemove.index, 1);
-        evicted++;
-        logger.warn(`Evicted message ${toRemove.msg.id} due to queue overflow`);
-      }
+    // ELITE: Get indices to remove, filter out critical, sort descending
+    const indicesToRemove = sortedIndices
+      .slice(0, count)
+      .filter(item => item.msg.priority !== 'critical')
+      .map(item => item.index)
+      .sort((a, b) => b - a); // Descending order to avoid index shifting
+
+    // Remove from highest index first
+    for (const idx of indicesToRemove) {
+      const removed = this.queue[idx];
+      this.queue.splice(idx, 1);
+      logger.warn(`Evicted message ${removed.id} due to queue overflow`);
     }
 
-    return evicted;
+    return indicesToRemove.length;
   }
 
   /**
@@ -514,7 +518,10 @@ class HybridMessageService {
   }
 
   /**
-   * Internal send logic with multi-channel support
+   * ELITE V5: Internal send logic with multi-channel support
+   * - Auto-initialize Firebase if not ready
+   * - SOS messages get priority treatment
+   * - Store-and-Forward integration
    */
   private async attemptSend(message: HybridMessage): Promise<boolean> {
     const isOnline = connectionManager.isOnline;
@@ -522,19 +529,41 @@ class HybridMessageService {
     let cloudSuccess = false;
 
     try {
-      // 1. Always try MESH (local/offline priority)
+      // 1. MESH LAYER: Always try (offline-first priority)
       try {
-        meshNetworkService.broadcastMessage(message.content, MeshMessageType.TEXT);
+        const meshType = message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT;
+        await meshNetworkService.broadcastMessage(message.content, meshType);
         meshSuccess = true;
-        logger.debug('Mesh broadcast successful');
+        logger.debug(`Mesh broadcast successful (type: ${meshType})`);
+
+        // V5: Store-and-Forward for offline peers
+        if (message.recipientId) {
+          try {
+            const { meshStoreForwardService } = await import('./mesh/MeshStoreForwardService');
+            await meshStoreForwardService.storeForPeer(
+              message.recipientId,
+              message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT,
+              message.content,
+              { priority: message.priority === 'critical' ? MeshPriority.CRITICAL : MeshPriority.NORMAL }
+            );
+          } catch {
+            // Silent fail - Store-Forward is optional enhancement
+          }
+        }
       } catch (meshError) {
         logger.warn('Mesh broadcast failed:', meshError);
       }
 
-      // 2. Try CLOUD if online
+      // 2. CLOUD LAYER: Try if online
       if (isOnline) {
         try {
           const { firebaseDataService } = await import('./FirebaseDataService');
+
+          // V5: Auto-initialize if not ready
+          if (!firebaseDataService.isInitialized) {
+            logger.info('FirebaseDataService not initialized, attempting auto-init...');
+            await firebaseDataService.initialize();
+          }
 
           if (firebaseDataService.isInitialized) {
             const messageData = {
@@ -543,24 +572,45 @@ class HybridMessageService {
               toDeviceId: message.recipientId || 'broadcast',
               content: message.content,
               timestamp: message.timestamp,
-              type: 'text' as const,
+              type: message.type === 'SOS' ? 'sos' as const : 'text' as const,
               status: 'sent' as const,
               priority: message.priority,
+              // V5: Include location for SOS
+              ...(message.location && { location: message.location }),
             };
-            await firebaseDataService.saveMessage(message.senderId, messageData);
-            cloudSuccess = true;
-            logger.debug('Cloud send successful');
+
+            const saved = await firebaseDataService.saveMessage(message.senderId, messageData);
+            if (saved) {
+              cloudSuccess = true;
+              logger.debug('Cloud send successful');
+            } else {
+              logger.warn('Cloud save returned false');
+            }
+          } else {
+            logger.warn('FirebaseDataService still not initialized after auto-init attempt');
           }
         } catch (cloudError) {
           logger.warn('Cloud send failed:', cloudError);
         }
       }
+
+      // V5: SOS Special Handling - must succeed on at least one channel
+      if (message.type === 'SOS' && !meshSuccess && !cloudSuccess) {
+        logger.error('🚨 SOS MESSAGE FAILED ON ALL CHANNELS!');
+        // Queue for aggressive retry
+        message.priority = 'critical';
+      }
     } catch (error) {
       logger.error('Attempt send failed:', error);
     }
 
-    return meshSuccess || cloudSuccess;
+    const success = meshSuccess || cloudSuccess;
+    if (success) {
+      logger.info(`✅ Message ${message.id} sent (mesh: ${meshSuccess}, cloud: ${cloudSuccess})`);
+    }
+    return success;
   }
+
 
   /**
    * Update message status and notify callbacks
@@ -729,7 +779,10 @@ class HybridMessageService {
 
     return () => {
       unsubscribeMesh();
-      if (unsubscribeCloud) unsubscribeCloud();
+      // ELITE: Safe cleanup with type check
+      if (unsubscribeCloud && typeof unsubscribeCloud === 'function') {
+        unsubscribeCloud();
+      }
     };
   }
 

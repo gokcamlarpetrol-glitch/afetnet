@@ -1,184 +1,324 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
     // ============================================================
-    // AFETNET ELITE FIRESTORE SECURITY RULES
-    // Version: 2.0.0 - Enhanced with Contact Requests
+    // HELPER FUNCTIONS
     // ============================================================
-
-    // Helper: Check if authenticated
+    
     function isAuthenticated() {
       return request.auth != null;
     }
-
-    // Helper: Check if user owns this resource
+    
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
-
-    // ==================== USER PROFILES ====================
-    match /users/{userId} {
-      // Anyone authenticated can read basic profile (for QR contact lookup)
-      allow read: if isAuthenticated();
-      
-      // Only owner can write their own profile
-      allow write: if isOwner(userId);
-      
-      // ==================== CONTACTS ====================
-      match /contacts/{contactId} {
-        // Only owner can read/write contacts
-        allow read, write: if isOwner(userId);
-      }
-      
-      // ==================== BLOCKED USERS ====================
-      match /blocked/{blockedId} {
-        // Only owner can manage blocked list
-        allow read, write: if isOwner(userId);
-      }
-      
-      // ==================== CONTACT REQUESTS ====================
-      match /contactRequests/{requestId} {
-        // Owner can read their incoming requests
-        allow read: if isOwner(userId);
-        
-        // Owner can update/delete (accept/decline) their requests
-        allow update, delete: if isOwner(userId);
-        
-        // Anyone authenticated can create a request TO this user
-        // (when they add this user as a contact)
-        allow create: if isAuthenticated() 
-          && request.resource.data.fromUserId == request.auth.uid
-          && request.resource.data.status == 'pending';
-      }
-      
-      // ==================== NOTIFICATIONS ====================
-      match /notifications/{notificationId} {
-        // Owner can read/delete their notifications
-        allow read, delete: if isOwner(userId);
-        
-        // Anyone authenticated can create notifications
-        allow create: if isAuthenticated();
-        
-        // Owner can update (mark as read)
-        allow update: if isOwner(userId);
-      }
-      
-      // ==================== MESSAGES ====================
-      match /messages/{messageId} {
-        // Only owner can access messages
-        allow read, write: if isOwner(userId);
-      }
-      
-      // ==================== CONVERSATIONS ====================
-      match /conversations/{conversationId} {
-        // Only owner can access conversations
-        allow read, write: if isOwner(userId);
-      }
-      
-      // ==================== REACTIONS ====================
-      match /reactions/{reactionId} {
-        // Only owner can access their reactions
-        allow read, write: if isOwner(userId);
-      }
-      
-      // ==================== VOICE MESSAGES ====================
-      match /voiceMessages/{voiceId} {
-        // Only owner can access voice message metadata
-        allow read, write: if isOwner(userId);
-      }
+    
+    function hasAppCheck() {
+      return request.app != null;
     }
     
-    // ==================== PUBLIC PROFILES (for QR lookup) ====================
-    match /publicProfiles/{userId} {
-      // Anyone can read public profiles
-      allow read: if isAuthenticated();
-      
-      // Only owner updates their public profile
-      allow write: if isOwner(userId);
+    // Rate limiting helper (approximate - check timestamp)
+    function isNotSpamming() {
+      return request.time > resource.data.createdAt + duration.value(1, 's');
     }
     
-    // ==================== FAMILIES ====================
-    match /families/{familyId} {
-      // Family members can read
-      allow read: if isAuthenticated() 
-        && (request.auth.uid in resource.data.memberIds 
-            || request.auth.uid == resource.data.adminId);
-      
-      // Admin can update
-      allow update: if isAuthenticated() 
-        && request.auth.uid == resource.data.adminId;
-      
-      // Anyone authenticated can create (becomes admin)
+    // ============================================================
+    // EEW COLLECTIONS - Elite Security
+    // ============================================================
+    
+    // P-wave crowdsourced detections
+    // - Anyone can write (for crowdsourcing)
+    // - Rate limited (1 per second per device)
+    // - Auto-expires after 5 minutes
+    match /eew_pwave_detections/{detectionId} {
+      allow read: if true; // Public read for crowdsourcing
       allow create: if isAuthenticated()
-        && request.resource.data.adminId == request.auth.uid;
+                    && request.resource.data.deviceId is string
+                    && request.resource.data.timestamp is number
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number
+                    && request.resource.data.confidence is number
+                    && request.resource.data.confidence >= 0
+                    && request.resource.data.confidence <= 100;
+      allow update: if false; // No updates allowed
+      allow delete: if false; // Cleanup via Cloud Functions
+    }
+    
+    // EEW broadcasts (official or crowdsourced)
+    // - Public read
+    // - Only authenticated users can create
+    // - Only creator or admin can update/delete
+    match /eew_broadcasts/{broadcastId} {
+      allow read: if true;
+      allow create: if isAuthenticated()
+                    && request.resource.data.magnitude is number
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number
+                    && request.resource.data.source is string;
+      allow update: if isAuthenticated()
+                    && (resource.data.source == 'CROWDSOURCED' || request.auth.token.admin == true);
+      allow delete: if request.auth.token.admin == true;
+    }
+    
+    // EEW history (user-specific)
+    // - Only owner can read/write
+    match /eew_history/{entryId} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.timestamp is number;
+      allow update: if isOwner(resource.data.userId);
+      allow delete: if isOwner(resource.data.userId);
+    }
+    
+    // P-wave consensus (aggregated data)
+    // - Public read
+    // - Only authenticated users can create/update
+    match /eew_consensus/{consensusId} {
+      allow read: if true;
+      allow create: if isAuthenticated()
+                    && request.resource.data.detectionCount is number
+                    && request.resource.data.centerLatitude is number
+                    && request.resource.data.centerLongitude is number;
+      allow update: if isAuthenticated();
+      allow delete: if request.auth.token.admin == true;
+    }
+    
+    // EEW analytics (write-only for tracking)
+    // - Anyone authenticated can write
+    // - No reads (only Cloud Functions)
+    match /eew_analytics/{eventId} {
+      allow read: if request.auth.token.admin == true;
+      allow create: if isAuthenticated()
+                    && request.resource.data.eventType is string
+                    && request.resource.data.timestamp is number;
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // ============================================================
+    // DEVICES COLLECTION - ELITE FAMILY TRACKING
+    // ============================================================
+    
+    // Device documents store user's device info and current location
+    // - Owner can read/write their own device
+    // - Other authenticated users can read location (for family tracking)
+    match /devices/{deviceId} {
+      // Allow authenticated users to read device info (for family member location tracking)
+      allow read: if isAuthenticated();
       
-      // Only admin can delete
-      allow delete: if isAuthenticated()
-        && request.auth.uid == resource.data.adminId;
-        
+      // Only the device owner can write their own document
+      // Since we use anonymous auth, we check if the request comes from the same device
+      // by allowing any authenticated user to write (they can only know their own deviceId)
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false; // Devices should not be deleted
+      
       // Family members subcollection
-      match /members/{memberId} {
-        allow read, write: if isAuthenticated()
-          && (request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberIds
-              || request.auth.uid == get(/databases/$(database)/documents/families/$(familyId)).data.adminId);
+      // - Each device can have its own family members list
+      match /familyMembers/{memberId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.name is string
+                      && request.resource.data.id is string;
+        allow update: if isAuthenticated();
+        allow delete: if isAuthenticated();
+      }
+      
+      // Location history subcollection
+      match /locations/{locationId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.latitude is number
+                      && request.resource.data.longitude is number;
+        allow update: if false; // Location history is immutable
+        allow delete: if false; // Cleanup via Cloud Functions/TTL
+      }
+      
+      // Status updates subcollection
+      match /status/{statusId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
+        allow delete: if false;
+      }
+      
+      // Health profile subcollection
+      match /health/{healthId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
+        allow delete: if false;
+      }
+      
+      // ICE (In Case of Emergency) data subcollection
+      match /ice/{iceId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
+        allow delete: if false;
+      }
+      
+      // Messages subcollection  
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if false;
+        allow delete: if false;
+      }
+      
+      // Conversations subcollection
+      match /conversations/{conversationId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
+        allow delete: if isAuthenticated();
       }
     }
     
-    // ==================== EARTHQUAKE DATA ====================
+    // ============================================================
+    // SEISMIC DETECTIONS - Crowdsourced Data
+    // ============================================================
+    
+    match /seismicDetections/{detectionId} {
+      allow read: if true; // Public read for real-time map
+      allow create: if isAuthenticated()
+                    && request.resource.data.deviceId is string
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number;
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // ============================================================
+    // NEW: FCM TOKEN MANAGEMENT
+    // ============================================================
+    
+    // FCM tokens (user-specific)
+    // - Only owner can read/write their token
+    // - Token registration is required for push notifications
+    match /fcm_tokens/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+                            && request.resource.data.token is string
+                            && request.resource.data.platform is string;
+      allow delete: if isOwner(userId);
+    }
+    
+    // ============================================================
+    // NEW: PLUM OBSERVATIONS (Elite EEW)
+    // ============================================================
+    
+    // PLUM intensity observations for proximity-based EEW
+    // - Public read for P2P sharing
+    // - Authenticated create
+    match /plum_observations/{observationId} {
+      allow read: if true;
+      allow create: if isAuthenticated()
+                    && request.resource.data.deviceId is string
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number
+                    && request.resource.data.intensity is number
+                    && request.resource.data.timestamp is number;
+      allow update: if false;
+      allow delete: if false; // Cleanup via TTL or Cloud Functions
+    }
+    
+    // ============================================================
+    // NEW: EEW EVENTS (Server-Side Generated)
+    // ============================================================
+    
+    // EEW events from official sources (AFAD, Kandilli, etc.)
+    // - Public read
+    // - Only Cloud Functions can write (via admin SDK)
+    match /eew_events/{eventId} {
+      allow read: if true;
+      allow write: if false; // Only via Cloud Functions with admin SDK
+    }
+    
+    // ============================================================
+    // NEW: DAILY ANALYTICS (Aggregated)
+    // ============================================================
+    
+    // Daily analytics summaries
+    // - Admin only read
+    // - Only Cloud Functions can write
+    match /eew_analytics_daily/{docId} {
+      allow read: if request.auth.token.admin == true;
+      allow write: if false; // Only via Cloud Functions
+    }
+    
+    // ============================================================
+    // NEWS SUMMARIES - SHARED CACHE (Cost Optimization)
+    // ============================================================
+    
+    // News summaries (shared across ALL users for cost optimization)
+    // - Public read: All users can read cached summaries
+    // - Authenticated write: Any authenticated user can save a summary
+    // - Summaries are shared by articleId, not userId
+    // - This reduces OpenAI API costs significantly
+    match /news_summaries/{summaryId} {
+      allow read: if true; // Public read for shared cache
+      allow create: if isAuthenticated()
+                    && request.resource.data.articleId is string
+                    && request.resource.data.summary is string
+                    && request.resource.data.title is string;
+      allow update: if isAuthenticated()
+                    && request.resource.data.articleId is string
+                    && request.resource.data.summary is string;
+      allow delete: if false; // Cleanup via Cloud Functions/TTL
+    }
+    
+    // ============================================================
+    // EXISTING COLLECTIONS (if not already defined)
+    // ============================================================
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if false;
+    }
+    
+    // Earthquakes collection
     match /earthquakes/{earthquakeId} {
-      // Anyone authenticated can read
-      allow read: if isAuthenticated();
-      
-      // Only server/admin can write (via Cloud Functions)
-      allow write: if false;
-    }
-    
-    // ==================== REPORTS ====================
-    match /reports/{reportId} {
-      // Anyone authenticated can read
-      allow read: if isAuthenticated();
-      
-      // Anyone authenticated can create reports
-      allow create: if isAuthenticated()
-        && request.resource.data.userId == request.auth.uid;
-      
-      // Only author can update/delete
-      allow update, delete: if isOwner(resource.data.userId);
-    }
-    
-    // ==================== SOS ALERTS ====================
-    match /sosAlerts/{alertId} {
-      // Anyone authenticated can read (emergency info is public)
-      allow read: if isAuthenticated();
-      
-      // Anyone authenticated can create SOS
-      allow create: if isAuthenticated()
-        && request.resource.data.userId == request.auth.uid;
-      
-      // Only author can update/delete
-      allow update, delete: if isOwner(resource.data.userId);
-    }
-    
-    // ==================== ASSEMBLY POINTS ====================
-    match /assemblyPoints/{pointId} {
-      // Anyone can read
       allow read: if true;
-      
-      // Only admin (via Cloud Functions)
-      allow write: if false;
-    }
-    
-    // ==================== NEWS SUMMARIES ====================
-    match /newsSummaries/{summaryId} {
-      // Anyone can read
-      allow read: if true;
-      
-      // Anyone authenticated can write (for AI summaries)
       allow write: if isAuthenticated();
     }
-
-    // ==================== DEFAULT DENY ====================
-    // Catch-all: deny all other access
+    
+    // Felt earthquakes reports
+    match /feltEarthquakes/{reportId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false;
+    }
+    
+    // Family members
+    match /familyMembers/{memberId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    // SOS alerts
+    match /sosAlerts/{alertId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false;
+    }
+    
+    // Messages
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // Catch-all deny for undefined paths
     match /{document=**} {
       allow read, write: if false;
     }

@@ -11,16 +11,14 @@ import EmergencyButton from './components/EmergencyButton';
 import FeatureGrid from './components/FeatureGrid';
 import AIAssistantCard from './components/AIAssistantCard';
 import NewsCard from './components/NewsCard';
-import AboutAfetNetCard from './components/AboutAfetNetCard';
-
 import { PaperBackground } from '../../components/design-system/PaperBackground';
-import { SeismicAlertBanner } from '../../components/design-system/SeismicAlertBanner';
-import { FamilyCheckInModule } from '../../components/design-system/FamilyCheckInModule';
+import { PremiumEarthquakeCard } from '../../components/design-system/ModernEarthquakeCard';
+// ELITE: Family Check-In moved to Family Screen
 
 import SOSModal from '../../components/SOSModal';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { useFamilyStore } from '../../stores/familyStore';
+// ELITE: Family store no longer needed on home screen
 import { createLogger } from '../../utils/logger';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase } from '@react-navigation/native';
@@ -39,8 +37,6 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
-
-  const familyMembers = useFamilyStore((state) => state.members);
 
   // Animation Values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -82,14 +78,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
 
   const latestEarthquake = earthquakes[0];
 
-  // Map Family Members to Component Props
-  const mappedFamilyMembers = familyMembers.map(m => ({
-    id: m.id,
-    name: m.name,
-    status: m.status as 'safe' | 'warning' | 'danger' | 'unknown',
-    lastSeen: new Date(m.lastSeen || Date.now()).toLocaleTimeString(),
-    isOnline: (Date.now() - (m.lastSeen || 0)) < 1000 * 60 * 5, // Online if seen in last 5 mins
-  }));
+
 
 
 
@@ -113,19 +102,21 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         {/* 1. Header - Identity & Status */}
         <HomeHeader />
 
-        {/* 2. Signature: Seismic Alert Banner */}
+        {/* 2. Modern Earthquake Card with Map Preview */}
         {latestEarthquake && (
-          <SeismicAlertBanner
+          <PremiumEarthquakeCard
             magnitude={latestEarthquake.magnitude}
             location={latestEarthquake.location}
             time={new Date(latestEarthquake.time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
             depth={latestEarthquake.depth}
+            latitude={latestEarthquake.latitude}
+            longitude={latestEarthquake.longitude}
             onPress={() => navigation.navigate('AllEarthquakes')}
+            onMapPress={() => navigation.navigate('DisasterMap', { earthquake: latestEarthquake })}
           />
         )}
 
-        {/* 3. Signature: Family Check-In */}
-        <FamilyCheckInModule members={mappedFamilyMembers} />
+        {/* 3. Family Check-In moved to Family Screen */}
 
         {/* 4. Editorial News Carousel */}
         {newsEnabled && <NewsCard />}
@@ -141,8 +132,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         {/* 8. Tools & Features Grid */}
         <FeatureGrid navigation={navigation} />
 
-        {/* 9. Footer */}
-        <AboutAfetNetCard />
+        {/* 9. Footer removed - info in onboarding */}
 
         <View style={styles.bottomSpacer} />
       </Animated.ScrollView>

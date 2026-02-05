@@ -1,16 +1,27 @@
 /**
- * EMERGENCY BUTTON - ELITE EDITION
- * "The Heart of Safety"
+ * EMERGENCY BUTTON - PREMIUM V3
+ * "The Heart of Safety" - Modern Calm Trust Theme
+ * 
  * Features:
- * - Alive 'Heartbeat' Animation
- * - Glassmorphism Quick Actions
+ * - Modern Calm Trust Theme Integration (Navy & Cream)
+ * - Premium rounded corners and shadows
  * - Intensifying Haptic Feedback
- * - 100% Reliable Service Integration
+ * - Clean, premium UI
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Linking, Alert } from 'react-native';
-import { LinearGradient } from '../../../components/SafeLinearGradient';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Linking,
+  Alert,
+  Modal,
+  StatusBar,
+  Dimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-device';
@@ -23,11 +34,37 @@ import { createLogger } from '../../../utils/logger';
 
 const logger = createLogger('EmergencyButton');
 
-const logDebug = (message: string, ...args: unknown[]) => {
-  if (__DEV__) {
-    logger.debug(message, ...args);
-  }
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const HOLD_DURATION = 3000; // 3 seconds to activate
+
+// PREMIUM Emergency Color - Single Bold Red
+const COLORS = {
+  // Single Premium Red - Rich, Saturated, Bold
+  sosColor: '#DC2626', // Premium emergency red
+  sosPressed: '#B91C1C', // Darker when pressed
+  sosGlow: '#EF4444', // Bright glow
+
+  // Text
+  textPrimary: '#FFFFFF',
+  textSecondary: 'rgba(255, 255, 255, 0.9)',
+  textMuted: 'rgba(255, 255, 255, 0.7)',
+
+  // Quick action colors (Modern Calm Trust)
+  amber: '#D9A441',
+  amberBg: 'rgba(217, 164, 65, 0.15)',
+  amberBorder: 'rgba(217, 164, 65, 0.3)',
+
+  critical: '#B53A3A',
+  criticalBg: 'rgba(181, 58, 58, 0.15)',
+  criticalBorder: 'rgba(181, 58, 58, 0.3)',
 };
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
 
 interface EmergencyButtonProps {
   onPress: () => void;
@@ -35,9 +72,12 @@ interface EmergencyButtonProps {
 
 export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const { status } = useUserStatusStore();
+
+  // Local State
   const [isPressed, setIsPressed] = useState(false);
   const [whistleActive, setWhistleActive] = useState(false);
   const [flashActive, setFlashActive] = useState(false);
+  const [screenFlashlightVisible, setScreenFlashlightVisible] = useState(false);
 
   // Animation Refs
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -47,26 +87,35 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraPermission] = useCameraPermissions();
 
-  // --- 1. INITIALIZATION & LIVE HEARTBEAT ---
+  // ============================================================================
+  // PREMIUM ANIMATIONS
+  // ============================================================================
+
   useEffect(() => {
-    // Idle pulse animation
-    Animated.loop(
+    // Subtle idle pulse
+    const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1.02,
-          duration: 1500,
+          duration: 2000,
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 1500,
+          duration: 2000,
           useNativeDriver: true,
         }),
       ]),
-    ).start();
+    );
+    pulse.start();
+
+    return () => pulse.stop();
   }, []);
 
-  // ELITE: Initialize services on mount
+  // ============================================================================
+  // SERVICE INITIALIZATION
+  // ============================================================================
+
   useEffect(() => {
     const initializeServices = async () => {
       try {
@@ -83,7 +132,10 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     initializeServices();
   }, []);
 
-  // CRITICAL: Auto-activate if trapped
+  // ============================================================================
+  // AUTO-ACTIVATE IF TRAPPED
+  // ============================================================================
+
   useEffect(() => {
     let alertTimeout: NodeJS.Timeout | null = null;
     if (status === 'trapped') {
@@ -97,30 +149,42 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     }
     return () => {
       if (alertTimeout) clearTimeout(alertTimeout);
-      if (status !== 'trapped') {
-        if (whistleActive) whistleService.stop().catch(e => logger.error('Whistle stop error', e));
-        if (flashActive) flashlightService.stop().catch(e => logger.error('Flash stop error', e));
-      }
     };
-  }, [status]); // Dependencies simplified to avoid loops, explicit handlers tracked via state
+  }, [status]);
 
-  // --- 2. PRESS HANDLERS ---
+  // ============================================================================
+  // PRESS HANDLERS
+  // ============================================================================
+
   const handlePressIn = () => {
     setIsPressed(true);
     haptics.impactMedium();
-    logDebug('🆘 SOS Pressed');
+    logger.debug('🆘 SOS Pressed');
 
-    Animated.spring(scaleAnim, { toValue: 0.95, useNativeDriver: true }).start();
-    Animated.timing(progressAnim, { toValue: 1, duration: 3000, useNativeDriver: false }).start();
+    // Spring animation for press
+    Animated.spring(scaleAnim, {
+      toValue: 0.96,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 100,
+    }).start();
 
+    // Progress fill
+    Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: HOLD_DURATION,
+      useNativeDriver: false,
+    }).start();
+
+    // Timer for activation
     pressTimer.current = setTimeout(() => {
-      logDebug('✅ SOS Triggered');
+      logger.info('✅ SOS Triggered');
       haptics.impactHeavy();
-      haptics.notificationSuccess(); // Success sound
+      haptics.notificationSuccess();
       onPress();
       setIsPressed(false);
       progressAnim.setValue(0);
-    }, 3000);
+    }, HOLD_DURATION);
   };
 
   const handlePressOut = () => {
@@ -129,11 +193,27 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
       pressTimer.current = null;
     }
     setIsPressed(false);
-    Animated.spring(scaleAnim, { toValue: 1, friction: 3, tension: 40, useNativeDriver: true }).start();
-    Animated.timing(progressAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+
+    // Spring back
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      friction: 5,
+      tension: 60,
+      useNativeDriver: true,
+    }).start();
+
+    // Reset progress
+    Animated.timing(progressAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
   };
 
-  // --- 3. HARDWARE TOGGLES ---
+  // ============================================================================
+  // HARDWARE TOGGLES
+  // ============================================================================
+
   const handleWhistle = useCallback(async () => {
     haptics.impactMedium();
     try {
@@ -141,35 +221,53 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
         await whistleService.stop();
         setWhistleActive(false);
       } else {
-        // Ensure initialized
         await whistleService.initialize();
         await whistleService.playSOSWhistle('morse');
         setWhistleActive(true);
       }
     } catch (e) {
       logger.error('Whistle toggle error', e);
+      Alert.alert('Düdük Hatası', 'Düdük çalınamadı. Lütfen tekrar deneyin.');
       setWhistleActive(false);
-      Alert.alert('Hata', 'Düdük işlemi başarısız.');
     }
   }, [whistleActive]);
 
   const handleFlashlight = useCallback(async () => {
     haptics.impactMedium();
     try {
-      if (flashActive) {
+      await flashlightService.initialize();
+
+      if (flashActive || screenFlashlightVisible) {
         await flashlightService.stop();
+        await flashlightService.turnOffScreenFlashlight();
+        setScreenFlashlightVisible(false);
         setFlashActive(false);
       } else {
-        await flashlightService.initialize();
-        await flashlightService.flashSOSMorse();
-        setFlashActive(true);
+        // Try hardware torch first, fallback to screen flashlight
+        if (flashlightService.isAvailable()) {
+          await flashlightService.flashSOSMorse();
+          setFlashActive(true);
+        } else {
+          // Show full white screen as flashlight
+          await flashlightService.turnOnScreenFlashlight();
+          setScreenFlashlightVisible(true);
+          setFlashActive(true);
+        }
       }
     } catch (e) {
       logger.error('Flash toggle error', e);
+      Alert.alert('Fener Hatası', 'Fener açılamadı. Lütfen tekrar deneyin.');
       setFlashActive(false);
-      // Don't alert if just permissions (logs info previously)
+      setScreenFlashlightVisible(false);
     }
-  }, [flashActive]);
+  }, [flashActive, screenFlashlightVisible]);
+
+  const closeScreenFlashlight = useCallback(async () => {
+    haptics.impactMedium();
+    await flashlightService.turnOffScreenFlashlight();
+    setScreenFlashlightVisible(false);
+    setFlashActive(false);
+  }, []);
 
   const handle112Call = useCallback(async () => {
     haptics.impactHeavy();
@@ -184,142 +282,358 @@ export default function EmergencyButton({ onPress }: EmergencyButtonProps) {
     }
   }, []);
 
-  const progressWidth = progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  // ============================================================================
+  // COMPUTED VALUES
+  // ============================================================================
+
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
 
   return (
     <View style={styles.container}>
+      {/* SCREEN FLASHLIGHT MODAL - Full White Screen */}
+      <Modal
+        visible={screenFlashlightVisible}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeScreenFlashlight}
+      >
+        <StatusBar hidden />
+        <TouchableOpacity
+          style={styles.screenFlashlight}
+          activeOpacity={1}
+          onPress={closeScreenFlashlight}
+        >
+          <View style={styles.screenFlashlightContent}>
+            <Text style={styles.screenFlashlightText}>FENER</Text>
+            <Text style={styles.screenFlashlightSubtext}>Kapatmak için dokunun</Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Hidden Camera for Torch */}
       {Device.isDevice && (
         <CameraView
           ref={ref => { cameraRef.current = ref; if (ref) flashlightService.setCameraRef(ref); }}
-          style={{ width: 1, height: 1, position: 'absolute', opacity: 0 }}
+          style={styles.hiddenCamera}
           facing="back"
         />
       )}
 
-      {/* Main SOS Button */}
-      <Animated.View style={[styles.mainButtonWrapper, { transform: [{ scale: pulseAnim }, { scale: scaleAnim }] }]}>
+      {/* MAIN SOS BUTTON */}
+      <Animated.View
+        style={[
+          styles.mainButtonWrapper,
+          {
+            transform: [
+              { scale: Animated.multiply(pulseAnim, scaleAnim) },
+            ],
+          },
+        ]}
+      >
         <TouchableOpacity
           activeOpacity={1}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           style={styles.touchable}
         >
-          <LinearGradient
-            colors={isPressed ? ['#cc0000', '#990000'] : ['#ff3333', '#cc0000']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={styles.mainButton}
+          <View
+            style={[
+              styles.mainButton,
+              { backgroundColor: isPressed ? COLORS.sosPressed : COLORS.sosColor }
+            ]}
           >
-            <View style={styles.glow} />
-
+            {/* Icon Container */}
             <View style={styles.iconContainer}>
-              <Ionicons name="warning" size={72} color="#ffffff" />
+              <Ionicons
+                name="warning"
+                size={48}
+                color={COLORS.textPrimary}
+              />
             </View>
 
-            <Text style={styles.mainTitle}>ACİL DURUM / SOS</Text>
+            {/* Text Content */}
+            <Text style={styles.mainTitle}>ACİL YARDIM</Text>
             <Text style={styles.mainSubtitle}>
-              {isPressed ? 'Basılı tutun...' : 'Anında yardım çağrısı gönder'}
+              {isPressed ? 'Basılı tutun...' : 'SOS sinyali gönder'}
             </Text>
 
+            {/* Info Badges */}
             {!isPressed && (
-              <View style={styles.locationBadge}>
-                <Ionicons name="location" size={14} color="#ffffff" />
-                <Text style={styles.locationText}>Konumunuz otomatik gönderilir</Text>
+              <View style={styles.badgeContainer}>
+                <View style={styles.infoBadge}>
+                  <Ionicons name="location" size={13} color={COLORS.textSecondary} />
+                  <Text style={styles.badgeText}>Konum paylaşılır</Text>
+                </View>
+                <View style={styles.infoBadge}>
+                  <Ionicons name="radio" size={13} color={COLORS.textSecondary} />
+                  <Text style={styles.badgeText}>Yakınlara bildirim</Text>
+                </View>
               </View>
             )}
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
-              <Animated.View style={[styles.progressBar, { width: progressWidth }]} />
+              <Animated.View
+                style={[
+                  styles.progressBar,
+                  { width: progressWidth }
+                ]}
+              />
             </View>
-
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Quick Actions */}
+      {/* QUICK ACTIONS */}
+      <Text style={styles.quickActionsTitle}>HIZLI ERİŞİM</Text>
       <View style={styles.quickActions}>
         {/* Whistle */}
-        <TouchableOpacity style={styles.quickButton} onPress={handleWhistle} activeOpacity={0.7}>
-          <LinearGradient
-            colors={whistleActive ? ['#f59e0b', '#d97706'] : ['rgba(245, 158, 11, 0.2)', 'rgba(217, 119, 6, 0.1)']}
-            style={styles.quickButtonGradient}
-          >
-            <Ionicons name="megaphone" size={24} color={whistleActive ? '#ffffff' : '#f59e0b'} />
-            <Text style={[styles.quickButtonText, whistleActive && styles.quickButtonTextActive]}>
-              {whistleActive ? 'DURDUR' : 'DÜDÜK'}
+        <TouchableOpacity
+          style={styles.quickButton}
+          onPress={handleWhistle}
+          activeOpacity={0.7}
+        >
+          <View style={[
+            styles.quickButtonInner,
+            whistleActive && styles.quickButtonActiveAmber,
+          ]}>
+            <Ionicons
+              name="megaphone"
+              size={22}
+              color={whistleActive ? '#ffffff' : COLORS.amber}
+            />
+            <Text style={[
+              styles.quickButtonText,
+              { color: whistleActive ? '#ffffff' : COLORS.amber },
+            ]}>
+              {whistleActive ? 'Durdur' : 'Düdük'}
             </Text>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
 
         {/* Flashlight */}
-        <TouchableOpacity style={styles.quickButton} onPress={handleFlashlight} activeOpacity={0.7}>
-          <LinearGradient
-            colors={flashActive ? ['#eab308', '#ca8a04'] : ['rgba(234, 179, 8, 0.2)', 'rgba(202, 138, 4, 0.1)']}
-            style={styles.quickButtonGradient}
-          >
-            <Ionicons name="flashlight" size={24} color={flashActive ? '#ffffff' : '#eab308'} />
-            <Text style={[styles.quickButtonText, flashActive && styles.quickButtonTextActive]}>
-              {flashActive ? 'DURDUR' : 'FENER'}
+        <TouchableOpacity
+          style={styles.quickButton}
+          onPress={handleFlashlight}
+          activeOpacity={0.7}
+        >
+          <View style={[
+            styles.quickButtonInner,
+            flashActive && styles.quickButtonActiveAmber,
+          ]}>
+            <Ionicons
+              name="flashlight"
+              size={22}
+              color={flashActive ? '#ffffff' : COLORS.amber}
+            />
+            <Text style={[
+              styles.quickButtonText,
+              { color: flashActive ? '#ffffff' : COLORS.amber },
+            ]}>
+              {flashActive ? 'Durdur' : 'Fener'}
             </Text>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
 
         {/* 112 */}
-        <TouchableOpacity style={styles.quickButton} onPress={handle112Call} activeOpacity={0.7}>
-          <LinearGradient
-            colors={['rgba(220, 38, 38, 0.2)', 'rgba(185, 28, 28, 0.1)']}
-            style={styles.quickButtonGradient}
-          >
-            <Ionicons name="call" size={24} color="#dc2626" />
-            <Text style={styles.quickButtonText}>112</Text>
-          </LinearGradient>
+        <TouchableOpacity
+          style={styles.quickButton}
+          onPress={handle112Call}
+          activeOpacity={0.7}
+        >
+          <View style={styles.quickButtonInner112}>
+            <Ionicons name="call" size={22} color={COLORS.critical} />
+            <Text style={[styles.quickButtonText, { color: COLORS.critical }]}>
+              112
+            </Text>
+          </View>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
+// ============================================================================
+// STYLES
+// ============================================================================
+
 const styles = StyleSheet.create({
-  container: { marginBottom: 20, gap: 16 },
+  container: {
+    marginBottom: 20,
+    gap: 14,
+  },
+  hiddenCamera: {
+    width: 1,
+    height: 1,
+    position: 'absolute',
+    opacity: 0,
+  },
+
+  // Main Button - PREMIUM STYLING
   mainButtonWrapper: {
     borderRadius: 28,
-    shadowColor: '#ff3333', shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.7, shadowRadius: 32, elevation: 20,
+    shadowColor: COLORS.sosGlow,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
+    elevation: 16,
   },
-  touchable: { borderRadius: 28 },
+  touchable: {
+    borderRadius: 28,
+    overflow: 'hidden',
+  },
   mainButton: {
-    minHeight: 200, borderRadius: 28, padding: 28, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-  },
-  glow: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 51, 51, 0.3)', borderRadius: 28,
+    minHeight: 220,
+    borderRadius: 28,
+    padding: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   iconContainer: {
-    marginBottom: 16, backgroundColor: 'rgba(255, 255, 255, 0.25)', borderRadius: 50, width: 100, height: 100,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255, 255, 255, 0.4)',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
+    marginBottom: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 40,
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
   mainTitle: {
-    fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 0.5, textAlign: 'center', marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4,
+    fontSize: 26,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+    letterSpacing: 1.5,
+    textAlign: 'center',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   mainSubtitle: {
-    fontSize: 15, fontWeight: '600', color: 'rgba(255, 255, 255, 0.9)', textAlign: 'center', marginBottom: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 16,
   },
-  locationBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginTop: 4,
+  badgeContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
-  locationText: { fontSize: 13, fontWeight: '600', color: '#ffffff', letterSpacing: 0.2 },
+  infoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
   progressContainer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
-  progressBar: { height: '100%', backgroundColor: '#ffffff' },
-  quickActions: { flexDirection: 'row', gap: 12 },
-  quickButton: { flex: 1 },
-  quickButtonGradient: {
-    paddingVertical: 16, paddingHorizontal: 12, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)',
+  progressBar: {
+    height: '100%',
+    backgroundColor: COLORS.textPrimary,
   },
-  quickButtonText: { fontSize: 12, fontWeight: '800', color: 'rgba(255, 255, 255, 0.7)', letterSpacing: 0.5 },
-  quickButtonTextActive: { color: '#ffffff' },
+
+  // Quick Actions
+  quickActionsTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.4)',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  quickButton: {
+    flex: 1,
+  },
+  quickButtonInner: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: COLORS.amberBg,
+    borderWidth: 1,
+    borderColor: COLORS.amberBorder,
+  },
+  quickButtonActiveAmber: {
+    backgroundColor: COLORS.amber,
+    borderColor: COLORS.amber,
+  },
+  quickButtonText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  quickButtonInner112: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: COLORS.criticalBg,
+    borderWidth: 1,
+    borderColor: COLORS.criticalBorder,
+  },
+
+  // Screen Flashlight Modal
+  screenFlashlight: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  screenFlashlightContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  screenFlashlightText: {
+    fontSize: 48,
+    fontWeight: '900',
+    color: 'rgba(0, 0, 0, 0.08)',
+    letterSpacing: 4,
+  },
+  screenFlashlightSubtext: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(0, 0, 0, 0.15)',
+    marginTop: 8,
+  },
 });

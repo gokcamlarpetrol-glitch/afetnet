@@ -37,6 +37,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase, RouteProp } from '@react-navigation/native';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('ConversationScreen');
 
 // ELITE: Type-safe navigation and route props
 type ConversationNavigationProp = StackNavigationProp<ParamListBase>;
@@ -214,6 +217,16 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     return () => unsubscribe();
   }, []);
 
+  // ELITE: Cleanup voice recording interval on unmount
+  useEffect(() => {
+    return () => {
+      if (voiceRecordingIntervalRef.current) {
+        clearInterval(voiceRecordingIntervalRef.current);
+        voiceRecordingIntervalRef.current = null;
+      }
+    };
+  }, []);
+
   // Subscribe to typing indicators
   useEffect(() => {
     const unsubscribe = hybridMessageService.onTyping((typingUserId, _userName, typing) => {
@@ -269,7 +282,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       });
       setText('');
     } catch (error) {
-      console.error('Send failed:', error);
+      logger.error('Send failed:', error);
       Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
     }
   }, [text, userId]);
@@ -374,7 +387,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         await sendImageMessage(imageUri);
       }
     } catch (error) {
-      console.error('Camera error:', error);
+      logger.error('Camera error:', error);
       Alert.alert('Hata', 'Fotoğraf çekilemedi.');
     }
   }, [userId]);
@@ -399,7 +412,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         await sendImageMessage(imageUri);
       }
     } catch (error) {
-      console.error('Gallery error:', error);
+      logger.error('Gallery error:', error);
       Alert.alert('Hata', 'Fotoğraf seçilemedi.');
     }
   }, [userId]);
@@ -414,7 +427,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       });
       haptics.notificationSuccess();
     } catch (error) {
-      console.error('Send image error:', error);
+      logger.error('Send image error:', error);
       Alert.alert('Hata', 'Fotoğraf gönderilemedi.');
     }
   }, [userId]);
@@ -434,7 +447,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         }, 1000);
       }
     } catch (error) {
-      console.error('Voice recording error:', error);
+      logger.error('Voice recording error:', error);
       Alert.alert('Hata', 'Ses kaydı başlatılamadı.');
     }
   }, []);
@@ -464,7 +477,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         voiceMessageService.backupToFirebase(voiceMessage);
       }
     } catch (error) {
-      console.error('Voice send error:', error);
+      logger.error('Voice send error:', error);
       Alert.alert('Hata', 'Ses mesajı gönderilemedi.');
     }
   }, [userId]);
@@ -522,7 +535,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
       haptics.notificationSuccess();
     } catch (error) {
-      console.error('Location share error:', error);
+      logger.error('Location share error:', error);
       Alert.alert('Hata', 'Konum paylaşılamadı.');
     }
   }, [userId]);

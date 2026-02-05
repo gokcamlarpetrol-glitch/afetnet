@@ -19,6 +19,11 @@ import {
     sendPasswordResetEmail,
     sendEmailVerification,
     updateProfile,
+    updatePassword,
+    updateEmail,
+    deleteUser,
+    reauthenticateWithCredential,
+    EmailAuthProvider,
     User,
     UserCredential,
 } from 'firebase/auth';
@@ -54,14 +59,18 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
     'auth/email-already-in-use': 'Bu e-posta adresi zaten kullanılıyor.',
     'auth/invalid-email': 'Geçersiz e-posta adresi.',
     'auth/operation-not-allowed': 'E-posta/şifre girişi etkin değil.',
-    'auth/weak-password': 'Şifre çok zayıf. En az 6 karakter kullanın.',
+    'auth/weak-password': 'Şifre çok zayıf. En az 8 karakter kullanın.',
     'auth/user-disabled': 'Bu hesap devre dışı bırakılmış.',
     'auth/user-not-found': 'Bu e-posta ile kayıtlı hesap bulunamadı.',
     'auth/wrong-password': 'Hatalı şifre.',
     'auth/too-many-requests': 'Çok fazla başarısız deneme. Lütfen biraz bekleyin.',
     'auth/network-request-failed': 'Ağ bağlantısı hatası. İnternet bağlantınızı kontrol edin.',
-    'auth/invalid-credential': 'Geçersiz kimlik bilgileri.',
+    'auth/invalid-credential': 'Geçersiz kimlik bilgileri. E-posta veya şifre hatalı.',
     'auth/requires-recent-login': 'Bu işlem için yeniden giriş yapmanız gerekiyor.',
+    'auth/expired-action-code': 'Bağlantının süresi dolmuş. Lütfen yeni bağlantı isteyin.',
+    'auth/invalid-action-code': 'Geçersiz bağlantı. Lütfen yeni bağlantı isteyin.',
+    'auth/missing-email': 'E-posta adresi gereklidir.',
+    'auth/missing-password': 'Şifre gereklidir.',
 };
 
 /**
@@ -72,12 +81,15 @@ function getErrorMessage(error: any): string {
     return AUTH_ERROR_MESSAGES[code] || error?.message || 'Bilinmeyen bir hata oluştu.';
 }
 
+// ELITE: Minimum password length constant (synced with UI)
+const MIN_PASSWORD_LENGTH = 8;
+
 /**
  * Şifre geçerliliğini kontrol et
  */
 function validatePassword(password: string): { valid: boolean; message?: string } {
-    if (password.length < 6) {
-        return { valid: false, message: 'Şifre en az 6 karakter olmalıdır.' };
+    if (password.length < MIN_PASSWORD_LENGTH) {
+        return { valid: false, message: `Şifre en az ${MIN_PASSWORD_LENGTH} karakter olmalıdır.` };
     }
     if (password.length > 128) {
         return { valid: false, message: 'Şifre çok uzun.' };
@@ -306,6 +318,222 @@ export const EmailAuthService = {
 
         const auth = getAuth(app);
         return auth.currentUser?.email ?? null;
+    },
+
+    // ============================================================================
+    // ELITE: Gelişmiş Güvenlik Özellikleri
+    // ============================================================================
+
+    /**
+     * ELITE: Hassas işlemler için yeniden kimlik doğrulama
+     * Şifre değiştirme, hesap silme gibi işlemlerden önce çağrılmalı
+     */
+    reauthenticate: async (password: string): Promise<void> => {
+        try {
+            const app = initializeFirebase();
+            if (!app) throw new Error('Firebase başlatılamadı');
+
+            const auth = getAuth(app);
+            const user = auth.currentUser;
+
+            if (!user || !user.email) {
+                throw new Error('Oturum açık değil.');
+            }
+
+            const credential = EmailAuthProvider.credential(user.email, password);
+            await reauthenticateWithCredential(user, credential);
+
+            logger.info('✅ Yeniden kimlik doğrulama başarılı');
+
+        } catch (error: any) {
+            logger.error('Yeniden kimlik doğrulama hatası:', error);
+            throw new Error(getErrorMessage(error));
+        }
+    },
+
+    /**
+     * ELITE: Şifre değiştirme
+     * Önce reauthenticate() çağrılmalı
+     */
+    changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+        // Validasyon
+        const passwordValidation = validatePassword(newPassword);
+        if (!passwordValidation.valid) {
+            throw new Error(passwordValidation.message);
+        }
+
+        if (currentPassword === newPassword) {
+            throw new Error('Yeni şifre mevcut şifre ile aynı olamaz.');
+        }
+
+        try {
+            const app = initializeFirebase();
+            if (!app) throw new Error('Firebase başlatılamadı');
+
+            const auth = getAuth(app);
+            const user = auth.currentUser;
+
+            if (!user || !user.email) {
+                throw new Error('Oturum açık değil.');
+            }
+
+            // Önce yeniden kimlik doğrula
+            const credential = EmailAuthProvider.credential(user.email, currentPassword);
+            await reauthenticateWithCredential(user, credential);
+
+            // Sonra şifreyi güncelle
+            await updatePassword(user, newPassword);
+
+            logger.info('✅ Şifre başarıyla değiştirildi');
+
+        } catch (error: any) {
+            logger.error('Şifre değiştirme hatası:', error);
+            throw new Error(getErrorMessage(error));
+        }
+    },
+
+    /**
+     * ELITE: E-posta adresi değiştirme
+     * Hassas işlem - yeniden kimlik doğrulama gerektirir
+     */
+    changeEmail: async (password: string, newEmail: string): Promise<void> => {
+        // Validasyon
+        const emailValidation = validateEmail(newEmail);
+        if (!emailValidation.valid) {
+            throw new Error(emailValidation.message);
+        }
+
+        try {
+            const app = initializeFirebase();
+            if (!app) throw new Error('Firebase başlatılamadı');
+
+            const auth = getAuth(app);
+            const user = auth.currentUser;
+
+            if (!user || !user.email) {
+                throw new Error('Oturum açık değil.');
+            }
+
+            if (user.email === newEmail.trim().toLowerCase()) {
+                throw new Error('Yeni e-posta mevcut e-posta ile aynı.');
+            }
+
+            // Önce yeniden kimlik doğrula
+            const credential = EmailAuthProvider.credential(user.email, password);
+            await reauthenticateWithCredential(user, credential);
+
+            // Sonra e-postayı güncelle
+            await updateEmail(user, newEmail.trim().toLowerCase());
+
+            // Yeni e-posta için doğrulama gönder
+            await sendEmailVerification(user);
+
+            logger.info('✅ E-posta başarıyla değiştirildi, doğrulama gönderildi');
+
+        } catch (error: any) {
+            logger.error('E-posta değiştirme hatası:', error);
+            throw new Error(getErrorMessage(error));
+        }
+    },
+
+    /**
+     * ELITE: Hesap silme (KVKK/GDPR Uyumlu)
+     * ! DİKKAT: Bu işlem geri alınamaz!
+     * Tüm kullanıcı verileri silinir
+     */
+    deleteAccount: async (password: string): Promise<void> => {
+        try {
+            const app = initializeFirebase();
+            if (!app) throw new Error('Firebase başlatılamadı');
+
+            const auth = getAuth(app);
+            const user = auth.currentUser;
+
+            if (!user || !user.email) {
+                throw new Error('Oturum açık değil.');
+            }
+
+            // CRITICAL: Yeniden kimlik doğrulama (güvenlik için zorunlu)
+            const credential = EmailAuthProvider.credential(user.email, password);
+            await reauthenticateWithCredential(user, credential);
+
+            const userId = user.uid;
+            const userEmail = user.email;
+
+            // ELITE: İlişkili servisleri temizle (varsa)
+            try {
+                // Servislerde cleanup metodu varsa çağır
+                if (typeof (presenceService as any).cleanup === 'function') {
+                    await (presenceService as any).cleanup();
+                }
+                if (typeof (contactService as any).cleanup === 'function') {
+                    await (contactService as any).cleanup();
+                }
+                if (typeof (contactRequestService as any).cleanup === 'function') {
+                    await (contactRequestService as any).cleanup();
+                }
+                if (typeof (identityService as any).cleanup === 'function') {
+                    await (identityService as any).cleanup();
+                }
+                logger.info('✅ İlişkili servisler temizlendi');
+            } catch (cleanupError) {
+                logger.warn('Servis temizleme hatası (devam ediliyor):', cleanupError);
+            }
+
+            // FINAL: Firebase Auth hesabını sil
+            await deleteUser(user);
+
+            logger.info('🗑️ Hesap başarıyla silindi:', { userId, userEmail });
+
+        } catch (error: any) {
+            logger.error('Hesap silme hatası:', error);
+            throw new Error(getErrorMessage(error));
+        }
+    },
+
+    /**
+     * ELITE: Kullanıcı bilgilerini yenile
+     * E-posta doğrulama durumunu güncellemek için kullanılır
+     */
+    refreshUser: async (): Promise<void> => {
+        try {
+            const app = initializeFirebase();
+            if (!app) throw new Error('Firebase başlatılamadı');
+
+            const auth = getAuth(app);
+            const user = auth.currentUser;
+
+            if (!user) {
+                throw new Error('Oturum açık değil.');
+            }
+
+            await user.reload();
+            logger.info('✅ Kullanıcı bilgileri yenilendi');
+
+        } catch (error: any) {
+            logger.error('Kullanıcı yenileme hatası:', error);
+            throw new Error(getErrorMessage(error));
+        }
+    },
+
+    /**
+     * ELITE: Mevcut kullanıcı bilgilerini al
+     */
+    getCurrentUser: (): { uid: string; email: string | null; displayName: string | null; emailVerified: boolean } | null => {
+        const app = initializeFirebase();
+        if (!app) return null;
+
+        const auth = getAuth(app);
+        const user = auth.currentUser;
+
+        if (!user) return null;
+
+        return {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            emailVerified: user.emailVerified,
+        };
     },
 };
 

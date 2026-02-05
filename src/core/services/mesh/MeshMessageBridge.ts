@@ -129,8 +129,9 @@ class MeshMessageBridge {
     }
 
     private async handleMeshMessage(message: MeshMessage): Promise<void> {
-        // Deduplication
-        if (this.seenMessageIds.checkAndAdd(message.id)) {
+        // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
+        // We should skip if it's a duplicate (returns false means it already existed)
+        if (!this.seenMessageIds.checkAndAdd(message.id)) {
             return;
         }
 
@@ -184,8 +185,9 @@ class MeshMessageBridge {
     }
 
     private async handleCloudMessage(message: Message): Promise<void> {
-        // Deduplication
-        if (this.seenMessageIds.checkAndAdd(message.id)) {
+        // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
+        // Skip if duplicate (returns false means it already existed)
+        if (!this.seenMessageIds.checkAndAdd(message.id)) {
             return;
         }
 
@@ -255,6 +257,9 @@ class MeshMessageBridge {
                 }
             }
         }
+
+        // ELITE: Persist seen IDs after sync to maintain deduplication state
+        await this.saveSeenIds();
     }
 
     private async syncToCloud(message: BridgedMessage): Promise<void> {

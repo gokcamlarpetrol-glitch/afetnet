@@ -284,9 +284,9 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           await bleMeshService.start();
           // Wait a bit for device ID to be generated
           await new Promise(resolve => setTimeout(resolve, 1000));
-          id = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
-          if (id) {
-            setQrValue(id);
+          const newId = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
+          if (newId) {
+            setQrValue(newId);
             setQrModalVisible(true);
             return;
           }

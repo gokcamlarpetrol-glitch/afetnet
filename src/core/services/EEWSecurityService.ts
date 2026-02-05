@@ -396,7 +396,7 @@ class EEWSecurityService {
         'www.seismicportal.eu',
         'seismicportal.eu',
         'earthquake.usgs.gov',
-        'afetnet-backend.onrender.com',
+        // Render backend deprecated - using Firebase
       ];
 
       if (!allowedDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
