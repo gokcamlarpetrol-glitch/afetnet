@@ -353,8 +353,8 @@ export default function DisasterPreparednessScreen({ navigation }: DisasterPrepa
                 <Text style={styles.videoPlaceholderText}>Eğitim Videosu</Text>
                 <Text style={styles.videoPlaceholderSubtext}>
                   {selectedModule.type === 'earthquake'
-                    ? 'Drop-Cover-Hold animasyonu yakında eklenecek'
-                    : 'İlgili eğitim videoları yakında eklenecek'}
+                    ? 'Drop-Cover-Hold adımları bu ekranda metin olarak sunuluyor.'
+                    : 'Eğitim içeriği bu ekranda adım adım metin olarak sunuluyor.'}
                 </Text>
               </View>
             </Animated.View>
@@ -581,4 +581,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

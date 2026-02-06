@@ -365,10 +365,37 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   // Stores
   const familyMembers = useFamilyStore((state) => state.members);
   const earthquakes = useEarthquakeStore((state) => state.items);
+  const currentSOSSignal = useSOSStore((state) => state.currentSignal);
 
   // SOS Signals state
-  const [activeSOSSignals, setActiveSOSSignals] = useState<ActiveSOSSignal[]>([]);
   const [selectedSOS, setSelectedSOS] = useState<ActiveSOSSignal | null>(null);
+
+  const activeSOSSignals = useMemo<ActiveSOSSignal[]>(() => {
+    if (
+      !currentSOSSignal ||
+      !currentSOSSignal.location ||
+      (currentSOSSignal.status !== 'broadcasting' && currentSOSSignal.status !== 'acknowledged')
+    ) {
+      return [];
+    }
+
+    return [{
+      id: currentSOSSignal.id,
+      userId: currentSOSSignal.userId,
+      userName: currentSOSSignal.userId,
+      latitude: currentSOSSignal.location.latitude,
+      longitude: currentSOSSignal.location.longitude,
+      timestamp: currentSOSSignal.timestamp,
+      message: currentSOSSignal.message,
+      trapped: currentSOSSignal.trapped,
+    }];
+  }, [currentSOSSignal]);
+
+  useEffect(() => {
+    if (selectedSOS && !activeSOSSignals.some((signal) => signal.id === selectedSOS.id)) {
+      setSelectedSOS(null);
+    }
+  }, [activeSOSSignals, selectedSOS]);
 
   // Cluster Engine
   const clusterEngine = useMemo(() => new MapClusterEngine({

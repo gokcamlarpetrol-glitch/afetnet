@@ -65,8 +65,8 @@ class FCMTokenService {
             let finalStatus = existingStatus;
 
             if (existingStatus !== 'granted') {
-                const { status } = await Notif.requestPermissionsAsync();
-                finalStatus = status;
+                logger.info('Notification permission not granted yet; token registration deferred');
+                return null;
             }
 
             if (finalStatus !== 'granted') {

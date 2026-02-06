@@ -13,16 +13,6 @@ export const APP_CONFIG = {
   easProjectId: '072f1217-172a-40ce-af23-3fc0ad3f7f09',
   owner: 'gokhancamci1',
 
-  // RevenueCat Product IDs - Must match Apple StoreKit configuration
-  iap: {
-    productIds: {
-      monthly: 'org.afetapp.premium.monthly.v2',
-      yearly: 'org.afetapp.premium.yearly.v2',
-      lifetime: 'org.afetapp.premium.lifetime.v2',
-    },
-    entitlementId: 'Premium',
-  },
-
   // URLs
   urls: {
     privacyPolicy: 'https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html',
@@ -36,4 +26,3 @@ export const APP_CONFIG = {
     eewNativeAlarm: false,
   },
 };
-

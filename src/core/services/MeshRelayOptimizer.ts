@@ -10,7 +10,7 @@
  */
 
 import { createLogger } from '../utils/logger';
-import { useMeshStore } from '../stores/meshStore';
+import { useMeshStore } from './mesh/MeshStore';
 import { QMeshPacket, PacketPriority, PacketType } from './mesh/QMeshProtocol';
 
 const logger = createLogger('MeshRelayOptimizer');
@@ -112,7 +112,7 @@ class MeshRelayOptimizer {
      */
   getTopology(): NetworkTopology {
     const state = useMeshStore.getState();
-    const peers = Object.values(state.peers);
+    const peers = state.peers;
 
     const peerCount = peers.length;
     const avgRSSI =

@@ -236,7 +236,27 @@ export default function VolunteerModuleScreen({ navigation }: { navigation: Volu
                     {task.assigned} / {task.needed} kişi
                   </Text>
                 </View>
-                <Pressable style={styles.joinButton}>
+                <Pressable
+                  style={styles.joinButton}
+                  onPress={() => {
+                    // ELITE: Show join confirmation
+                    import('react-native').then(({ Alert }) => {
+                      Alert.alert(
+                        'Göreve Katıl',
+                        `"${task.title}" görevine katılmak istediğinizden emin misiniz?`,
+                        [
+                          { text: 'İptal', style: 'cancel' },
+                          {
+                            text: 'Katıl',
+                            onPress: () => {
+                              Alert.alert('Başarılı', 'Göreve kaydınız alındı. Görev koordinatörleri sizinle iletişime geçecektir.');
+                            }
+                          }
+                        ]
+                      );
+                    });
+                  }}
+                >
                   <Text style={styles.joinButtonText}>Katıl</Text>
                   <Ionicons name="arrow-forward" size={16} color={colors.brand.primary} />
                 </Pressable>

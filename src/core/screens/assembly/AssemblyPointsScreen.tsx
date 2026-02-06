@@ -413,7 +413,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
         <View style={styles.sampleNotice}>
           <Ionicons name="information-circle" size={16} color="#fbbf24" style={{ marginRight: 8 }} />
           <Text style={styles.sampleNoticeText}>
-            Bu liste örnek veriler içeriyor. Bölgenize özel toplanma noktaları yakında eklenecek.
+            Bu liste örnek veriler içeriyor. Konumunuza en yakın resmi noktaları AFAD/belediye kaynaklarıyla doğrulayın.
           </Text>
         </View>
       )}

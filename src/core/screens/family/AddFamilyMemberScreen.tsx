@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Location from 'expo-location'; // ELITE: For getting user's location
 import { useFamilyStore } from '../../stores/familyStore';
 import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
@@ -47,31 +46,12 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   const [notes, setNotes] = useState('');
   const [addMethod, setAddMethod] = useState<'qr' | 'manual'>('qr');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null); // ELITE: User's current location
 
   const members = useFamilyStore((state) => state.members);
 
-  // Initialize service and get user location
+  // Initialize service
   useEffect(() => {
     identityService.initialize();
-
-    // ELITE: Get user's location for initial member position
-    const getUserLocation = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          setUserLocation({
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          });
-          logger.debug('User location obtained:', location.coords);
-        }
-      } catch (error) {
-        logger.warn('Failed to get user location:', error);
-      }
-    };
-    getUserLocation();
   }, []);
 
   // ELITE: Check for duplicate IDs or Device IDs
@@ -236,19 +216,15 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       const trimmedNotes = notes.trim();
 
       // ELITE: Add member with comprehensive data
-      // Use user's current location as initial position (will be updated when member syncs their location)
+      // Do NOT seed new member location with inviter's GPS. Member will publish own location.
       await useFamilyStore.getState().addMember({
         id: idToSave, // Use Identity ID
         name: trimmedName,
         status: 'unknown',
         lastSeen: Date.now(),
-        latitude: userLocation?.latitude ?? 0,
-        longitude: userLocation?.longitude ?? 0,
-        location: userLocation ? {
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-          timestamp: Date.now(),
-        } : undefined,
+        latitude: 0,
+        longitude: 0,
+        location: undefined,
         deviceId: deviceIdToSave, // Use Physical ID for Mesh routing
         relationship: selectedRelationship || undefined,
         phoneNumber: trimmedPhone || undefined,

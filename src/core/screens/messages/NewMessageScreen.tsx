@@ -24,7 +24,7 @@ import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMessageStore } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
-import { useMeshStore } from '../../stores/meshStore';
+import { useMeshStore } from '../../services/mesh/MeshStore';
 import { getDeviceId as getDeviceIdFromLib, isValidDeviceId } from '../../../lib/device';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as haptics from '../../utils/haptics';
@@ -238,7 +238,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
               if (messageType === 'discovery' || messageType === 'beacon' || messageType === 'discovery_request') {
                 // ELITE: Sanitize device ID
                 const discoveredId = sanitizeDeviceId(
-                  data.deviceId || data.senderId || message.from || '',
+                  data.deviceId || data.senderId || message.senderId || '',
                 );
 
                 // ELITE: Validate device ID format
@@ -298,11 +298,6 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         ttl: 3,
       }).catch((error) => {
         logger.error('Failed to broadcast discovery request:', error);
-      });
-
-      // CRITICAL: Also add to mesh store for tracking
-      useMeshStore.getState().broadcastMessage(discoveryPayload, 'text').catch((error) => {
-        logger.error('Failed to add discovery request to store:', error);
       });
     }
 
@@ -1407,4 +1402,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-

@@ -6,9 +6,10 @@
 
 import { Alert } from 'react-native';
 import { logger } from '../utils/logger';
-import { useMeshStore } from '../stores/meshStore';
 import { useUserStatusStore } from '../stores/userStatusStore';
 import { useFamilyStore } from '../stores/familyStore';
+import { meshNetworkService } from './mesh/MeshNetworkService';
+import { MeshMessageType } from './mesh/MeshProtocol';
 
 class AutoCheckinService {
   private checkInTimer: NodeJS.Timeout | null = null;
@@ -151,15 +152,16 @@ class AutoCheckinService {
    */
   private async broadcastStatus(status: string, message: string) {
     try {
-      const meshStore = useMeshStore.getState();
-
-      // Broadcast to all peers
-      await meshStore.broadcastMessage(JSON.stringify({
-        type: 'status_update',
-        status,
-        message,
-        timestamp: Date.now(),
-      }), 'status');
+      await meshNetworkService.broadcastMessage(
+        JSON.stringify({
+          type: 'status_update',
+          status,
+          message,
+          timestamp: Date.now(),
+        }),
+        MeshMessageType.TEXT,
+        { to: 'broadcast' },
+      );
 
       logger.info(`AutoCheckinService: Broadcasted ${status}`);
     } catch (error) {
@@ -216,4 +218,3 @@ class AutoCheckinService {
 }
 
 export const autoCheckinService = new AutoCheckinService();
-

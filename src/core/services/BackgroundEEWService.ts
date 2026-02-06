@@ -160,8 +160,9 @@ class BackgroundEEWService {
         if (!Location || !TaskManager) return;
 
         try {
-            // Check permissions
-            const { status } = await Location.requestBackgroundPermissionsAsync();
+            // Do not trigger permission prompt during startup.
+            // Background permission should be granted from feature flow first.
+            const { status } = await Location.getBackgroundPermissionsAsync();
             if (status !== 'granted') {
                 logger.warn('Background location permission not granted');
                 return;

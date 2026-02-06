@@ -145,7 +145,7 @@ export default function SecurityScreen({ navigation }: SecurityScreenProps) {
               <View style={styles.settingContent}>
                 <Text style={styles.settingTitle}>İki Faktörlü Doğrulama</Text>
                 <Text style={styles.settingSubtitle}>
-                  Ekstra güvenlik katmanı (yakında)
+                  Ekstra güvenlik katmanı (bu sürümde pasif)
                 </Text>
               </View>
             </View>
@@ -155,7 +155,7 @@ export default function SecurityScreen({ navigation }: SecurityScreenProps) {
                 haptics.impactLight();
                 Alert.alert(
                   'İki Faktörlü Doğrulama',
-                  'Bu özellik yakında kullanıma sunulacak',
+                  'Bu sürümde iki faktörlü doğrulama kapalıdır. Biyometrik kilidi kullanabilirsiniz.',
                 );
               }}
               trackColor={{ false: '#334155', true: '#3b82f6' }}
@@ -508,4 +508,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

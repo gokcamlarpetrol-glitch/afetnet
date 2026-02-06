@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.0.3",
+  version: "1.1.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -66,7 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "13", // Incremented for crash fix
+    buildNumber: "1", // Fresh start for 1.1.1
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
@@ -143,8 +143,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EEW_ENABLED: process.env.EEW_ENABLED === 'true' ? true : false,
     EEW_NATIVE_ALARM: process.env.EEW_NATIVE_ALARM === 'true' ? true : false,
     EXPO_PUBLIC_OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || '',
-    RC_IOS_KEY: process.env.RC_IOS_KEY || '',
-    RC_ANDROID_KEY: process.env.RC_ANDROID_KEY || '',
     // CRITICAL: Firebase API Key from .env file (loaded via dotenv.config() above)
     EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',

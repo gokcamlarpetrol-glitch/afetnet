@@ -17,6 +17,8 @@ import { bleMeshService } from './BLEMeshService';
 import { firebaseDataService } from './FirebaseDataService';
 import { identityService } from './IdentityService';
 import { LOCATION_TASK_NAME } from '../tasks/BackgroundLocationTask';
+import { useFamilyStore } from '../stores/familyStore';
+import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 
 const logger = createLogger('FamilyTrackingService');
 
@@ -27,6 +29,7 @@ const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 export interface FamilyMember {
   id: string;
   name: string;
+  deviceId?: string;
   phone?: string;
   photo?: string;
   location?: {
@@ -44,7 +47,7 @@ export interface FamilyMember {
     source: 'gps' | 'mesh' | 'cloud' | 'manual';
   };
   batteryLevel?: number;
-  status: 'safe' | 'danger' | 'unknown' | 'offline';
+  status: 'safe' | 'danger' | 'unknown' | 'offline' | 'need-help' | 'critical';
   lastSeen: number;
   isOnline: boolean;
 }
@@ -63,6 +66,46 @@ class FamilyTrackingService {
   private statusCallbacks: Array<(member: FamilyMember) => void> = [];
   private locationSubscriptions: Map<string, () => void> = new Map();
 
+  private syncMembersFromStore(): void {
+    const storeMembers = useFamilyStore.getState().members;
+    if (!Array.isArray(storeMembers)) {
+      this.members = [];
+      return;
+    }
+
+    this.members = storeMembers.map((member) => {
+      const location = member.location
+        ? {
+          latitude: member.location.latitude,
+          longitude: member.location.longitude,
+          timestamp: member.location.timestamp || member.lastSeen || Date.now(),
+          accuracy: member.location.accuracy,
+        }
+        : (
+          Number.isFinite(member.latitude) && Number.isFinite(member.longitude)
+            ? {
+              latitude: member.latitude,
+              longitude: member.longitude,
+              timestamp: member.lastSeen || Date.now(),
+            }
+            : undefined
+        );
+
+      return {
+        id: member.id,
+        name: member.name,
+        deviceId: member.deviceId,
+        phone: member.phoneNumber,
+        location,
+        lastKnownLocation: member.lastKnownLocation,
+        batteryLevel: member.batteryLevel,
+        status: member.status,
+        lastSeen: member.lastSeen || location?.timestamp || Date.now(),
+        isOnline: member.isOnline ?? true,
+      };
+    });
+  }
+
   /**
      * Initialize service and load saved members
      */
@@ -73,6 +116,7 @@ class FamilyTrackingService {
         this.members = JSON.parse(data);
         logger.info(`Loaded ${this.members.length} family members`);
       }
+      this.syncMembersFromStore();
     } catch (e) {
       logger.error('Failed to load family members', e);
     }
@@ -85,6 +129,7 @@ class FamilyTrackingService {
     if (this.isTracking) return;
 
     logger.info('Starting Family Tracking');
+    this.syncMembersFromStore();
 
     // Check and request background permissions BEFORE setting isTracking
     const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
@@ -110,19 +155,22 @@ class FamilyTrackingService {
 
     // Start Background Location Updates (ELITE 24/7)
     try {
-      await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-        accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 50, // Update every 50 meters
-        deferredUpdatesInterval: 60 * 1000, // Minimum time between updates (1 min) - Battery saving
-        pausesUpdatesAutomatically: false, // CRITICAL: Keep running
-        showsBackgroundLocationIndicator: true, // Required for iOS
-        foregroundService: {
-          notificationTitle: "AfetNet Aktif",
-          notificationBody: "Konumunuz güvende kalmanız için izleniyor.",
-          notificationColor: "#C62828",
-        },
-      });
-      logger.info('Background location task started');
+      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+      if (!hasStarted) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 50, // Update every 50 meters
+          deferredUpdatesInterval: 60 * 1000, // Minimum time between updates (1 min) - Battery saving
+          pausesUpdatesAutomatically: false, // CRITICAL: Keep running
+          showsBackgroundLocationIndicator: true, // Required for iOS
+          foregroundService: {
+            notificationTitle: "AfetNet Aktif",
+            notificationBody: "Konumunuz güvende kalmanız için izleniyor.",
+            notificationColor: "#C62828",
+          },
+        });
+        logger.info('Background location task started');
+      }
     } catch (e) {
       logger.error('Failed to start background location task:', e);
       // Fallback to old interval method if native task fails
@@ -143,9 +191,14 @@ class FamilyTrackingService {
      */
   stopTracking() {
     // Stop native background task
-    Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(err => {
-      logger.warn('Failed to stop background updates', err);
-    });
+    Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+      .then((started) => {
+        if (!started) return;
+        return Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      })
+      .catch(err => {
+        logger.warn('Failed to stop background updates', err);
+      });
 
     if (this.locationInterval) {
       clearInterval(this.locationInterval);
@@ -188,6 +241,7 @@ class FamilyTrackingService {
      * ELITE: Returns lastKnownLocation coordinates when member is offline
      */
   getMembers(): FamilyMember[] {
+    this.syncMembersFromStore();
     const now = Date.now();
     return this.members.map((m) => {
       const isOnline = now - m.lastSeen < STALE_THRESHOLD;
@@ -269,6 +323,10 @@ class FamilyTrackingService {
       // Notify callbacks
       this.notifyStatusChange(member);
       this.saveMembers();
+
+      useFamilyStore.getState().updateMemberLocation(memberId, location.latitude, location.longitude).catch((error) => {
+        logger.warn('Failed to sync member location to FamilyStore', error);
+      });
     }
   }
 
@@ -282,6 +340,17 @@ class FamilyTrackingService {
       member.lastSeen = Date.now();
       this.notifyStatusChange(member);
       this.saveMembers();
+
+      const normalizedStatus: 'safe' | 'need-help' | 'critical' | 'unknown' =
+        status === 'danger'
+          ? 'need-help'
+          : status === 'offline'
+            ? 'unknown'
+            : (status as 'safe' | 'need-help' | 'critical' | 'unknown');
+
+      useFamilyStore.getState().updateMemberStatus(memberId, normalizedStatus).catch((error) => {
+        logger.warn('Failed to sync member status to FamilyStore', error);
+      });
     }
   }
 
@@ -295,29 +364,48 @@ class FamilyTrackingService {
       });
 
       const timestamp = Date.now();
-      const myId = identityService.getMyId();
+      const identity = identityService.getIdentity();
+      const cloudTargetIds = new Set<string>();
+      if (identity?.id && identity.id !== 'unknown') {
+        cloudTargetIds.add(identity.id);
+      }
+      if (identity?.deviceId && identity.deviceId !== 'unknown') {
+        cloudTargetIds.add(identity.deviceId);
+      }
+      try {
+        const physicalDeviceId = await getDeviceIdFromLib();
+        if (physicalDeviceId) {
+          cloudTargetIds.add(physicalDeviceId);
+        }
+      } catch (error) {
+        logger.debug('Could not resolve physical device ID for location fan-out', error);
+      }
 
       // 1. Share via Mesh (Always, for offline peer-to-peer)
       bleMeshService.shareLocation(loc.coords.latitude, loc.coords.longitude);
 
-      // 2. Share via Cloud (If Online - ELITE "Find My")
-      // This pushes to our own "devices/{myId}" doc which others subscribe to
-      if (myId && myId !== 'unknown') {
-        // Fire and forget - don't await to keep UI responsive
-        firebaseDataService.saveLocationUpdate(myId, {
+      // 2. Share via Cloud (QR ID + physical device ID fan-out for compatibility)
+      if (cloudTargetIds.size > 0) {
+        const payload = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
           timestamp: timestamp, // Use number for consistency
           accuracy: loc.coords.accuracy || 0,
           speed: loc.coords.speed || 0,
           heading: loc.coords.heading || 0,
-        }).catch(e => logger.warn('Failed to push online location', e));
+        };
 
-        // Also update the main device doc for easy subscription
-        // (Using saveDeviceId with merged location would be ideal, 
-        // but saveLocationUpdate logic in firebase service might need adjustment 
-        // or we assume saveLocationUpdate handles the "latest" field too.
-        // Based on our plan, we'll rely on saveLocationUpdate updating the device doc)
+        Promise.all(
+          Array.from(cloudTargetIds).map((targetId) =>
+            firebaseDataService.saveLocationUpdate(targetId, payload),
+          ),
+        )
+          .then((results) => {
+            if (!results.some(Boolean)) {
+              logger.warn('Cloud location fan-out returned false for all IDs');
+            }
+          })
+          .catch(e => logger.warn('Failed to push online location', e));
       }
 
       logger.debug('Location shared (Hybrid)');
@@ -369,13 +457,15 @@ class FamilyTrackingService {
     // Clear existing
     this.locationSubscriptions.forEach(unsubscribe => unsubscribe());
     this.locationSubscriptions.clear();
+    this.syncMembersFromStore();
 
     for (const member of this.members) {
-      if (!member.id) continue;
+      const targetDeviceId = member.deviceId || member.id;
+      if (!targetDeviceId) continue;
 
       // Subscribe to each member's device location
       const unsubscribe = await firebaseDataService.subscribeToDeviceLocation(
-        member.id,
+        targetDeviceId,
         (location) => {
           // ELITE: Use typeof check instead of truthy check to allow 0 coordinates
           if (location &&
@@ -394,7 +484,7 @@ class FamilyTrackingService {
         },
       );
 
-      this.locationSubscriptions.set(member.id, unsubscribe);
+      this.locationSubscriptions.set(targetDeviceId, unsubscribe);
     }
   }
 

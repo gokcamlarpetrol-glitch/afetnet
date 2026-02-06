@@ -102,98 +102,108 @@ export async function initializeApp() {
     logger.info('🚀 Starting AfetNet Elite initialization...');
 
     // 1. Load core services dynamically (Parallel Loading for Speed)
-    // CRITICAL: Load all services in parallel to minimize startup time
+    // CRITICAL: Use Promise.allSettled so ONE service failure doesn't crash entire app
     logger.info('📦 Loading services dynamically...');
 
+    // ELITE RESILIENT PATTERN: Load each service with individual try-catch
+    const safeImport = async <T>(importFn: () => Promise<T>, name: string): Promise<T | null> => {
+      try {
+        return await importFn();
+      } catch (error) {
+        logger.error(`Failed to import ${name}:`, error);
+        return null;
+      }
+    };
+
     const [
-      { earthquakeService: es },
-      { bleMeshService: bms },
-      { locationService: ls },
-      { notificationService: ns },
-      { firebaseService: fs },
-      { permissionService: ps },
-      { backgroundTaskService: bts },
-      { offlineSyncService: ss },
-      { offlineMapService: oms },
+      esModule,
+      bmsModule,
+      lsModule,
+      nsModule,
+      fsModule,
+      psModule,
+      btsModule,
+      ssModule,
+      omsModule,
       // ELITE: EEW Advanced Services
-      { fcmTokenService: fts },
-      { backgroundEEWService: bews },
-      { plumEEWService: pews },
-      { mlPWaveClassifier: mlc },
+      ftsModule,
+      bewsModule,
+      pewsModule,
+      mlcModule,
       // ELITE: Multi-Source, Widget & Watch Services
-      { multiSourceEEWService: msews },
-      { widgetDataBridgeService: wdbs },
-      { watchBridgeService: wbs },
+      msewsModule,
+      wdbsModule,
+      wbsModule,
       // ELITE: Life-Saving Services (2026)
-      { turkeyOfflineDataService: tods },
-      { turkeyAssemblyPointsService: taps },
-      { comprehensiveNotificationService: cns },
-      { voiceEvacuationService: ves },
-      { nearestSafeZoneService: nszs },
-      { batterySOSService: bsos },
-      { tsunamiRiskService: trs },
-      { firstAidGuideService: fags },
-      { ultraEliteWaveService: uews },
+      todsModule,
+      tapsModule,
+      cnsModule,
+      vesModule,
+      nszsModule,
+      bsosModule,
+      trsModule,
+      fagsModule,
+      uewsModule,
     ] = await Promise.all([
-      import('./services/EarthquakeService'),
-      import('./services/BLEMeshService'),
-      import('./services/LocationService'),
-      import('./services/NotificationService'),
-      import('./services/FirebaseService'),
-      import('./services/PermissionService'),
-      import('./services/BackgroundTaskService'),
-      import('./services/OfflineSyncService'),
-      import('./services/OfflineMapService'),
+      safeImport(() => import('./services/EarthquakeService'), 'EarthquakeService'),
+      safeImport(() => import('./services/BLEMeshService'), 'BLEMeshService'),
+      safeImport(() => import('./services/LocationService'), 'LocationService'),
+      safeImport(() => import('./services/NotificationService'), 'NotificationService'),
+      safeImport(() => import('./services/FirebaseService'), 'FirebaseService'),
+      safeImport(() => import('./services/PermissionService'), 'PermissionService'),
+      safeImport(() => import('./services/BackgroundTaskService'), 'BackgroundTaskService'),
+      safeImport(() => import('./services/OfflineSyncService'), 'OfflineSyncService'),
+      safeImport(() => import('./services/OfflineMapService'), 'OfflineMapService'),
       // ELITE: EEW Advanced Services
-      import('./services/FCMTokenService'),
-      import('./services/BackgroundEEWService'),
-      import('./services/PLUMEEWService'),
-      import('./services/MLPWaveClassifier'),
+      safeImport(() => import('./services/FCMTokenService'), 'FCMTokenService'),
+      safeImport(() => import('./services/BackgroundEEWService'), 'BackgroundEEWService'),
+      safeImport(() => import('./services/PLUMEEWService'), 'PLUMEEWService'),
+      safeImport(() => import('./services/MLPWaveClassifier'), 'MLPWaveClassifier'),
       // ELITE: Multi-Source, Widget & Watch Services
-      import('./services/MultiSourceEEWService'),
-      import('./services/WidgetDataBridgeService'),
-      import('./services/WatchBridgeService'),
+      safeImport(() => import('./services/MultiSourceEEWService'), 'MultiSourceEEWService'),
+      safeImport(() => import('./services/WidgetDataBridgeService'), 'WidgetDataBridgeService'),
+      safeImport(() => import('./services/WatchBridgeService'), 'WatchBridgeService'),
       // ELITE: Life-Saving Services (2026)
-      import('./services/TurkeyOfflineDataService'),
-      import('./services/TurkeyAssemblyPointsService'),
-      import('./services/ComprehensiveNotificationService'),
-      import('./services/VoiceEvacuationService'),
-      import('./services/NearestSafeZoneService'),
-      import('./services/BatterySOSService'),
-      import('./services/TsunamiRiskService'),
-      import('./services/FirstAidGuideService'),
-      import('./services/UltraEliteWaveService'),
+      safeImport(() => import('./services/TurkeyOfflineDataService'), 'TurkeyOfflineDataService'),
+      safeImport(() => import('./services/TurkeyAssemblyPointsService'), 'TurkeyAssemblyPointsService'),
+      safeImport(() => import('./services/ComprehensiveNotificationService'), 'ComprehensiveNotificationService'),
+      safeImport(() => import('./services/VoiceEvacuationService'), 'VoiceEvacuationService'),
+      safeImport(() => import('./services/NearestSafeZoneService'), 'NearestSafeZoneService'),
+      safeImport(() => import('./services/BatterySOSService'), 'BatterySOSService'),
+      safeImport(() => import('./services/TsunamiRiskService'), 'TsunamiRiskService'),
+      safeImport(() => import('./services/FirstAidGuideService'), 'FirstAidGuideService'),
+      safeImport(() => import('./services/UltraEliteWaveService'), 'UltraEliteWaveService'),
     ]);
 
-    // Assign to module-level variables
-    earthquakeService = es;
-    bleMeshService = bms;
-    locationService = ls;
-    notificationService = ns;
-    firebaseService = fs;
-    permissionService = ps;
-    backgroundTaskService = bts;
-    syncService = ss;
-    offlineMapService = oms;
+    // ELITE: Safely extract services with null fallback
+    earthquakeService = esModule?.earthquakeService;
+    bleMeshService = bmsModule?.bleMeshService;
+    locationService = lsModule?.locationService;
+    notificationService = nsModule?.notificationService;
+    firebaseService = fsModule?.firebaseService;
+    permissionService = psModule?.permissionService;
+    backgroundTaskService = btsModule?.backgroundTaskService;
+    syncService = ssModule?.offlineSyncService;
+    offlineMapService = omsModule?.offlineMapService;
     // ELITE: EEW Advanced Services
-    fcmTokenService = fts;
-    backgroundEEWService = bews;
-    plumEEWService = pews;
-    mlPWaveClassifier = mlc;
+    fcmTokenService = ftsModule?.fcmTokenService;
+    backgroundEEWService = bewsModule?.backgroundEEWService;
+    plumEEWService = pewsModule?.plumEEWService;
+    mlPWaveClassifier = mlcModule?.mlPWaveClassifier;
     // ELITE: Multi-Source, Widget & Watch Services
-    multiSourceEEWService = msews;
-    widgetDataBridgeService = wdbs;
-    watchBridgeService = wbs;
+    multiSourceEEWService = msewsModule?.multiSourceEEWService;
+    widgetDataBridgeService = wdbsModule?.widgetDataBridgeService;
+    watchBridgeService = wbsModule?.watchBridgeService;
     // ELITE: Life-Saving Services (2026)
-    turkeyOfflineDataService = tods;
-    turkeyAssemblyPointsService = taps;
-    comprehensiveNotificationService = cns;
-    voiceEvacuationService = ves;
-    nearestSafeZoneService = nszs;
-    batterySOSService = bsos;
-    tsunamiRiskService = trs;
-    firstAidGuideService = fags;
-    ultraEliteWaveService = uews;
+    turkeyOfflineDataService = todsModule?.turkeyOfflineDataService;
+    turkeyAssemblyPointsService = tapsModule?.turkeyAssemblyPointsService;
+    comprehensiveNotificationService = cnsModule?.comprehensiveNotificationService;
+    voiceEvacuationService = vesModule?.voiceEvacuationService;
+    nearestSafeZoneService = nszsModule?.nearestSafeZoneService;
+    batterySOSService = bsosModule?.batterySOSService;
+    tsunamiRiskService = trsModule?.tsunamiRiskService;
+    firstAidGuideService = fagsModule?.firstAidGuideService;
+    ultraEliteWaveService = uewsModule?.ultraEliteWaveService;
 
     logger.info('✅ Services loaded (including EEW Elite + Multi-Source + Life-Saving)');
 
@@ -228,14 +238,10 @@ export async function initializeApp() {
       logger.error('❌ Earthquake service start failed:', error);
     }
 
-    // 6. Initialize BLE Mesh (Offline Communication)
-    // Starts advertising/scanning if enabled
-    try {
-      await bleMeshService?.start?.();
-      logger.info('✅ BLE Mesh service started');
-    } catch (error: unknown) {
-      logger.error('❌ BLE Mesh service start failed:', error);
-    }
+    // 6. BLE Mesh startup is deferred.
+    // Apple review compliance: avoid Bluetooth permission prompts at app launch.
+    // Mesh starts when the user explicitly enables the feature in UI/onboarding.
+    logger.info('ℹ️ BLE Mesh auto-start deferred until user action');
 
     // 7. Initialize Background Tasks
     // Registers background fetch/tasks

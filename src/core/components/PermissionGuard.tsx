@@ -46,36 +46,9 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
   const [isRequesting, setIsRequesting] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
-    const timeoutId = setTimeout(() => {
-      if (isMounted && !permissionsChecked) {
-        // ELITE: Don't log - timeout is expected behavior and happens silently
-        // Permission requests can take time, especially on first launch
-        setPermissionsChecked(true);
-        setIsRequesting(false);
-      }
-    }, 10000); // Reduced from 30s to 10s - permissions should be faster
-
-    const init = async () => {
-      try {
-        await requestAllPermissions();
-      } catch (error) {
-        logger.error('Permission request failed:', error);
-        if (isMounted) {
-          setPermissionsChecked(true);
-          setIsRequesting(false);
-        }
-      }
-    };
-
-    init();
-
-    return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
-    };
-    // ELITE: Empty dependency array is intentional - permissions should only be
-    // requested once on component mount, not on re-renders
+    // Startup must not force system permission prompts.
+    // Permissions are requested on feature entry points (onboarding / relevant screens).
+    setPermissionsChecked(true);
   }, []);
 
   const requestAllPermissions = async () => {
@@ -93,14 +66,11 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     // 1. Location Permission
     try {
       logger.info('Requesting location permission...');
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-
-      if (foregroundStatus === 'granted') {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-        statuses.location = backgroundStatus === 'granted' || foregroundStatus === 'granted';
-        logger.info(`Location permission: ${backgroundStatus === 'granted' ? 'FULL' : 'FOREGROUND ONLY'}`);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      statuses.location = status === 'granted';
+      if (statuses.location) {
+        logger.info('Location permission: FOREGROUND');
       } else {
-        statuses.location = false;
         logger.warn('Location permission DENIED - continuing anyway');
       }
     } catch (error) {

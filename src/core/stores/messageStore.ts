@@ -5,10 +5,12 @@
  */
 
 import { create } from 'zustand';
+import { getAuth } from 'firebase/auth';
 import { DirectStorage } from '../utils/storage';
 import { getDeviceId } from '../utils/device';
 import { createLogger } from '../utils/logger';
 import { safeLowerCase, safeIncludes } from '../utils/safeString';
+import { initializeFirebase } from '../../lib/firebase';
 
 const logger = createLogger('MessageStore');
 
@@ -128,8 +130,39 @@ export interface MessageActions {
   getMessage: (messageId: string) => Message | undefined;
 }
 
-const STORAGE_KEY_MESSAGES = '@afetnet:messages';
-const STORAGE_KEY_CONVERSATIONS = '@afetnet:conversations';
+const STORAGE_KEY_MESSAGES_BASE = '@afetnet:messages';
+const STORAGE_KEY_CONVERSATIONS_BASE = '@afetnet:conversations';
+const STORAGE_GUEST_SCOPE = 'guest';
+
+const getStorageScope = (): string => {
+  try {
+    const app = initializeFirebase();
+    if (!app) return STORAGE_GUEST_SCOPE;
+    const uid = getAuth(app).currentUser?.uid;
+    return uid ? `user:${uid}` : STORAGE_GUEST_SCOPE;
+  } catch {
+    return STORAGE_GUEST_SCOPE;
+  }
+};
+
+const getScopedStorageKey = (baseKey: string): string => `${baseKey}:${getStorageScope()}`;
+
+const readScopedStorage = (baseKey: string): string | null => {
+  const scopedKey = getScopedStorageKey(baseKey);
+  const scopedData = DirectStorage.getString(scopedKey);
+  if (scopedData) {
+    return scopedData;
+  }
+
+  // Migration path for legacy global keys
+  const legacyData = DirectStorage.getString(baseKey);
+  if (legacyData) {
+    DirectStorage.setString(scopedKey, legacyData);
+    return legacyData;
+  }
+
+  return null;
+};
 
 const initialState: MessageState = {
   messages: [],
@@ -142,7 +175,7 @@ const initialState: MessageState = {
 // ELITE: Load messages from MMKV (Sync & Fast)
 const loadMessages = (): Message[] => {
   try {
-    const data = DirectStorage.getString(STORAGE_KEY_MESSAGES);
+    const data = readScopedStorage(STORAGE_KEY_MESSAGES_BASE);
     if (data) {
       return JSON.parse(data);
     }
@@ -155,7 +188,7 @@ const loadMessages = (): Message[] => {
 // ELITE: Save messages to MMKV (Sync & Fast)
 const saveMessages = (messages: Message[]) => {
   try {
-    DirectStorage.setString(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
+    DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_MESSAGES_BASE), JSON.stringify(messages));
   } catch (error) {
     logger.error('Failed to save messages:', error);
   }
@@ -164,7 +197,7 @@ const saveMessages = (messages: Message[]) => {
 // ELITE: Load conversations from MMKV
 const loadConversations = (): Conversation[] => {
   try {
-    const data = DirectStorage.getString(STORAGE_KEY_CONVERSATIONS);
+    const data = readScopedStorage(STORAGE_KEY_CONVERSATIONS_BASE);
     if (data) {
       return JSON.parse(data);
     }
@@ -177,7 +210,7 @@ const loadConversations = (): Conversation[] => {
 // ELITE: Save conversations to MMKV
 const saveConversations = (conversations: Conversation[]) => {
   try {
-    DirectStorage.setString(STORAGE_KEY_CONVERSATIONS, JSON.stringify(conversations));
+    DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_CONVERSATIONS_BASE), JSON.stringify(conversations));
   } catch (error) {
     logger.error('Failed to save conversations:', error);
   }
@@ -324,11 +357,13 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
           // ELITE: Save message to Firebase (fire and forget - don't block UI)
           firebaseService.saveMessage(deviceId, {
             id: message.id,
-            text: message.content || message.from || '',
-            userId: message.from,
+            fromDeviceId: message.from || deviceId,
+            toDeviceId: message.to || deviceId,
+            content: message.content || '',
             timestamp: message.timestamp,
             type: 'text',
-            read: message.read || false,
+            status: message.status || (message.read ? 'read' : message.delivered ? 'delivered' : 'sent'),
+            priority: message.priority || 'normal',
           }).catch((error) => {
             // ELITE: Message save failures are logged but don't block app
             logger.error('Failed to save message to Firebase:', error);
@@ -513,6 +548,11 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     set({ ...initialState, firebaseUnsubscribe: null });
     saveMessages([]);
     saveConversations([]);
+    DirectStorage.delete(getScopedStorageKey(STORAGE_KEY_MESSAGES_BASE));
+    DirectStorage.delete(getScopedStorageKey(STORAGE_KEY_CONVERSATIONS_BASE));
+    // Cleanup legacy unscoped keys to prevent cross-account bleed
+    DirectStorage.delete(STORAGE_KEY_MESSAGES_BASE);
+    DirectStorage.delete(STORAGE_KEY_CONVERSATIONS_BASE);
   },
 
   // ELITE: Update message status
@@ -733,4 +773,3 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     return get().messages.find(m => m.id === messageId);
   },
 }));
-

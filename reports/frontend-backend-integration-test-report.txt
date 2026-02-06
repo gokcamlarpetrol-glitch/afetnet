@@ -1,0 +1,59 @@
+[2026-02-06T17:52:29.107Z] ℹ️ ========================================
+[2026-02-06T17:52:29.108Z] ℹ️ FRONTEND-BACKEND INTEGRATION TEST
+[2026-02-06T17:52:29.108Z] ℹ️ ========================================
+[2026-02-06T17:52:29.108Z] ℹ️ 
+[2026-02-06T17:52:29.108Z] ℹ️ Testing Backend API Endpoints...
+[2026-02-06T17:52:29.120Z] ⚠️ Health endpoint: ⚠️ Status undefined
+[2026-02-06T17:52:29.120Z] ⚠️ EEW health: ⚠️ Status undefined
+[2026-02-06T17:52:29.121Z] ⚠️ Earthquakes API: ⚠️ Status undefined
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Frontend API Client...
+[2026-02-06T17:52:29.121Z] ✅ APIClient.ts: ✅ File exists
+[2026-02-06T17:52:29.121Z] ✅ APIClient class: ✅ Defined
+[2026-02-06T17:52:29.121Z] ✅ request method: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ Timeout handling: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ HMAC signature: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ get method: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ post method: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ put method: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ delete method: ✅ Implemented
+[2026-02-06T17:52:29.121Z] ✅ registerDevice endpoint: ✅ Defined
+[2026-02-06T17:52:29.121Z] ✅ syncMessages endpoint: ✅ Defined
+[2026-02-06T17:52:29.121Z] ✅ updateLocation endpoint: ✅ Defined
+[2026-02-06T17:52:29.121Z] ✅ sendSOS endpoint: ✅ Defined
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Backend Routes...
+[2026-02-06T17:52:29.121Z] ⚠️ Earthquakes route: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ EEW route: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ News route: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ Preparedness route: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ Sensor Data route: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Backend Services...
+[2026-02-06T17:52:29.121Z] ⚠️ centralizedAIAnalysisService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ centralizedNewsSummaryService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ centralizedPreparednessPlanService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ BackendAIPredictionService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ newsBackgroundService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ newsCacheService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ newsPriorityService: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Backend Middleware...
+[2026-02-06T17:52:29.121Z] ❌ Rate limiter: ❌ File not found
+[2026-02-06T17:52:29.121Z] ⚠️ Security headers: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Database Configuration...
+[2026-02-06T17:52:29.121Z] ❌ Database.ts: ❌ File not found
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ Testing Frontend-Backend Configuration...
+[2026-02-06T17:52:29.121Z] ⚠️ Frontend config.ts: ⚠️ File not found
+[2026-02-06T17:52:29.121Z] ✅ Frontend env.ts: ✅ File exists
+[2026-02-06T17:52:29.121Z] ✅ API base URL: ✅ Configured
+[2026-02-06T17:52:29.121Z] ℹ️ 
+[2026-02-06T17:52:29.121Z] ℹ️ ========================================
+[2026-02-06T17:52:29.121Z] ℹ️ TEST SUMMARY
+[2026-02-06T17:52:29.121Z] ℹ️ ========================================
+[2026-02-06T17:52:29.121Z] ℹ️ Success: 15
+[2026-02-06T17:52:29.121Z] ℹ️ Errors: 2
+[2026-02-06T17:52:29.121Z] ℹ️ Warnings: 17
+[2026-02-06T17:52:29.121Z] ⚠️ ⚠️ 2 issue(s) found

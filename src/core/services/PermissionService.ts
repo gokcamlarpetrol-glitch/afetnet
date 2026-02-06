@@ -52,12 +52,7 @@ class PermissionService {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         this.cachedStatus.location = true;
-        // ELITE: Also request background permission on iOS
-        if (Platform.OS === 'ios') {
-          const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-          this.cachedStatus.locationBackground = bgStatus === 'granted';
-        }
-        logger.info('Location permission granted');
+        logger.info('Location permission granted (foreground)');
         return true;
       }
       this.cachedStatus.location = false;

@@ -95,7 +95,18 @@ export default function CoreApp() {
 
     initializeWithSecurityCheck();
 
+    // CRITICAL FIX: Hydration safety timeout
+    // If onboarding store doesn't hydrate in 5 seconds, force it to prevent black screen
+    const hydrationTimeout = setTimeout(() => {
+      const state = useOnboardingStore.getState();
+      if (!state.isHydrated) {
+        console.warn('[App] Hydration timeout - forcing hydrated state');
+        useOnboardingStore.setState({ isHydrated: true });
+      }
+    }, 5000);
+
     return () => {
+      clearTimeout(hydrationTimeout);
       cleanupAuthListener();
       shutdownApp();
     };

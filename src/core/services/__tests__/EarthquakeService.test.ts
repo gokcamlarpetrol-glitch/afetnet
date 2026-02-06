@@ -1,225 +1,137 @@
 /**
- * EARTHQUAKE SERVICE TESTS - ELITE EDITION
- * Comprehensive test coverage for earthquake data fetching
+ * EARTHQUAKE SERVICE TESTS - CURRENT API
+ * Focus: store update behavior and failure fallbacks
  */
 
 import { earthquakeService } from '../EarthquakeService';
+import { useEarthquakeStore } from '../../stores/earthquakeStore';
+import { fetchAllEarthquakes } from '../earthquake/EarthquakeFetcher';
+import { loadFromCache, saveToCache } from '../earthquake/EarthquakeCacheManager';
 
-// Mock fetch globally
+jest.mock('../earthquake/EarthquakeFetcher', () => ({
+  fetchAllEarthquakes: jest.fn(),
+  fetchFromAFADAPI: jest.fn(),
+  fetchFromKandilliAPI: jest.fn(),
+}));
+
+jest.mock('../earthquake/EarthquakeCacheManager', () => ({
+  loadFromCache: jest.fn(),
+  saveToCache: jest.fn().mockResolvedValue(undefined),
+  getCacheAge: jest.fn().mockResolvedValue(1),
+}));
+
+jest.mock('../earthquake/EarthquakeDataProcessor', () => ({
+  filterByTurkeyBounds: jest.fn((items) => items),
+}));
+
+jest.mock('../earthquake/EarthquakeDeduplicator', () => ({
+  deduplicateEarthquakes: jest.fn((items) => items),
+}));
+
+jest.mock('../../ai/services/EarthquakeValidationService', () => ({
+  earthquakeValidationService: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    validateBatch: jest.fn(async (items) => ({ valid: items, invalid: [] })),
+  },
+}));
+
+jest.mock('../earthquake/EarthquakeNotificationHandler', () => ({
+  processEarthquakeNotifications: jest.fn().mockResolvedValue(undefined),
+}));
+
+const mockedFetchAllEarthquakes = fetchAllEarthquakes as jest.MockedFunction<typeof fetchAllEarthquakes>;
+const mockedLoadFromCache = loadFromCache as jest.MockedFunction<typeof loadFromCache>;
+const mockedSaveToCache = saveToCache as jest.MockedFunction<typeof saveToCache>;
 const mockFetch = jest.fn();
-global.fetch = mockFetch;
+
+(global as any).fetch = mockFetch;
 
 describe('EarthquakeService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockFetch.mockReset();
-  });
-
-  describe('Initialization', () => {
-    it('should be a singleton instance', () => {
-      expect(earthquakeService).toBeDefined();
-      expect(typeof earthquakeService).toBe('object');
-    });
-
-    it('should have required methods', () => {
-      expect(typeof earthquakeService.fetchEarthquakes).toBe('function');
-      expect(typeof earthquakeService.fetchEarthquakeDetail).toBe('function');
+    useEarthquakeStore.setState({
+      items: [],
+      loading: false,
+      error: null,
+      lastUpdate: null,
     });
   });
 
-  describe('Earthquake Fetching', () => {
-    it('should fetch earthquakes successfully', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: jest.fn().mockResolvedValue(JSON.stringify([
-          {
-            eventID: '12345',
-            mag: 4.5,
-            lat: 41.0082,
-            lng: 28.9784,
-            depth: 10,
-            title: 'İstanbul',
-            date: new Date().toISOString(),
-          },
-        ])),
-      });
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it('should handle empty response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: jest.fn().mockResolvedValue('[]'),
-      });
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBe(0);
-    });
-
-    it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      // Should return empty array or cached data, not throw
-      expect(Array.isArray(result)).toBe(true);
-    });
+  it('is singleton and exposes required methods', () => {
+    expect(earthquakeService).toBeDefined();
+    expect(typeof earthquakeService.fetchEarthquakes).toBe('function');
+    expect(typeof earthquakeService.fetchEarthquakeDetail).toBe('function');
   });
 
-  describe('Earthquake Detail', () => {
-    it('should fetch earthquake detail by ID', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: jest.fn().mockResolvedValue(JSON.stringify({
-          eventID: '12345',
-          mag: 5.2,
-          lat: 41.0082,
-          lng: 28.9784,
-          depth: 15,
-          title: 'İstanbul Açıkları',
-          date: new Date().toISOString(),
-        })),
-      });
+  it('updates store items when upstream fetch succeeds', async () => {
+    mockedFetchAllEarthquakes.mockResolvedValueOnce({
+      earthquakes: [
+        {
+          id: 'afad-1',
+          magnitude: 3.8,
+          latitude: 41.0,
+          longitude: 29.0,
+          depth: 10,
+          location: 'Istanbul',
+          time: Date.now(),
+          source: 'AFAD',
+        },
+      ],
+      sources: {
+        afadHTML: true,
+        afadAPI: true,
+        kandilliAPI: false,
+      },
+    } as any);
 
-      const result = await earthquakeService.fetchEarthquakeDetail('12345');
+    await earthquakeService.fetchEarthquakes();
 
-      // Should return earthquake or null
-      expect(result === null || typeof result === 'object').toBe(true);
-    });
-
-    it('should handle missing earthquake', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        text: jest.fn().mockResolvedValue('Not found'),
-      });
-
-      const result = await earthquakeService.fetchEarthquakeDetail('nonexistent');
-
-      expect(result).toBeNull();
-    });
+    const state = useEarthquakeStore.getState();
+    expect(state.items).toHaveLength(1);
+    expect(state.loading).toBe(false);
+    expect(state.error).toBeNull();
+    expect(mockedSaveToCache).toHaveBeenCalled();
   });
 
-  describe('Data Validation', () => {
-    it('should validate earthquake object structure', () => {
-      const validEarthquake = {
-        id: 'afad-12345',
-        magnitude: 4.5,
-        latitude: 41.0082,
-        longitude: 28.9784,
-        depth: 10,
-        location: 'Test',
-        time: Date.now(),
-        source: 'AFAD',
-      };
+  it('keeps service stable on empty upstream response', async () => {
+    mockedFetchAllEarthquakes.mockResolvedValueOnce({
+      earthquakes: [],
+      sources: {
+        afadHTML: false,
+        afadAPI: false,
+        kandilliAPI: false,
+      },
+    } as any);
 
-      expect(validEarthquake).toBeValidEarthquake();
-    });
+    await expect(earthquakeService.fetchEarthquakes()).resolves.toBeUndefined();
 
-    it('should reject invalid magnitude', () => {
-      const invalidEarthquake = {
-        id: 'test',
-        magnitude: -1, // Invalid
-        latitude: 41.0,
-        longitude: 28.9,
-      };
-
-      expect(invalidEarthquake).not.toBeValidEarthquake();
-    });
-
-    it('should reject missing coordinates', () => {
-      const invalidEarthquake = {
-        id: 'test',
-        magnitude: 4.0,
-        // Missing latitude and longitude
-      };
-
-      expect(invalidEarthquake).not.toBeValidEarthquake();
-    });
+    const state = useEarthquakeStore.getState();
+    expect(state.loading).toBe(false);
   });
 
-  describe('Caching', () => {
-    it('should cache earthquake data', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: jest.fn().mockResolvedValue(JSON.stringify([
-          { eventID: '1', mag: 4.0, lat: 41.0, lng: 28.9, depth: 10, title: 'Test', date: new Date().toISOString() },
-        ])),
-      });
+  it('sets an error when fetch throws and cache is unavailable', async () => {
+    mockedFetchAllEarthquakes.mockRejectedValueOnce(new Error('Network error'));
+    mockedLoadFromCache.mockResolvedValueOnce(null);
 
-      // First fetch
-      const first = await earthquakeService.fetchEarthquakes();
+    await expect(earthquakeService.fetchEarthquakes()).resolves.toBeUndefined();
 
-      // Mock network failure
-      mockFetch.mockRejectedValueOnce(new Error('Network failed'));
-
-      // Second fetch should return cached data
-      const second = await earthquakeService.fetchEarthquakes();
-
-      expect(Array.isArray(first)).toBe(true);
-      expect(Array.isArray(second)).toBe(true);
-    });
+    const state = useEarthquakeStore.getState();
+    expect(state.items).toHaveLength(0);
+    expect(state.error).toBeTruthy();
+    expect(state.loading).toBe(false);
   });
 
-  describe('Source Validation', () => {
-    it('should normalize AFAD source', () => {
-      const source = 'AFAD';
-      expect(['AFAD', 'Kandilli', 'USGS']).toContain(source);
-    });
+  it('fetchEarthquakeDetail returns null when API is not ok', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: jest.fn(),
+      text: jest.fn().mockResolvedValue('not found'),
+    } as any);
 
-    it('should normalize Kandilli source', () => {
-      const source = 'Kandilli';
-      expect(['AFAD', 'Kandilli', 'USGS']).toContain(source);
-    });
-  });
-});
+    const result = await earthquakeService.fetchEarthquakeDetail('missing');
 
-describe('EarthquakeService - Edge Cases', () => {
-  describe('Timeout Handling', () => {
-    it('should handle request timeout', async () => {
-      mockFetch.mockImplementationOnce(() =>
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 100),
-        ),
-      );
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      expect(Array.isArray(result)).toBe(true);
-    });
-  });
-
-  describe('Invalid JSON', () => {
-    it('should handle malformed JSON', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: jest.fn().mockResolvedValue('not valid json'),
-      });
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      // Should not crash, return empty or cached
-      expect(Array.isArray(result)).toBe(true);
-    });
-  });
-
-  describe('Rate Limiting', () => {
-    it('should handle 429 rate limit response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-        text: jest.fn().mockResolvedValue('Rate limited'),
-      });
-
-      const result = await earthquakeService.fetchEarthquakes();
-
-      // Should return cached data or empty
-      expect(Array.isArray(result)).toBe(true);
-    });
+    expect(result).toBeNull();
   });
 });

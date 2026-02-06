@@ -25,7 +25,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.3</string>
+    <string>1.1.1</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -43,9 +43,17 @@
           <string>exp+afetnet</string>
         </array>
       </dict>
+      <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>com.googleusercontent.apps.702394557087-4be0b0gkms5u6ph6ck5mquofd4kaffjd</string>
+        </array>
+      </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>13</string>
+    <string>1</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSApplicationQueriesSchemes</key>

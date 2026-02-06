@@ -20,12 +20,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFamilyStore } from '../../stores/familyStore';
 import { bleMeshService } from '../../services/BLEMeshService';
+import { useMeshStore } from '../../services/mesh/MeshStore';
+import { identityService } from '../../services/IdentityService';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { getDeviceId } from '../../../lib/device';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('FamilyGroupChatScreen');
+const FAMILY_GROUP_CHANNEL = 'family-group';
 
 interface GroupMessage {
   id: string;
@@ -54,10 +57,66 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
   // ELITE: Use ref for async subscription cleanup
   const unsubscribeHybridRef = useRef<(() => void) | null>(null);
   const { members } = useFamilyStore();
+  const meshMessages = useMeshStore((state) => state.messages);
+  const selfIds = useMemo(() => {
+    const ids = new Set<string>(['ME']);
+    if (myDeviceId) {
+      ids.add(myDeviceId);
+    }
+    const identityId = identityService.getIdentity()?.id;
+    if (identityId) {
+      ids.add(identityId);
+    }
+    const meshId = bleMeshService.getMyDeviceId();
+    if (meshId) {
+      ids.add(meshId);
+    }
+    return ids;
+  }, [myDeviceId]);
+
+  const allowedSenderIds = useMemo(() => {
+    const ids = new Set<string>(selfIds);
+    members.forEach((member) => {
+      if (member.id) ids.add(member.id);
+      if (member.deviceId) ids.add(member.deviceId);
+    });
+    return ids;
+  }, [members, selfIds]);
+
+  const isAllowedGroupMessage = useCallback((senderId?: string, recipientId?: string) => {
+    if (!senderId || !allowedSenderIds.has(senderId)) {
+      return false;
+    }
+
+    if (recipientId && recipientId !== 'broadcast' && recipientId !== 'ME') {
+      return selfIds.has(recipientId);
+    }
+
+    return true;
+  }, [allowedSenderIds, selfIds]);
+
+  const parseGroupPayload = useCallback((content: string): { text: string; senderName?: string } | null => {
+    try {
+      const parsed = JSON.parse(content);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        parsed.channel === FAMILY_GROUP_CHANNEL &&
+        typeof parsed.text === 'string'
+      ) {
+        return {
+          text: parsed.text,
+          senderName: typeof parsed.senderName === 'string' ? parsed.senderName : undefined,
+        };
+      }
+    } catch {
+      // Not a family-group payload
+    }
+    return null;
+  }, []);
 
   useEffect(() => {
     loadDeviceId();
-    loadMessages();
 
     // ELITE: Ensure BLE Mesh service is started for offline messaging
     const ensureMeshReady = async () => {
@@ -82,6 +141,14 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
     const setupSubscription = async () => {
       const { hybridMessageService } = await import('../../services/HybridMessageService');
       const unsub = await hybridMessageService.subscribeToMessages(async (message) => {
+        const parsed = parseGroupPayload(message.content);
+        if (!parsed) {
+          return;
+        }
+        if (!isAllowedGroupMessage(message.senderId, message.recipientId)) {
+          return;
+        }
+
         // ELITE: Update UI with hybrid message
         setMessages((prev) => {
           // Deduplicate
@@ -90,8 +157,8 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
           const groupMsg: GroupMessage = {
             id: message.id,
             senderId: message.senderId,
-            senderName: message.senderName,
-            content: message.content,
+            senderName: parsed.senderName || message.senderName,
+            content: parsed.text,
             timestamp: message.timestamp,
             status: message.status === 'pending' ? 'sending' : 'read', // Assume read if received
             readBy: [message.senderId],
@@ -118,16 +185,43 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
       });
       statusUpdateTimeoutsRef.current.clear();
     };
-  }, []);
+    }, [isAllowedGroupMessage, parseGroupPayload]);
+
+  useEffect(() => {
+    setMessages((prev) => {
+      const merged = new Map(prev.map((msg) => [msg.id, msg]));
+      meshMessages.forEach((msg) => {
+        const parsed = parseGroupPayload(msg.content);
+        if (!parsed) {
+          return;
+        }
+        if (!isAllowedGroupMessage(msg.senderId, msg.to)) {
+          return;
+        }
+
+        if (merged.has(msg.id)) {
+          return;
+        }
+
+        const normalized: GroupMessage = {
+          id: msg.id,
+          senderId: msg.senderId,
+          senderName: msg.senderName || msg.senderId,
+          content: parsed.text,
+          timestamp: msg.timestamp,
+          status: msg.status === 'pending' || msg.status === 'sending' ? 'sending' : 'read',
+          readBy: [msg.senderId],
+        };
+        merged.set(msg.id, normalized);
+      });
+
+      return Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
+    });
+  }, [isAllowedGroupMessage, meshMessages, parseGroupPayload]);
 
   const loadDeviceId = async () => {
     const id = await getDeviceId();
     setMyDeviceId(id);
-  };
-
-  const loadMessages = () => {
-    // Load from storage (simplified)
-    setMessages([]);
   };
 
   // ELITE: Memoized callback with comprehensive error handling
@@ -149,8 +243,13 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
 
       // ELITE: Create message with validation
       const timestamp = Date.now();
-      const messageId = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
       const trimmedContent = inputText.trim();
+      const payload = JSON.stringify({
+        channel: FAMILY_GROUP_CHANNEL,
+        text: trimmedContent,
+        senderName: 'Ben',
+        ts: timestamp,
+      });
 
       // ELITE: Validate message length
       if (trimmedContent.length > 500) {
@@ -158,36 +257,57 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
         return;
       }
 
-      const newMessage: GroupMessage = {
-        id: messageId,
-        senderId: myDeviceId,
-        senderName: 'Ben',
-        content: trimmedContent,
-        timestamp,
-        status: 'sending',
-        readBy: [myDeviceId],
-      };
-
-      setMessages((prev) => [...prev, newMessage]);
       setInputText('');
 
       // ELITE: Send via Hybrid Service (Auto Mesh + Cloud)
       try {
         const { hybridMessageService } = await import('../../services/HybridMessageService');
-        await hybridMessageService.sendMessage(trimmedContent);
+        await hybridMessageService.sendMessage(payload, undefined, {
+          type: 'CHAT',
+          priority: 'normal',
+        });
+        logger.info('Group message sent via Hybrid');
 
-        // Update status to sent locally
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === newMessage.id ? { ...msg, status: 'sent' } : msg,
-          ),
-        );
+        // Cloud fan-out for online delivery to family inboxes.
+        const recipients = members
+          .map((member) => member.deviceId || member.id)
+          .filter((recipientId): recipientId is string => !!recipientId && !selfIds.has(recipientId));
 
-        logger.info('Group message sent via Hybrid:', messageId);
+        if (recipients.length > 0) {
+          try {
+            const { firebaseDataService } = await import('../../services/FirebaseDataService');
+            if (!firebaseDataService.isInitialized) {
+              await firebaseDataService.initialize();
+            }
+
+            const identity = identityService.getIdentity();
+            const senderCloudId = myDeviceId || identity?.deviceId || identity?.id;
+
+            if (firebaseDataService.isInitialized && senderCloudId) {
+              const baseMessageId = `fg_${timestamp}_${senderCloudId}`;
+              await Promise.all(
+                recipients.map((recipientId, index) =>
+                  firebaseDataService.saveMessage(recipientId, {
+                    id: `${baseMessageId}_${index}`,
+                    fromDeviceId: senderCloudId,
+                    toDeviceId: recipientId,
+                    content: payload,
+                    timestamp,
+                    type: 'text',
+                    status: 'sent',
+                    priority: 'normal',
+                  }),
+                ),
+              );
+            }
+          } catch (fanoutError) {
+            logger.warn('Family group cloud fan-out skipped:', fanoutError);
+          }
+        }
       } catch (error) {
         logger.error('Error sending group message:', error);
         Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
-        setMessages((prev) => prev.filter(msg => msg.id !== newMessage.id));
+        setInputText(trimmedContent);
       }
 
       // ELITE: Scroll to bottom with error handling
@@ -202,10 +322,10 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
       logger.error('Error in handleSend:', error);
       Alert.alert('Hata', 'Mesaj gönderilirken bir hata oluştu.');
     }
-  }, [inputText, myDeviceId]);
+  }, [inputText, members, myDeviceId, selfIds]);
 
   const renderMessage = ({ item }: { item: GroupMessage }) => {
-    const isMyMessage = item.senderId === myDeviceId;
+    const isMyMessage = selfIds.has(item.senderId);
 
     return (
       <View
@@ -279,7 +399,17 @@ export default function FamilyGroupChatScreen({ navigation }: FamilyGroupChatScr
           <Text style={styles.title}>Aile Grubu</Text>
           <Text style={styles.subtitle}>{members.length} üye</Text>
         </View>
-        <Pressable style={styles.infoButton}>
+        <Pressable
+          style={styles.infoButton}
+          onPress={() => {
+            haptics.impactLight();
+            Alert.alert(
+              'Aile Grubu',
+              `Bu grup ${members.length} üyeden oluşmaktadır.\n\nBLE Mesh üzerinden internet olmadan mesajlaşabilirsiniz.`,
+              [{ text: 'Tamam' }]
+            );
+          }}
+        >
           <Ionicons name="information-circle-outline" size={24} color={colors.text.primary} />
         </Pressable>
       </View>
@@ -481,5 +611,3 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.tertiary,
   },
 });
-
-

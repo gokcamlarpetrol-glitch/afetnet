@@ -85,10 +85,6 @@ function validateApiKey(key: string, keyName: string, expectedPrefix?: string): 
 }
 
 export const ENV = {
-  // RevenueCat - PRODUCTION READY
-  RC_IOS_KEY: getEnvVar('RC_IOS_KEY', ''),
-  RC_ANDROID_KEY: getEnvVar('RC_ANDROID_KEY', ''),
-
   // Firebase - ELITE SECURITY
   // PRODUCTION: Set via EAS secrets (EXPO_PUBLIC_FIREBASE_API_KEY)
   // DEVELOPMENT: Fallback key provided for local testing
@@ -131,4 +127,3 @@ export const ENV = {
   // Map Tiles
   MAP_TILE_URL: getEnvVar('MAP_TILE_URL', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),
 };
-

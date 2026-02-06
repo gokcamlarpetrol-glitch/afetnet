@@ -8,7 +8,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMeshStore } from '../../stores/meshStore';
+import { useMeshStore } from '../../services/mesh/MeshStore';
 import { useMessageStore } from '../../stores/messageStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { colors, typography } from '../../theme';
@@ -359,4 +359,3 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
-

@@ -6,7 +6,9 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth } from 'firebase/auth';
 import { getDeviceId } from '../../lib/device';
+import { initializeFirebase } from '../../lib/firebase';
 import { FamilyMember } from '../types/family';
 import { createLogger } from '../utils/logger';
 
@@ -19,6 +21,10 @@ interface FirebaseDataServiceType {
   loadFamilyMembers: (deviceId: string) => Promise<FamilyMember[]>;
   saveFamilyMember: (deviceId: string, member: FamilyMember) => Promise<boolean>;
   deleteFamilyMember: (deviceId: string, memberId: string) => Promise<boolean>;
+  subscribeToDeviceLocation?: (
+    deviceId: string,
+    callback: (location: any) => void
+  ) => Promise<() => void>;
   subscribeToFamilyMembers?: (
     deviceId: string,
     callback: (members: FamilyMember[]) => void,
@@ -37,6 +43,19 @@ const getFirebaseDataService = (): FirebaseDataServiceType | null => {
     }
   }
   return firebaseDataService;
+};
+
+const memberLocationSubscriptions = new Map<string, () => void>();
+
+const clearMemberLocationSubscriptions = () => {
+  memberLocationSubscriptions.forEach((unsubscribe) => {
+    try {
+      unsubscribe();
+    } catch {
+      // no-op
+    }
+  });
+  memberLocationSubscriptions.clear();
 };
 
 // Re-export for backward compatibility
@@ -58,7 +77,19 @@ interface FamilyActions {
   clear: () => Promise<void>;
 }
 
-const STORAGE_KEY = '@afetnet:family_members';
+const STORAGE_KEY_BASE = '@afetnet:family_members';
+const STORAGE_GUEST_SCOPE = 'guest';
+
+const getScopedStorageKey = (): string => {
+  try {
+    const app = initializeFirebase();
+    if (!app) return `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+    const uid = getAuth(app).currentUser?.uid;
+    return uid ? `${STORAGE_KEY_BASE}:user:${uid}` : `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+  } catch {
+    return `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+  }
+};
 
 const initialState: FamilyState = {
   members: [],
@@ -68,7 +99,14 @@ const initialState: FamilyState = {
 // Load from storage
 const loadMembers = async (): Promise<FamilyMember[]> => {
   try {
-    const data = await AsyncStorage.getItem(STORAGE_KEY);
+    const scopedKey = getScopedStorageKey();
+    let data = await AsyncStorage.getItem(scopedKey);
+    if (!data) {
+      data = await AsyncStorage.getItem(STORAGE_KEY_BASE);
+      if (data) {
+        await AsyncStorage.setItem(scopedKey, data);
+      }
+    }
     if (data) {
       return JSON.parse(data);
     }
@@ -81,10 +119,72 @@ const loadMembers = async (): Promise<FamilyMember[]> => {
 // Save to storage
 const saveMembers = async (members: FamilyMember[]) => {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(members));
+    await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(members));
   } catch (error) {
     logger.error('Failed to save family members:', error);
   }
+};
+
+const syncMemberLocationSubscriptions = async (
+  members: FamilyMember[],
+  onLocation: (memberId: string, latitude: number, longitude: number) => void,
+) => {
+  const firebaseService = getFirebaseDataService();
+  if (!firebaseService?.isInitialized || !firebaseService.subscribeToDeviceLocation) {
+    clearMemberLocationSubscriptions();
+    return;
+  }
+
+  const desiredKeys = new Set<string>();
+
+  for (const member of members) {
+    const targetDeviceId = member.deviceId || member.id;
+    if (!targetDeviceId) {
+      continue;
+    }
+
+    const key = `${member.id}:${targetDeviceId}`;
+    desiredKeys.add(key);
+
+    if (memberLocationSubscriptions.has(key)) {
+      continue;
+    }
+
+    try {
+      const unsubscribe = await firebaseService.subscribeToDeviceLocation(targetDeviceId, (location) => {
+        if (
+          location &&
+          typeof location.latitude === 'number' &&
+          !isNaN(location.latitude) &&
+          typeof location.longitude === 'number' &&
+          !isNaN(location.longitude)
+        ) {
+          onLocation(member.id, location.latitude, location.longitude);
+        }
+      });
+
+      if (typeof unsubscribe === 'function') {
+        memberLocationSubscriptions.set(key, unsubscribe);
+      }
+    } catch (error) {
+      logger.warn(`Failed to subscribe location for member ${member.id}:`, error);
+    }
+  }
+
+  Array.from(memberLocationSubscriptions.keys()).forEach((key) => {
+    if (desiredKeys.has(key)) {
+      return;
+    }
+    const unsubscribe = memberLocationSubscriptions.get(key);
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch {
+        // no-op
+      }
+    }
+    memberLocationSubscriptions.delete(key);
+  });
 };
 
 export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => ({
@@ -104,10 +204,14 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       }
       set({ firebaseUnsubscribe: null });
     }
+    clearMemberLocationSubscriptions();
 
     // First load from AsyncStorage (fast)
     const localMembers = await loadMembers();
     set({ members: localMembers });
+    await syncMemberLocationSubscriptions(localMembers, (memberId, latitude, longitude) => {
+      void get().updateMemberLocation(memberId, latitude, longitude);
+    });
 
     // Then try to sync from Firebase (lazy load to avoid circular dependency)
     try {
@@ -126,6 +230,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             set({ members: cloudMembers });
             // Save merged data to AsyncStorage
             await saveMembers(cloudMembers);
+            await syncMemberLocationSubscriptions(cloudMembers, (memberId, latitude, longitude) => {
+              void get().updateMemberLocation(memberId, latitude, longitude);
+            });
           }
 
           // ELITE: Subscribe to real-time family member updates
@@ -146,6 +253,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
                 const mergedMembers = Array.from(memberMap.values());
                 set({ members: mergedMembers });
                 await saveMembers(mergedMembers);
+                await syncMemberLocationSubscriptions(mergedMembers, (memberId, latitude, longitude) => {
+                  void get().updateMemberLocation(memberId, latitude, longitude);
+                });
               } catch (error) {
                 logger.error('Error processing real-time family members:', error);
               }
@@ -182,6 +292,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     };
     const updatedMembers = [...members, newMember];
     set({ members: updatedMembers });
+    await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
+      void get().updateMemberLocation(memberId, latitude, longitude);
+    });
 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
@@ -199,9 +312,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'save',
-
-
-              data: newMember,
+              data: {
+                ownerDeviceId: deviceId,
+                member: newMember,
+              },
               priority: 'normal',
             });
           }
@@ -210,9 +324,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'save',
-
-
-            data: newMember,
+            data: {
+              ownerDeviceId: deviceId,
+              member: newMember,
+            },
             priority: 'normal',
           });
         }
@@ -224,9 +339,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { offlineSyncService } = await import('../services/OfflineSyncService');
         await offlineSyncService.queueOperation({
           type: 'save',
-
-
-          data: newMember,
+          data: {
+            ownerDeviceId: await getDeviceId(),
+            member: newMember,
+          },
           priority: 'normal',
         });
       } catch (syncError) {
@@ -267,6 +383,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMembers = members.map(m => m.id === id ? { ...m, ...updates, lastSeen: Date.now() } : m);
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
+    await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
+      void get().updateMemberLocation(memberId, latitude, longitude);
+    });
 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
@@ -284,9 +403,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
               const { offlineSyncService } = await import('../services/OfflineSyncService');
               await offlineSyncService.queueOperation({
                 type: 'update',
-
-
-                data: updatedMember,
+                data: {
+                  ownerDeviceId: deviceId,
+                  member: updatedMember,
+                },
                 priority: 'normal',
               });
             }
@@ -295,9 +415,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'update',
-
-
-              data: updatedMember,
+              data: {
+                ownerDeviceId: deviceId,
+                member: updatedMember,
+              },
               priority: 'normal',
             });
           }
@@ -309,9 +430,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'update',
-
-
-            data: updatedMember,
+            data: {
+              ownerDeviceId: await getDeviceId(),
+              member: updatedMember,
+            },
             priority: 'normal',
           });
         } catch (syncError) {
@@ -349,6 +471,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const { members } = get();
     const updatedMembers = members.filter(m => m.id !== id);
     set({ members: updatedMembers });
+    await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
+      void get().updateMemberLocation(memberId, latitude, longitude);
+    });
 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
@@ -365,9 +490,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             const { offlineSyncService } = await import('../services/OfflineSyncService');
             await offlineSyncService.queueOperation({
               type: 'delete',
-
-
-              data: {},
+              data: {
+                ownerDeviceId: deviceId,
+                memberId: id,
+              },
               priority: 'normal',
             });
           }
@@ -376,9 +502,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           const { offlineSyncService } = await import('../services/OfflineSyncService');
           await offlineSyncService.queueOperation({
             type: 'delete',
-
-
-            data: {},
+            data: {
+              ownerDeviceId: deviceId,
+              memberId: id,
+            },
             priority: 'normal',
           });
         }
@@ -390,9 +517,10 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         const { offlineSyncService } = await import('../services/OfflineSyncService');
         await offlineSyncService.queueOperation({
           type: 'delete',
-
-
-          data: {},
+          data: {
+            ownerDeviceId: await getDeviceId(),
+            memberId: id,
+          },
           priority: 'normal',
         });
       } catch (syncError) {
@@ -619,10 +747,14 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         logger.error('Error unsubscribing from Firebase family members:', error);
       }
     }
+    clearMemberLocationSubscriptions();
 
     set({ ...initialState, firebaseUnsubscribe: null });
-    await AsyncStorage.removeItem(STORAGE_KEY).catch((error) => {
+    await AsyncStorage.removeItem(getScopedStorageKey()).catch((error) => {
       logger.error('Failed to clear AsyncStorage:', error);
+    });
+    await AsyncStorage.removeItem(STORAGE_KEY_BASE).catch(() => {
+      // legacy key cleanup
     });
 
     // Clear Firebase data (lazy load to avoid circular dependency)
@@ -642,4 +774,3 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     }
   },
 }));
-

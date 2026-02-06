@@ -4,24 +4,29 @@
  */
 
 // Mock React Native modules
+jest.mock('react-native/Libraries/TurboModule/TurboModuleRegistry', () => ({
+  get: jest.fn(() => ({})),
+  getEnforcing: jest.fn(() => ({})),
+}));
+
 jest.mock('react-native', () => {
-  const RN = jest.requireActual('react-native');
+  const RN = jest.requireActual('react-native/jest/mock');
   return {
     ...RN,
     Platform: {
-      ...RN.Platform,
+      ...(RN.Platform || {}),
       OS: 'ios',
       select: jest.fn((spec) => spec.ios || spec.default),
     },
     NativeModules: {
-      ...RN.NativeModules,
+      ...(RN.NativeModules || {}),
       StatusBarManager: {
         HEIGHT: 20,
         getHeight: jest.fn(),
       },
     },
     Linking: {
-      ...RN.Linking,
+      ...(RN.Linking || {}),
       openURL: jest.fn(),
       canOpenURL: jest.fn().mockResolvedValue(true),
     },
@@ -107,6 +112,8 @@ jest.mock('firebase/auth', () => ({
     }),
   })),
   signInWithCredential: jest.fn(),
+  signInWithEmailAndPassword: jest.fn(),
+  createUserWithEmailAndPassword: jest.fn(),
   signOut: jest.fn(),
   GoogleAuthProvider: {
     credential: jest.fn(),
@@ -114,6 +121,16 @@ jest.mock('firebase/auth', () => ({
   OAuthProvider: jest.fn(() => ({
     credential: jest.fn(),
   })),
+}));
+
+jest.mock('firebase/firestore', () => ({
+  getFirestore: jest.fn(() => ({})),
+  doc: jest.fn(() => ({})),
+  setDoc: jest.fn().mockResolvedValue(undefined),
+  getDoc: jest.fn().mockResolvedValue({
+    exists: () => false,
+    data: () => null,
+  }),
 }));
 
 // Mock @react-native-community/netinfo

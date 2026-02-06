@@ -14,6 +14,7 @@ export default [
       'build/**',
       'coverage/**',
       'shared/**/*.js',
+      'functions/lib/**',
     ],
   },
   js.configs.recommended,
@@ -44,4 +45,3 @@ export default [
     },
   },
 ];
-

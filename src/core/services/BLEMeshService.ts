@@ -8,6 +8,7 @@
  */
 
 import { meshNetworkService } from './mesh/MeshNetworkService';
+import { MeshMessageType } from './mesh/MeshProtocol';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('BLEMeshService');
@@ -40,11 +41,13 @@ class BLEMeshService {
   }
 
   async broadcastMessage(msg: { type: string; content: string; priority?: string; ttl?: number }) {
-    return meshNetworkService.broadcastMessage(msg.content);
+    const type = msg.type.toLowerCase() === 'sos' ? MeshMessageType.SOS : MeshMessageType.TEXT;
+    return meshNetworkService.broadcastMessage(msg.content, type, { to: 'broadcast' });
   }
 
-  async sendMessage(content: string, _to: string) {
-    return meshNetworkService.broadcastMessage(content);
+  async sendMessage(content: string, to: string) {
+    const normalizedTo = to && to !== '*' ? to : 'broadcast';
+    return meshNetworkService.broadcastMessage(content, MeshMessageType.TEXT, { to: normalizedTo });
   }
 
   async sendSOS(reason: string) {

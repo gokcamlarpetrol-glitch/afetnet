@@ -12,26 +12,33 @@ import { createLogger } from '../core/utils/logger';
 const logger = createLogger('DeviceLib');
 
 const DEVICE_ID_KEY = 'afetnet_secure_device_id'; // ELITE: New key for new storage
+const LEGACY_SECURE_DEVICE_ID_KEY = 'afetnet_device_id';
+const LEGACY_ASYNC_DEVICE_ID_KEY = '@afetnet:device_id';
 
 // Cache device ID in memory
 let cachedDeviceId: string | null = null;
 
+function normalizeDeviceId(deviceId: string): string {
+  return deviceId.trim().toUpperCase();
+}
+
 /**
- * Generate AfetNet device ID format: afn-XXXXXXXXXXXXXXXX (32 chars)
- * ELITE SECURITY: 128-bit entropy
+ * Generate AfetNet device ID format: AFN-XXXXXXXX (12 chars)
+ * ELITE SECURITY: Matches AuthService QR ID format
+ * CRITICAL: Must use AFN- (uppercase) to match core/utils/device.ts
  */
 async function generateDeviceId(): Promise<string> {
   try {
-    const randomBytes = await Crypto.getRandomBytesAsync(16); // 16 bytes = 128 bits
+    const randomBytes = await Crypto.getRandomBytesAsync(4); // 4 bytes = 32 bits = 8 hex chars
     const hex = Array.from(randomBytes)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
-    return `afn-${hex}`;
+    return `AFN-${hex}`.toUpperCase();
   } catch (error) {
-    // Fallback: use timestamp + random math (should rarely happen)
-    const timestamp = Date.now().toString(16);
-    const random = Math.floor(Math.random() * 1000000000).toString(16);
-    return `afn-${timestamp}${random}`.padEnd(36, '0').slice(0, 36);
+    // Fallback: use timestamp + random math
+    const timestamp = Date.now().toString(16).slice(-4);
+    const random = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
+    return `AFN-${timestamp}${random}`.toUpperCase();
   }
 }
 
@@ -47,7 +54,11 @@ export async function getDeviceId(): Promise<string> {
     try {
       const secureId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (secureId && isValidDeviceId(secureId)) {
-        cachedDeviceId = secureId;
+        const normalizedSecureId = normalizeDeviceId(secureId);
+        await SecureStore.setItemAsync(DEVICE_ID_KEY, normalizedSecureId);
+        await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalizedSecureId);
+        await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedSecureId);
+        cachedDeviceId = normalizedSecureId;
         return cachedDeviceId;
       }
     } catch (e) {
@@ -55,16 +66,19 @@ export async function getDeviceId(): Promise<string> {
     }
 
     // 2. Migration: Check Legacy AsyncStorage
-    const legacyId = await AsyncStorage.getItem('@afetnet:device_id');
-    if (legacyId && legacyId.startsWith('afn-')) {
+    const legacyId = await AsyncStorage.getItem(LEGACY_ASYNC_DEVICE_ID_KEY);
+    if (legacyId && isValidDeviceId(legacyId)) {
+      const normalizedLegacyId = normalizeDeviceId(legacyId);
       // We found a legacy ID. We should probably keep it to avoid data loss, 
       // OR migrate it to SecureStore. Let's list it as "legacy" but secure it.
       // For "Maximum Security", we might prefer generating a NEW one, 
       // but that breaks existing users. 
       // Strategy: Keep legacy ID, but save it to SecureStore for future.
-      await SecureStore.setItemAsync(DEVICE_ID_KEY, legacyId);
-      cachedDeviceId = legacyId;
-      return legacyId;
+      await SecureStore.setItemAsync(DEVICE_ID_KEY, normalizedLegacyId);
+      await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalizedLegacyId);
+      await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedLegacyId);
+      cachedDeviceId = normalizedLegacyId;
+      return normalizedLegacyId;
     }
 
     // 3. Generate NEW High-Entropy ID
@@ -72,8 +86,9 @@ export async function getDeviceId(): Promise<string> {
 
     // Save to Vault
     await SecureStore.setItemAsync(DEVICE_ID_KEY, newId);
+    await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, newId);
     // Also save to legacy storage for backward compat if needed (optional)
-    await AsyncStorage.setItem('@afetnet:device_id', newId);
+    await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, newId);
 
     cachedDeviceId = newId;
 
@@ -131,12 +146,56 @@ export async function getDeviceType(): Promise<Device.DeviceType> {
 
 /**
  * Validate AfetNet device ID format
- * Format: afn-XXXXXXXX (12 characters total)
+ * Format: AFN-XXXXXXXX (12 characters total)
+ * CRITICAL: Accepts both AFN- (new) and afn- (legacy) for backward compat
  */
 export function isValidDeviceId(deviceId: string | null | undefined): boolean {
   if (!deviceId || typeof deviceId !== 'string') return false;
-  // Allow both Legacy (12 chars) and Elite (36 chars: prefix + 32 hex)
-  return /^afn-[a-zA-Z0-9]{8,}$/.test(deviceId);
+  // Accept both AFN- (uppercase, new) and afn- (lowercase, legacy)
+  return /^[Aa][Ff][Nn]-[a-zA-Z0-9]{8,}$/.test(deviceId);
+}
+
+/**
+ * Force device ID update and keep in-memory cache consistent.
+ */
+export async function setDeviceId(deviceId: string): Promise<void> {
+  if (!isValidDeviceId(deviceId)) {
+    logger.warn('Invalid device ID format, update skipped');
+    return;
+  }
+
+  const normalized = normalizeDeviceId(deviceId);
+
+  try {
+    await SecureStore.setItemAsync(DEVICE_ID_KEY, normalized);
+    await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalized);
+    await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalized);
+    cachedDeviceId = normalized;
+  } catch (error) {
+    logger.error('Failed to set device ID:', error);
+  }
+}
+
+/**
+ * Clear persistent device identity and cache.
+ */
+export async function clearDeviceId(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(DEVICE_ID_KEY);
+    await SecureStore.deleteItemAsync(LEGACY_SECURE_DEVICE_ID_KEY);
+    await AsyncStorage.removeItem(LEGACY_ASYNC_DEVICE_ID_KEY);
+  } catch (error) {
+    logger.error('Failed to clear device ID:', error);
+  } finally {
+    cachedDeviceId = null;
+  }
+}
+
+/**
+ * Clear only in-memory cache (used for auth/session transitions).
+ */
+export function resetCachedDeviceId(): void {
+  cachedDeviceId = null;
 }
 
 export default {
@@ -145,4 +204,7 @@ export default {
   isPhysicalDevice,
   getDeviceType,
   isValidDeviceId,
+  setDeviceId,
+  clearDeviceId,
+  resetCachedDeviceId,
 };

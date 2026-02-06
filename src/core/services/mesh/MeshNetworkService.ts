@@ -31,7 +31,6 @@
 import { createLogger } from '../../utils/logger';
 import { useMeshStore, MeshNode, MeshMessage } from './MeshStore';
 import { MeshProtocol, MeshMessageType, MeshPriority, MeshPacket } from './MeshProtocol';
-import { QMeshProtocol, QMeshPacket, PacketType, PacketPriority } from './QMeshProtocol';
 import { meshStoreForwardService } from './MeshStoreForwardService';
 import { meshEmergencyService, EmergencyReasonCode } from './MeshEmergencyService';
 import { Buffer } from 'buffer';
@@ -41,7 +40,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LRUSet } from '../../utils/LRUCache';
 import { sanitizeMessage } from '../../utils/messageSanitizer';
 import { cryptoService } from '../CryptoService';
-import { useMessageStore } from '../../stores/messageStore';
+import { identityService } from '../IdentityService';
+import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
 import {
   BLE_SCAN_DURATION_MS,
   BLE_ADVERTISE_DURATION_MS,
@@ -74,10 +74,19 @@ const ADAPTIVE_TIMING = {
   DEFAULT_HEARTBEAT_MS: BLE_HEARTBEAT_INTERVAL_MS,
 };
 
+interface PendingMeshPacket {
+  type: MeshMessageType;
+  payloadBase64: string;
+  ttl: number;
+  priority: MeshPriority;
+  messageId: number;
+}
+
 class MeshNetworkService {
   // Identity
   private myId: string = '';
-  private protocol: QMeshProtocol | null = null;
+  private initialized = false;
+  private initializePromise: Promise<void> | null = null;
 
   // State
   private isRunning = false;
@@ -92,10 +101,10 @@ class MeshNetworkService {
   private cleanupTimers: Set<NodeJS.Timeout> = new Set();
 
   // Priority Queues (from BLEMeshService)
-  private criticalQueue: QMeshPacket[] = [];
-  private highQueue: QMeshPacket[] = [];
-  private normalQueue: QMeshPacket[] = [];
-  private relayQueue: QMeshPacket[] = [];
+  private criticalQueue: PendingMeshPacket[] = [];
+  private highQueue: PendingMeshPacket[] = [];
+  private normalQueue: PendingMeshPacket[] = [];
+  private relayQueue: PendingMeshPacket[] = [];
 
   // Deduplication
   private seenMessageIds: LRUSet<string>;
@@ -137,30 +146,64 @@ class MeshNetworkService {
    * Initialize the mesh service
    */
   async initialize(): Promise<void> {
-    try {
-      // Generate secure device ID
-      const secureId = await cryptoService.generateUUID();
-      this.myId = secureId || this.myId;
-    } catch {
-      // Keep existing myId
+    if (this.initialized) {
+      if (!useMeshStore.getState().myDeviceId) {
+        useMeshStore.getState().setMyDeviceId(this.myId);
+      }
+      return;
+    }
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
     }
 
-    this.protocol = new QMeshProtocol(this.myId);
-    useMeshStore.getState().setMyDeviceId(this.myId);
+    this.initializePromise = (async () => {
+      const identity = identityService.getIdentity();
+      if (identity?.id) {
+        this.myId = identity.id;
+      } else {
+        try {
+          const stableDeviceId = await getDeviceIdFromLib();
+          if (stableDeviceId) {
+            this.myId = stableDeviceId;
+          }
+        } catch {
+          // Keep existing myId fallback
+        }
+      }
 
-    // Load persisted queues
-    await this.loadQueues();
+      if (!this.myId) {
+        try {
+          const secureId = await cryptoService.generateUUID();
+          this.myId = secureId || this.myId;
+        } catch {
+          // Keep existing myId
+        }
+      }
 
-    // V4: Initialize Store & Forward and Emergency services
-    await meshStoreForwardService.initialize(this.myId);
-    await meshEmergencyService.initialize(this.myId);
+      useMeshStore.getState().setMyDeviceId(this.myId);
 
-    // V4: Listen for ACK events
-    meshStoreForwardService.onACKReceived((msgId) => {
-      logger.debug(`ACK received for message ${msgId}`);
-    });
+      // Load persisted queues
+      await this.loadQueues();
 
-    logger.info(`Mesh Service V4 Initialized (ID: ${this.myId})`);
+      // V4: Initialize Store & Forward and Emergency services
+      await meshStoreForwardService.initialize(this.myId);
+      await meshEmergencyService.initialize(this.myId);
+
+      // V4: Listen for ACK events
+      meshStoreForwardService.onACKReceived((msgId) => {
+        logger.debug(`ACK received for message ${msgId}`);
+      });
+
+      this.initialized = true;
+      logger.info(`Mesh Service V4 Initialized (ID: ${this.myId})`);
+    })();
+
+    try {
+      await this.initializePromise;
+    } finally {
+      this.initializePromise = null;
+    }
   }
 
   /**
@@ -168,7 +211,7 @@ class MeshNetworkService {
    */
   async start(): Promise<void> {
     if (this.isRunning) return;
-    if (!this.protocol) await this.initialize();
+    await this.initialize();
 
     this.isRunning = true;
     useMeshStore.getState().toggleMesh(true);
@@ -287,47 +330,52 @@ class MeshNetworkService {
   /**
    * Broadcast a message to the mesh
    */
-  async broadcastMessage(content: string, type: MeshMessageType = MeshMessageType.TEXT): Promise<void> {
-    if (!this.protocol) await this.initialize();
-    if (!this.protocol) throw new Error('Protocol not initialized');
-
+  async broadcastMessage(
+    content: string,
+    type: MeshMessageType = MeshMessageType.TEXT,
+    options: { to?: string; from?: string; messageId?: string } = {},
+  ): Promise<void> {
     // Sanitize content
     const sanitized = sanitizeMessage(content);
 
     // Generate secure message ID
-    let messageId: string;
-    try {
-      messageId = await cryptoService.generateUUID();
-    } catch {
-      messageId = Math.random().toString(16).substring(2, 10);
+    let messageId: string = options.messageId || '';
+    if (!messageId) {
+      try {
+        messageId = await cryptoService.generateUUID();
+      } catch {
+        messageId = Math.random().toString(16).substring(2, 10);
+      }
     }
 
-    // Create Q-Mesh packet
-    const packet: QMeshPacket = {
-      header: {
-        version: 1,
-        type: type === MeshMessageType.SOS ? PacketType.MESSAGE : PacketType.MESSAGE,
-        ttl: MESSAGE_DEFAULT_TTL,
-        priority: type === MeshMessageType.SOS ? PacketPriority.CRITICAL : PacketPriority.NORMAL,
-        senderIdShort: this.myId.substring(0, 8),
-        packetIdShort: messageId,
-      },
-      payload: Buffer.from(sanitized, 'utf-8'),
-      originalSize: sanitized.length,
+    const envelope = this.buildMessageEnvelope(sanitized, {
+      senderId: options.from,
+      to: options.to,
+      messageId,
+      meshType: type,
+    });
+    const { to, from: senderId } = envelope;
+    const payload = Buffer.from(JSON.stringify(envelope), 'utf-8');
+    const queuePacket: PendingMeshPacket = {
+      type,
+      payloadBase64: payload.toString('base64'),
+      ttl: MESSAGE_DEFAULT_TTL,
+      priority: this.getMeshPriority(type),
+      messageId: this.toMessageIdUInt32(messageId),
     };
 
     // Add to store (UI)
     const storeMsg: MeshMessage = {
       id: messageId,
-      senderId: 'ME',
-      to: 'broadcast',
+      senderId,
+      to,
       type: type === MeshMessageType.SOS ? 'SOS' : 'CHAT',
-      content: sanitized,
+      content: envelope.content,
       timestamp: Date.now(),
       hops: 0,
       status: 'sending',
       ttl: MESSAGE_DEFAULT_TTL,
-      priority: type === MeshMessageType.SOS ? 'critical' : 'normal',
+      priority: this.getStorePriority(type),
       acks: [],
       retryCount: 0,
     };
@@ -335,17 +383,21 @@ class MeshNetworkService {
 
     // Add to appropriate queue
     if (type === MeshMessageType.SOS) {
-      this.criticalQueue.push(packet);
+      this.criticalQueue.push(queuePacket);
       // Force immediate processing for SOS
       this.processQueues();
     } else {
-      this.normalQueue.push(packet);
+      if (queuePacket.priority === MeshPriority.HIGH) {
+        this.highQueue.push(queuePacket);
+      } else {
+        this.normalQueue.push(queuePacket);
+      }
     }
 
     // Save queues
     this.saveQueues();
 
-    logger.debug(`Message queued: ${messageId} (${sanitized.length} bytes)`);
+    logger.debug(`Message queued: ${messageId} (${payload.length} bytes, to: ${to})`);
   }
 
   /**
@@ -411,10 +463,10 @@ class MeshNetworkService {
   private async saveQueues(): Promise<void> {
     try {
       const data = JSON.stringify({
-        critical: this.criticalQueue,
-        high: this.highQueue,
-        normal: this.normalQueue,
-        relay: this.relayQueue,
+        critical: this.serializeQueue(this.criticalQueue),
+        high: this.serializeQueue(this.highQueue),
+        normal: this.serializeQueue(this.normalQueue),
+        relay: this.serializeQueue(this.relayQueue),
         seenIds: this.seenMessageIds.toArray(),
       });
       await AsyncStorage.setItem(STORAGE_KEYS.MESH_QUEUE, data);
@@ -428,10 +480,10 @@ class MeshNetworkService {
       const data = await AsyncStorage.getItem(STORAGE_KEYS.MESH_QUEUE);
       if (data) {
         const parsed = JSON.parse(data);
-        this.criticalQueue = parsed.critical || [];
-        this.highQueue = parsed.high || [];
-        this.normalQueue = parsed.normal || [];
-        this.relayQueue = parsed.relay || [];
+        this.criticalQueue = this.deserializeQueue(parsed.critical);
+        this.highQueue = this.deserializeQueue(parsed.high);
+        this.normalQueue = this.deserializeQueue(parsed.normal);
+        this.relayQueue = this.deserializeQueue(parsed.relay);
         if (parsed.seenIds) {
           this.seenMessageIds.fromArray(parsed.seenIds);
         }
@@ -439,6 +491,228 @@ class MeshNetworkService {
     } catch (e) {
       logger.error('Failed to load queues', e);
     }
+  }
+
+  private serializeQueue(queue: PendingMeshPacket[]): PendingMeshPacket[] {
+    return queue.map((packet) => ({ ...packet }));
+  }
+
+  private deserializeQueue(rawQueue: unknown): PendingMeshPacket[] {
+    if (!Array.isArray(rawQueue)) return [];
+
+    return rawQueue
+      .map((rawPacket) => this.normalizeQueuedPacket(rawPacket))
+      .filter((packet): packet is PendingMeshPacket => packet !== null);
+  }
+
+  private normalizeQueuedPacket(rawPacket: unknown): PendingMeshPacket | null {
+    if (!rawPacket || typeof rawPacket !== 'object') {
+      return null;
+    }
+
+    const packet = rawPacket as {
+      type?: unknown;
+      payloadBase64?: unknown;
+      ttl?: unknown;
+      priority?: unknown;
+      messageId?: unknown;
+      header?: {
+        ttl?: unknown;
+        priority?: unknown;
+        packetIdShort?: unknown;
+      };
+      payload?: unknown;
+    };
+
+    if (
+      typeof packet.type === 'number' &&
+      typeof packet.payloadBase64 === 'string' &&
+      typeof packet.ttl === 'number' &&
+      typeof packet.priority === 'number' &&
+      typeof packet.messageId === 'number'
+    ) {
+      return {
+        type: packet.type as MeshMessageType,
+        payloadBase64: packet.payloadBase64,
+        ttl: packet.ttl,
+        priority: packet.priority as MeshPriority,
+        messageId: packet.messageId,
+      };
+    }
+
+    const legacyPayload = this.normalizeLegacyPayload(packet.payload);
+    const legacyMeshType = this.inferLegacyMeshType(legacyPayload);
+    const legacyPriority = typeof packet.header?.priority === 'number'
+      ? packet.header.priority
+      : MeshPriority.NORMAL;
+    const legacyMessageId = packet.header?.packetIdShort;
+
+    return {
+      type: legacyMeshType,
+      payloadBase64: legacyPayload.toString('base64'),
+      ttl: typeof packet.header?.ttl === 'number' ? packet.header.ttl : MESSAGE_DEFAULT_TTL,
+      priority: this.normalizePriority(legacyPriority),
+      messageId: this.toMessageIdUInt32(
+        typeof legacyMessageId === 'string' && legacyMessageId.trim().length > 0
+          ? legacyMessageId
+          : Date.now().toString(),
+      ),
+    };
+  }
+
+  private normalizeLegacyPayload(rawPayload: unknown): Buffer {
+    if (Buffer.isBuffer(rawPayload)) {
+      return rawPayload;
+    }
+
+    if (
+      rawPayload &&
+      typeof rawPayload === 'object' &&
+      (rawPayload as { type?: unknown }).type === 'Buffer' &&
+      Array.isArray((rawPayload as { data?: unknown }).data)
+    ) {
+      const data = (rawPayload as { data: number[] }).data;
+      return Buffer.from(data);
+    }
+
+    if (typeof rawPayload === 'string') {
+      return Buffer.from(rawPayload, 'utf-8');
+    }
+
+    return Buffer.alloc(0);
+  }
+
+  private inferLegacyMeshType(payload: Buffer): MeshMessageType {
+    const payloadText = payload.toString('utf-8');
+    try {
+      const parsed = JSON.parse(payloadText);
+      const parsedType = typeof parsed?.type === 'string' ? parsed.type.toUpperCase() : '';
+      if (parsedType === 'SOS') return MeshMessageType.SOS;
+      if (parsedType === 'LOCATION' || parsedType === 'FAMILY_LOCATION_UPDATE') return MeshMessageType.LOCATION;
+      if (parsedType === 'STATUS' || parsedType === 'FAMILY_STATUS_UPDATE') return MeshMessageType.TEXT;
+    } catch {
+      // Legacy plain text payload
+    }
+
+    if (payloadText.startsWith('SOS:')) {
+      return MeshMessageType.SOS;
+    }
+
+    return MeshMessageType.TEXT;
+  }
+
+  private normalizePriority(priority: number): MeshPriority {
+    switch (priority) {
+      case MeshPriority.CRITICAL:
+        return MeshPriority.CRITICAL;
+      case MeshPriority.HIGH:
+        return MeshPriority.HIGH;
+      case MeshPriority.LOW:
+        return MeshPriority.LOW;
+      case MeshPriority.RELAY:
+        return MeshPriority.RELAY;
+      default:
+        return MeshPriority.NORMAL;
+    }
+  }
+
+  private getMeshPriority(type: MeshMessageType): MeshPriority {
+    switch (type) {
+      case MeshMessageType.SOS:
+      case MeshMessageType.HEALTH_SOS:
+      case MeshMessageType.EMERGENCY_BEACON:
+        return MeshPriority.CRITICAL;
+      case MeshMessageType.LOCATION:
+      case MeshMessageType.STATUS:
+        return MeshPriority.HIGH;
+      default:
+        return MeshPriority.NORMAL;
+    }
+  }
+
+  private getStorePriority(type: MeshMessageType): MeshMessage['priority'] {
+    const priority = this.getMeshPriority(type);
+    if (priority === MeshPriority.CRITICAL) return 'critical';
+    if (priority === MeshPriority.HIGH) return 'high';
+    if (priority === MeshPriority.LOW) return 'low';
+    return 'normal';
+  }
+
+  private getQScore(priority: MeshPriority): number {
+    switch (priority) {
+      case MeshPriority.CRITICAL:
+        return 100;
+      case MeshPriority.HIGH:
+        return 90;
+      case MeshPriority.RELAY:
+        return 70;
+      case MeshPriority.LOW:
+        return 50;
+      default:
+        return 80;
+    }
+  }
+
+  private toMessageIdUInt32(id: string | number): number {
+    const raw = String(id);
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
+    }
+    return hash >>> 0;
+  }
+
+  private buildMessageEnvelope(
+    sanitizedContent: string,
+    options: {
+      senderId?: string;
+      to?: string;
+      messageId: string;
+      meshType: MeshMessageType;
+    },
+  ): {
+    id: string;
+    from: string;
+    to: string;
+    type: string;
+    content: string;
+    timestamp: number;
+  } {
+    let parsedContent = sanitizedContent;
+    let parsedTimestamp: number | null = null;
+    let parsedFrom: string | null = null;
+    let parsedTo: string | null = null;
+
+    try {
+      const parsed = JSON.parse(sanitizedContent);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.content === 'string') {
+          parsedContent = sanitizeMessage(parsed.content);
+        } else if (typeof parsed.message === 'string') {
+          parsedContent = sanitizeMessage(parsed.message);
+        }
+        if (typeof parsed.from === 'string' && parsed.from.trim().length > 0) {
+          parsedFrom = parsed.from.trim();
+        }
+        if (typeof parsed.to === 'string' && parsed.to.trim().length > 0) {
+          parsedTo = parsed.to.trim();
+        }
+        if (typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)) {
+          parsedTimestamp = parsed.timestamp;
+        }
+      }
+    } catch {
+      // Regular plain-text payload
+    }
+
+    return {
+      id: options.messageId,
+      from: options.senderId || parsedFrom || this.myId || 'ME',
+      to: options.to || parsedTo || 'broadcast',
+      type: options.meshType === MeshMessageType.SOS ? 'SOS' : 'CHAT',
+      content: parsedContent,
+      timestamp: parsedTimestamp ?? Date.now(),
+    };
   }
 
   // ===========================================================================
@@ -595,8 +869,6 @@ class MeshNetworkService {
   }
 
   private async processQueues(): Promise<void> {
-    if (!this.protocol) return;
-
     // Process critical (all)
     while (this.criticalQueue.length > 0) {
       const packet = this.criticalQueue.shift();
@@ -631,16 +903,16 @@ class MeshNetworkService {
     this.saveQueues();
   }
 
-  private async broadcastPacket(packet: QMeshPacket): Promise<void> {
-    if (!this.protocol) return;
-
+  private async broadcastPacket(packet: PendingMeshPacket): Promise<void> {
     try {
-      const encoded = this.protocol.encode(
-        packet.header.type,
-        packet.payload,
-        packet.header.ttl,
-        packet.header.priority,
-        packet.header.packetIdShort
+      const payloadBuffer = Buffer.from(packet.payloadBase64, 'base64');
+      const encoded = MeshProtocol.serialize(
+        packet.type,
+        this.myId,
+        payloadBuffer,
+        packet.ttl,
+        this.getQScore(packet.priority),
+        packet.messageId,
       );
 
       await highPerformanceBle.startAdvertising(encoded);
@@ -658,7 +930,7 @@ class MeshNetworkService {
   }
 
   private startHeartbeat(): void {
-    if (!this.protocol || !this.isRealMode) return;
+    if (!this.isRealMode) return;
 
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -734,20 +1006,59 @@ class MeshNetworkService {
   private processIncomingPacket(packet: MeshPacket, rssi: number): void {
     // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
     // Skip if duplicate (checkAndAdd returns false when ID already existed)
-    const msgId = packet.header.messageId.toString();
-    if (!this.seenMessageIds.checkAndAdd(msgId)) {
+    const transportMsgId = `${packet.header.sourceId}:${packet.header.messageId}`;
+    if (!this.seenMessageIds.checkAndAdd(transportMsgId)) {
       // This is correct! If checkAndAdd returns false, it was already seen
       return;
     }
 
     // Process TEXT or SOS messages
     if (packet.header.type === MeshMessageType.TEXT || packet.header.type === MeshMessageType.SOS) {
-      const content = sanitizeMessage(packet.payload.toString('utf8'));
+      const rawContent = sanitizeMessage(packet.payload.toString('utf8'));
+
+      // Default routing for legacy/plain payloads
+      let to = 'broadcast';
+      let senderId = packet.header.sourceId;
+      let content = rawContent;
+      let messageId = transportMsgId;
+
+      // Envelope support for direct/private messages
+      try {
+        const parsed = JSON.parse(rawContent);
+        if (parsed && typeof parsed === 'object') {
+          if (typeof parsed.to === 'string' && parsed.to.trim().length > 0) {
+            to = parsed.to.trim();
+          }
+          if (typeof parsed.from === 'string' && parsed.from.trim().length > 0) {
+            senderId = parsed.from.trim();
+          }
+          if (typeof parsed.id === 'string' && parsed.id.trim().length > 0) {
+            messageId = parsed.id.trim();
+          } else if (typeof parsed.id === 'number' && Number.isFinite(parsed.id)) {
+            messageId = String(parsed.id);
+          }
+          if (typeof parsed.content === 'string') {
+            content = sanitizeMessage(parsed.content);
+          } else if (typeof parsed.message === 'string') {
+            content = sanitizeMessage(parsed.message);
+          }
+        }
+      } catch {
+        // Not an envelope JSON; treat as legacy plaintext broadcast
+      }
+
+      // Drop non-targeted direct messages locally (still relayed below).
+      if (to !== 'broadcast' && to !== this.myId && to !== 'ME') {
+        if (packet.header.ttl > 0) {
+          this.relayPacket(packet);
+        }
+        return;
+      }
 
       const message: MeshMessage = {
-        id: msgId,
-        senderId: packet.header.sourceId,
-        to: 'broadcast',
+        id: messageId,
+        senderId,
+        to,
         type: packet.header.type === MeshMessageType.SOS ? 'SOS' : 'CHAT',
         content,
         timestamp: Date.now(),
@@ -797,12 +1108,14 @@ class MeshNetworkService {
   private async relayPacket(originalPacket: MeshPacket): Promise<void> {
     const newTtl = originalPacket.header.ttl - 1;
     if (newTtl <= 0) return;
-
-    const sourceIdHash = parseInt(originalPacket.header.sourceId, 16);
+    const sourceIdHash = Number.parseInt(originalPacket.header.sourceId, 16);
+    const relaySourceId: string | number = Number.isFinite(sourceIdHash)
+      ? sourceIdHash
+      : originalPacket.header.sourceId;
 
     const packet = MeshProtocol.serialize(
       originalPacket.header.type,
-      sourceIdHash,
+      relaySourceId,
       originalPacket.payload,
       newTtl,
       originalPacket.header.qScore,

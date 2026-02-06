@@ -713,7 +713,7 @@ class NewsAggregatorService {
 
     if (!this.deviceIdPromise) {
       this.deviceIdPromise = getDeviceId()
-        .then((id) => (id && id.startsWith('afn-') ? id : null))
+        .then((id) => (id && id.toUpperCase().startsWith('AFN-') ? id : null))
         .catch((error) => {
           logger.warn('Failed to resolve device ID for news summary:', error);
           return null;
@@ -1242,4 +1242,3 @@ ${(article.location && typeof article.location === 'string') ? `Konum: ${article
 }
 
 export const newsAggregatorService = new NewsAggregatorService();
-

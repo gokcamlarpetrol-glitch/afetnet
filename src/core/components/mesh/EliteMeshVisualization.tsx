@@ -647,7 +647,20 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = memo(({ node, onClose })
                     </View>
 
                     <View style={styles.modalActions}>
-                        <TouchableOpacity style={styles.actionButton}>
+                        <TouchableOpacity
+                            style={styles.actionButton}
+                            onPress={() => {
+                                onClose();
+                                // ELITE: In production, navigate to conversation with this node
+                                import('react-native').then(({ Alert }) => {
+                                    Alert.alert(
+                                        'Mesaj Gönder',
+                                        `"${node.name}" cihazı için mesajlaşmayı Mesajlar > Yeni Mesaj ekranından başlatabilirsiniz.`,
+                                        [{ text: 'Tamam' }]
+                                    );
+                                });
+                            }}
+                        >
                             <Ionicons name="chatbubble" size={20} color="#fff" />
                             <Text style={styles.actionButtonText}>Mesaj Gönder</Text>
                         </TouchableOpacity>

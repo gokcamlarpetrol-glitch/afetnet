@@ -159,20 +159,11 @@ export const OnboardingScreen = () => {
           Alert.alert('Teşekkürler', 'Acil durum bildirimleri aktif.');
         }
       } else if (type === 'location') {
-        // ELITE: Request both foreground and background location
-        const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-        if (fgStatus === 'granted') {
-          // Also request background location for iOS
-          if (Platform.OS === 'ios') {
-            const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-            if (bgStatus === 'granted') {
-              Alert.alert('Teşekkürler', 'Konum takibi tam yetki ile aktif.');
-            } else {
-              Alert.alert('Teşekkürler', 'Konum servisleri aktif (ön plan).');
-            }
-          } else {
-            Alert.alert('Teşekkürler', 'Konum servisleri aktif.');
-          }
+        // Request foreground location during onboarding.
+        // Background location is requested only when the related feature is enabled.
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          Alert.alert('Teşekkürler', 'Konum servisleri aktif.');
         }
       } else if (type === 'camera_contacts') {
         // ELITE: Request camera and contacts for family safety features
@@ -502,4 +493,3 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
-

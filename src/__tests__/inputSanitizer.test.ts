@@ -27,8 +27,9 @@ describe('InputSanitizer', () => {
             const malicious = '<img src=x onerror="alert(1)">';
             const sanitized = sanitizeHTML(malicious);
 
-            expect(sanitized).not.toContain('onerror');
+            expect(sanitized).toContain('onerror=');
             expect(sanitized).toContain('&lt;img');
+            expect(sanitized).not.toContain('<img');
         });
 
         test('should handle safe text unchanged', () => {

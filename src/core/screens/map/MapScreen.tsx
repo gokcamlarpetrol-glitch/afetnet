@@ -80,7 +80,18 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const insets = useSafeAreaInsets();
 
   // GLOBAL MAP STATE
-  const { filters, setFilters, mode, setMode, mapStyle: currentMapStyle, setMapStyle, is3DMode, toggle3DMode } = useMapStore();
+  const {
+    filters,
+    setFilters,
+    mode,
+    setMode,
+    mapStyle: currentMapStyle,
+    setMapStyle,
+    is3DMode,
+    toggle3DMode,
+    realTimeTracking,
+    familyTrackingInterval,
+  } = useMapStore();
 
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
@@ -119,6 +130,10 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const { heading, isAvailable: compassAvailable } = useCompass();
 
   useEffect(() => {
+    useFamilyStore.getState().initialize().catch((error) => {
+      logger.warn('Failed to initialize family store from MapScreen:', error);
+    });
+
     // Subscribe to stores
     const unsubscribeEq = useEarthquakeStore.subscribe((state) => setEarthquakes(state.items));
     const unsubscribeFam = useFamilyStore.subscribe((state) => setFamilyMembers(state.members));
@@ -142,28 +157,36 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   // ELITE: Real-Time Family Location Tracking
   // Automatically refresh family member locations based on configured interval
   useEffect(() => {
-    const mapState = useMapStore.getState();
-    if (!mapState.realTimeTracking) return;
+    if (!realTimeTracking) return;
 
-    const intervalMs = mapState.familyTrackingInterval * 1000;
+    const intervalMs = Math.max(10, familyTrackingInterval) * 1000;
+    let intervalId: NodeJS.Timeout | null = null;
+    let trackingStarted = false;
+    let isUnmounted = false;
+    let isRefreshing = false;
 
     const refreshFamilyLocations = async () => {
+      if (isRefreshing) return;
+      isRefreshing = true;
       try {
         // Trigger FamilyTrackingService to share our location
         const { familyTrackingService } = await import('../../services/FamilyTrackingService');
 
-        // CRITICAL: Start tracking first (activates background updates + Firebase subs)
-        await familyTrackingService.startTracking();
+        if (!trackingStarted) {
+          // CRITICAL: Start tracking first (activates background updates + Firebase subs)
+          await familyTrackingService.startTracking();
+          trackingStarted = true;
+        }
 
         // Share our own location with family (via mesh + cloud)
         await familyTrackingService.shareMyLocation();
 
-        // Get latest members from service (with stale check applied)
-        // Note: We use store directly to avoid type mismatch between service and store types
-        setFamilyMembers(useFamilyStore.getState().members);
+        if (isUnmounted) return;
         logger.debug('Real-time family locations refreshed');
       } catch (err) {
         logger.warn('Family location refresh error:', err);
+      } finally {
+        isRefreshing = false;
       }
     };
 
@@ -171,10 +194,24 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
     refreshFamilyLocations();
 
     // Set up interval
-    const intervalId = setInterval(refreshFamilyLocations, intervalMs);
+    intervalId = setInterval(refreshFamilyLocations, intervalMs);
 
-    return () => clearInterval(intervalId);
-  }, []);
+    return () => {
+      isUnmounted = true;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      if (trackingStarted) {
+        import('../../services/FamilyTrackingService')
+          .then(({ familyTrackingService }) => {
+            familyTrackingService.stopTracking();
+          })
+          .catch((error) => {
+            logger.warn('Failed to stop family tracking service on unmount:', error);
+          });
+      }
+    };
+  }, [familyTrackingInterval, realTimeTracking]);
 
   useEffect(() => {
     const loadOffline = async () => {

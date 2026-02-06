@@ -18,6 +18,7 @@ import {
   Linking,
   ActionSheetIOS,
   Platform,
+  Share as NativeShare,
   TextInput,
   ImageBackground,
 } from 'react-native';
@@ -27,9 +28,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import GlassButton from '../../components/buttons/GlassButton';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { useMeshStore } from '../../stores/meshStore';
+import { useMeshStore } from '../../services/mesh/MeshStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { bleMeshService } from '../../services/BLEMeshService';
+import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
+import { MeshMessageType } from '../../services/mesh/MeshProtocol';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
 import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
 import { MemberCard } from '../../components/family/MemberCard';
@@ -38,7 +41,6 @@ import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
-import * as Sharing from 'expo-sharing';
 import * as SMS from 'expo-sms';
 
 const logger = createLogger('FamilyScreen');
@@ -458,7 +460,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           // ELITE: Broadcast location update (only if BLE Mesh is running)
           if (bleMeshService.getIsRunning()) {
             try {
-              await useMeshStore.getState().broadcastMessage(locationMessage, 'location');
+              await meshNetworkService.broadcastMessage(locationMessage, MeshMessageType.TEXT, {
+                to: 'broadcast',
+                from: myDeviceId,
+              });
               if (__DEV__) {
                 logger.debug('Location update broadcasted via BLE Mesh');
               }
@@ -640,7 +645,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       let broadcastSuccess = false;
       if (bleMeshService.getIsRunning()) {
         try {
-          await useMeshStore.getState().broadcastMessage(statusMessage, 'status');
+          await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.TEXT, {
+            to: 'broadcast',
+            from: myDeviceId,
+          });
           broadcastSuccess = true;
           if (__DEV__) {
             logger.info('Status update broadcasted via BLE Mesh');
@@ -878,9 +886,8 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
             }
           } else if (buttonIndex === 3) {
             // Other (System share sheet)
-            const isAvailable = await Sharing.isAvailableAsync();
-            if (isAvailable) {
-              await Sharing.shareAsync(shareMessage);
+            const result = await NativeShare.share({ message: shareMessage });
+            if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
               haptics.notificationSuccess();
             } else {
               await handleCopyId();
@@ -910,9 +917,8 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         }
 
         // Fallback to system share
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(shareMessage);
+        const result = await NativeShare.share({ message: shareMessage });
+        if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
           haptics.notificationSuccess();
         } else {
           await handleCopyId();
@@ -969,9 +975,8 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     const shareMessage = `AfetNet ID'm: ${myDeviceId}\n\nBeni eklemek için bu ID'yi kullanabilirsiniz. AfetNet uygulamasında "ID ile Ekle" seçeneğini kullanın.`;
 
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(shareMessage);
+      const result = await NativeShare.share({ message: shareMessage });
+      if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
         haptics.notificationSuccess();
       } else {
         await handleCopyId();
@@ -1254,53 +1259,66 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                   index={index}
                   onPress={() => {
                     haptics.impactLight();
-                    // Show actions for member
-                    ActionSheetIOS.showActionSheetWithOptions(
-                      {
-                        options: ['İptal', 'Düzenle', 'Sil', 'Konumu Gör'],
-                        destructiveButtonIndex: 2,
-                        cancelButtonIndex: 0,
-                        title: member.name,
-                      },
-                      (buttonIndex) => {
-                        if (buttonIndex === 1) {
-                          // Edit
-                          setEditingMember(member);
-                          setEditName(member.name);
-                          setShowEditModal(true);
-                        } else if (buttonIndex === 2) {
-                          // Delete
-                          Alert.alert(
-                            'Üyeyi Sil',
-                            `${member.name} isimli üyeyi silmek istediğinize emin misiniz?`,
-                            [
-                              { text: 'İptal', style: 'cancel' },
-                              {
-                                text: 'Sil',
-                                style: 'destructive',
-                                onPress: () => {
-                                  useFamilyStore.getState().removeMember(member.id);
-                                  haptics.notificationSuccess();
-                                },
-                              },
-                            ],
-                          );
-                        } else if (buttonIndex === 3) {
-                          // View Location
-                          if (member.location) {
-                            const url = Platform.select({
-                              ios: `maps:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
-                              android: `geo:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
-                            });
-                            if (url) {
-                              Linking.openURL(url).catch((err) => logger.error('Error opening maps:', err));
-                            }
-                          } else {
-                            Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
-                          }
+                    const handleEdit = () => {
+                      setEditingMember(member);
+                      setEditName(member.name);
+                      setShowEditModal(true);
+                    };
+
+                    const handleDelete = () => {
+                      Alert.alert(
+                        'Üyeyi Sil',
+                        `${member.name} isimli üyeyi silmek istediğinize emin misiniz?`,
+                        [
+                          { text: 'İptal', style: 'cancel' },
+                          {
+                            text: 'Sil',
+                            style: 'destructive',
+                            onPress: () => {
+                              useFamilyStore.getState().removeMember(member.id);
+                              haptics.notificationSuccess();
+                            },
+                          },
+                        ],
+                      );
+                    };
+
+                    const handleViewLocation = () => {
+                      if (member.location) {
+                        const url = Platform.select({
+                          ios: `maps:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
+                          android: `geo:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
+                        });
+                        if (url) {
+                          Linking.openURL(url).catch((err) => logger.error('Error opening maps:', err));
                         }
-                      },
-                    );
+                      } else {
+                        Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
+                      }
+                    };
+
+                    if (Platform.OS === 'ios') {
+                      ActionSheetIOS.showActionSheetWithOptions(
+                        {
+                          options: ['İptal', 'Düzenle', 'Sil', 'Konumu Gör'],
+                          destructiveButtonIndex: 2,
+                          cancelButtonIndex: 0,
+                          title: member.name,
+                        },
+                        (buttonIndex) => {
+                          if (buttonIndex === 1) handleEdit();
+                          if (buttonIndex === 2) handleDelete();
+                          if (buttonIndex === 3) handleViewLocation();
+                        },
+                      );
+                    } else {
+                      Alert.alert(member.name, 'İşlem seçin', [
+                        { text: 'Düzenle', onPress: handleEdit },
+                        { text: 'Konumu Gör', onPress: handleViewLocation },
+                        { text: 'Sil', style: 'destructive', onPress: handleDelete },
+                        { text: 'İptal', style: 'cancel' },
+                      ]);
+                    }
                   }}
                 />
               ))}
@@ -1960,5 +1978,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-
-

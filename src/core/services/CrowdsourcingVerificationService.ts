@@ -13,9 +13,8 @@
 
 import { createLogger } from '../utils/logger';
 import NetInfo from '@react-native-community/netinfo';
-import { bleMeshService } from './BLEMeshService';
-import { MeshMessage } from '../stores/meshStore';
-import { useMeshStore } from '../stores/meshStore';
+import { meshNetworkService } from './mesh/MeshNetworkService';
+import { MeshMessageType } from './mesh/MeshProtocol';
 
 const logger = createLogger('CrowdsourcingVerificationService');
 
@@ -187,7 +186,6 @@ class CrowdsourcingVerificationService {
    */
   private async broadcastViaBLEMesh(packet: SensorDataPacket): Promise<void> {
     try {
-      // ELITE: Use meshStore broadcastMessage instead of direct BLE service
       const messageContent = JSON.stringify({
         type: 'sensor_data',
         deviceId: packet.deviceId,
@@ -199,7 +197,7 @@ class CrowdsourcingVerificationService {
         eventDetected: packet.eventDetected,
       });
 
-      await useMeshStore.getState().broadcastMessage(messageContent, 'broadcast');
+      await meshNetworkService.broadcastMessage(messageContent, MeshMessageType.TEXT, { to: 'broadcast' });
     } catch (error) {
       // Silent fail - BLE is optional
     }
@@ -295,4 +293,3 @@ class CrowdsourcingVerificationService {
 }
 
 export const crowdsourcingVerificationService = new CrowdsourcingVerificationService();
-

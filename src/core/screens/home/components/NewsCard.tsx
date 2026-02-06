@@ -129,7 +129,10 @@ export default function NewsCard() {
 
               {/* Footer */}
               <View style={styles.cardFooter}>
-                <TouchableOpacity style={styles.readMoreBtn}>
+                <TouchableOpacity
+                  style={styles.readMoreBtn}
+                  onPress={() => handleArticlePress(article)}
+                >
                   <Text style={styles.readMoreText}>OKU</Text>
                   <View style={styles.readMoreArrow}>
                     <Ionicons name="arrow-forward" size={10} color="#FFF" />

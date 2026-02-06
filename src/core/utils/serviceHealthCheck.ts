@@ -1,11 +1,12 @@
 /**
  * SERVICE HEALTH CHECK - Backend Service Verification
- * Tests Firebase, BLE mesh, RevenueCat initialization
+ * Tests Firebase and BLE mesh initialization
  */
 
 import { createLogger } from './logger';
 import { getFirebaseApp } from '../../lib/firebase';
-import { useMeshStore } from '../stores/meshStore';
+import { useMeshStore } from '../services/mesh/MeshStore';
+import { meshNetworkService } from '../services/mesh/MeshNetworkService';
 
 const logger = createLogger('ServiceHealthCheck');
 
@@ -86,8 +87,9 @@ export async function checkBLEMeshHealth(): Promise<ServiceHealthStatus> {
   try {
     // Check BLE mesh status via store
     const meshStore = useMeshStore.getState();
-    const stats = meshStore.stats;
-    const myDeviceId = meshStore.myDeviceId;
+    const runtimeStats = meshNetworkService.getStats();
+    const myDeviceId = meshStore.myDeviceId || meshNetworkService.getMyDeviceId();
+    const peerCount = meshStore.peers.length;
 
     if (!myDeviceId) {
       // This is normal on first launch or if Bluetooth is disabled
@@ -102,13 +104,13 @@ export async function checkBLEMeshHealth(): Promise<ServiceHealthStatus> {
     }
 
     // Check if there are any peers or messages (indicates service is active)
-    const hasActivity = stats.peersDiscovered > 0 || stats.messagesSent > 0 || stats.messagesReceived > 0;
+    const hasActivity = peerCount > 0 || runtimeStats.packetsSent > 0 || runtimeStats.packetsReceived > 0;
 
     if (hasActivity) {
       healthStatuses.set('BLE Mesh', {
         name: 'BLE Mesh',
         status: 'healthy',
-        message: `BLE Mesh active - ${stats.peersDiscovered} peers, ${stats.messagesSent} sent, ${stats.messagesReceived} received`,
+        message: `BLE Mesh active - ${peerCount} peers, ${runtimeStats.packetsSent} sent, ${runtimeStats.packetsReceived} received`,
         lastChecked: startTime,
       });
 
@@ -190,4 +192,3 @@ export function getCachedHealthStatus(serviceName: string): ServiceHealthStatus 
 export function getAllCachedHealthStatuses(): ServiceHealthStatus[] {
   return Array.from(healthStatuses.values());
 }
-

@@ -212,9 +212,14 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
   },
 
   sendMessage: async (content, options = {}) => {
-    const { myDeviceId } = get();
+    let { myDeviceId } = get();
+
+    // ELITE FIX: Auto-generate temporary device ID if not set
     if (!myDeviceId) {
-      throw new Error('Device ID not set');
+      myDeviceId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      get().setMyDeviceId(myDeviceId);
+      const logger = require('../utils/logger').createLogger('MeshStore');
+      logger.warn('Device ID was not set, generated temporary ID:', myDeviceId);
     }
 
     const {
@@ -281,8 +286,13 @@ export const useMeshStore = create<MeshState & MeshActions>((set, get) => ({
       logger.error('Failed to broadcast message via BLE Mesh Service:', error);
     }
 
-    // CRITICAL: Also add to store for tracking
-    await get().sendMessage(content, { type, skipTransport: true });
+    // CRITICAL: Also add to store for tracking (with error handling)
+    try {
+      await get().sendMessage(content, { type, skipTransport: true });
+    } catch (error) {
+      const logger = require('../utils/logger').createLogger('MeshStore');
+      logger.warn('broadcastMessage: sendMessage failed, skipping store tracking:', error);
+    }
   },
 
   setScanning: (isScanning) => set({ isScanning }),

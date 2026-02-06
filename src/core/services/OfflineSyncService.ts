@@ -13,7 +13,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../utils/logger';
-import { useMeshStore } from '../stores/meshStore';
+import { useMeshStore } from './mesh/MeshStore';
 
 const logger = createLogger('OfflineSyncService');
 
@@ -190,10 +190,32 @@ class OfflineSyncService {
         break;
       }
       case 'save':
-      case 'update':
-      case 'delete':
-        // Future generic types
+      case 'update': {
+        const { firebaseDataService } = await import('./FirebaseDataService');
+        const ownerDeviceId = item.data?.ownerDeviceId || useMeshStore.getState().myDeviceId || 'unknown';
+        const member = item.data?.member;
+        if (!member || ownerDeviceId === 'unknown') {
+          throw new Error(`Invalid ${item.type} payload for family sync`);
+        }
+        const ok = await firebaseDataService.saveFamilyMember(ownerDeviceId, member);
+        if (!ok) {
+          throw new Error(`Family ${item.type} sync returned false`);
+        }
         break;
+      }
+      case 'delete': {
+        const { firebaseDataService } = await import('./FirebaseDataService');
+        const ownerDeviceId = item.data?.ownerDeviceId || useMeshStore.getState().myDeviceId || 'unknown';
+        const memberId = item.data?.memberId;
+        if (!memberId || ownerDeviceId === 'unknown') {
+          throw new Error('Invalid delete payload for family sync');
+        }
+        const ok = await firebaseDataService.deleteFamilyMember(ownerDeviceId, memberId);
+        if (!ok) {
+          throw new Error('Family delete sync returned false');
+        }
+        break;
+      }
     }
   }
 
@@ -243,4 +265,3 @@ class OfflineSyncService {
 }
 
 export const offlineSyncService = new OfflineSyncService();
-

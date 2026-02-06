@@ -45,6 +45,7 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
     const auth = getAuth();
     const currentUser = auth.currentUser;
     const ownerUid = currentUser ? currentUser.uid : null;
+    const qrAliasId = ownerUid ? `AFN-${ownerUid.substring(0, 8).toUpperCase()}` : null;
 
     const deviceData: any = {
       deviceId,
@@ -61,13 +62,28 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
       deviceData.ownerUid = ownerUid;
     }
 
+    const targetDeviceIds = new Set<string>([deviceId]);
+    if (qrAliasId) {
+      targetDeviceIds.add(qrAliasId);
+    }
+
     await withTimeout(
-      () => setDoc(doc(db, 'devices', deviceId), deviceData, { merge: true }),
+      async () => {
+        await Promise.all(
+          Array.from(targetDeviceIds).map(async (targetId) => {
+            const payload = {
+              ...deviceData,
+              ...(targetId !== deviceId ? { aliasOfDeviceId: deviceId } : {}),
+            };
+            await setDoc(doc(db, 'devices', targetId), payload, { merge: true });
+          }),
+        );
+      },
       'Device ID save',
     );
 
     if (__DEV__) {
-      logger.info(`Device ID saved to Firestore: ${deviceId}`);
+      logger.info(`Device IDs saved to Firestore: ${Array.from(targetDeviceIds).join(', ')}`);
     }
     return true;
   } catch (error: unknown) {

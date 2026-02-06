@@ -9,9 +9,48 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
     
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDeviceOwner(deviceId) {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/devices/$(deviceId))
+             && get(/databases/$(database)/documents/devices/$(deviceId)).data.ownerUid == request.auth.uid;
+    }
+
+    function requesterQrId() {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+             ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.qrId
+             : null;
+    }
+
+    function isLinkedFamilyMember(deviceId) {
+      let qrId = requesterQrId();
+      return isAuthenticated()
+             && (
+               exists(/databases/$(database)/documents/devices/$(deviceId)/familyMembers/$(request.auth.uid))
+               || (
+                 qrId is string
+                 && exists(/databases/$(database)/documents/devices/$(deviceId)/familyMembers/$(qrId))
+               )
+             );
+    }
+
+    function isDeviceReadable(deviceId) {
+      return isDeviceOwner(deviceId) || isLinkedFamilyMember(deviceId);
+    }
+
+    function isSenderOwned(senderDeviceId) {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/devices/$(senderDeviceId))
+             && get(/databases/$(database)/documents/devices/$(senderDeviceId)).data.ownerUid == request.auth.uid;
     }
     
     function hasAppCheck() {
@@ -57,8 +96,8 @@ service cloud.firestore {
                     && request.resource.data.longitude is number
                     && request.resource.data.source is string;
       allow update: if isAuthenticated()
-                    && (resource.data.source == 'CROWDSOURCED' || request.auth.token.admin == true);
-      allow delete: if request.auth.token.admin == true;
+                    && (resource.data.source == 'CROWDSOURCED' || isAdmin());
+      allow delete: if isAdmin();
     }
     
     // EEW history (user-specific)
@@ -82,14 +121,14 @@ service cloud.firestore {
                     && request.resource.data.centerLatitude is number
                     && request.resource.data.centerLongitude is number;
       allow update: if isAuthenticated();
-      allow delete: if request.auth.token.admin == true;
+      allow delete: if isAdmin();
     }
     
     // EEW analytics (write-only for tracking)
     // - Anyone authenticated can write
     // - No reads (only Cloud Functions)
     match /eew_analytics/{eventId} {
-      allow read: if request.auth.token.admin == true;
+      allow read: if isAdmin();
       allow create: if isAuthenticated()
                     && request.resource.data.eventType is string
                     && request.resource.data.timestamp is number;
@@ -103,77 +142,87 @@ service cloud.firestore {
     
     // Device documents store user's device info and current location
     // - Owner can read/write their own device
-    // - Other authenticated users can read location (for family tracking)
+    // - Family members can read device location for tracking (via deviceId field match)
+    // CRITICAL: Restrict to device owner via qrId matching
     match /devices/{deviceId} {
-      // Allow authenticated users to read device info (for family member location tracking)
-      allow read: if isAuthenticated();
-      
-      // Only the device owner can write their own document
-      // Since we use anonymous auth, we check if the request comes from the same device
-      // by allowing any authenticated user to write (they can only know their own deviceId)
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      // ELITE SECURITY: Owner or explicitly linked family member only
+      allow read: if isDeviceReadable(deviceId);
+
+      // First write must bind ownerUid to authenticated user
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      // Owner-only updates; ownerUid cannot be changed after creation
+      allow update: if isDeviceOwner(deviceId)
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false; // Devices should not be deleted
       
       // Family members subcollection
       // - Each device can have its own family members list
       match /familyMembers/{memberId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated()
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isDeviceOwner(deviceId)
                       && request.resource.data.name is string
                       && request.resource.data.id is string;
-        allow update: if isAuthenticated();
-        allow delete: if isAuthenticated();
+        allow update: if isDeviceOwner(deviceId);
+        allow delete: if isDeviceOwner(deviceId);
       }
       
       // Location history subcollection
       match /locations/{locationId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated()
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isDeviceOwner(deviceId)
                       && request.resource.data.latitude is number
                       && request.resource.data.longitude is number;
-        allow update: if false; // Location history is immutable
+        allow update: if isDeviceOwner(deviceId)
+                      && request.resource.data.latitude is number
+                      && request.resource.data.longitude is number;
         allow delete: if false; // Cleanup via Cloud Functions/TTL
       }
       
       // Status updates subcollection
       match /status/{statusId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated();
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isDeviceOwner(deviceId);
+        allow update: if isDeviceOwner(deviceId);
         allow delete: if false;
       }
       
       // Health profile subcollection
       match /health/{healthId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated();
+        allow read: if isDeviceOwner(deviceId);
+        allow create: if isDeviceOwner(deviceId);
+        allow update: if isDeviceOwner(deviceId);
         allow delete: if false;
       }
       
       // ICE (In Case of Emergency) data subcollection
       match /ice/{iceId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated();
+        allow read: if isDeviceOwner(deviceId);
+        allow create: if isDeviceOwner(deviceId);
+        allow update: if isDeviceOwner(deviceId);
         allow delete: if false;
       }
       
       // Messages subcollection  
       match /messages/{messageId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
+        allow read: if isDeviceOwner(deviceId);
+        allow create: if isAuthenticated()
+                      && exists(/databases/$(database)/documents/devices/$(deviceId))
+                      && request.resource.data.fromDeviceId is string
+                      && request.resource.data.toDeviceId is string
+                      && isSenderOwned(request.resource.data.fromDeviceId)
+                      && (isDeviceOwner(deviceId) || request.resource.data.toDeviceId == deviceId);
         allow update: if false;
         allow delete: if false;
       }
       
       // Conversations subcollection
       match /conversations/{conversationId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated();
-        allow delete: if isAuthenticated();
+        allow read: if isDeviceOwner(deviceId);
+        allow create: if isDeviceOwner(deviceId);
+        allow update: if isDeviceOwner(deviceId);
+        allow delete: if isDeviceOwner(deviceId);
       }
     }
     
@@ -245,7 +294,7 @@ service cloud.firestore {
     // - Admin only read
     // - Only Cloud Functions can write
     match /eew_analytics_daily/{docId} {
-      allow read: if request.auth.token.admin == true;
+      allow read: if isAdmin();
       allow write: if false; // Only via Cloud Functions
     }
     
@@ -282,38 +331,49 @@ service cloud.firestore {
       allow delete: if false;
     }
     
-    // Earthquakes collection
+    // Earthquakes collection (read-only for users, write via Cloud Functions)
     match /earthquakes/{earthquakeId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      // ELITE SECURITY: Users cannot write earthquakes - only Cloud Functions with admin SDK
+      allow write: if false;
     }
     
     // Felt earthquakes reports
     match /feltEarthquakes/{reportId} {
       allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && request.resource.data.earthquakeId is string
+                    && request.resource.data.userId is string
+                    && request.resource.data.timestamp is number;
+      allow update: if false;
       allow delete: if false;
     }
     
-    // Family members
+    // Family members (top-level collection)
+    // ELITE SECURITY: Restrict to users who own the linked device
     match /familyMembers/{memberId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated() 
+                  && (resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticated() 
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAuthenticated() 
+                    && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isAuthenticated() 
+                    && resource.data.ownerUid == request.auth.uid;
     }
     
     // SOS alerts
     match /sosAlerts/{alertId} {
-      allow read: if true;
+      allow read: if isAuthenticated() || isAdmin();
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow update: if false;
       allow delete: if false;
     }
     
     // Messages
     match /messages/{messageId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if false;
+      allow create: if false;
       allow update: if false;
       allow delete: if false;
     }

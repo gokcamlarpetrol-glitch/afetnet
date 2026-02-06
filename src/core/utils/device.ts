@@ -1,43 +1,19 @@
-import * as SecureStore from 'expo-secure-store';
-import * as Crypto from 'expo-crypto';
 import { createLogger } from './logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getDeviceId as getSharedDeviceId,
+  setDeviceId as setSharedDeviceId,
+  clearDeviceId as clearSharedDeviceId,
+} from '../../lib/device';
 
 const logger = createLogger('Device');
 
-const DEVICE_ID_KEY = 'afetnet_device_id';
-const ASYNC_STORAGE_KEY = '@afetnet:device_id'; // Compatibility with Background Task
-
 /**
- * Get or generate device ID
- * Stored securely and persists across app launches
+ * Single source of truth for device ID.
+ * This wrapper keeps backward compatibility for older imports under core/utils.
  */
 export async function getDeviceId(): Promise<string> {
   try {
-    // 1. Try SecureStore (Primary)
-    let deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
-
-    // 2. Try AsyncStorage (Fallback/Background Compat)
-    if (!deviceId) {
-      deviceId = await AsyncStorage.getItem(ASYNC_STORAGE_KEY);
-      // If found here but not in SecureStore, migrate it up
-      if (deviceId) {
-        await SecureStore.setItemAsync(DEVICE_ID_KEY, deviceId);
-      }
-    }
-
-    if (deviceId) {
-      return deviceId;
-    }
-
-    // Generate new ID
-    const uuid = await Crypto.randomUUID();
-    deviceId = `AFN-${uuid.slice(0, 8)}`;
-
-    // Store in both
-    await setDeviceId(deviceId);
-
-    return deviceId;
+    return await getSharedDeviceId();
   } catch (error) {
     logger.error('Error getting device ID:', error);
     // Fallback to random ID (not persisted)
@@ -50,9 +26,8 @@ export async function getDeviceId(): Promise<string> {
  */
 export async function setDeviceId(id: string): Promise<void> {
   try {
-    await SecureStore.setItemAsync(DEVICE_ID_KEY, id);
-    await AsyncStorage.setItem(ASYNC_STORAGE_KEY, id);
-    logger.info(`Device ID updated to: ${id}`);
+    await setSharedDeviceId(id);
+    logger.info(`Device ID updated to: ${id.toUpperCase()}`);
   } catch (error) {
     logger.error('Error setting device ID:', error);
   }
@@ -63,10 +38,8 @@ export async function setDeviceId(id: string): Promise<void> {
  */
 export async function clearDeviceId(): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(DEVICE_ID_KEY);
-    await AsyncStorage.removeItem(ASYNC_STORAGE_KEY);
+    await clearSharedDeviceId();
   } catch (error) {
     logger.error('Error clearing device ID:', error);
   }
 }
-

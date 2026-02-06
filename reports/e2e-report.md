@@ -7,7 +7,7 @@
 ### Static checks
 
 - ⚠️ ESLint failed
-- ⚠️ Typecheck failed
+- ✅ Typecheck OK
 
 ### Env presence
 
@@ -27,8 +27,8 @@
 
 ### GitHub Pages
 
-- ✅ privacy-policy.html 200 (0.23s)
-- ✅ terms-of-service.html 200 (0.20s)
+- ⚠️ privacy-policy.html HTTP 0
+- ⚠️ terms-of-service.html HTTP 0
 
 ### Backend health
 

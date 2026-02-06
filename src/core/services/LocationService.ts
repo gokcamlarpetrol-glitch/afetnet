@@ -3,7 +3,6 @@
  */
 
 import * as Location from 'expo-location';
-import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('LocationService');
@@ -26,23 +25,16 @@ class LocationService {
     if (__DEV__) logger.info('[LocationService] Initializing...');
 
     try {
-      // Request foreground permission
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+      // Do not trigger permission prompt during startup.
+      // Feature screens request permission when user takes action.
+      const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
 
       if (foregroundStatus !== 'granted') {
-        if (__DEV__) logger.warn('Foreground permission not granted');
+        if (__DEV__) logger.warn('Foreground permission not granted (startup check)');
         return;
       }
 
       this.hasPermission = true;
-
-      // Request background permission (optional)
-      if (Platform.OS === 'ios') {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-        if (backgroundStatus !== 'granted') {
-          if (__DEV__) logger.warn('Background permission not granted');
-        }
-      }
 
       // Get initial location
       await this.updateLocation();
@@ -61,7 +53,7 @@ class LocationService {
 
   async recheckPermission(): Promise<boolean> {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       this.hasPermission = status === 'granted';
       return this.hasPermission;
     } catch (error) {
@@ -353,4 +345,3 @@ class LocationService {
 }
 
 export const locationService = new LocationService();
-

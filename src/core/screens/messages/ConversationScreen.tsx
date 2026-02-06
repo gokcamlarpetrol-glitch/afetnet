@@ -12,22 +12,21 @@
  * - Edit/Delete messages
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TextInput, Pressable, FlatList,
-  KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert, Image,
+  KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from '../../components/SafeLinearGradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
 import { hybridMessageService } from '../../services/HybridMessageService';
-import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
 import { BlurView } from '../../components/SafeBlurView';
 import Animated, { FadeInUp, Layout, FadeIn, FadeOut } from 'react-native-reanimated';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { useMessageStore, Message } from '../../stores/messageStore';
+import { Message, useMessageStore } from '../../stores/messageStore';
 import { validateMessage, sanitizeForDisplay } from '../../utils/messageSanitizer';
 import MessageOptionsModal from '../../components/messages/MessageOptionsModal';
 import { AttachmentsModal } from '../../components/messages/AttachmentsModal';
@@ -35,6 +34,8 @@ import { VoiceRecorderUI } from '../../components/messages/VoiceRecorderUI';
 import { voiceMessageService } from '../../services/VoiceMessageService';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
+import { identityService } from '../../services/IdentityService';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase, RouteProp } from '@react-navigation/native';
 import { createLogger } from '../../utils/logger';
@@ -172,38 +173,65 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const [text, setText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [connectionState, setConnectionState] = useState<'online' | 'mesh' | 'offline'>('offline');
+  const [physicalDeviceId, setPhysicalDeviceId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ELITE: Message options modal state
   const [optionsModalVisible, setOptionsModalVisible] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [selectedMessage, setSelectedMessage] = useState<MeshMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
-  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<MeshMessage | null>(null);
 
   // ELITE: Media messaging state
   const [attachmentsModalVisible, setAttachmentsModalVisible] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
-  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ELITE: Get message store actions for edit/delete
-  const editMessage = useMessageStore(state => state.editMessage);
-  const deleteMessage = useMessageStore(state => state.deleteMessage);
-  const forwardMessage = useMessageStore(state => state.forwardMessage);
+  // ELITE: Use mesh store state for all in-screen mutations
+  const updateMeshMessage = useMeshStore(state => state.updateMessage);
 
   // ELITE: Connect to real store (M7 fix)
   const allMessages = useMeshStore(state => state.messages);
   const myDeviceId = useMeshStore(state => state.myDeviceId);
+  const selfIds = useMemo(() => {
+    const ids = new Set<string>(['ME']);
+    if (myDeviceId) {
+      ids.add(myDeviceId);
+    }
+    if (physicalDeviceId) {
+      ids.add(physicalDeviceId);
+    }
+    const identity = identityService.getIdentity();
+    if (identity?.id) {
+      ids.add(identity.id);
+    }
+    if (identity?.deviceId) {
+      ids.add(identity.deviceId);
+    }
+    return ids;
+  }, [myDeviceId, physicalDeviceId]);
 
-  // Filter messages for this conversation
-  const messages = allMessages.filter(msg => {
-    // Show messages from/to this user
-    return msg.senderId === userId || msg.to === userId ||
-      msg.senderId === 'ME' || msg.to === 'broadcast';
-  }).sort((a, b) => a.timestamp - b.timestamp);
+  // Strictly isolate this one-to-one conversation
+  const messages = useMemo(() => {
+    if (!userId) return [];
+
+    return allMessages
+      .filter((msg) => {
+        const fromMe = selfIds.has(msg.senderId);
+        const toPeer = msg.to === userId;
+        if (fromMe && toPeer) {
+          return true;
+        }
+
+        const fromPeer = msg.senderId === userId;
+        const toMe = !!msg.to && selfIds.has(msg.to);
+        return fromPeer && toMe;
+      })
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }, [allMessages, selfIds, userId]);
 
   // Subscribe to connection state
   useEffect(() => {
@@ -215,6 +243,18 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     setConnectionState(hybridMessageService.getConnectionState());
 
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    getDeviceIdFromLib()
+      .then((id) => {
+        if (id) {
+          setPhysicalDeviceId(id);
+        }
+      })
+      .catch((error) => {
+        logger.warn('Failed to resolve physical device ID in ConversationScreen:', error);
+      });
   }, []);
 
   // ELITE: Cleanup voice recording interval on unmount
@@ -294,7 +334,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   }, []);
 
   // ELITE: Handle message long press to show options
-  const handleMessageLongPress = useCallback((message: Message) => {
+  const handleMessageLongPress = useCallback((message: MeshMessage) => {
     haptics.impactLight();
     setSelectedMessage(message);
     setOptionsModalVisible(true);
@@ -315,13 +355,19 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const saveEditedMessage = useCallback(async () => {
     if (!editingMessageId || !editText.trim()) return;
 
-    const success = await editMessage(editingMessageId, editText.trim());
-    if (success) {
-      haptics.notificationSuccess();
+    const validation = validateMessage(editText);
+    if (!validation.valid) {
+      Alert.alert('Hata', validation.error || 'Geçersiz mesaj');
+      return;
     }
+
+    updateMeshMessage(editingMessageId, {
+      content: validation.sanitized,
+    });
+    haptics.notificationSuccess();
     setEditingMessageId(null);
     setEditText('');
-  }, [editingMessageId, editText, editMessage]);
+  }, [editingMessageId, editText, updateMeshMessage]);
 
   // ELITE: Cancel editing
   const cancelEditing = useCallback(() => {
@@ -331,18 +377,16 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
   // ELITE: Handle delete message
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    const success = await deleteMessage(messageId);
-    if (success) {
-      haptics.notificationWarning();
-    }
+    updateMeshMessage(messageId, { content: 'Bu mesaj silindi' });
+    haptics.notificationWarning();
     setOptionsModalVisible(false);
-  }, [deleteMessage]);
+  }, [updateMeshMessage]);
 
   // ELITE: Handle forward message
   const handleForwardMessage = useCallback(async (messageId: string) => {
     Alert.alert(
       'Mesajı İlet',
-      'Bu özellik yakında eklenecek.',
+      'Bu mesaj türü için iletme özelliği şu anda kullanılamıyor.',
       [{ text: 'Tamam', style: 'default' }]
     );
     setOptionsModalVisible(false);
@@ -362,6 +406,23 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     setOptionsModalVisible(false);
     setSelectedMessage(null);
   }, []);
+
+  const selectedMessageForModal: Message | null = useMemo(() => {
+    if (!selectedMessage) return null;
+    const isMe = selfIds.has(selectedMessage.senderId);
+    return {
+      id: selectedMessage.id,
+      from: isMe ? 'me' : selectedMessage.senderId,
+      to: selectedMessage.to || userId || 'broadcast',
+      content: selectedMessage.content,
+      timestamp: selectedMessage.timestamp,
+      delivered: selectedMessage.status === 'delivered' || selectedMessage.status === 'read',
+      read: selectedMessage.status === 'read',
+      status: selectedMessage.status,
+      isEdited: (selectedMessage as any).isEdited,
+      isDeleted: (selectedMessage as any).isDeleted,
+    };
+  }, [selectedMessage, selfIds, userId]);
 
   // ============================================================================
   // ELITE: Media Message Handlers
@@ -629,24 +690,9 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           data={messages}
           keyExtractor={item => item.id}
           renderItem={({ item, index }) => {
-            const isMe = item.senderId === 'ME' || item.senderId === myDeviceId;
-            const prevMsg = messages[index - 1];
+            const isMe = selfIds.has(item.senderId);
             const nextMsg = messages[index + 1];
             const isLast = !nextMsg || nextMsg.senderId !== item.senderId;
-
-            // Convert MeshMessage to Message format for modal
-            const messageForModal: Message = {
-              id: item.id,
-              from: isMe ? 'me' : item.senderId,
-              to: item.to || userId,
-              content: item.content,
-              timestamp: item.timestamp,
-              delivered: item.status === 'delivered' || item.status === 'read',
-              read: item.status === 'read',
-              status: item.status,
-              isEdited: (item as any).isEdited,
-              isDeleted: (item as any).isDeleted,
-            };
 
             return (
               <Pressable
@@ -664,7 +710,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                     );
                   } else {
                     // Show message options modal
-                    handleMessageLongPress(messageForModal);
+                    handleMessageLongPress(item);
                   }
                 }}
               >
@@ -779,8 +825,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       {/* ELITE: Message Options Modal */}
       <MessageOptionsModal
         visible={optionsModalVisible}
-        message={selectedMessage}
-        isOwnMessage={selectedMessage?.from === 'me'}
+        message={selectedMessageForModal}
+        isOwnMessage={selectedMessage ? selfIds.has(selectedMessage.senderId) : false}
         onClose={closeOptionsModal}
         onEdit={handleEditMessage}
         onDelete={handleDeleteMessage}

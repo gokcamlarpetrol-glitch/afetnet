@@ -27,7 +27,7 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
 import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
-import { useMeshStore } from '../../stores/meshStore';
+import { useMeshStore } from '../../services/mesh/MeshStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
 import QRCode from 'react-native-qrcode-svg';
@@ -100,8 +100,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   }, [searchQuery, conversations, messages]);
   const isMeshConnected = useMeshStore((state) => state.isConnected);
   const myDeviceId = useMeshStore((state) => state.myDeviceId);
-  const networkHealth = useMeshStore((state) => state.networkHealth);
   const peers = useMeshStore((state) => state.peers);
+  const meshMessages = useMeshStore((state) => state.messages);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [qrValue, setQrValue] = useState<string | null>(null);
 
@@ -202,17 +202,26 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   // ELITE: Memoize network stats for performance
   const networkStats = useMemo(() => {
     try {
-      const peerCount = (peers ? Object.keys(peers).length : 0) + 1;
-      const deliveryPercent = Math.round(Math.min(1, Math.max(0, networkHealth.deliveryRatio)) * 100);
-      const avgHop = Number.isFinite(networkHealth.avgHopCount) && networkHealth.avgHopCount > 0
-        ? networkHealth.avgHopCount.toFixed(1)
-        : '1.0';
+      const peerCount = (peers?.length || 0) + 1;
+      const trackedMessages = meshMessages.filter((msg) =>
+        msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sent' || msg.status === 'failed',
+      );
+      const deliveredMessages = trackedMessages.filter((msg) =>
+        msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sent',
+      );
+      const deliveryPercent = trackedMessages.length > 0
+        ? Math.round((deliveredMessages.length / trackedMessages.length) * 100)
+        : 100;
+      const avgHopValue = meshMessages.length > 0
+        ? meshMessages.reduce((sum, msg) => sum + (Number.isFinite(msg.hops) ? msg.hops : 0), 0) / meshMessages.length
+        : 1;
+      const avgHop = avgHopValue > 0 ? avgHopValue.toFixed(1) : '1.0';
       return { peerCount, deliveryPercent, avgHop };
     } catch (error) {
       logger.error('Error calculating network stats:', error);
       return { peerCount: 1, deliveryPercent: 0, avgHop: '1.0' };
     }
-  }, [peers, networkHealth]);
+  }, [meshMessages, peers]);
 
   // ELITE: Memoized callbacks for performance
   const handleDeleteConversation = useCallback((userId: string) => {

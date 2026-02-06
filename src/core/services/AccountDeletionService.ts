@@ -8,8 +8,10 @@ import { createLogger } from '../utils/logger';
 import { firebaseDataService } from './FirebaseDataService';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { deleteDoc, collection, query, where, getDocs, doc } from 'firebase/firestore';
+import { getAuth, deleteUser, signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { initializeFirebase } from '../../lib/firebase';
 import { useFamilyStore } from '../stores/familyStore';
 import { useHealthProfileStore } from '../stores/healthProfileStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -40,7 +42,7 @@ class AccountDeletionService {
   ): Promise<{ success: boolean; errors: string[] }> {
     const errors: string[] = [];
     let progress = 0;
-    const totalSteps = 12;
+    const totalSteps = 14;
 
     try {
       logger.info('Starting account deletion process...');
@@ -165,7 +167,31 @@ class AccountDeletionService {
         logger.error('Failed to delete SOS signals:', error);
       });
 
-      // Step 11: Clear local storage
+      // Step 11: Delete user profile
+      progress++;
+      onProgress?.({
+        step: 'Kullanıcı profili siliniyor...',
+        progress,
+        total: totalSteps,
+      });
+      await this.deleteUserProfile().catch((error) => {
+        errors.push(`User profile: ${error.message}`);
+        logger.error('Failed to delete user profile:', error);
+      });
+
+      // Step 12: Delete Firebase Auth account
+      progress++;
+      onProgress?.({
+        step: 'Kimlik hesabı siliniyor...',
+        progress,
+        total: totalSteps,
+      });
+      await this.deleteFirebaseAuthAccount().catch((error) => {
+        errors.push(`Auth account: ${error.message}`);
+        logger.error('Failed to delete auth account:', error);
+      });
+
+      // Step 13: Clear local storage
       progress++;
       onProgress?.({
         step: 'Yerel veriler temizleniyor...',
@@ -177,7 +203,7 @@ class AccountDeletionService {
         logger.error('Failed to clear local storage:', error);
       });
 
-      // Step 12: Clear secure storage
+      // Step 14: Clear secure storage
       progress++;
       onProgress?.({
         step: 'Güvenli depolama temizleniyor...',
@@ -202,6 +228,72 @@ class AccountDeletionService {
         success: false,
         errors: [errMsg],
       };
+    }
+  }
+
+  /**
+   * Delete user profile document from Firestore (users/{uid})
+   */
+  private async deleteUserProfile(): Promise<void> {
+    if (!firebaseDataService.isInitialized) return;
+
+    const app = initializeFirebase();
+    if (!app) {
+      logger.warn('Firebase app not initialized, skipping user profile deletion');
+      return;
+    }
+
+    const auth = getAuth(app);
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      logger.warn('No authenticated user, skipping user profile deletion');
+      return;
+    }
+
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+
+      await deleteDoc(doc(db, 'users', uid));
+      logger.info('User profile deleted');
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Delete Firebase Auth user account.
+   * If recent login is required, report explicit instruction.
+   */
+  private async deleteFirebaseAuthAccount(): Promise<void> {
+    const app = initializeFirebase();
+    if (!app) {
+      logger.warn('Firebase app not initialized, skipping auth deletion');
+      return;
+    }
+
+    const auth = getAuth(app);
+    const user = auth.currentUser;
+    if (!user) {
+      logger.warn('No authenticated user, skipping auth deletion');
+      return;
+    }
+
+    try {
+      await deleteUser(user);
+      await signOut(auth).catch(() => {
+        // Ignore sign-out errors after delete
+      });
+      logger.info('Firebase auth account deleted');
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code === 'auth/requires-recent-login') {
+        throw new Error('Güvenlik nedeniyle hesabı silmek için yeniden giriş yapıp tekrar deneyin.');
+      }
+      throw error;
     }
   }
 
@@ -499,4 +591,3 @@ class AccountDeletionService {
 }
 
 export const accountDeletionService = new AccountDeletionService();
-

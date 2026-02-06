@@ -4,7 +4,7 @@
  * ELITE: Şebeke olmadan BLE Mesh ile mesajlaşma
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,9 +23,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../../theme/colors';
 import { bleMeshService } from '../../services/BLEMeshService';
-import { useMeshStore, MeshMessage } from '../../stores/meshStore';
-import { useMessageStore } from '../../stores/messageStore';
-import { getDeviceId } from '../../utils/device';
+import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
+import { hybridMessageService } from '../../services/HybridMessageService';
+import { getDeviceId } from '../../../lib/device';
+import { identityService } from '../../services/IdentityService';
 import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
 import * as Location from 'expo-location';
@@ -45,15 +46,6 @@ interface SOSMessageType {
   content: string;
   timestamp: number;
   isFromMe: boolean;
-}
-
-// ELITE: Props made compatible with react-navigation type system
-// ELITE: Parsed message data payload type
-interface MessageDataPayload {
-  from?: string;
-  message?: string;
-  text?: string;
-  content?: string;
 }
 
 interface SOSConversationScreenProps {
@@ -83,6 +75,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const meshMessages = useMeshStore((state) => state.messages);
 
   // Load device ID
   useEffect(() => {
@@ -110,95 +103,64 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     })();
   }, []);
 
-  // CRITICAL: Listen for messages from SOS user
-  useEffect(() => {
-    const unsubscribe = bleMeshService.onMessage(async (meshMessage: MeshMessage) => {
-      try {
-        // Parse message content
-        let messageData: MessageDataPayload | null = null;
-        try {
-          if (typeof meshMessage.content === 'string') {
-            messageData = JSON.parse(meshMessage.content);
-          } else {
-            messageData = meshMessage.content;
-          }
-        } catch (parseError) {
-          // Check if it's a direct text message
-          if (meshMessage.from === sosUserId && meshMessage.type === 'text') {
-            const newMessage = {
-              id: meshMessage.id,
-              from: meshMessage.from,
-              content: meshMessage.content,
-              timestamp: meshMessage.timestamp,
-              isFromMe: false,
-            };
-            setMessages((prev) => [...prev, newMessage]);
-            haptics.notificationSuccess();
-            return;
-          }
-          return;
-        }
-
-        // Check if message is from SOS user
-        if (messageData?.from === sosUserId || meshMessage.from === sosUserId) {
-          const newMessage = {
-            id: meshMessage.id,
-            from: sosUserId,
-            content: typeof messageData === 'string' ? messageData : messageData?.message || messageData?.content || '',
-            timestamp: meshMessage.timestamp || Date.now(),
-            isFromMe: false,
-          };
-          setMessages((prev) => [...prev, newMessage]);
-          haptics.notificationSuccess();
-        }
-      } catch (error) {
-        logger.error('Error processing SOS message:', error);
+  const normalizeMessageContent = useCallback((rawContent: string): string => {
+    try {
+      const parsed = JSON.parse(rawContent);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.content === 'string') return parsed.content;
+        if (typeof parsed.message === 'string') return parsed.message;
+        if (typeof parsed.text === 'string') return parsed.text;
       }
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [sosUserId]);
-
-  // Load existing messages
-  useEffect(() => {
-    const loadMessages = async () => {
-      try {
-        const conversationMessages = useMessageStore.getState().getConversationMessages(sosUserId);
-        const meshMessages = useMeshStore.getState().messages.filter(
-          (msg) => msg.from === sosUserId || msg.to === sosUserId,
-        );
-
-        const allMessages = [
-          ...conversationMessages.map((msg) => ({
-            id: msg.id,
-            from: msg.from,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            isFromMe: msg.from === myDeviceId,
-          })),
-          ...meshMessages.map((msg) => ({
-            id: msg.id,
-            from: msg.from,
-            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-            timestamp: msg.timestamp,
-            isFromMe: msg.from === myDeviceId,
-          })),
-        ];
-
-        // Sort by timestamp
-        allMessages.sort((a, b) => a.timestamp - b.timestamp);
-        setMessages(allMessages);
-      } catch (error) {
-        logger.error('Failed to load messages:', error);
-      }
-    };
-
-    if (myDeviceId) {
-      loadMessages();
+    } catch {
+      // Legacy/plain text payload
     }
-  }, [myDeviceId, sosUserId]);
+    return rawContent;
+  }, []);
+
+  const conversationMessages = useMemo(() => {
+    const selfIds = new Set<string>(['ME']);
+    if (myDeviceId) {
+      selfIds.add(myDeviceId);
+    }
+    const identity = identityService.getIdentity();
+    if (identity?.id) {
+      selfIds.add(identity.id);
+    }
+    if (identity?.deviceId) {
+      selfIds.add(identity.deviceId);
+    }
+
+    const filtered = meshMessages
+      .filter((msg: MeshMessage) => {
+        if (msg.type !== 'CHAT' && msg.type !== 'SOS') {
+          return false;
+        }
+
+        const fromTarget = msg.senderId === sosUserId;
+        const toTarget = msg.to === sosUserId;
+        const fromMe = selfIds.has(msg.senderId);
+        const toMe = !!msg.to && selfIds.has(msg.to);
+
+        return (fromTarget && toMe) || (fromMe && toTarget);
+      })
+      .map((msg) => {
+        const isFromMe = selfIds.has(msg.senderId);
+        return {
+          id: msg.id,
+          from: msg.senderId,
+          content: normalizeMessageContent(msg.content),
+          timestamp: msg.timestamp,
+          isFromMe,
+        };
+      });
+
+    filtered.sort((a, b) => a.timestamp - b.timestamp);
+    return filtered;
+  }, [meshMessages, myDeviceId, normalizeMessageContent, sosUserId]);
+
+  useEffect(() => {
+    setMessages(conversationMessages);
+  }, [conversationMessages]);
 
   // Send message
   const sendMessage = useCallback(async () => {
@@ -210,59 +172,22 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     setInputText('');
     setIsSending(true);
 
-    // Create message ID before try block for error handling
-    const messageId = `msg_${Date.now()}_${myDeviceId}`;
-    const messageTimestamp = Date.now();
-
     try {
       // CRITICAL: Ensure BLE Mesh service is running
       if (!bleMeshService.getIsRunning()) {
         await bleMeshService.start();
       }
 
-      // Create message
-      const message = {
-        id: messageId,
-        from: myDeviceId,
-        to: sosUserId,
-        content: messageContent,
-        timestamp: messageTimestamp,
-        isFromMe: true,
-      };
-
-      // Add to local state immediately
-      setMessages((prev) => [...prev, message]);
-
-      // CRITICAL: Send via BLE Mesh
-      await bleMeshService.sendMessage(
-        JSON.stringify({
-          type: 'chat',
-          from: myDeviceId,
-          to: sosUserId,
-          content: messageContent,
-          timestamp: messageTimestamp,
-        }),
-        sosUserId,
-      );
-
-      // Also add to message store
-      useMessageStore.getState().addMessage({
-        id: messageId,
-        from: myDeviceId,
-        to: sosUserId,
-        content: messageContent,
-        timestamp: messageTimestamp,
+      await hybridMessageService.sendMessage(messageContent, sosUserId, {
         type: 'CHAT',
-        delivered: false,
-        read: false,
+        priority: 'critical',
       });
 
       haptics.notificationSuccess();
     } catch (error) {
       logger.error('Failed to send message:', error);
       Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
-      // Remove message from local state on error
-      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+      setInputText(messageContent);
     } finally {
       setIsSending(false);
     }
@@ -693,4 +618,3 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
   },
 });
-

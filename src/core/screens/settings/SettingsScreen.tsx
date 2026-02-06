@@ -25,7 +25,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
-import { useMeshStore } from '../../stores/meshStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 import { i18nService } from '../../services/I18nService';
@@ -67,7 +66,6 @@ interface SettingsScreenProps {
 export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
 
-  const [meshStats, setMeshStats] = useState({ messagesSent: 0, messagesReceived: 0, peersDiscovered: 0 });
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deletionProgress, setDeletionProgress] = useState<{ step: string; progress: number; total: number } | null>(null);
 
@@ -123,10 +121,6 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMeshStats(useMeshStore.getState().stats);
-    }, 500);
-
     // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
 
     // CRITICAL FIX: Load device ID asynchronously
@@ -135,8 +129,6 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     }).catch(() => {
       setDeviceId('N/A');
     });
-
-    return () => clearInterval(interval);
   }, []);
 
   const handleLanguageChange = () => {

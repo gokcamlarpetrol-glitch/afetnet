@@ -1,279 +1,141 @@
 #!/usr/bin/env node
 
 /**
- * Final IAP System Verification
- * Ensures only 3 valid product IDs remain and all systems are ready for TestFlight
+ * NO-IAP POLICY VERIFICATION
+ * Confirms the app does not ship an in-app purchase SDK or billing flow.
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Valid product IDs
-const VALID_PRODUCTS = [
-  'org.afetapp.premium.monthly.v2',
-  'org.afetapp.premium.yearly.v2', 
-  'org.afetapp.premium.lifetime.v2',
+const ROOT = process.cwd();
+const SRC_ROOT = path.join(ROOT, 'src');
+
+const bannedPackages = [
+  'react-native-iap',
+  'react-native-purchases',
+  'expo-in-app-purchases',
+  'revenuecat',
 ];
 
-// Invalid/old product IDs to check for
-const INVALID_PRODUCTS = [
-  'org.afetapp.premium.monthly',
-  'org.afetapp.premium.yearly',
-  'org.afetapp.premium.lifetime',
-  'afetnet_premium_monthly',
-  'afetnet_premium_yearly',
+const bannedPatterns = [
+  /from\s+['"]react-native-iap['"]/,
+  /from\s+['"]react-native-purchases['"]/,
+  /from\s+['"]expo-in-app-purchases['"]/,
+  /RevenueCat/i,
+  /purchasePackage\s*\(/,
+  /restorePurchases\s*\(/,
 ];
 
-console.log('🔍 AfetNet IAP System Final Verification');
-console.log('==========================================');
+let hasError = false;
+const warnings = [];
 
-let allChecksPassed = true;
+function pass(message) {
+  console.log(`PASS ${message}`);
+}
 
-// Check 1: Verify products.ts file
-console.log('\n📦 1. Checking centralized products file...');
-try {
-  const productsFile = fs.readFileSync('shared/iap/products.ts', 'utf8');
-  
-  // Check for valid products
-  VALID_PRODUCTS.forEach(productId => {
-    if (productsFile.includes(productId)) {
-      console.log(`✅ Valid product found: ${productId}`);
-    } else {
-      console.log(`❌ Missing valid product: ${productId}`);
-      allChecksPassed = false;
-    }
-  });
-  
-  // Check for invalid products (only in actual code, not comments)
-  INVALID_PRODUCTS.forEach(productId => {
-    // Check for actual usage, not just mentions in comments
-    const lines = productsFile.split('\n');
-    let foundInCode = false;
-    
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      // Skip comment lines
-      if (trimmedLine.startsWith('//') || trimmedLine.startsWith('*') || trimmedLine.startsWith('/*')) {
+function fail(message) {
+  hasError = true;
+  console.log(`FAIL ${message}`);
+}
+
+function warn(message) {
+  warnings.push(message);
+  console.log(`WARN ${message}`);
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function listSourceFiles(dir) {
+  const out = [];
+
+  if (!fs.existsSync(dir)) {
+    return out;
+  }
+
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      if (['node_modules', '.git', 'ios', 'android', 'build', 'dist', '.expo'].includes(entry.name)) {
         continue;
       }
-      // Check if the old product ID is used in actual code
-      if (trimmedLine.includes(`"${productId}"`) || trimmedLine.includes(`'${productId}'`)) {
-        foundInCode = true;
-        break;
-      }
+      out.push(...listSourceFiles(full));
+      continue;
     }
-    
-    if (foundInCode) {
-      console.log(`❌ Invalid product still present in code: ${productId}`);
-      allChecksPassed = false;
-    } else {
-      console.log(`✅ Invalid product removed from code: ${productId}`);
+
+    if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
+      out.push(full);
     }
-  });
-} catch (error) {
-  console.log('❌ Error reading products.ts:', error.message);
-  allChecksPassed = false;
+  }
+
+  return out;
 }
 
-// Check 2: Verify IAP service
-console.log('\n🔧 2. Checking IAP service...');
-try {
-  const iapServiceFile = fs.readFileSync('src/services/iapService.ts', 'utf8');
-  
-  // Check for valid product imports
-  if (iapServiceFile.includes("from '@shared/iap/products'")) {
-    console.log('✅ IAP service imports from centralized products');
-  } else {
-    console.log('❌ IAP service not using centralized products');
-    allChecksPassed = false;
-  }
-  
-  // Check for old product references
-  INVALID_PRODUCTS.forEach(productId => {
-    if (iapServiceFile.includes(productId)) {
-      console.log(`❌ Old product reference in IAP service: ${productId}`);
-      allChecksPassed = false;
-    }
-  });
-} catch (error) {
-  console.log('❌ Error reading IAP service:', error.message);
-  allChecksPassed = false;
+function toRelative(filePath) {
+  return path.relative(ROOT, filePath).replace(/\\/g, '/');
 }
 
-// Check 3: Verify server configuration
-console.log('\n🌐 3. Checking server configuration...');
-try {
-  const serverRoutesFile = fs.readFileSync('server/iap-routes.ts', 'utf8');
-  
-  // Check for valid product imports
-  if (serverRoutesFile.includes("from '@shared/iap/products'")) {
-    console.log('✅ Server imports from centralized products');
+console.log('NO-IAP POLICY VERIFICATION');
+console.log('==========================');
+
+const pkg = readJson(path.join(ROOT, 'package.json'));
+const dependencySets = [pkg.dependencies || {}, pkg.devDependencies || {}];
+
+for (const banned of bannedPackages) {
+  const found = dependencySets.some(depSet => Object.prototype.hasOwnProperty.call(depSet, banned));
+  if (found) {
+    fail(`Banned billing dependency found in package.json: ${banned}`);
   } else {
-    console.log('❌ Server not using centralized products');
-    allChecksPassed = false;
+    pass(`No banned billing dependency: ${banned}`);
   }
-  
-  // Check for old product references
-  INVALID_PRODUCTS.forEach(productId => {
-    if (serverRoutesFile.includes(productId)) {
-      console.log(`❌ Old product reference in server: ${productId}`);
-      allChecksPassed = false;
-    }
-  });
-} catch (error) {
-  console.log('❌ Error reading server routes:', error.message);
-  allChecksPassed = false;
 }
 
-// Check 4: Verify app icons
-console.log('\n🎨 4. Checking app icons...');
-try {
-  const appIconDir = 'ios/AfetNet/Assets.xcassets/AppIcon.appiconset';
-  
-  if (fs.existsSync(appIconDir)) {
-    const files = fs.readdirSync(appIconDir);
-    const pngFiles = files.filter(file => file.endsWith('.png'));
-    
-    console.log(`✅ AppIcon directory exists with ${pngFiles.length} PNG files`);
-    
-    // Check for Contents.json
-    if (fs.existsSync(path.join(appIconDir, 'Contents.json'))) {
-      console.log('✅ Contents.json exists');
-      
-      const contents = JSON.parse(fs.readFileSync(path.join(appIconDir, 'Contents.json'), 'utf8'));
-      if (contents.images && contents.images.length === 18) {
-        console.log('✅ All 18 icon sizes configured');
-      } else {
-        console.log(`❌ Expected 18 icon sizes, found ${contents.images?.length || 0}`);
-        allChecksPassed = false;
-      }
-    } else {
-      console.log('❌ Contents.json missing');
-      allChecksPassed = false;
-    }
-  } else {
-    console.log('❌ AppIcon directory missing');
-    allChecksPassed = false;
-  }
-} catch (error) {
-  console.log('❌ Error checking app icons:', error.message);
-  allChecksPassed = false;
-}
-
-// Check 5: Verify logging implementation
-console.log('\n📝 5. Checking logging implementation...');
-try {
-  const loggerFile = fs.readFileSync('src/utils/logger.ts', 'utf8');
-  
-  if (loggerFile.includes('iap: {')) {
-    console.log('✅ IAP-specific logging methods implemented');
-  } else {
-    console.log('❌ IAP-specific logging methods missing');
-    allChecksPassed = false;
-  }
-  
-  if (loggerFile.includes('productDetected:')) {
-    console.log('✅ Product detection logging implemented');
-  } else {
-    console.log('❌ Product detection logging missing');
-    allChecksPassed = false;
-  }
-} catch (error) {
-  console.log('❌ Error checking logger:', error.message);
-  allChecksPassed = false;
-}
-
-// Check 6: Verify database schema
-console.log('\n🗄️ 6. Checking database schema...');
-try {
-  const migrationFile = fs.readFileSync('server/src/migrations/001_create_iap_tables.sql', 'utf8');
-  const migrationUpdateFile = fs.existsSync('server/src/migrations/004_update_iap_product_ids.sql')
-    ? fs.readFileSync('server/src/migrations/004_update_iap_product_ids.sql', 'utf8')
-    : '';
-  
-  if (migrationFile.includes('org.afetapp.premium.monthly.v2') && 
-      migrationFile.includes('org.afetapp.premium.yearly.v2') && 
-      migrationFile.includes('org.afetapp.premium.lifetime.v2')) {
-    console.log('✅ Database schema includes all valid products');
-  } else {
-    console.log('❌ Database schema missing valid products');
-    allChecksPassed = false;
-  }
-  
-  if (migrationFile.includes('CHECK (product_id IN')) {
-    console.log('✅ Database has product ID constraints');
-  } else {
-    console.log('❌ Database missing product ID constraints');
-    allChecksPassed = false;
-  }
-  
-  if (migrationUpdateFile) {
-    if (
-      migrationUpdateFile.includes('DROP CONSTRAINT IF EXISTS purchases_product_id_check') &&
-      migrationUpdateFile.includes('org.afetapp.premium.monthly.v2')
-    ) {
-      console.log('✅ Update migration covers existing databases');
-    } else {
-      console.log('❌ Update migration missing required constraint or IDs');
-      allChecksPassed = false;
-    }
-  } else {
-    console.log('⚠️  Update migration file (004_update_iap_product_ids.sql) not found');
-  }
-} catch (error) {
-  console.log('❌ Error checking database schema:', error.message);
-  allChecksPassed = false;
-}
-
-// Check 7: Verify TestFlight plan
-console.log('\n🧪 7. Checking TestFlight plan...');
-try {
-  if (fs.existsSync('TESTFLIGHT_TESTING_PLAN.md')) {
-    console.log('✅ TestFlight testing plan exists');
-    
-    const planContent = fs.readFileSync('TESTFLIGHT_TESTING_PLAN.md', 'utf8');
-    if (planContent.includes('org.afetapp.premium.monthly.v2') && 
-        planContent.includes('org.afetapp.premium.yearly.v2') && 
-        planContent.includes('org.afetapp.premium.lifetime.v2')) {
-      console.log('✅ TestFlight plan references correct IAP products');
-    } else {
-      console.log('❌ TestFlight plan missing valid products');
-      allChecksPassed = false;
-    }
-  } else {
-    console.log('❌ TestFlight testing plan missing');
-    allChecksPassed = false;
-  }
-} catch (error) {
-  console.log('❌ Error checking TestFlight plan:', error.message);
-  allChecksPassed = false;
-}
-
-// Final Results
-console.log('\n🎯 Final Verification Results');
-console.log('============================');
-
-if (allChecksPassed) {
-  console.log('🎉 ALL CHECKS PASSED!');
-  console.log('');
-  console.log('✅ System is ready for TestFlight testing:');
-  console.log('   • Only 3 valid product IDs remain');
-  console.log('   • All old product IDs removed');
-  console.log('   • App icons with full-bleed red background');
-  console.log('   • Database schema implemented');
-  console.log('   • Server verification ready');
-  console.log('   • Consistent logging implemented');
-  console.log('   • TestFlight plan documented');
-  console.log('');
-  console.log('🚀 Next Steps:');
-  console.log('   1. Deploy database server');
-  console.log('   2. Configure Apple webhook');
-  console.log('   3. Upload to TestFlight');
-  console.log('   4. Run comprehensive testing');
-  console.log('   5. Submit to App Store');
+const preSubmit = pkg.scripts?.['pre-submit'] || '';
+if (/iap:check|verify-revenuecat|test:iap|verify:iap/i.test(preSubmit)) {
+  fail('pre-submit script still references IAP checks');
 } else {
-  console.log('❌ SOME CHECKS FAILED!');
-  console.log('');
-  console.log('Please fix the issues above before proceeding to TestFlight.');
-  process.exit(1);
+  pass('pre-submit script does not enforce IAP checks');
 }
+
+const files = listSourceFiles(SRC_ROOT);
+const findings = [];
+
+for (const file of files) {
+  const content = fs.readFileSync(file, 'utf8');
+  for (const pattern of bannedPatterns) {
+    if (pattern.test(content)) {
+      findings.push(`${toRelative(file)} :: ${String(pattern)}`);
+      break;
+    }
+  }
+}
+
+if (findings.length > 0) {
+  fail('IAP/billing code references found in source files');
+  findings.slice(0, 20).forEach(item => console.log(`  - ${item}`));
+  if (findings.length > 20) {
+    warn(`... ${findings.length - 20} additional matches omitted`);
+  }
+} else {
+  pass('No IAP/billing code references found in source files');
+}
+
+const appConfigPath = path.join(ROOT, 'app.config.ts');
+if (fs.existsSync(appConfigPath)) {
+  const appConfig = fs.readFileSync(appConfigPath, 'utf8');
+  if (/RC_IOS_KEY|RC_ANDROID_KEY/.test(appConfig)) {
+    fail('app.config.ts still exposes RevenueCat keys');
+  } else {
+    pass('app.config.ts does not expose RevenueCat keys');
+  }
+}
+
+console.log('\nSummary');
+console.log('-------');
+console.log(`Warnings: ${warnings.length}`);
+console.log(`Result: ${hasError ? 'FAILED' : 'PASSED'}`);
+
+process.exit(hasError ? 1 : 0);

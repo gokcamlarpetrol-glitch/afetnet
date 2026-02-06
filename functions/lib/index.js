@@ -176,17 +176,32 @@ exports.eewMonitorBackup = functions
 exports.eewEmergencyTrigger = functions
     .region(REGION)
     .https.onRequest(async (req, res) => {
-    // CORS
-    res.set('Access-Control-Allow-Origin', '*');
+    // CORS - ELITE SECURITY: Restrict to AfetNet domains
+    const allowedOrigins = [
+        'https://afetnet.com',
+        'https://www.afetnet.com',
+        'https://api.afetnet.com',
+        'https://afetnet-app.web.app',
+        'https://afetnet-app.firebaseapp.com',
+    ];
+    const origin = req.headers.origin || '';
+    if (allowedOrigins.includes(origin)) {
+        res.set('Access-Control-Allow-Origin', origin);
+    }
     if (req.method === 'OPTIONS') {
         res.set('Access-Control-Allow-Methods', 'POST');
         res.set('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
         res.status(204).send('');
         return;
     }
-    // Verify API key
+    // Verify API key - ELITE SECURITY: No fallback, environment variable REQUIRED
     const apiKey = req.headers['x-api-key'];
-    const validKey = process.env.EEW_API_KEY || 'AFETNET_EEW_ELITE_SECURE_2024';
+    const validKey = process.env.EEW_API_KEY;
+    if (!validKey) {
+        functions.logger.error('EEW_API_KEY environment variable not configured!');
+        res.status(500).json({ error: 'Server configuration error' });
+        return;
+    }
     if (!apiKey || apiKey !== validKey) {
         res.status(403).json({ error: 'Invalid API key' });
         return;
@@ -322,9 +337,14 @@ exports.broadcastEEW = functions
 exports.eewWebhook = functions
     .region(REGION)
     .https.onRequest(async (req, res) => {
-    // Verify API key
+    // Verify API key - ELITE SECURITY: No fallback, environment variable REQUIRED
     const apiKey = req.headers['x-api-key'];
-    const validKey = process.env.EEW_API_KEY || 'AFETNET_EEW_ELITE_SECURE_2024';
+    const validKey = process.env.EEW_API_KEY;
+    if (!validKey) {
+        functions.logger.error('EEW_API_KEY environment variable not configured!');
+        res.status(500).json({ error: 'Server configuration error' });
+        return;
+    }
     if (!apiKey || apiKey !== validKey) {
         res.status(403).json({ error: 'Invalid API key' });
         return;

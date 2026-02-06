@@ -6,6 +6,8 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth } from 'firebase/auth';
+import { initializeFirebase } from '../../lib/firebase';
 import { logger } from '../utils/logger';
 
 export interface EmergencyContact {
@@ -88,7 +90,19 @@ const DEFAULT_PROFILE: HealthProfile = {
   lastUpdated: Date.now(),
 };
 
-const STORAGE_KEY = '@afetnet:health_profile';
+const STORAGE_KEY_BASE = '@afetnet:health_profile';
+const STORAGE_GUEST_SCOPE = 'guest';
+
+const getScopedStorageKey = (): string => {
+  try {
+    const app = initializeFirebase();
+    if (!app) return `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+    const uid = getAuth(app).currentUser?.uid;
+    return uid ? `${STORAGE_KEY_BASE}:user:${uid}` : `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+  } catch {
+    return `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
+  }
+};
 
 export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
   profile: DEFAULT_PROFILE,
@@ -231,7 +245,14 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
   loadProfile: async () => {
     try {
       // First load from AsyncStorage (fast)
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      const scopedKey = getScopedStorageKey();
+      let stored = await AsyncStorage.getItem(scopedKey);
+      if (!stored) {
+        stored = await AsyncStorage.getItem(STORAGE_KEY_BASE);
+        if (stored) {
+          await AsyncStorage.setItem(scopedKey, stored);
+        }
+      }
       if (stored) {
         const profile = JSON.parse(stored);
         set({ profile, isLoaded: true });
@@ -251,7 +272,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
             if (cloudProfile) {
               // Merge: Firebase takes precedence
               set({ profile: cloudProfile, isLoaded: true });
-              await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cloudProfile));
+              await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(cloudProfile));
               logger.info('HealthProfile loaded from Firebase');
             }
           }
@@ -268,7 +289,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
   saveProfile: async () => {
     try {
       const { profile } = get();
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(profile));
 
       // Save to Firebase
       try {
@@ -312,7 +333,10 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
 
   clearProfile: async () => {
     try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
+      await AsyncStorage.removeItem(getScopedStorageKey());
+      await AsyncStorage.removeItem(STORAGE_KEY_BASE).catch(() => {
+        // legacy key cleanup
+      });
       set({ profile: DEFAULT_PROFILE });
       logger.info('HealthProfile cleared');
     } catch (error) {
@@ -320,4 +344,3 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
     }
   },
 }));
-

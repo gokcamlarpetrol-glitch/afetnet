@@ -34,6 +34,7 @@ import { LRUSet } from '../utils/LRUCache';
 import { Mutex, Debouncer, Throttle } from '../utils/Mutex';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMeshStore } from './mesh/MeshStore';
+import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import { AppState, AppStateStatus } from 'react-native';
 import {
   MAX_QUEUE_SIZE,
@@ -142,6 +143,22 @@ class HybridMessageService {
 
     // Initialize delivery manager
     await deliveryManager.initialize();
+
+    // Ensure device identity docs exist in Firestore (physical ID + QR alias).
+    try {
+      const { firebaseDataService } = await import('./FirebaseDataService');
+      if (!firebaseDataService.isInitialized) {
+        await firebaseDataService.initialize();
+      }
+      if (firebaseDataService.isInitialized) {
+        const deviceId = await getDeviceIdFromLib();
+        if (deviceId) {
+          await firebaseDataService.saveDeviceId(deviceId);
+        }
+      }
+    } catch (error) {
+      logger.warn('Firestore device registration skipped:', error);
+    }
 
     this.isInitialized = true;
 
@@ -532,7 +549,20 @@ class HybridMessageService {
       // 1. MESH LAYER: Always try (offline-first priority)
       try {
         const meshType = message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT;
-        await meshNetworkService.broadcastMessage(message.content, meshType);
+        const meshPayload = JSON.stringify({
+          id: message.id,
+          from: message.senderId,
+          to: message.recipientId || 'broadcast',
+          type: message.type,
+          content: message.content,
+          timestamp: message.timestamp,
+        });
+
+        await meshNetworkService.broadcastMessage(meshPayload, meshType, {
+          to: message.recipientId || 'broadcast',
+          from: message.senderId,
+          messageId: message.id,
+        });
         meshSuccess = true;
         logger.debug(`Mesh broadcast successful (type: ${meshType})`);
 
@@ -579,12 +609,26 @@ class HybridMessageService {
               ...(message.location && { location: message.location }),
             };
 
-            const saved = await firebaseDataService.saveMessage(message.senderId, messageData);
-            if (saved) {
-              cloudSuccess = true;
-              logger.debug('Cloud send successful');
+            const writeTargets = message.recipientId
+              ? [message.senderId, message.recipientId]
+              : [message.senderId];
+
+            const writeResults = await Promise.all(
+              writeTargets.map((targetDeviceId) =>
+                firebaseDataService.saveMessage(targetDeviceId, messageData),
+              ),
+            );
+
+            const inboxWriteIndex = message.recipientId ? 1 : 0;
+            const inboxWriteOk = !!writeResults[inboxWriteIndex];
+            cloudSuccess = writeResults.some(Boolean);
+
+            if (cloudSuccess) {
+              logger.debug(
+                `Cloud send successful (senderCopy=${Boolean(writeResults[0])}, inboxCopy=${inboxWriteOk})`,
+              );
             } else {
-              logger.warn('Cloud save returned false');
+              logger.warn('Cloud save returned false for all targets');
             }
           } else {
             logger.warn('FirebaseDataService still not initialized after auto-init attempt');
@@ -732,6 +776,7 @@ class HybridMessageService {
           content: sanitizeMessage(meshMsg.content),
           senderId: meshMsg.senderId || 'unknown',
           senderName: meshMsg.senderName || 'Mesh User',
+          recipientId: meshMsg.to && meshMsg.to !== 'broadcast' ? meshMsg.to : undefined,
           timestamp: meshMsg.timestamp || Date.now(),
           source: 'MESH',
           status: 'delivered',
@@ -743,15 +788,78 @@ class HybridMessageService {
       }
     });
 
-    // 2. Subscribe to Cloud messages
-    let unsubscribeCloud: (() => void) | null = null;
-    if (connectionManager.isOnline) {
+    // 2. Subscribe to Cloud messages (QR ID + physical device ID, with online rebind)
+    const cloudUnsubscribers = new Map<string, () => void>();
+    let isDisposed = false;
+    let isCloudSyncInProgress = false;
+
+    const clearCloudSubscriptions = () => {
+      cloudUnsubscribers.forEach((unsubscribe) => {
+        try {
+          unsubscribe();
+        } catch {
+          // no-op
+        }
+      });
+      cloudUnsubscribers.clear();
+    };
+
+    const getCloudInboxTargets = async (): Promise<string[]> => {
+      const targets = new Set<string>();
+      const identity = identityService.getIdentity();
+      if (identity?.id && identity.id !== 'unknown') {
+        targets.add(identity.id);
+      }
+      if (identity?.deviceId && identity.deviceId !== 'unknown') {
+        targets.add(identity.deviceId);
+      }
+      try {
+        const physicalDeviceId = await getDeviceIdFromLib();
+        if (physicalDeviceId && physicalDeviceId !== 'unknown') {
+          targets.add(physicalDeviceId);
+        }
+      } catch {
+        // Optional source
+      }
+      return Array.from(targets);
+    };
+
+    const ensureCloudSubscriptions = async () => {
+      if (isDisposed || !connectionManager.isOnline || isCloudSyncInProgress) {
+        return;
+      }
+
+      isCloudSyncInProgress = true;
       try {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          const myDeviceId = identityService.getIdentity()?.id;
-          if (myDeviceId) {
-            unsubscribeCloud = await firebaseDataService.subscribeToMessages(myDeviceId, (cloudMsgs) => {
+        if (!firebaseDataService.isInitialized) {
+          await firebaseDataService.initialize();
+        }
+        if (!firebaseDataService.isInitialized || isDisposed) {
+          return;
+        }
+
+        const targetIds = await getCloudInboxTargets();
+        const targetSet = new Set(targetIds);
+
+        Array.from(cloudUnsubscribers.keys()).forEach((existingTargetId) => {
+          if (targetSet.has(existingTargetId)) {
+            return;
+          }
+          const unsubscribe = cloudUnsubscribers.get(existingTargetId);
+          if (unsubscribe) {
+            unsubscribe();
+          }
+          cloudUnsubscribers.delete(existingTargetId);
+        });
+
+        await Promise.all(
+          targetIds.map(async (targetId) => {
+            if (cloudUnsubscribers.has(targetId) || isDisposed) {
+              return;
+            }
+
+            const unsubscribe = await firebaseDataService.subscribeToMessages(targetId, (cloudMsgs) => {
               cloudMsgs.forEach(msg => {
                 if (!this.recordSeenMessage(msg.id)) return;
 
@@ -760,29 +868,50 @@ class HybridMessageService {
                   content: sanitizeMessage(msg.content),
                   senderId: msg.fromDeviceId,
                   senderName: 'Cloud User',
+                  recipientId: msg.toDeviceId && msg.toDeviceId !== 'broadcast' ? msg.toDeviceId : undefined,
                   timestamp: msg.timestamp,
                   source: 'CLOUD',
                   status: 'delivered',
-                  priority: 'normal',
-                  type: 'CHAT',
+                  priority: msg.priority || 'normal',
+                  type: msg.type === 'sos' ? 'SOS' : 'CHAT',
                   retryCount: 0,
                 };
                 callback(hybridMsg);
               });
             });
-          }
-        }
+
+            if (unsubscribe && !isDisposed) {
+              cloudUnsubscribers.set(targetId, unsubscribe);
+            }
+          }),
+        );
       } catch (error) {
         logger.warn('Cloud subscription failed:', error);
+      } finally {
+        isCloudSyncInProgress = false;
       }
-    }
+    };
+
+    const unsubscribeConnection = this.onConnectionChange((state) => {
+      if (isDisposed) {
+        return;
+      }
+      if (state === 'online') {
+        ensureCloudSubscriptions().catch((error) => {
+          logger.warn('Cloud resubscribe failed:', error);
+        });
+      } else {
+        clearCloudSubscriptions();
+      }
+    });
+
+    await ensureCloudSubscriptions();
 
     return () => {
+      isDisposed = true;
       unsubscribeMesh();
-      // ELITE: Safe cleanup with type check
-      if (unsubscribeCloud && typeof unsubscribeCloud === 'function') {
-        unsubscribeCloud();
-      }
+      unsubscribeConnection();
+      clearCloudSubscriptions();
     };
   }
 

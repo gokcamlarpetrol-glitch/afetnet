@@ -3,7 +3,7 @@
  * Access BLE mesh state
  */
 
-import { useMeshStore } from '../stores/meshStore';
+import { useMeshStore } from '../services/mesh/MeshStore';
 import { bleMeshService } from '../services/BLEMeshService';
 
 export function useMesh() {
@@ -22,4 +22,3 @@ export function useMesh() {
     isConnected,
   };
 }
-

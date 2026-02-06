@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
 import { initializeFirebase } from '../../lib/firebase';
 import { identityService, UserIdentity } from '../services/IdentityService';
+import { AuthService } from '../services/AuthService';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('AuthStore');
@@ -106,13 +107,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     logout: async () => {
         try {
-            const app = initializeFirebase();
-            if (app) {
-                const auth = getAuth(app);
-                await auth.signOut();
-            }
-
-            await identityService.clearIdentity();
+            await AuthService.signOut();
 
             set({
                 isAuthenticated: false,
