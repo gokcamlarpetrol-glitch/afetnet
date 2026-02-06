@@ -18,6 +18,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getAuth,
   signInWithCredential,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   GoogleAuthProvider,
   OAuthProvider,
   User,
@@ -276,6 +278,104 @@ export const AuthService = {
           logger.debug('GELİŞTİRİCİ NOTU: Simülatörde Apple ID ile giriş yapılmamış olabilir.');
           throw new Error('Simülatörde Apple ID ile giriş yapılmamış olabilir. Lütfen ayarlardan giriş yapın.');
         }
+      }
+      throw authError;
+    }
+  },
+
+  /**
+   * Sign in with Email and Password
+   */
+  signInWithEmail: async (email: string, password: string): Promise<User | null> => {
+    try {
+      const app = initializeFirebase();
+      if (!app) throw new Error('Firebase başlatılamadı');
+
+      const auth = getAuth(app);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+
+      // Sync user profile
+      try {
+        await retryWithBackoff(
+          () => AuthService.syncUserProfile(userCredential.user),
+          { maxRetries: 2, baseDelayMs: 500 },
+        );
+      } catch (syncError) {
+        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+      }
+
+      // Sync identity and contacts after successful auth
+      try {
+        await identityService.syncFromFirebase(userCredential.user);
+        await contactService.initialize();
+        await presenceService.initialize();
+        await contactRequestService.initialize();
+        logger.info('✅ All services synced after Email login');
+      } catch (syncError) {
+        logger.warn('Service sync failed (non-blocking):', syncError);
+      }
+
+      return userCredential.user;
+    } catch (error: unknown) {
+      const authError = error as AuthError;
+      logger.error('E-posta Giriş Hatası', authError);
+
+      if (authError.code === 'auth/user-not-found') {
+        throw new Error('Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı');
+      } else if (authError.code === 'auth/wrong-password') {
+        throw new Error('Şifre hatalı');
+      } else if (authError.code === 'auth/invalid-email') {
+        throw new Error('Geçersiz e-posta adresi');
+      } else if (authError.code === 'auth/too-many-requests') {
+        throw new Error('Çok fazla başarısız deneme. Lütfen daha sonra tekrar deneyin');
+      }
+      throw authError;
+    }
+  },
+
+  /**
+   * Sign up with Email and Password
+   */
+  signUpWithEmail: async (email: string, password: string, displayName?: string): Promise<User | null> => {
+    try {
+      const app = initializeFirebase();
+      if (!app) throw new Error('Firebase başlatılamadı');
+
+      const auth = getAuth(app);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+      // Sync user profile with display name
+      try {
+        await retryWithBackoff(
+          () => AuthService.syncUserProfile(userCredential.user, displayName ? { givenName: displayName } as AppleFullName : null),
+          { maxRetries: 2, baseDelayMs: 500 },
+        );
+      } catch (syncError) {
+        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+      }
+
+      // Sync identity and contacts after successful auth
+      try {
+        await identityService.syncFromFirebase(userCredential.user);
+        await contactService.initialize();
+        await presenceService.initialize();
+        await contactRequestService.initialize();
+        logger.info('✅ All services synced after Email signup');
+      } catch (syncError) {
+        logger.warn('Service sync failed (non-blocking):', syncError);
+      }
+
+      return userCredential.user;
+    } catch (error: unknown) {
+      const authError = error as AuthError;
+      logger.error('E-posta Kayıt Hatası', authError);
+
+      if (authError.code === 'auth/email-already-in-use') {
+        throw new Error('Bu e-posta adresi zaten kullanımda');
+      } else if (authError.code === 'auth/invalid-email') {
+        throw new Error('Geçersiz e-posta adresi');
+      } else if (authError.code === 'auth/weak-password') {
+        throw new Error('Şifre çok zayıf. En az 6 karakter olmalı');
       }
       throw authError;
     }

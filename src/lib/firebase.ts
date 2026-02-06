@@ -8,7 +8,6 @@ import { getMessaging, getToken, onMessage, Messaging } from 'firebase/messaging
 import {
   initializeAuth,
   getAuth,
-  signInAnonymously,
   Auth,
   User,
   // @ts-expect-error - getReactNativePersistence is available in firebase/auth but not in typings
@@ -86,43 +85,8 @@ function getOrInitializeAuth(app: FirebaseApp): Auth {
   return authInstance;
 }
 
-/**
- * ELITE: Anonymous Authentication
- * Enables writing to shared collections (news summaries) without user signup
- */
-export async function signInAnonymouslyAsync(): Promise<User | null> {
-  try {
-    const app = initializeFirebase();
-    if (!app) return null;
-
-    const auth = getOrInitializeAuth(app);
-
-    const userCredential = await signInAnonymously(auth);
-    if (__DEV__) {
-      logger.info('✅ Signed in anonymously:', userCredential.user.uid);
-    }
-    return userCredential.user;
-  } catch (error: any) {
-    // ELITE: Network errors are expected in simulators - don't show error to user
-    const errorCode = error?.code || '';
-    const errorMessage = error?.message || '';
-
-    if (errorCode === 'auth/network-request-failed' ||
-      errorMessage.includes('network') ||
-      errorMessage.includes('Network')) {
-      // Silent fail for network errors - expected in simulators
-      if (__DEV__) {
-        logger.debug('Anonymous sign-in skipped (network unavailable)');
-      }
-    } else {
-      // Log other errors but don't crash
-      if (__DEV__) {
-        logger.debug('Anonymous sign-in failed:', errorCode || errorMessage);
-      }
-    }
-    return null;
-  }
-}
+// NOTE: Anonymous auth removed - authentication is now mandatory
+// All users must sign in with Google, Apple, or Email before using the app
 
 /**
  * Get FCM token for push notifications
@@ -192,5 +156,4 @@ export default {
   onForegroundMessage,
   getFirebaseApp,
   getFirebaseAppAsync,
-  signInAnonymously: signInAnonymouslyAsync, // ELITE: Export alias
 };

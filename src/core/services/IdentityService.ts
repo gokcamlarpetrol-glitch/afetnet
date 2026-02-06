@@ -92,28 +92,19 @@ class IdentityService {
         }
       }
 
-      // Step 2: Try cached identity
+      // Step 2: Try cached identity (only if verified/CLOUD type)
       const cached = await this.loadCachedIdentity();
-      if (cached) {
+      if (cached && cached.type === 'CLOUD' && cached.isVerified) {
         this.identity = cached;
         this.isInitialized = true;
         logger.info(`✅ Identity loaded from cache: ${this.identity.id}`);
         return;
       }
 
-      // Step 3: Fallback to mesh-only identity
-      this.identity = {
-        id: deviceId,
-        deviceId: deviceId,
-        displayName: 'İsimsiz Kahraman',
-        isVerified: false,
-        type: 'MESH_ONLY',
-        createdAt: Date.now(),
-      };
-
-      await this.cacheIdentity();
+      // ELITE: No MESH_ONLY fallback - auth is mandatory
+      // If we reach here, user needs to authenticate
       this.isInitialized = true;
-      logger.info(`✅ Identity initialized as MESH_ONLY: ${this.identity.id}`);
+      logger.warn('⚠️ No authenticated identity found - user must login');
 
     } catch (error) {
       logger.error('❌ Failed to init Identity:', error);

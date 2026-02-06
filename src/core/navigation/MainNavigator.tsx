@@ -1,8 +1,8 @@
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { Suspense } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import { initializeFirebase } from '../../lib/firebase';
+// ELITE: Auth is now handled centrally in CoreApp via authStore
+// No need for local auth state here
 
 import MainTabs from './MainTabs';
 
@@ -41,9 +41,9 @@ import NotificationSettingsScreen from '../screens/settings/NotificationSettings
 import DisasterPreparednessScreen from '../screens/preparedness/DisasterPreparednessScreen';
 import AssemblyPointsScreen from '../screens/assembly/AssemblyPointsScreen';
 import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
-import { LoginScreen } from '../screens/auth/LoginScreen'; // ELITE: Auth Screen
-import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen'; // ELITE: Email Register
-import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen'; // ELITE: Password Reset
+// ELITE: Auth screens for in-app registration/password reset navigation
+import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
+import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import DesignSystemScreen from '../screens/design/DesignSystemScreen';
 import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
 import MyQRScreen from '../screens/profile/MyQRScreen';
@@ -55,7 +55,7 @@ import AboutScreen from '../screens/settings/AboutScreen';
 import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
 import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
 import SecurityScreen from '../screens/settings/SecurityScreen';
-import EEWSettingsScreen from '../screens/settings/EEWSettingsScreen'; // ELITE: Ultra-Fast EEW Settings
+import EEWSettingsScreen from '../screens/settings/EEWSettingsScreen';
 import RescueTeamScreen from '../screens/rescue/RescueTeamScreen';
 
 const Stack = createStackNavigator();
@@ -66,56 +66,10 @@ const LoadingFallback = () => (
   </View>
 );
 
+// ELITE: MainNavigator assumes user is authenticated (checked in CoreApp)
 export default function MainNavigator() {
-  const [user, setUser] = useState<User | null>(null);
-  const [initializing, setInitializing] = useState(true);
-
-  useEffect(() => {
-    // ELITE: Safe Firebase initialization with null-check
-    const app = initializeFirebase();
-
-    if (!app) {
-      // Firebase failed to initialize - show loading fallback
-      setInitializing(false);
-      return;
-    }
-
-    // CRITICAL: Pass the app instance to getAuth for type safety
-    const auth = getAuth(app);
-    const subscriber = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (initializing) {
-        setInitializing(false);
-      }
-    });
-
-    // Unsubscribe from auth state changes when the component unmounts
-    return subscriber;
-  }, [initializing]);
-
-  // ELITE: Auth Gate - No mock user, proper auth flow
-  // If no user is signed in after initialization, they need to authenticate
-  // The LoginScreen handles the sign-in flow with Apple/Google
-
-  if (!user) {
-    // ELITE: Show Login screen for authentication
-    // Onboarding is handled by App.tsx before reaching MainNavigator
-    return (
-      <Suspense fallback={<LoadingFallback />}>
-        <Stack.Navigator
-          id={undefined}
-          screenOptions={{
-            headerShown: false,
-            cardStyle: { backgroundColor: '#000' },
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="EmailRegister" component={EmailRegisterScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
-        </Stack.Navigator>
-      </Suspense>
-    );
-  }
+  // Auth is centrally managed in CoreApp via authStore
+  // This component only renders when isAuthenticated === true
 
   return (
     <Suspense fallback={<LoadingFallback />}>

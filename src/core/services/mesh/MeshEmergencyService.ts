@@ -69,7 +69,9 @@ class MeshEmergencyService {
         isEmergencyModeEnabled: false,
         autoLocationBroadcast: true,
         impactDetectionEnabled: true,
-        inactivitySOSEnabled: true,
+        // ELITE: Disabled by default to prevent false positives
+        // Users must explicitly enable in settings
+        inactivitySOSEnabled: false,
         familyPanicEnabled: true,
     };
 

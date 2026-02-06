@@ -123,6 +123,10 @@ class RealtimeEarthquakeMonitorService {
     private appState: AppStateStatus = 'active';
     // ELITE: Track AppState subscription for cleanup
     private appStateSubscription: any = null;
+    // ELITE: Exponential backoff for WebSocket reconnection
+    private wsReconnectAttempts = 0;
+    private readonly WS_MAX_BACKOFF_MS = 300000; // 5 minutes max
+    private readonly WS_BASE_DELAY_MS = 5000; // 5 seconds base
 
     // ==================== INITIALIZATION ====================
 
@@ -207,6 +211,8 @@ class RealtimeEarthquakeMonitorService {
                 const latency = Date.now() - startTime;
                 logger.info(`🟢 EMSC WebSocket connected (${latency}ms)`);
                 this.updateSourceStatus('EMSC', true, latency);
+                // Reset backoff on successful connection
+                this.wsReconnectAttempts = 0;
             };
 
             this.websocket.onmessage = (event) => {
@@ -219,18 +225,33 @@ class RealtimeEarthquakeMonitorService {
             };
 
             this.websocket.onerror = (error) => {
-                logger.error('EMSC WebSocket error:', error);
+                // ELITE: Use debug level - EMSC WebSocket errors are expected
+                // when external service is unavailable. Avoids red console errors.
+                if (this.wsReconnectAttempts === 0 && __DEV__) {
+                    logger.debug('⚠️ EMSC WebSocket bağlanamadı (servis geçici olarak erişilemez)');
+                }
                 this.updateSourceStatus('EMSC', false);
                 this.handleSourceFailure('EMSC');
             };
 
             this.websocket.onclose = () => {
-                logger.warn('EMSC WebSocket closed');
+                // ELITE: Only log on first few attempts to avoid spam
+                if (this.wsReconnectAttempts < 3) {
+                    logger.warn('EMSC WebSocket closed');
+                }
                 this.updateSourceStatus('EMSC', false);
 
-                // Attempt reconnection after delay
+                // ELITE: Exponential backoff for reconnection
                 if (this.isRunning) {
-                    setTimeout(() => this.connectEMSCWebSocket(), 5000);
+                    this.wsReconnectAttempts++;
+                    const delay = Math.min(
+                        this.WS_BASE_DELAY_MS * Math.pow(2, this.wsReconnectAttempts - 1),
+                        this.WS_MAX_BACKOFF_MS
+                    );
+                    if (this.wsReconnectAttempts <= 3) {
+                        logger.info(`🔄 EMSC reconnect in ${delay / 1000}s (attempt ${this.wsReconnectAttempts})`);
+                    }
+                    setTimeout(() => this.connectEMSCWebSocket(), delay);
                 }
             };
 

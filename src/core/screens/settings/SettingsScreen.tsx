@@ -573,7 +573,21 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Telefon sensörleri ile deprem algılama',
       type: 'switch',
       value: seismicSensorEnabled,
-      onPress: () => setSeismicSensorEnabled(!seismicSensorEnabled),
+      onPress: async () => {
+        haptics.impactLight();
+        const newValue = !seismicSensorEnabled;
+        setSeismicSensorEnabled(newValue);
+
+        // Start/stop seismic sensor based on setting
+        const { onDeviceSeismicDetector } = await import('../../services/OnDeviceSeismicDetector');
+        if (newValue) {
+          await onDeviceSeismicDetector.start();
+          Alert.alert('Sensör Algılama', 'P-dalga sensör algılama aktif edildi.');
+        } else {
+          onDeviceSeismicDetector.stop();
+          Alert.alert('Sensör Algılama', 'Sensör tabanlı algılama kapatıldı.');
+        }
+      },
     },
     {
       icon: 'alert-circle',

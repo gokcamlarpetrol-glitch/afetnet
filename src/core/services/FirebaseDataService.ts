@@ -53,7 +53,7 @@ class FirebaseDataService {
 
       // ELITE: Check for named export
       const getFirebaseAppAsync = firebaseModule.getFirebaseAppAsync;
-      const signInAnonymously = firebaseModule.signInAnonymouslyAsync; // ELITE: Import via named export
+      // NOTE: signInAnonymously removed - auth is now mandatory
 
       if (!getFirebaseAppAsync || typeof getFirebaseAppAsync !== 'function') {
         if (__DEV__) {
@@ -77,11 +77,9 @@ class FirebaseDataService {
         return;
       }
 
-      // ELITE: Authenticate Anonymously (Required for Firestore Rules)
-      // This enables "Write Once, Read Many" for shared news summaries
-      if (signInAnonymously && typeof signInAnonymously === 'function') {
-        await signInAnonymously();
-      }
+      // ELITE: User must be authenticated - no anonymous fallback
+      // Auth is now mandatory - checked in CoreApp before app access
+      // The onAuthStateChanged listener in authStore handles auth state
 
       // ELITE: Get Firestore instance with async initialization and timeout
       const dbPromise = getFirestoreInstanceAsync();

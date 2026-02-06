@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.0.2",
+  version: "1.0.3",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -66,7 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "11", // Incremented for security update
+    buildNumber: "13", // Incremented for crash fix
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
