@@ -29,10 +29,12 @@ import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 import { createLogger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
 import { initializeFirebase } from '../../lib/firebase';
+import { clearDeviceId, getDeviceId, setDeviceId } from '../../lib/device';
 import { identityService } from './IdentityService';
 import { contactService } from './ContactService';
 import { presenceService } from './PresenceService';
 import { contactRequestService } from './ContactRequestService';
+import { authSessionCleanupService } from './AuthSessionCleanupService';
 
 const logger = createLogger('AuthService');
 
@@ -392,8 +394,10 @@ export const AuthService = {
       // ELITE: Cleanup all services on logout
       await presenceService.cleanup();
       await contactRequestService.cleanup();
-      await identityService.clearIdentity();
+      await authSessionCleanupService.clearLocalSessionData();
       await contactService.clearAll();
+
+      await identityService.clearIdentity();
 
       await firebaseSignOut(getAuth(app));
 
@@ -402,6 +406,8 @@ export const AuthService = {
       } catch (e) {
         // Ignore if not signed in with Google
       }
+
+      await clearDeviceId();
 
       logger.info('✅ Signed out and cleared all data');
     } catch (error) {
@@ -446,7 +452,6 @@ export const AuthService = {
     if (displayName) dataToUpdate.displayName = displayName;
 
     // Update device ID to match QR ID
-    const { setDeviceId, getDeviceId } = require('../utils/device');
     const currentDeviceId = await getDeviceId();
 
     if (currentDeviceId !== qrId) {

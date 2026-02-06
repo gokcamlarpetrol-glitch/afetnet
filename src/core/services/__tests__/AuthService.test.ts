@@ -1,26 +1,27 @@
 /**
- * AUTH SERVICE TESTS - ELITE EDITION
- * Comprehensive test coverage for authentication flows
+ * AUTH SERVICE TESTS - CURRENT API
  */
 
-import { authService } from '../AuthService';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { AuthService } from '../AuthService';
+import { clearDeviceId } from '../../../lib/device';
+import {
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
 
-// Mock Google Sign-In
 jest.mock('@react-native-google-signin/google-signin', () => ({
   GoogleSignin: {
     configure: jest.fn(),
     hasPlayServices: jest.fn().mockResolvedValue(true),
     signIn: jest.fn().mockResolvedValue({
-      user: {
-        id: 'google-user-id',
-        email: 'test@gmail.com',
-        name: 'Test User',
-      },
       idToken: 'mock-google-id-token',
+      data: { idToken: 'mock-google-id-token' },
     }),
-    signOut: jest.fn().mockResolvedValue(null),
-    isSignedIn: jest.fn().mockResolvedValue(false),
-    getCurrentUser: jest.fn().mockResolvedValue(null),
+    signOut: jest.fn().mockResolvedValue(undefined),
   },
   statusCodes: {
     SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
@@ -29,169 +30,166 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
   },
 }));
 
-// Mock Apple Authentication
 jest.mock('expo-apple-authentication', () => ({
   AppleAuthenticationScope: {
     EMAIL: 'email',
     FULL_NAME: 'fullName',
   },
-  isAvailableAsync: jest.fn().mockResolvedValue(true),
   signInAsync: jest.fn().mockResolvedValue({
     identityToken: 'mock-apple-identity-token',
-    user: 'apple-user-id',
-    email: 'test@icloud.com',
-    fullName: {
-      givenName: 'Test',
-      familyName: 'User',
-    },
+    fullName: { givenName: 'Test', familyName: 'User' },
   }),
+  isAvailableAsync: jest.fn().mockResolvedValue(true),
+}));
+
+jest.mock('../../../lib/firebase', () => ({
+  initializeFirebase: jest.fn(() => ({})),
+}));
+
+jest.mock('../../../lib/device', () => ({
+  getDeviceId: jest.fn().mockResolvedValue('afn-test-device-id'),
+  setDeviceId: jest.fn().mockResolvedValue(undefined),
+  clearDeviceId: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../IdentityService', () => ({
+  identityService: {
+    syncFromFirebase: jest.fn().mockResolvedValue(undefined),
+    updateProfile: jest.fn().mockResolvedValue(undefined),
+    clearIdentity: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../ContactService', () => ({
+  contactService: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    clearAll: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../PresenceService', () => ({
+  presenceService: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    stopHeartbeat: jest.fn(),
+    cleanup: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../ContactRequestService', () => ({
+  contactRequestService: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    cleanup: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../AuthSessionCleanupService', () => ({
+  authSessionCleanupService: {
+    cleanup: jest.fn().mockResolvedValue(undefined),
+    clearLocalSessionData: jest.fn().mockResolvedValue(undefined),
+  },
 }));
 
 describe('AuthService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    (GoogleSignin.hasPlayServices as jest.Mock).mockResolvedValue(true);
+    (GoogleSignin.signIn as jest.Mock).mockResolvedValue({
+      idToken: 'mock-google-id-token',
+      data: { idToken: 'mock-google-id-token' },
+    });
+
+    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
+      identityToken: 'mock-apple-identity-token',
+      fullName: { givenName: 'Test', familyName: 'User' },
+    });
+
+    (signInWithCredential as jest.Mock).mockResolvedValue({
+      user: {
+        uid: 'user-1',
+        email: 'test@example.com',
+        displayName: 'Test User',
+        photoURL: null,
+      },
+    });
+
+    (signInWithEmailAndPassword as jest.Mock).mockResolvedValue({
+      user: {
+        uid: 'user-2',
+        email: 'email@example.com',
+        displayName: 'Email User',
+      },
+    });
+
+    (createUserWithEmailAndPassword as jest.Mock).mockResolvedValue({
+      user: {
+        uid: 'user-3',
+        email: 'new@example.com',
+        displayName: 'New User',
+      },
+    });
+
+    (firebaseSignOut as jest.Mock).mockResolvedValue(undefined);
   });
 
-  describe('Initialization', () => {
-    it('should be a singleton instance', () => {
-      expect(authService).toBeDefined();
-      expect(typeof authService).toBe('object');
-    });
-
-    it('should have required methods', () => {
-      expect(typeof authService.initialize).toBe('function');
-      expect(typeof authService.signInWithGoogle).toBe('function');
-      expect(typeof authService.signInWithApple).toBe('function');
-      expect(typeof authService.signOut).toBe('function');
-      expect(typeof authService.isAuthenticated).toBe('function');
-    });
+  it('exposes expected auth methods', () => {
+    expect(typeof AuthService.signInWithGoogle).toBe('function');
+    expect(typeof AuthService.signInWithApple).toBe('function');
+    expect(typeof AuthService.signInWithEmail).toBe('function');
+    expect(typeof AuthService.signUpWithEmail).toBe('function');
+    expect(typeof AuthService.signOut).toBe('function');
+    expect(typeof AuthService.getCurrentUser).toBe('function');
   });
 
-  describe('Authentication State', () => {
-    it('should return false when not authenticated', async () => {
-      const isAuth = await authService.isAuthenticated();
-      expect(typeof isAuth).toBe('boolean');
-    });
+  it('signInWithGoogle returns user on success', async () => {
+    const user = await AuthService.signInWithGoogle();
 
-    it('should return current user or null', async () => {
-      const user = await authService.getCurrentUser();
-      // User can be null or an object
-      expect(user === null || typeof user === 'object').toBe(true);
-    });
+    expect(user).toBeTruthy();
+    expect(signInWithCredential).toHaveBeenCalled();
   });
 
-  describe('Google Sign-In', () => {
-    it('should call Google Sign-In methods', async () => {
-      // This test verifies the flow is correct
-      // Actual Firebase auth is mocked
-      try {
-        await authService.signInWithGoogle();
-      } catch (error) {
-        // Expected to fail due to mocked Firebase
-        expect(error).toBeDefined();
-      }
+  it('signInWithGoogle maps cancelled error to Turkish message', async () => {
+    (GoogleSignin.signIn as jest.Mock).mockRejectedValueOnce({
+      code: statusCodes.SIGN_IN_CANCELLED,
+      message: 'cancelled',
     });
 
-    it('should handle cancelled sign-in gracefully', async () => {
-      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
-
-      // Mock cancelled sign-in
-      GoogleSignin.signIn.mockRejectedValueOnce({
-        code: 'SIGN_IN_CANCELLED',
-        message: 'User cancelled',
-      });
-
-      try {
-        await authService.signInWithGoogle();
-      } catch (error: unknown) {
-        expect(error.message).toContain('iptal');
-      }
-    });
+    await expect(AuthService.signInWithGoogle()).rejects.toThrow('Giriş iptal edildi');
   });
 
-  describe('Apple Sign-In', () => {
-    it('should check Apple auth availability', async () => {
-      const AppleAuth = require('expo-apple-authentication');
+  it('signInWithApple returns user on success', async () => {
+    const user = await AuthService.signInWithApple();
 
-      await authService.signInWithApple();
-      expect(AppleAuth.isAvailableAsync).toHaveBeenCalled();
-    });
-
-    it('should handle unavailable Apple auth', async () => {
-      const AppleAuth = require('expo-apple-authentication');
-
-      AppleAuth.isAvailableAsync.mockResolvedValueOnce(false);
-
-      try {
-        await authService.signInWithApple();
-      } catch (error: unknown) {
-        expect(error.message).toContain('kullanılamıyor');
-      }
-    });
+    expect(user).toBeTruthy();
+    expect(signInWithCredential).toHaveBeenCalled();
   });
 
-  describe('Sign Out', () => {
-    it('should sign out without throwing', async () => {
-      await expect(authService.signOut()).resolves.not.toThrow();
+  it('signInWithApple rejects when identity token is missing', async () => {
+    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValueOnce({
+      identityToken: null,
+      fullName: null,
     });
 
-    it('should call Firebase signOut', async () => {
-      const { signOut } = require('firebase/auth');
-
-      await authService.signOut();
-      // signOut should be called during the process
-      expect(signOut).toHaveBeenCalled();
-    });
+    await expect(AuthService.signInWithApple()).rejects.toThrow('kimlik tokeni');
   });
 
-  describe('Error Handling', () => {
-    it('should provide user-friendly Turkish error messages', async () => {
-      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+  it('signInWithEmail returns user on success', async () => {
+    const user = await AuthService.signInWithEmail('email@example.com', 'Password123!');
 
-      // Mock Play Services error
-      GoogleSignin.signIn.mockRejectedValueOnce({
-        code: 'PLAY_SERVICES_NOT_AVAILABLE',
-      });
-
-      try {
-        await authService.signInWithGoogle();
-      } catch (error: unknown) {
-        // Should contain Turkish error message
-        expect(error.message).toBeDefined();
-      }
-    });
-  });
-});
-
-describe('AuthService - Edge Cases', () => {
-  describe('Network Errors', () => {
-    it('should handle network timeout', async () => {
-      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
-
-      GoogleSignin.signIn.mockRejectedValueOnce(new Error('Network timeout'));
-
-      try {
-        await authService.signInWithGoogle();
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
+    expect(user).toBeTruthy();
+    expect(signInWithEmailAndPassword).toHaveBeenCalled();
   });
 
-  describe('Token Validation', () => {
-    it('should reject null tokens', async () => {
-      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+  it('signUpWithEmail returns user on success', async () => {
+    const user = await AuthService.signUpWithEmail('new@example.com', 'Password123!', 'New User');
 
-      GoogleSignin.signIn.mockResolvedValueOnce({
-        idToken: null,
-        user: { email: 'test@test.com' },
-      });
+    expect(user).toBeTruthy();
+    expect(createUserWithEmailAndPassword).toHaveBeenCalled();
+  });
 
-      try {
-        await authService.signInWithGoogle();
-      } catch (error: unknown) {
-        expect(error.message).toContain('token');
-      }
-    });
+  it('signOut completes without throwing', async () => {
+    await expect(AuthService.signOut()).resolves.toBeUndefined();
+    expect(firebaseSignOut).toHaveBeenCalled();
+    expect(clearDeviceId).toHaveBeenCalled();
   });
 });
