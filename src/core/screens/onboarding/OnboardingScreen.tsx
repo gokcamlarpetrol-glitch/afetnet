@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, StatusBar, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, StatusBar, Image, PermissionsAndroid } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
@@ -10,7 +10,6 @@ import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { hasCompletedOnboarding, setOnboardingCompleted } from '../../utils/onboardingStorage';
-import { useOnboardingStore } from '../../stores/onboardingStore';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('OnboardingScreen');
@@ -32,16 +31,16 @@ const SLIDE_DATA = [
   {
     id: '1',
     title: "P-Dalga\nİstihbaratı",
-    desc: "Deprem başladığında ilk gelen zararsız P-dalgasını tespit eden yapay zeka destekli sensör ağımız, yıkıcı S-dalgası size ulaşmadan 3-60 saniye önce sizi uyarır. AFAD, Kandilli, USGS ve EMSC'den 4 kaynaktan çapraz doğrulama. 🔬 On-device AI ile gerçek zamanlı sismik izleme - Japonya Erken Uyarı Sistemi standartlarında.",
+    desc: "Deprem algılama motoru ve resmi kaynak takibi ile erken uyarı üretir. Uyarı süresi deprem tipi, uzaklık ve cihaz koşullarına göre değişir. AFAD verisi öncelikli kullanılır; desteklenen kaynaklarda çapraz kontrol yapılır.",
     image: IMAGE_ASSETS.seismic,
     action: 'notification',
     buttonText: 'Hayat Kurtaran Bildirimleri Aç',
-    badge: '4 KAYNAK',
+    badge: 'ERKEN UYARI',
   },
   {
     id: '2',
     title: "Hassas Konum +\nPDR Teknolojisi",
-    desc: "Enkaz altında kaldığınızda GPS çalışmaz. AfetNet'in eşsiz PDR (Pedestrian Dead Reckoning) teknolojisi, telefonunuzun sensörleriyle adımlarınızı takip eder. GPS + WiFi + Hücresel triangülasyon + PDR = metrelik hassasiyet. Son konumunuz bataryanız bitse bile AFAD ve 112'ye iletilir.",
+    desc: "Acil durumlarda konum servisleri ve cihaz sensörleriyle son bilinen konumunuzu paylaşmanıza yardımcı olur. Konum doğruluğu çevresel koşullara ve izin durumuna göre değişebilir.",
     image: IMAGE_ASSETS.location,
     action: 'location',
     buttonText: 'Konum Erişimi Ver',
@@ -50,7 +49,7 @@ const SLIDE_DATA = [
   {
     id: '3',
     title: "Yapay Zeka\nDoğrulama & Tehlike",
-    desc: "Afet anında sosyal medyada yayılan asılsız haberler panik yaratır. AfetNet AI'ı, resmi kaynaklardan gelen verileri çapraz doğrular (%99.7 doğruluk). Ayrıca deprem büyüklüğüne göre otomatik tehlike haritası oluşturur: göçebilecek binalar, patlayabilecek gaz hatları, çökebilecek viyadükler.",
+    desc: "Afet anında resmi kaynaklardan gelen verileri karşılaştırır, özetler ve risk değerlendirmesi sunar. Uygulama, karar desteği sağlar; nihai teyit için resmi kurum duyurularını takip edin.",
     image: IMAGE_ASSETS.verification,
     action: null,
     buttonText: 'Anladım, Devam Et',
@@ -77,7 +76,7 @@ const SLIDE_DATA = [
   {
     id: '6',
     title: "Aile Güvenlik\nÇemberi",
-    desc: "Deprem anında en büyük endişe: Sevdikleriniz nerede? Aile Çemberi ile tüm aile üyelerinin gerçek zamanlı konumunu görün. Tek tuşla 'Güvendeyim', 'Yardıma İhtiyacım Var' durumu bildirin. ☁️ Firebase bulut senkronizasyonu ile cihaz değişse bile verileriniz korunur. QR kod ile 10 saniyede aile üyesi ekleyin.",
+    desc: "Deprem anında aile üyelerinizin durumunu ve paylaşılan konumunu takip edin. Tek tuşla 'Güvendeyim' veya 'Yardıma İhtiyacım Var' durumu bildirin. Firebase bulut senkronizasyonu ile verileriniz hesap bazlı korunur.",
     image: IMAGE_ASSETS.familySafety,
     action: 'camera_contacts',
     buttonText: 'Ailemi Ekle',
@@ -85,17 +84,17 @@ const SLIDE_DATA = [
   },
   {
     id: '7',
-    title: "Akıllı SOS +\nWidget & Watch",
-    desc: "Enkaz altında parmağınızı oynatamayabilirsiniz. AfetNet akıllı SOS: Widget ile kilit ekranından, Apple Watch'tan, ses komutuyla veya sarsıntı algılayarak otomatik acil çağrı. Konumunuz, sağlık bilgileriniz ve ICE kişileriniz anında 112, AFAD, ailenize ve gönüllü kurtarma ekiplerine iletilir. ⌚ Tüm platformlarda!",
+    title: "Akıllı SOS +\nHızlı Erişim",
+    desc: "Acil durumda uygulama içinden ve desteklenen hızlı erişim yollarından SOS gönderebilirsiniz. Konum, sağlık bilgisi ve ICE kişileriniz seçtiğiniz paylaşım kanallarına iletilir. Özellik kullanılabilirliği cihaz, izin ve bağlantı durumuna göre değişebilir.",
     image: IMAGE_ASSETS.sos,
     action: null,
     buttonText: 'Hayatımı Koruyorum',
-    badge: 'WİDGET + WATCH',
+    badge: 'HIZLI SOS',
   },
   {
     id: '8',
     title: "Dijital Hayatta\nKalma Seti",
-    desc: "Telefonunuz hayatta kalma aracınız: LED fener (SOS mors kodu), ultrasonik düdük (kurtarma ekiplerinin frekansı), çevrimdışı haritalar, pusula, ilk yardım rehberi, acil durum radyo frekansları ve enkaz altı hayatta kalma rehberi. İnternet gerekmez! Hepsi tek uygulamada, offline çalışır.",
+    desc: "Telefonunuz hayatta kalma aracınız: LED fener (SOS mors kodu), yüksek sesli düdük, çevrimdışı haritalar, pusula, ilk yardım rehberi, acil durum radyo frekansları ve enkaz altı hayatta kalma rehberi. Hepsi tek uygulamada, internet olmadan da kullanılabilir.",
     image: IMAGE_ASSETS.toolkit,
     action: null,
     buttonText: 'Araçları Keşfet',
@@ -118,8 +117,6 @@ export const OnboardingScreen = () => {
     // ELITE: Complete onboarding - CoreApp will switch to MainNavigator
     if (nextPage >= TOTAL_SLIDES) {
       await setOnboardingCompleted();
-      // Set store state to trigger navigation in CoreApp
-      useOnboardingStore.getState().setCompleted(true);
       return;
     }
     pagerRef.current?.setPage(nextPage);
@@ -133,11 +130,7 @@ export const OnboardingScreen = () => {
 
   useEffect(() => {
     const checkOnboardingStatus = async () => {
-      const hasCompleted = await hasCompletedOnboarding();
-      if (hasCompleted) {
-        // ELITE: Complete via store - CoreApp will switch to MainNavigator
-        useOnboardingStore.getState().setCompleted(true);
-      }
+      await hasCompletedOnboarding();
     };
     checkOnboardingStatus();
   }, []);
@@ -146,13 +139,12 @@ export const OnboardingScreen = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       if (type === 'notification') {
-        // ELITE: Request critical alerts on iOS for emergency notifications
+        // Request standard notification permissions during onboarding
         const { status } = await Notifications.requestPermissionsAsync({
           ios: {
             allowAlert: true,
             allowBadge: true,
             allowSound: true,
-            allowCriticalAlerts: true,
           },
         });
         if (status === 'granted') {
@@ -175,25 +167,37 @@ export const OnboardingScreen = () => {
           Alert.alert('Bilgi', 'Bazı izinler verilmedi. Ayarlardan değiştirebilirsiniz.');
         }
       } else if (type === 'bluetooth') {
-        // ELITE: Real Bluetooth/BLE permission handling
-        // On iOS 13+, Bluetooth access requires permission
-        // On Android 12+, BLUETOOTH_SCAN and BLUETOOTH_CONNECT required
         if (Platform.OS === 'ios') {
-          // iOS: Bluetooth permission is requested when first accessing BLE
-          // The permission dialog appears automatically when app tries to use BLE
-          // For now, we inform the user and proceed
           Alert.alert(
             'Mesh Ağı',
-            'Bluetooth izni, uygulama Mesh ağına ilk bağlandığında istenecektir.',
+            'Bluetooth izni, Mesh ağı ilk kez kullanıldığında iOS tarafından istenir. İzin vererek offline iletişimi aktif tutabilirsiniz.',
             [{ text: 'Tamam' }],
           );
         } else {
-          // Android: Request location permission (required for BLE scanning)
-          const { status } = await Location.requestForegroundPermissionsAsync();
-          if (status === 'granted') {
-            Alert.alert('Teşekkürler', 'Mesh ağ bağlantısı hazır.');
+          // Android BLE runtime permissions
+          const sdkVersion = Number(Platform.Version || 0);
+          const permissions: string[] = [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+
+          if (sdkVersion >= 31) {
+            permissions.push(
+              PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+              PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+              PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+            );
+          }
+
+          const results = await PermissionsAndroid.requestMultiple(permissions as any);
+          const allGranted = permissions.every(
+            (permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED,
+          );
+
+          if (allGranted) {
+            Alert.alert('Teşekkürler', 'Mesh ağ bağlantısı için gerekli Bluetooth izinleri aktif.');
           } else {
-            Alert.alert('Bilgi', 'Bluetooth için konum izni gerekli.');
+            Alert.alert(
+              'Bluetooth İzni Eksik',
+              'Offline mesh iletişimi için Bluetooth tarama/bağlantı izinleri zorunludur. İzinleri Ayarlar > Uygulamalar > AfetNet bölümünden açabilirsiniz.',
+            );
           }
         }
       }

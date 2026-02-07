@@ -3,7 +3,7 @@
  * Advanced configuration options for power users
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -33,8 +33,6 @@ interface AdvancedSettingsScreenProps {
 }
 
 export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsScreenProps) {
-  const [debugMode, setDebugMode] = useState(false);
-  const [verboseLogging, setVerboseLogging] = useState(false);
   const { beaconInterval, setBeaconInterval } = useRescueStore();
 
   // Store Settings
@@ -42,6 +40,10 @@ export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsS
   const setSensorSensitivity = useSettingsStore((state) => state.setSensorSensitivity);
   const sensorFalsePositiveFilter = useSettingsStore((state) => state.sensorFalsePositiveFilter);
   const setSensorFalsePositiveFilter = useSettingsStore((state) => state.setSensorFalsePositiveFilter);
+  const debugMode = useSettingsStore((state) => state.debugModeEnabled);
+  const setDebugMode = useSettingsStore((state) => state.setDebugMode);
+  const verboseLogging = useSettingsStore((state) => state.verboseLoggingEnabled);
+  const setVerboseLogging = useSettingsStore((state) => state.setVerboseLogging);
 
   const handleClearAICache = async () => {
     haptics.impactMedium();

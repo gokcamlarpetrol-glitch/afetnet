@@ -105,8 +105,9 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
 
 
 /**
- * Subscribe to device location updates (real-time)
- * ELITE: Streams changes directly from the device document for minimal latency.
+ * Subscribe to device location updates (real-time) with auto-recovery
+ * FIX #3: Listeners now auto-reconnect after transient errors (network drops).
+ * Permission-denied errors are permanent and not retried.
  */
 export async function subscribeToDeviceLocation(
   deviceId: string,
@@ -118,38 +119,88 @@ export async function subscribeToDeviceLocation(
     return () => { };
   }
 
-  try {
-    const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available');
-      return () => { };
-    }
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 5000;
+  let retryCount = 0;
+  let currentUnsubscribe: (() => void) | null = null;
+  let destroyed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const { doc, onSnapshot } = await import('firebase/firestore');
-    const deviceRef = doc(db, 'devices', deviceId);
+  const subscribe = async (): Promise<void> => {
+    if (destroyed) return;
 
-    const unsubscribe = onSnapshot(
-      deviceRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          // Extract location data if available
-          if (data?.location) {
-            callback(data.location);
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db || destroyed) {
+        return;
+      }
+
+      const { doc, onSnapshot } = await import('firebase/firestore');
+      const deviceRef = doc(db, 'devices', deviceId);
+
+      // Cleanup previous listener before creating new one
+      if (currentUnsubscribe) {
+        try { currentUnsubscribe(); } catch { /* noop */ }
+        currentUnsubscribe = null;
+      }
+
+      currentUnsubscribe = onSnapshot(
+        deviceRef,
+        (docSnap) => {
+          retryCount = 0; // Reset retry counter on successful snapshot
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data?.location) {
+              callback(data.location);
+            }
           }
-        }
-      },
-      (error: any) => {
-        // Silent fail permissible for permissions/network
-        if (__DEV__) {
-          logger.debug(`Device location subscription error for ${deviceId}:`, error);
-        }
-      },
-    );
+        },
+        async (error: any) => {
+          const errorCode = error?.code || '';
+          const errorMessage = error?.message || '';
 
-    return unsubscribe;
-  } catch (error) {
-    logger.error('Failed to subscribe to device location:', error);
-    return () => { };
-  }
+          // Permission-denied is permanent — don't retry
+          if (errorCode === 'permission-denied' ||
+            errorMessage.includes('permission') ||
+            errorMessage.includes('Missing or insufficient permissions')) {
+            logger.warn(`Location listener for ${deviceId} permission denied — not retrying`);
+            return;
+          }
+
+          // Transient error — retry with backoff
+          if (retryCount < MAX_RETRIES && !destroyed) {
+            retryCount++;
+            const delayMs = RETRY_DELAY_MS * retryCount;
+            logger.info(`🔄 Location listener retry ${retryCount}/${MAX_RETRIES} for ${deviceId} in ${delayMs}ms`);
+            retryTimer = setTimeout(() => {
+              if (!destroyed) {
+                subscribe().catch((e) => {
+                  logger.warn(`Retry subscribe failed for ${deviceId}:`, e);
+                });
+              }
+            }, delayMs);
+          } else if (!destroyed) {
+            logger.warn(`Location listener for ${deviceId} exhausted ${MAX_RETRIES} retries`);
+          }
+        },
+      );
+    } catch (error) {
+      logger.error('Failed to subscribe to device location:', error);
+    }
+  };
+
+  await subscribe();
+
+  // Return cleanup function that prevents retries and unsubscribes
+  return () => {
+    destroyed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (currentUnsubscribe) {
+      try { currentUnsubscribe(); } catch { /* noop */ }
+      currentUnsubscribe = null;
+    }
+  };
 }

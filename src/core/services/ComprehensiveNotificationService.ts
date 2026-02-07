@@ -92,14 +92,16 @@ const VIBRATION_PATTERNS = {
 // ========================
 
 const NOTIFICATION_SOUNDS = {
-    earthquake_alarm: 'earthquake_alarm.wav',
-    tsunami_siren: 'tsunami_siren.wav',
-    fire_alarm: 'fire_alarm.wav',
-    emergency: 'emergency.wav',
-    sos: 'sos.wav',
-    family_alert: 'family_alert.wav',
-    gentle: 'gentle.wav',
-    success: 'success.wav',
+    // PREMIUM: Use 'default' for all notification sounds
+    // Actual emergency alarm audio is played separately via UltraFastEEWNotification service
+    earthquake_alarm: 'default',
+    tsunami_siren: 'default',
+    fire_alarm: 'default',
+    emergency: 'default',
+    sos: 'default',
+    family_alert: 'default',
+    gentle: 'default',
+    success: 'default',
     default: 'default',
 };
 
@@ -282,19 +284,12 @@ class ComprehensiveNotificationService {
      */
     async initialize(): Promise<void> {
         try {
-            // Request permissions
-            const { status } = await Notifications.requestPermissionsAsync({
-                ios: {
-                    allowAlert: true,
-                    allowBadge: true,
-                    allowSound: true,
-                    allowCriticalAlerts: true,
-                    provideAppNotificationSettings: true,
-                },
-            });
+            // Apple-review safe: never prompt at app startup.
+            // Permission is requested from explicit onboarding/settings flows.
+            const { status } = await Notifications.getPermissionsAsync();
 
             if (status !== 'granted') {
-                logger.warn('Notification permission not granted');
+                logger.warn('Notification permission not granted yet; comprehensive notifications deferred');
                 return;
             }
 

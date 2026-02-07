@@ -196,19 +196,18 @@ class EnkazDetectionService {
     if (!store.sosTriggered) {
       store.setSosTriggered(true);
 
-      // ELITE: Use SOS Service for comprehensive SOS handling
+      // FIX: Use unified SOS controller for consistent state management
       try {
-        const { getSOSService } = await import('./SOSService');
-        const sosService = getSOSService();
+        const { unifiedSOSController } = await import('./sos');
+        const { EmergencyReason } = await import('./sos/SOSStateManager');
 
-        // ELITE: Auto-trigger SOS with current location
-        await sosService.autoTriggerFromEnkazDetection(this.lastLocation ? {
-          latitude: this.lastLocation.latitude,
-          longitude: this.lastLocation.longitude,
-          accuracy: 10, // Default accuracy
-        } : null);
+        // Use unified controller — this updates Zustand store + broadcasts via all channels
+        await unifiedSOSController.forceActivateSOS(
+          EmergencyReason.TRAPPED_DETECTED,
+          'Otomatik algılandı: Enkaz altındayım! Acil yardım gerekiyor!',
+        );
 
-        logger.warn('✅ ELITE SOS: Auto-triggered from enkaz detection!');
+        logger.warn('✅ SOS: Auto-triggered from enkaz detection via unified controller!');
       } catch (error) {
         logger.error('Failed to auto-trigger SOS:', error);
         // Fallback to basic BLE SOS

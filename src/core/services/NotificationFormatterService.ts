@@ -3,8 +3,6 @@
  * Standardizes notification content across different channels and priorities.
  */
 
-import { Platform } from 'react-native';
-
 export interface FormattedNotification {
   title: string;
   body: string;
@@ -18,6 +16,12 @@ export interface FormattedNotification {
 }
 
 class NotificationFormatterService {
+  private truncate(text: string, maxLength: number): string {
+    if (!text || text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+  }
 
   formatEarthquakeNotification(
     magnitude: number,
@@ -33,7 +37,7 @@ class NotificationFormatterService {
     if (isEEW) {
       return {
         title: `🚨 DEPREM UYARISI (${magnitude.toFixed(1)})`,
-        body: `Sarsıntı Bekleniyor! ${location} (~${timeAdvance || 0}sn)`,
+        body: `Sarsıntı Bekleniyor! ${location} (~${Math.max(0, Math.round(timeAdvance || 0))}sn)`,
         priority: 'critical',
         sound: 'siren.wav',
         vibrationPattern: [0, 500, 200, 500, 200, 500],
@@ -46,7 +50,7 @@ class NotificationFormatterService {
     // Standard Earthquake Alert
     return {
       title: `${magnitude >= 6.0 ? '🔴' : magnitude >= 5.0 ? '🟠' : '🟡'} Deprem: ${magnitude.toFixed(1)} ${location}`,
-      body: `${timeStr} - Derinlik ve detaylar için dokunun.`,
+      body: `${timeStr || 'Şimdi'} - Derinlik ve detaylar için dokunun.`,
       priority: isCritical ? 'high' : 'normal',
       sound: isCritical ? 'default' : undefined,
       vibrationPattern: isCritical ? [0, 250, 250, 250] : undefined,
@@ -72,21 +76,43 @@ class NotificationFormatterService {
     return this.formatEarthquakeNotification(magnitude, location, new Date(), true, timeAdvance);
   }
 
-  formatMessageNotification(from: string, message: string, isSOS?: boolean, isCritical?: boolean): FormattedNotification {
+  formatMessageNotification(
+    from: string,
+    message: string,
+    isSOS?: boolean,
+    isCritical?: boolean,
+    showPreview: boolean = true,
+  ): FormattedNotification {
+    const safeBody = showPreview
+      ? this.truncate(message, 140)
+      : (isSOS ? 'Acil mesajı açmak için dokunun.' : 'Yeni mesajı açmak için dokunun.');
+
     return {
       title: isSOS ? `🆘 ${from}` : `💬 ${from}`,
-      body: message,
+      body: safeBody,
       priority: isSOS || isCritical ? 'critical' : 'high',
       sound: 'default',
-      ttsText: `${from} kişisinden yeni mesaj: ${message}`,
+      ttsText: showPreview ? `${from} kişisinden yeni mesaj: ${safeBody}` : `${from} kişisinden yeni mesaj var.`,
+      categoryId: 'message',
       data: { type: 'message', from, isSOS },
     };
   }
 
-  formatNewsNotification(title: string, summary: string, source: string, imageUrl?: string): FormattedNotification {
+  formatNewsNotification(
+    title: string,
+    summary: string,
+    source: string,
+    imageUrl?: string,
+    showPreview: boolean = true,
+  ): FormattedNotification {
+    const safeTitle = this.truncate(title, 90);
+    const safeSummary = showPreview
+      ? this.truncate(summary, 120)
+      : 'Yeni haber detayları için dokunun.';
+
     const notification: FormattedNotification = {
-      title: `📰 ${title}`,
-      body: summary.length > 100 ? summary.substring(0, 97) + '...' : summary,
+      title: `📰 ${safeTitle}`,
+      body: safeSummary,
       priority: 'normal',
       categoryId: 'news', // ELITE: Interactive actions
       data: { type: 'news', source, imageUrl },

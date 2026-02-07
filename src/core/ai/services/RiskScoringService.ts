@@ -79,6 +79,11 @@ class RiskScoringService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    try {
+      await openAIService.initialize();
+    } catch (error) {
+      logger.warn('OpenAI init failed for RiskScoringService, continuing in hybrid fallback mode', error);
+    }
     logger.info('RiskScoringService initialized (hybrid AI/rule-based)');
     this.isInitialized = true;
   }
@@ -1387,8 +1392,8 @@ Yapısal Not: ${context.building.description}`;
         serviceName: 'RiskScoringService', // ELITE: For cost tracking
       });
 
-      // ELITE: Extract JSON more safely - handle truncated responses
-      let jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      // ELITE: Use lazy match to avoid matching past the first complete JSON
+      let jsonMatch = aiResponse.match(/\{[\s\S]*?\}/);
       if (!jsonMatch) {
         throw new Error('AI enrichment JSON not found');
       }
@@ -1484,4 +1489,3 @@ Yapısal Not: ${context.building.description}`;
 }
 
 export const riskScoringService = new RiskScoringService();
-

@@ -39,6 +39,11 @@ class EarthquakeAnalysisService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    try {
+      await openAIService.initialize();
+    } catch (error) {
+      logger.warn('OpenAI init failed for EarthquakeAnalysisService, continuing with fallback', error);
+    }
     logger.info('EarthquakeAnalysisService initialized');
     this.isInitialized = true;
   }
@@ -51,6 +56,10 @@ class EarthquakeAnalysisService {
     userLocation?: { latitude: number; longitude: number },
   ): Promise<EarthquakeAnalysis | null> {
     try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
       // 5.0+ depremler için çoklu kaynak doğrulaması
       let verified = true;
       let sources: string[] = [earthquake.source];
@@ -151,9 +160,10 @@ class EarthquakeAnalysisService {
    */
   private async checkAFAD(earthquake: Earthquake): Promise<VerificationResult> {
     try {
-      // AFAD API'den son depremleri çek
+      // ELITE: Dynamic date range — prevents hardcoded expiry (was 2030-12-31)
+      const today = new Date().toISOString().split('T')[0];
       const response = await fetch(
-        'https://deprem.afad.gov.tr/apiv2/event/filter?start=2020-01-01&end=2030-12-31&minmag=3.0',
+        `https://deprem.afad.gov.tr/apiv2/event/filter?start=2020-01-01&end=${today}&minmag=3.0`,
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
@@ -307,12 +317,26 @@ class EarthquakeAnalysisService {
   private determineRiskLevel(earthquake: Earthquake, distance?: number): RiskLevel {
     const { magnitude } = earthquake;
 
-    // Büyüklük bazlı risk
-    if (magnitude >= 7.0) return 'critical';
-    if (magnitude >= 6.0) return 'high';
-    if (magnitude >= 5.0) return 'high';
-    if (magnitude >= 4.0) return 'medium';
-    return 'low';
+    // ELITE: Factor distance into risk calculation
+    // A M7.0 earthquake 500km away is less risky than one 5km away
+    let distanceReduction = 0;
+    if (distance !== undefined && distance > 0) {
+      if (distance > 500) distanceReduction = 2;      // Very far: reduce 2 levels
+      else if (distance > 200) distanceReduction = 1;  // Far: reduce 1 level
+      // < 200km: no reduction
+    }
+
+    // Base risk level from magnitude
+    const riskLevels: RiskLevel[] = ['low', 'medium', 'high', 'critical'];
+    let riskIndex: number;
+    if (magnitude >= 7.0) riskIndex = 3;       // critical
+    else if (magnitude >= 5.0) riskIndex = 2;  // high
+    else if (magnitude >= 4.0) riskIndex = 1;  // medium
+    else riskIndex = 0;                        // low
+
+    // Apply distance reduction (never go below 'low')
+    riskIndex = Math.max(0, riskIndex - distanceReduction);
+    return riskLevels[riskIndex];
   }
 
   /**
@@ -362,7 +386,8 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
 
     // Parse
     try {
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      // ELITE: Use lazy match to avoid matching past the first complete JSON
+      const jsonMatch = aiResponse.match(/\{[\s\S]*?\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
@@ -376,7 +401,7 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
       logger.error('AI analysis parse error:', error);
     }
 
-    // Fallback
+    // Fallback — only called once (removed duplicate call from inside try block)
     return this.generateFallbackAnalysis(earthquake, distance, riskLevel);
   }
 
@@ -457,5 +482,4 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Öneriler AFAD standartlar�
 }
 
 export const earthquakeAnalysisService = new EarthquakeAnalysisService();
-
 

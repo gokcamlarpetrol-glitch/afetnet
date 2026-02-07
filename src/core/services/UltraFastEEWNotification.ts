@@ -136,9 +136,13 @@ class UltraFastEEWNotificationService {
                 playThroughEarpieceAndroid: false,
             });
 
-            // Request notification permissions
+            // Apple-review safe: do not trigger permission prompt during warmup.
+            // Permissions are requested from explicit user actions (onboarding/settings).
             if (this.notifModule) {
-                await this.notifModule.requestPermissionsAsync();
+                const permissions = await this.notifModule.getPermissionsAsync?.();
+                if (__DEV__ && permissions?.status !== 'granted') {
+                    logger.info('Notification permission not granted yet; ultra-fast local push channel is deferred');
+                }
             }
 
             // ELITE: Pre-warm TTS engine with silent utterance
@@ -314,6 +318,7 @@ class UltraFastEEWNotificationService {
 
     /**
      * Play alarm sound with urgency-based intensity
+     * PREMIUM: Loads and plays the actual emergency-alert.wav file
      * ELITE: Respects settings.notificationSound and settings.alarmSoundEnabled
      * NOTE: Critical/High urgency ALWAYS plays for life safety!
      */
@@ -331,13 +336,54 @@ class UltraFastEEWNotificationService {
 
             // Stop any existing sound
             if (this.activeSound) {
-                await this.activeSound.stopAsync();
-                await this.activeSound.unloadAsync();
+                try {
+                    await this.activeSound.stopAsync();
+                    await this.activeSound.unloadAsync();
+                } catch (e) {
+                    logger.debug('Sound cleanup error:', e);
+                }
+                this.activeSound = null;
             }
 
-            // Use haptics as audio feedback (works without sound files)
+            // PREMIUM: Get urgency-based audio configuration
+            const config = ALARM_CONFIG[urgency];
+
+            // PREMIUM: Load and play the actual emergency alert sound file
+            try {
+                const { sound } = await Audio.Sound.createAsync(
+                    require('../../../assets/emergency-alert.wav'),
+                    {
+                        shouldPlay: true,
+                        isLooping: config.loop,
+                        volume: config.volume,
+                        rate: config.rate,
+                        shouldCorrectPitch: true,
+                    },
+                );
+                this.activeSound = sound;
+
+                // Auto-stop after 30 seconds for safety (prevent infinite loop)
+                setTimeout(async () => {
+                    if (this.activeSound === sound) {
+                        try {
+                            await sound.stopAsync();
+                            await sound.unloadAsync();
+                            this.activeSound = null;
+                        } catch (e) {
+                            // Already cleaned up
+                        }
+                    }
+                }, 30000);
+
+                logger.info(`🔊 Emergency alarm sound playing (urgency: ${urgency}, volume: ${config.volume})`);
+            } catch (soundError) {
+                logger.warn('Emergency sound file failed, using haptic fallback:', soundError);
+            }
+
+            // PREMIUM: Also fire haptic feedback alongside audio for multi-sensory alert
             const hapticSequence = async () => {
-                for (let i = 0; i < (urgency === 'critical' ? 10 : 5); i++) {
+                const iterations = urgency === 'critical' ? 10 : urgency === 'high' ? 7 : 5;
+                for (let i = 0; i < iterations; i++) {
                     if (urgency === 'critical' || urgency === 'high') {
                         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                     } else {
@@ -347,7 +393,7 @@ class UltraFastEEWNotificationService {
                 }
             };
 
-            // Fire and forget
+            // Fire and forget (non-blocking)
             hapticSequence();
 
             return true;

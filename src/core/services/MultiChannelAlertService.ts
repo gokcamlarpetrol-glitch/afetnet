@@ -135,6 +135,8 @@ export interface AlertOptions {
   priority: 'low' | 'normal' | 'high' | 'critical';
   channels?: Partial<AlertChannels>;
   sound?: string; // Custom sound file
+  soundVolume?: number; // 0-100
+  soundRepeat?: number; // 1-10
   vibrationPattern?: number[]; // Android vibration pattern
   ttsText?: string; // Custom TTS text
   data?: Record<string, unknown>;
@@ -151,6 +153,50 @@ const DEFAULT_CHANNELS: AlertChannels = {
   bluetooth: false,
 };
 
+interface AlertSettingsSnapshot {
+  notificationsEnabled: boolean;
+  notificationPush: boolean;
+  notificationFullScreen: boolean;
+  notificationSound: boolean;
+  notificationSoundType: 'default' | 'alarm' | 'sos' | 'beep' | 'chime' | 'siren' | 'custom';
+  notificationSoundVolume: number;
+  notificationSoundRepeat: number;
+  alarmSoundEnabled: boolean;
+  notificationVibration: boolean;
+  vibrationEnabled: boolean;
+  magnitudeBasedSound: boolean;
+  magnitudeBasedVibration: boolean;
+  notificationTTS: boolean;
+  notificationMode: 'silent' | 'vibrate' | 'sound' | 'sound+vibrate' | 'critical-only';
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursCriticalOnly: boolean;
+  notificationShowOnLockScreen: boolean;
+}
+
+const DEFAULT_ALERT_SETTINGS: AlertSettingsSnapshot = {
+  notificationsEnabled: true,
+  notificationPush: true,
+  notificationFullScreen: true,
+  notificationSound: true,
+  notificationSoundType: 'alarm',
+  notificationSoundVolume: 80,
+  notificationSoundRepeat: 3,
+  alarmSoundEnabled: true,
+  notificationVibration: true,
+  vibrationEnabled: true,
+  magnitudeBasedSound: true,
+  magnitudeBasedVibration: true,
+  notificationTTS: true,
+  notificationMode: 'sound+vibrate',
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  quietHoursCriticalOnly: true,
+  notificationShowOnLockScreen: true,
+};
+
 class MultiChannelAlertService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private soundInstance: any = null; // Audio.Sound | null
@@ -160,6 +206,187 @@ class MultiChannelAlertService {
   private currentAlert: AlertOptions | null = null;
   private isAlerting = false;
   private static hasLoggedUnavailable = false; // ELITE: Log only once
+  private recentAlertKeys = new Map<string, number>();
+
+  private async getSettingsSnapshot(): Promise<AlertSettingsSnapshot> {
+    try {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const state = useSettingsStore.getState();
+      return {
+        notificationsEnabled: state.notificationsEnabled,
+        notificationPush: state.notificationPush,
+        notificationFullScreen: state.notificationFullScreen,
+        notificationSound: state.notificationSound,
+        notificationSoundType: state.notificationSoundType,
+        notificationSoundVolume: state.notificationSoundVolume,
+        notificationSoundRepeat: state.notificationSoundRepeat,
+        alarmSoundEnabled: state.alarmSoundEnabled,
+        notificationVibration: state.notificationVibration,
+        vibrationEnabled: state.vibrationEnabled,
+        magnitudeBasedSound: state.magnitudeBasedSound,
+        magnitudeBasedVibration: state.magnitudeBasedVibration,
+        notificationTTS: state.notificationTTS,
+        notificationMode: state.notificationMode,
+        quietHoursEnabled: state.quietHoursEnabled,
+        quietHoursStart: state.quietHoursStart,
+        quietHoursEnd: state.quietHoursEnd,
+        quietHoursCriticalOnly: state.quietHoursCriticalOnly,
+        notificationShowOnLockScreen: state.notificationShowOnLockScreen,
+      };
+    } catch (error) {
+      return DEFAULT_ALERT_SETTINGS;
+    }
+  }
+
+  private parseMinutes(value: string): number | null {
+    const match = /^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(value);
+    if (!match) {
+      return null;
+    }
+    return Number(match[1]) * 60 + Number(match[2]);
+  }
+
+  private isQuietHoursActive(settings: AlertSettingsSnapshot): boolean {
+    if (!settings.quietHoursEnabled) {
+      return false;
+    }
+    const start = this.parseMinutes(settings.quietHoursStart);
+    const end = this.parseMinutes(settings.quietHoursEnd);
+    if (start === null || end === null || start === end) {
+      return false;
+    }
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (start < end) {
+      return nowMinutes >= start && nowMinutes < end;
+    }
+    return nowMinutes >= start || nowMinutes < end;
+  }
+
+  private getDefaultDuration(priority: AlertOptions['priority']): number {
+    if (priority === 'critical') {
+      return 45;
+    }
+    if (priority === 'high') {
+      return 25;
+    }
+    if (priority === 'normal') {
+      return 12;
+    }
+    return 8;
+  }
+
+  private buildAlertFingerprint(options: AlertOptions): string {
+    const data = options.data || {};
+    const eventId = typeof data.eventId === 'string' ? data.eventId : undefined;
+    const messageId = typeof data.messageId === 'string' ? data.messageId : undefined;
+    const coreId = eventId || messageId || `${options.title}:${options.body.slice(0, 40)}`;
+    return `${options.priority}:${coreId}`;
+  }
+
+  private shouldSuppressDuplicate(fingerprint: string, windowMs: number): boolean {
+    const now = Date.now();
+
+    for (const [key, timestamp] of this.recentAlertKeys.entries()) {
+      if (now - timestamp > 5 * 60 * 1000) {
+        this.recentAlertKeys.delete(key);
+      }
+    }
+
+    const last = this.recentAlertKeys.get(fingerprint);
+    if (last && now - last < windowMs) {
+      return true;
+    }
+    this.recentAlertKeys.set(fingerprint, now);
+    return false;
+  }
+
+  private applySettingsToChannels(
+    channels: AlertChannels,
+    options: AlertOptions,
+    settings: AlertSettingsSnapshot,
+  ): AlertChannels {
+    const effective = { ...channels };
+
+    if (!settings.notificationsEnabled) {
+      return {
+        pushNotification: false,
+        fullScreenAlert: false,
+        alarmSound: false,
+        vibration: false,
+        led: false,
+        tts: false,
+        bluetooth: false,
+      };
+    }
+
+    if (settings.notificationMode === 'silent') {
+      return {
+        pushNotification: false,
+        fullScreenAlert: false,
+        alarmSound: false,
+        vibration: false,
+        led: false,
+        tts: false,
+        bluetooth: false,
+      };
+    }
+
+    if (settings.notificationMode === 'critical-only' && options.priority !== 'critical') {
+      return {
+        pushNotification: false,
+        fullScreenAlert: false,
+        alarmSound: false,
+        vibration: false,
+        led: false,
+        tts: false,
+        bluetooth: false,
+      };
+    }
+
+    if (!settings.notificationPush) {
+      effective.pushNotification = false;
+    }
+    if (!settings.notificationFullScreen) {
+      effective.fullScreenAlert = false;
+    }
+    if (!settings.notificationSound || settings.notificationSoundVolume <= 0 || !settings.alarmSoundEnabled || settings.notificationMode === 'vibrate') {
+      effective.alarmSound = false;
+    }
+    if (!settings.notificationVibration || !settings.vibrationEnabled || settings.notificationMode === 'sound') {
+      effective.vibration = false;
+    }
+    if (!settings.notificationTTS || settings.notificationMode === 'vibrate') {
+      effective.tts = false;
+    }
+
+    const quietHoursActive = this.isQuietHoursActive(settings);
+    if (quietHoursActive && settings.quietHoursCriticalOnly && options.priority !== 'critical') {
+      effective.fullScreenAlert = false;
+      effective.alarmSound = false;
+      effective.vibration = false;
+      effective.tts = false;
+    }
+
+    return effective;
+  }
+
+  private resolveNotificationSound(
+    settings: AlertSettingsSnapshot,
+    priority: AlertOptions['priority'],
+    fallback?: string,
+  ): string {
+    if (fallback) {
+      return fallback;
+    }
+    if (settings.notificationSoundType === 'default') {
+      return 'default';
+    }
+    if (priority === 'critical' || priority === 'high') {
+      return 'default';
+    }
+    return 'default';
+  }
 
   async initialize() {
     try {
@@ -212,61 +439,95 @@ class MultiChannelAlertService {
   }
 
   async sendAlert(options: AlertOptions) {
+    const fingerprint = this.buildAlertFingerprint(options);
+    const dedupWindow = options.priority === 'critical' ? 3000 : 10000;
+    if (this.shouldSuppressDuplicate(fingerprint, dedupWindow)) {
+      return;
+    }
+
     if (this.isAlerting) {
       // Queue or replace based on priority
-      if (this.currentAlert && this.comparePriority(options.priority, this.currentAlert.priority) <= 0) {
-        return; // Lower priority, ignore
+      if (this.currentAlert) {
+        const currentFingerprint = this.buildAlertFingerprint(this.currentAlert);
+        const priorityDelta = this.comparePriority(options.priority, this.currentAlert.priority);
+        if (priorityDelta < 0) {
+          return; // Lower priority, ignore
+        }
+        if (priorityDelta === 0 && currentFingerprint === fingerprint) {
+          return; // Same alert already active
+        }
       }
-      // Higher priority, cancel current and send new
+      // Higher or different same-priority alert, cancel current and send new
       await this.cancelAlert();
+    }
+
+    const settings = await this.getSettingsSnapshot();
+    const channels = this.applySettingsToChannels(
+      { ...DEFAULT_CHANNELS, ...options.channels },
+      options,
+      settings,
+    );
+    const effectiveSoundVolume = Math.max(
+      0,
+      Math.min(100, options.soundVolume ?? settings.notificationSoundVolume),
+    );
+    const effectiveSoundRepeat = Math.max(
+      1,
+      Math.min(10, Math.round(options.soundRepeat ?? settings.notificationSoundRepeat)),
+    );
+    const hasEnabledChannel = Object.values(channels).some(Boolean);
+    if (!hasEnabledChannel) {
+      return;
     }
 
     this.currentAlert = options;
     this.isAlerting = true;
 
-    const channels = { ...DEFAULT_CHANNELS, ...options.channels };
-
     try {
-      // 1. Push Notification (always on)
+      const tasks: Promise<unknown>[] = [];
+
       if (channels.pushNotification) {
-        await this.sendPushNotification(options);
+        tasks.push(this.sendPushNotification(options, settings));
       }
-
-      // 2. Full Screen Alert (critical priority)
       if (channels.fullScreenAlert && (options.priority === 'critical' || options.priority === 'high')) {
-        await this.showFullScreenAlert(options);
+        tasks.push(this.showFullScreenAlert(options, settings));
       }
-
-      // 3. Alarm Sound
       if (channels.alarmSound) {
-        await this.playAlarmSound(options.sound);
+        tasks.push(this.playAlarmSound(
+          this.resolveNotificationSound(settings, options.priority, options.sound),
+          effectiveSoundVolume,
+          settings.magnitudeBasedSound ? effectiveSoundRepeat : 1,
+        ));
       }
-
-      // 4. Vibration
       if (channels.vibration) {
-        await this.startVibration(options.vibrationPattern);
+        tasks.push(this.startVibration(
+          options.vibrationPattern,
+          settings.magnitudeBasedVibration ? effectiveSoundRepeat : 1,
+        ));
       }
-
-      // 5. LED Flash
       if (channels.led && Platform.OS === 'android') {
-        await this.startLEDFlash();
+        tasks.push(this.startLEDFlash());
       }
-
-      // 6. Text-to-Speech
       if (channels.tts) {
-        await this.speakText(options.ttsText || options.body);
+        tasks.push(this.speakText(options.ttsText || options.body));
       }
-
-      // 7. Bluetooth Broadcast (if enabled)
       if (channels.bluetooth) {
-        await this.broadcastViaBluetooth(options);
+        tasks.push(this.broadcastViaBluetooth(options));
       }
 
+      const results = await Promise.allSettled(tasks);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          logger.error(`Alert channel task ${index} failed:`, result.reason);
+        }
+      });
+
+      const resolvedDuration = options.duration ?? this.getDefaultDuration(options.priority);
       // Auto-dismiss after duration (if set) - STORE TIMEOUT TO PREVENT MEMORY LEAK
-      if (options.duration && options.duration > 0) {
+      if (resolvedDuration > 0) {
         this.dismissTimeout = setTimeout(() => {
           this.cancelAlert();
-        }, options.duration * 1000);
+        }, resolvedDuration * 1000);
       }
 
     } catch (error) {
@@ -375,7 +636,7 @@ class MultiChannelAlertService {
     });
   }
 
-  private async sendPushNotification(options: AlertOptions) {
+  private async sendPushNotification(options: AlertOptions, settings: AlertSettingsSnapshot) {
     // ELITE: Use async getter to ensure notifications module is ready
     const NotificationsAsync = await getNotificationsAsync();
     if (!NotificationsAsync || typeof NotificationsAsync.scheduleNotificationAsync !== 'function') {
@@ -392,17 +653,21 @@ class MultiChannelAlertService {
       channelId = 'high-priority';
     }
 
+    const sound = this.resolveNotificationSound(settings, options.priority, options.sound);
     const notificationId = await NotificationsAsync.scheduleNotificationAsync({
       content: {
         title: options.title,
         body: options.body,
-        sound: options.sound || 'default',
+        sound: sound || 'default',
         priority: options.priority === 'critical' ? 'max' :
           options.priority === 'high' ? 'high' :
             'default',
         data: options.data || {},
         categoryIdentifier: 'alert',
         sticky: options.priority === 'critical', // Critical alerts stay until dismissed
+        interruptionLevel: settings.notificationShowOnLockScreen
+          ? (options.priority === 'critical' ? 'timeSensitive' : undefined)
+          : 'passive',
       },
       trigger: null, // Immediate
       identifier: `alert-${Date.now()}`,
@@ -423,7 +688,7 @@ class MultiChannelAlertService {
     return notificationId;
   }
 
-  private async showFullScreenAlert(options: AlertOptions) {
+  private async showFullScreenAlert(options: AlertOptions, settings: AlertSettingsSnapshot) {
     // This will be handled by a React component overlay
     // For now, we'll use a high-priority notification that shows on lock screen
     // The actual full-screen modal will be shown by the AlertModal component
@@ -442,9 +707,10 @@ class MultiChannelAlertService {
         content: {
           title: options.title,
           body: options.body,
-          sound: 'default',
+          sound: this.resolveNotificationSound(settings, options.priority, options.sound),
           priority: 'max',
           data: { ...options.data, fullScreen: true },
+          interruptionLevel: settings.notificationShowOnLockScreen ? 'timeSensitive' : 'passive',
         },
         trigger: null,
       });
@@ -456,7 +722,7 @@ class MultiChannelAlertService {
         content: {
           title: options.title,
           body: options.body,
-          sound: 'default',
+          sound: this.resolveNotificationSound(settings, options.priority, options.sound),
           priority: 'max',
           data: { ...options.data, fullScreen: true },
         },
@@ -465,7 +731,11 @@ class MultiChannelAlertService {
     }
   }
 
-  private async playAlarmSound(soundFile?: string) {
+  private async playAlarmSound(
+    soundFile?: string,
+    volumePercent: number = 100,
+    repeatCount: number = 1,
+  ) {
     try {
       // ELITE: Get Audio module dynamically
       const Audio = getAudio();
@@ -482,6 +752,9 @@ class MultiChannelAlertService {
         return;
       }
 
+      const volume = Math.max(0, Math.min(1, volumePercent / 100));
+      const repeatWindowMs = Math.max(1, Math.min(10, repeatCount)) * 5000;
+
       // Stop any existing sound
       if (this.soundInstance) {
         try {
@@ -497,23 +770,55 @@ class MultiChannelAlertService {
         // Load custom sound
         const { sound } = await Audio.Sound.createAsync(
           { uri: soundFile },
-          { shouldPlay: true, isLooping: true, volume: 1.0 },
+          { shouldPlay: true, isLooping: repeatCount > 1, volume },
         );
         this.soundInstance = sound;
+        if (repeatCount > 1) {
+          setTimeout(async () => {
+            if (this.soundInstance === sound) {
+              try {
+                await sound.stopAsync();
+                await sound.unloadAsync();
+                this.soundInstance = null;
+              } catch {
+                // already cleaned up
+              }
+            }
+          }, repeatWindowMs);
+        }
       } else {
-        // Use default alarm sound (SOS pattern)
-        const sosPattern = [0.2, 0.1, 0.2, 0.1, 0.2, 0.1, 0.5, 0.1, 0.5, 0.1, 0.5, 0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
+        // PREMIUM: Load the actual emergency alert sound file
+        try {
+          const { sound } = await Audio.Sound.createAsync(
+            require('../../../assets/emergency-alert.wav'),
+            { shouldPlay: true, isLooping: repeatCount > 1, volume },
+          );
+          this.soundInstance = sound;
 
-        // For now, use system notification sound
-        // Custom audio file would be better but requires asset bundling
-        const Notifications = getNotifications();
-        if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              sound: 'default',
-            },
-            trigger: null,
-          });
+          // Auto-stop after configured repeat window (bounded for safety)
+          setTimeout(async () => {
+            if (this.soundInstance === sound) {
+              try {
+                await sound.stopAsync();
+                await sound.unloadAsync();
+                this.soundInstance = null;
+              } catch (e) {
+                // Already cleaned up
+              }
+            }
+          }, Math.max(5000, Math.min(90000, repeatWindowMs)));
+
+          logger.info('🔊 Emergency alert sound playing via MultiChannelAlertService');
+        } catch (soundError) {
+          logger.warn('Emergency sound file failed, using system notification fallback:', soundError);
+          // Last resort fallback to system notification sound
+          const Notifications = getNotifications();
+          if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
+            await Notifications.scheduleNotificationAsync({
+              content: { sound: 'default' },
+              trigger: null,
+            });
+          }
         }
       }
     } catch (error) {
@@ -521,7 +826,7 @@ class MultiChannelAlertService {
     }
   }
 
-  private async startVibration(pattern?: number[]) {
+  private async startVibration(pattern?: number[], repeatCount: number = 1) {
     try {
       // ELITE: Get Haptics module dynamically
       const Haptics = getHaptics();
@@ -555,6 +860,7 @@ class MultiChannelAlertService {
         };
 
         // Repeat pattern
+        const repeatWindowMs = Math.max(1, Math.min(10, repeatCount)) * 3000;
         this.vibrationInterval = setInterval(() => {
           vibrate().catch((error) => {
             logger.error('Vibration interval error:', error);
@@ -565,6 +871,14 @@ class MultiChannelAlertService {
         vibrate().catch((error) => {
           logger.error('Initial vibration error:', error);
         });
+        if (repeatCount > 0) {
+          setTimeout(() => {
+            if (this.vibrationInterval) {
+              clearInterval(this.vibrationInterval);
+              this.vibrationInterval = null;
+            }
+          }, repeatWindowMs);
+        }
       } else {
         // Android vibration is handled by notification channel
         // But we can also trigger additional vibrations
@@ -574,6 +888,7 @@ class MultiChannelAlertService {
 
         if (pattern) {
           // Custom pattern vibration
+          const repeatWindowMs = Math.max(1, Math.min(10, repeatCount)) * 1000;
           this.vibrationInterval = setInterval(async () => {
             try {
               if (Haptics.impactAsync) {
@@ -583,6 +898,14 @@ class MultiChannelAlertService {
               logger.error('Vibration interval error:', error);
             }
           }, 1000);
+          if (repeatCount > 0) {
+            setTimeout(() => {
+              if (this.vibrationInterval) {
+                clearInterval(this.vibrationInterval);
+                this.vibrationInterval = null;
+              }
+            }, repeatWindowMs);
+          }
         }
       }
     } catch (error) {
@@ -635,4 +958,3 @@ class MultiChannelAlertService {
 }
 
 export const multiChannelAlertService = new MultiChannelAlertService();
-

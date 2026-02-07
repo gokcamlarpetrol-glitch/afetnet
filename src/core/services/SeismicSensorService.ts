@@ -53,6 +53,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 class SeismicSensorService {
   private isServiceRunning = false;
   private detectionCallbacks: ((event: DetectionEvent) => void)[] = [];
+  private lastLocalAlertAt = 0;
+  private readonly localAlertCooldownMs = 5000;
 
   /**
    * ELITE: Register callback for seismic detection events
@@ -145,13 +147,20 @@ class SeismicSensorService {
     onDeviceEEWService.handleDetection(event);
 
     // 1. Local Notification (Critical Alert)
-    if (event.confidence > 70) {
+    const now = Date.now();
+    if (event.confidence > 70 && now - this.lastLocalAlertAt >= this.localAlertCooldownMs) {
+      this.lastLocalAlertAt = now;
+      const estimatedMagnitude =
+        (typeof event.estimatedMagnitude === 'number' && Number.isFinite(event.estimatedMagnitude) && event.estimatedMagnitude > 0)
+          ? event.estimatedMagnitude
+          : this.estimateMagnitudeFromAcceleration(event.magnitude, event.confidence);
+
       notificationService.showEarthquakeNotification(
-        event.magnitude,
+        estimatedMagnitude,
         event.type === 'P-WAVE' ? 'Yerel Algılama - Erken Uyarı' : 'Yerel Algılama - Sarsıntı',
         new Date(event.timestamp),
         event.type === 'P-WAVE', // isEEW
-        event.type === 'P-WAVE' ? 3 : 0, // timeAdvance for P-wave
+        event.type === 'P-WAVE' ? 5 : 0, // timeAdvance for P-wave
       );
     }
 
@@ -181,6 +190,16 @@ class SeismicSensorService {
 
   getStatistics() {
     return seismicEngine.getStatistics();
+  }
+
+  private estimateMagnitudeFromAcceleration(gForce: number, confidence: number): number {
+    const confBoost = Math.max(0, Math.min(1, confidence / 100));
+    if (gForce < 0.02) return 3.2 + confBoost * 0.3;
+    if (gForce < 0.05) return 3.8 + confBoost * 0.4;
+    if (gForce < 0.1) return 4.5 + confBoost * 0.5;
+    if (gForce < 0.2) return 5.2 + confBoost * 0.5;
+    if (gForce < 0.5) return 6.0 + confBoost * 0.6;
+    return 6.8;
   }
 
   getRunningStatus() {

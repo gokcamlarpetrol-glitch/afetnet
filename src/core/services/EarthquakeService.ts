@@ -13,6 +13,7 @@ import { loadFromCache, saveToCache } from './earthquake/EarthquakeCacheManager'
 import { fetchAllEarthquakes, fetchFromAFADAPI, fetchFromKandilliAPI } from './earthquake/EarthquakeFetcher';
 import { filterByTurkeyBounds } from './earthquake/EarthquakeDataProcessor';
 import { deduplicateEarthquakes } from './earthquake/EarthquakeDeduplicator';
+import { useSettingsStore } from '../stores/settingsStore';
 // import { processEarthquakeNotifications } from './earthquake/EarthquakeNotificationHandler'; // Removed to break circular dependency
 
 const logger = createLogger('EarthquakeService');
@@ -39,6 +40,14 @@ class EarthquakeService {
   async start() {
     if (this.isRunning) return;
 
+    const settings = useSettingsStore.getState();
+    if (!settings.earthquakeMonitoringEnabled) {
+      if (__DEV__) {
+        logger.info('ℹ️ Earthquake monitoring is disabled in settings; service start skipped');
+      }
+      return;
+    }
+
     // Initialize AI validation service for real-time data validation
     await earthquakeValidationService.initialize();
 
@@ -63,11 +72,10 @@ class EarthquakeService {
       // Continue anyway - polling will retry
     });
 
-    // ELITE: Start polling immediately (every 5 seconds for real-time updates)
-    // CRITICAL: POLL_INTERVAL = 5000ms (5 seconds) - verified for real-time AFAD data
+    // ELITE: Start polling for real-time earthquake updates
+    // Polls every 60 seconds (POLL_INTERVAL) to balance freshness and battery life
     this.intervalId = setInterval(() => {
       // CRITICAL: Handle async errors in interval callback
-      // CRITICAL: This runs every 5 seconds exactly - ensures continuous real-time updates
       this.fetchEarthquakes().catch((error) => {
         logger.error('Error in earthquake polling interval:', error);
       });
@@ -106,6 +114,16 @@ class EarthquakeService {
     this.isFetching = true;
 
     const store = useEarthquakeStore.getState();
+    const settings = useSettingsStore.getState();
+
+    if (!settings.earthquakeMonitoringEnabled) {
+      if (__DEV__) {
+        logger.debug('Deprem izleme ayarlarda kapalı; fetch atlandı');
+      }
+      store.setLoading(false);
+      this.isFetching = false;
+      return;
+    }
 
     // ELITE: Don't load cache here - already loaded in start() for instant display
     // This prevents duplicate cache loading and ensures fresh data is fetched
@@ -126,7 +144,14 @@ class EarthquakeService {
       }
 
       const fetchResult = await fetchAllEarthquakes(
-        true, // Always fetch AFAD
+        {
+          sourceAFAD: settings.sourceAFAD,
+          sourceKOERI: settings.sourceKOERI,
+          sourceUSGS: settings.sourceUSGS,
+          sourceEMSC: settings.sourceEMSC,
+          sourceCommunity: settings.sourceCommunity,
+          selectedObservatory: settings.selectedObservatory,
+        },
         () => fetchFromAFADAPI(),
         () => fetchFromKandilliAPI(),
       );
@@ -135,9 +160,11 @@ class EarthquakeService {
 
       if (__DEV__) {
         logger.info(`📊 [FETCH] Toplam: ${earthquakes.length} deprem alındı`);
+        logger.info(`   ├─ Kaynak tercihi: ${settings.selectedObservatory}`);
         logger.info(`   ├─ AFAD HTML: ${fetchResult.sources.afadHTML ? '✅' : '❌'}`);
         logger.info(`   ├─ AFAD API: ${fetchResult.sources.afadAPI ? '✅' : '❌'}`);
-        logger.info(`   └─ Kandilli: ${fetchResult.sources.kandilliAPI ? '✅' : '❌'}`);
+        logger.info(`   ├─ Kandilli: ${fetchResult.sources.kandilliAPI ? '✅' : '❌'}`);
+        logger.info(`   └─ Unified fallback: ${fetchResult.sources.unified ? '✅' : '❌'}`);
       }
 
       // ═══════════════════════════════════════════════════════════════════
@@ -317,12 +344,18 @@ class EarthquakeService {
       // ELITE: This handles push notifications, sound alerts, and emergency mode activation
       if (uniqueEarthquakes.length > 0) {
         try {
-          const { useSettingsStore } = await import('../stores/settingsStore');
-          const settings = useSettingsStore.getState();
           const { processEarthquakeNotifications } = await import('./earthquake/EarthquakeNotificationHandler');
           await processEarthquakeNotifications(uniqueEarthquakes, {
             minMagnitudeForNotification: settings.minMagnitudeForNotification,
             maxDistanceForNotification: settings.maxDistanceForNotification,
+            criticalMagnitudeThreshold: settings.criticalMagnitudeThreshold,
+            criticalDistanceThreshold: settings.criticalDistanceThreshold,
+            eewMinMagnitude: settings.eewMinMagnitude,
+            eewWarningTime: settings.eewWarningTime,
+            priorityCritical: settings.priorityCritical,
+            priorityHigh: settings.priorityHigh,
+            priorityMedium: settings.priorityMedium,
+            priorityLow: settings.priorityLow,
             notificationPush: settings.notificationPush,
           });
         } catch (notificationError) {
@@ -479,4 +512,3 @@ class EarthquakeService {
 }
 
 export const earthquakeService = new EarthquakeService();
-

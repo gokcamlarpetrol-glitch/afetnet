@@ -160,8 +160,13 @@ class UnifiedSOSController {
         // Create and activate signal immediately
         store.startCountdown(reason, message);
 
+        // FIX: Immutable state update instead of direct mutation
         if (store.currentSignal) {
-            store.currentSignal.userId = this.deviceId;
+            useSOSStore.setState(state => ({
+                currentSignal: state.currentSignal
+                    ? { ...state.currentSignal, userId: this.deviceId }
+                    : state.currentSignal,
+            }));
         }
 
         await this.fetchLocation();

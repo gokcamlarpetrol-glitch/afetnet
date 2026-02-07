@@ -53,13 +53,32 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lastUpdated}>Son Güncelleme: 12 Kasım 2025</Text>
+        <Text style={styles.lastUpdated}>Son Güncelleme: 7 Şubat 2026 | Sürüm 2.0</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. KABUL</Text>
           <Text style={styles.paragraph}>
             AfetNet uygulamasını ("Uygulama") kullanarak, bu Kullanım Koşullarını kabul etmiş olursunuz.
             Bu koşulları kabul etmiyorsanız, lütfen uygulamayı kullanmayın.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>1.1. YAŞ SINIRI</Text>
+          <Text style={styles.paragraph}>
+            AfetNet'i kullanabilmek için en az 13 yaşında olmanız gerekmektedir. 13-18 yaş arası
+            kullanıcılar, bir ebeveyn veya yasal vasinin gözetiminde ve onayıyla kullanabilir.
+            13 yaşından küçük bireylerin AfetNet'i kullanması yasaktır.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>1.2. APPLE LİSANS SÖZLEŞMESİ (EULA)</Text>
+          <Text style={styles.paragraph}>
+            Bu uygulama Apple App Store üzerinden dağıtılmaktadır. Uygulamanın kullanımı,
+            bu Koşullara ek olarak Apple'ın Standart Son Kullanıcı Lisans Sözleşmesi (EULA)
+            ile de yönetilmektedir. Bu koşullar ile Apple EULA arasında çelişki olması durumunda
+            Apple EULA geçerli olacaktır.
           </Text>
         </View>
 
@@ -161,8 +180,8 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
           <Text style={styles.sectionTitle}>11. İLETİŞİM</Text>
           <Text style={styles.paragraph}>
             Sorularınız için:{'\n\n'}
-            E-posta: legal@afetnet.app{'\n'}
-            Web: https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/terms-of-service.html
+            E-posta: support@afetnet.app{'\n'}
+            Geliştirici: Gökhan Çamcı — İstanbul, Türkiye
           </Text>
         </View>
 

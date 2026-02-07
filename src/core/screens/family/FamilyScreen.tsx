@@ -33,6 +33,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
 import { MeshMessageType } from '../../services/mesh/MeshProtocol';
+import { familyTrackingService } from '../../services/FamilyTrackingService';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
 import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
 import { MemberCard } from '../../components/family/MemberCard';
@@ -62,10 +63,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const locationEnabled = useSettingsStore((state) => state.locationEnabled);
 
   const [isSharingLocation, setIsSharingLocation] = useState(false);
-  const locationShareIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isSharingLocationRef = useRef(false); // ELITE: Ref to track sharing state in interval
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
-  const myStatusRef = useRef<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const [showIdModal, setShowIdModal] = useState(false);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -79,15 +77,6 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
-
-  // Keep refs in sync with state
-  useEffect(() => {
-    myStatusRef.current = myStatus;
-  }, [myStatus]);
-
-  useEffect(() => {
-    isSharingLocationRef.current = isSharingLocation;
-  }, [isSharingLocation]);
 
   // Batch update mechanism to prevent subscription loops
   const pendingUpdatesRef = useRef<Map<string, { status?: string; location?: { latitude: number; longitude: number } }>>(new Map());
@@ -328,7 +317,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const startLocationSharing = useCallback(async () => {
     // ELITE: Check if location is enabled in settings
-    if (!useSettingsStore.getState().locationEnabled) {
+    if (!locationEnabled) {
       Alert.alert(
         'Konum Kapalı',
         'Konum paylaşımı için Ayarlar > Konum Servisi\'ni aktif edin.',
@@ -338,26 +327,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       return;
     }
 
-    // ELITE: Clear any existing interval before starting a new one
-    if (locationShareIntervalRef.current) {
-      clearInterval(locationShareIntervalRef.current);
-      locationShareIntervalRef.current = null;
-    }
-
     try {
-      // ELITE: Ensure BLE Mesh service is started
-      if (!bleMeshService.getIsRunning()) {
-        try {
-          await bleMeshService.start();
-          if (__DEV__) {
-            logger.info('BLE Mesh service started for location sharing');
-          }
-        } catch (error) {
-          logger.warn('BLE Mesh start failed (non-critical):', error);
-          // Continue - location can still be saved to Firebase
-        }
-      }
-
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Konum İzni', 'Konum paylaşımı için izin gereklidir');
@@ -365,195 +335,30 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         return;
       }
 
-      const interval = setInterval(async () => {
-        // ELITE: Check if location sharing is still enabled (use ref to avoid stale closure)
-        if (!isSharingLocationRef.current) {
-          if (locationShareIntervalRef.current === interval) {
-            clearInterval(locationShareIntervalRef.current);
-            locationShareIntervalRef.current = null;
-          }
-          return;
-        }
-
-        try {
-          // ELITE: Ensure BLE Mesh service is running
-          if (!bleMeshService.getIsRunning()) {
-            try {
-              await bleMeshService.start();
-              if (__DEV__) {
-                logger.debug('BLE Mesh service started for location sharing');
-              }
-            } catch (error) {
-              logger.warn('BLE Mesh start failed during location sharing (non-critical):', error);
-              // Continue - location can still be saved to Firebase
-            }
-          }
-
-          // ELITE: Request location with timeout protection
-          const locationPromise = Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-
-          let timeoutId: NodeJS.Timeout | null = null;
-          const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
-            timeoutId = setTimeout(() => resolve(null), 15000); // 15 second timeout for location fetch
-          });
-
-          const location = await Promise.race([locationPromise, timeoutPromise]);
-
-          // CRITICAL: Cleanup timeout after race completes
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-          }
-
-          if (!location || !location.coords) {
-            logger.warn('Location fetch timeout or invalid - skipping this update');
-            return;
-          }
-
-          // ELITE: Validate location coordinates
-          const { latitude, longitude } = location.coords;
-          if (typeof latitude !== 'number' || isNaN(latitude) || latitude < -90 || latitude > 90) {
-            logger.error('Invalid latitude from location service:', latitude);
-            return;
-          }
-
-          if (typeof longitude !== 'number' || isNaN(longitude) || longitude < -180 || longitude > 180) {
-            logger.error('Invalid longitude from location service:', longitude);
-            return;
-          }
-
-          let myDeviceId = bleMeshService.getMyDeviceId();
-          if (!myDeviceId) {
-            // Fallback: Get device ID from device.ts
-            try {
-              myDeviceId = await getDeviceIdFromLib();
-              if (myDeviceId) {
-                useMeshStore.getState().setMyDeviceId(myDeviceId);
-              }
-            } catch (error) {
-              logger.error('Failed to get device ID for location update:', error);
-              return; // Cannot continue without device ID
-            }
-          }
-
-          if (!myDeviceId) {
-            logger.error('Device ID not available for location sharing');
-            return;
-          }
-
-          // FIXED: Use ref to get current status value (avoids closure issues)
-          const currentStatus = myStatusRef.current;
-
-          const locationMessage = JSON.stringify({
-            type: 'family_location_update',
-            deviceId: myDeviceId, // Include deviceId for matching
-            status: currentStatus, // Use ref value, not closure value
-            location: {
-              latitude,
-              longitude,
-              timestamp: Date.now(),
-            },
-          });
-
-          // ELITE: Broadcast location update (only if BLE Mesh is running)
-          if (bleMeshService.getIsRunning()) {
-            try {
-              await meshNetworkService.broadcastMessage(locationMessage, MeshMessageType.TEXT, {
-                to: 'broadcast',
-                from: myDeviceId,
-              });
-              if (__DEV__) {
-                logger.debug('Location update broadcasted via BLE Mesh');
-              }
-            } catch (broadcastError) {
-              logger.warn('BLE Mesh broadcast failed during location sharing (non-critical):', broadcastError);
-              // Continue - Firebase sync will still work
-            }
-          }
-
-          // Save to Firebase for cloud sync
-          try {
-            const { firebaseDataService } = await import('../../services/FirebaseDataService');
-            if (firebaseDataService.isInitialized) {
-              await firebaseDataService.saveLocationUpdate(myDeviceId, {
-                latitude,
-                longitude,
-                accuracy: location.coords.accuracy || null,
-                timestamp: Date.now(),
-              });
-
-              // Also save status update
-              await firebaseDataService.saveStatusUpdate(myDeviceId, {
-                status: currentStatus,
-                location: {
-                  latitude,
-                  longitude,
-                },
-                timestamp: Date.now(),
-              });
-            }
-          } catch (error) {
-            logger.error('Failed to save location to Firebase:', error);
-            // Continue - location update will still be applied locally
-          }
-
-          // ELITE: Find member by deviceId and use member.id (not deviceId) for updateMemberLocation
-          const familyMembers = useFamilyStore.getState().members;
-          const myMember = familyMembers.find(m => m.deviceId === myDeviceId);
-          if (myMember) {
-            try {
-              await useFamilyStore.getState().updateMemberLocation(
-                myMember.id, // Use member.id, not deviceId
-                latitude,
-                longitude,
-              );
-            } catch (updateError) {
-              logger.error('Failed to update member location in store:', updateError);
-            }
-          } else if (__DEV__) {
-            logger.debug('No family member found with deviceId:', myDeviceId);
-          }
-        } catch (error) {
-          logger.error('Location sharing error:', error);
-          // Don't stop interval - continue trying
-        }
-      }, 30000);
-
-      // Store interval ID in ref for cleanup
-      locationShareIntervalRef.current = interval;
+      // Keep a consistent sharing cadence and delegate all transport logic to FamilyTrackingService.
+      familyTrackingService.setShareThrottleMs(30 * 1000);
+      await familyTrackingService.startTracking('family-screen');
+      await familyTrackingService.shareMyLocation({ force: true, reason: 'family-screen-toggle-on' });
     } catch (error) {
       logger.error('Start location sharing error:', error);
       setIsSharingLocation(false);
     }
-  }, []); // FIXED: No dependencies - uses ref for myStatus
+  }, [locationEnabled]);
 
   useEffect(() => {
-    // ELITE: Use ref to track current sharing state to avoid stale closures
-    const currentSharingState = isSharingLocation;
-
-    if (currentSharingState) {
+    if (isSharingLocation) {
       startLocationSharing().catch((error) => {
         logger.error('Failed to start location sharing:', error);
-        setIsSharingLocation(false); // Reset state on error
+        setIsSharingLocation(false);
       });
     } else {
-      // Stop sharing when disabled
-      if (locationShareIntervalRef.current) {
-        clearInterval(locationShareIntervalRef.current);
-        locationShareIntervalRef.current = null;
-      }
+      familyTrackingService.stopTracking('family-screen');
     }
 
-    // Cleanup function - CRITICAL FOR MEMORY LEAK PREVENTION
     return () => {
-      if (locationShareIntervalRef.current) {
-        clearInterval(locationShareIntervalRef.current);
-        locationShareIntervalRef.current = null;
-      }
+      familyTrackingService.stopTracking('family-screen');
     };
-  }, [isSharingLocation, startLocationSharing]); // startLocationSharing is stable (empty deps, uses refs)
+  }, [isSharingLocation, startLocationSharing]);
 
   const handleStatusUpdate = async (status: 'safe' | 'need-help' | 'critical') => {
     haptics.notificationSuccess();

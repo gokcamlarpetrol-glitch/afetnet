@@ -225,7 +225,7 @@ checkContains('src/core/screens/messages/SOSConversationScreen.tsx', 'selfIds.ha
 checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.id)', 'FamilyTrackingService publishes for identity.id');
 checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.deviceId)', 'FamilyTrackingService publishes for identity.deviceId');
 checkContains('src/core/services/FamilyTrackingService.ts', 'getDeviceIdFromLib', 'FamilyTrackingService publishes for physical device id');
-checkContains('src/core/screens/map/MapScreen.tsx', 'familyTrackingService.stopTracking()', 'MapScreen stops tracking on cleanup');
+checkRegex('src/core/screens/map/MapScreen.tsx', /familyTrackingService\.stopTracking\([^)]*\)/, 'MapScreen stops tracking on cleanup');
 
 console.log('\n[4] Firestore security rules');
 checkContains('firestore.rules', 'function isDeviceReadable(deviceId)', 'Rules define device readability helper');

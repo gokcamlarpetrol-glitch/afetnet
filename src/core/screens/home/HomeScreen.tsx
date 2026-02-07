@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl, StatusBar, Animated } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, StatusBar, Animated, Pressable } from 'react-native';
 import { useEarthquakes } from '../../hooks/useEarthquakes';
 import HomeHeader from './components/HomeHeader';
 import EmergencyButton from './components/EmergencyButton';
@@ -20,6 +20,7 @@ import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
 // ELITE: Family store no longer needed on home screen
 import { createLogger } from '../../utils/logger';
+import { Ionicons } from '@expo/vector-icons';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase } from '@react-navigation/native';
 
@@ -33,7 +34,7 @@ interface HomeScreenProps {
 }
 
 export default function HomeScreen({ navigation }: HomeScreenProps) {
-  const { earthquakes, loading, error, refresh } = useEarthquakes();
+  const { earthquakes, loading, error, lastUpdate, refresh } = useEarthquakes();
   const [refreshing, setRefreshing] = useState(false);
   const [showSOSModal, setShowSOSModal] = useState(false);
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
@@ -77,6 +78,13 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   }, []);
 
   const latestEarthquake = earthquakes[0];
+  const isDataStale = !!lastUpdate && Date.now() - lastUpdate > 10 * 60 * 1000;
+
+  const dataStatusText = error
+    ? 'Deprem verisi güncellenemedi. Son alınan veri gösteriliyor.'
+    : isDataStale
+      ? 'Deprem verisi gecikmeli olabilir. Yenileyerek güncelleyin.'
+      : null;
 
 
 
@@ -103,6 +111,16 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         <HomeHeader />
 
         {/* 2. Modern Earthquake Card with Map Preview */}
+        {dataStatusText && (
+          <View style={styles.dataStatusBanner}>
+            <Ionicons name="alert-circle-outline" size={16} color="#92400e" />
+            <Text style={styles.dataStatusText}>{dataStatusText}</Text>
+            <Pressable onPress={onRefresh} style={styles.dataStatusAction}>
+              <Text style={styles.dataStatusActionText}>Yenile</Text>
+            </Pressable>
+          </View>
+        )}
+
         {latestEarthquake && (
           <PremiumEarthquakeCard
             magnitude={latestEarthquake.magnitude}
@@ -155,5 +173,34 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 80,
+  },
+  dataStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  dataStatusText: {
+    flex: 1,
+    color: '#78350f',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  dataStatusAction: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#f59e0b',
+  },
+  dataStatusActionText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

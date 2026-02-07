@@ -16,6 +16,8 @@ interface SettingsState {
   bleMeshEnabled: boolean;
   // EEW (Earthquake Early Warning)
   eewEnabled: boolean;
+  // Earthquake Monitoring
+  earthquakeMonitoringEnabled: boolean;
   // Seismic Sensor
   seismicSensorEnabled: boolean;
   // Alarm Sound
@@ -39,6 +41,8 @@ interface SettingsState {
   // ELITE: Accessibility Features
   fontScale: number; // Font scale 1.0-1.5 (default: 1.0)
   highContrastEnabled: boolean; // High contrast mode for visibility
+  debugModeEnabled: boolean; // Enables verbose diagnostics in development
+  verboseLoggingEnabled: boolean; // Forces debug log level in development
 
   // ELITE: Comprehensive Earthquake Settings
   // Notification Thresholds
@@ -114,6 +118,7 @@ interface SettingsActions {
   setLocation: (enabled: boolean) => void;
   setBleMesh: (enabled: boolean) => void;
   setEew: (enabled: boolean) => void;
+  setEarthquakeMonitoring: (enabled: boolean) => void;
   setSeismicSensor: (enabled: boolean) => void;
   setAlarmSound: (enabled: boolean) => void;
   setVibration: (enabled: boolean) => void;
@@ -130,6 +135,8 @@ interface SettingsActions {
   // ELITE: Accessibility Features Actions
   setFontScale: (scale: number) => void;
   setHighContrast: (enabled: boolean) => void;
+  setDebugMode: (enabled: boolean) => void;
+  setVerboseLogging: (enabled: boolean) => void;
 
   // ELITE: Comprehensive Earthquake Settings Actions
   setMinMagnitudeForNotification: (magnitude: number) => void;
@@ -185,6 +192,7 @@ const defaultSettings: SettingsState = {
   locationEnabled: true,
   bleMeshEnabled: true,
   eewEnabled: true,
+  earthquakeMonitoringEnabled: true,
   seismicSensorEnabled: true,
   alarmSoundEnabled: true,
   vibrationEnabled: true,
@@ -201,6 +209,8 @@ const defaultSettings: SettingsState = {
   // ELITE: Accessibility Features Defaults
   fontScale: 1.0, // Normal font size
   highContrastEnabled: false, // High contrast off by default
+  debugModeEnabled: false,
+  verboseLoggingEnabled: false,
 
   // ELITE: Comprehensive Earthquake Settings Defaults
   // CRITICAL: Default notification threshold is 4.0 M (user requirement)
@@ -257,6 +267,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setLocation: (enabled) => set({ locationEnabled: enabled }),
       setBleMesh: (enabled) => set({ bleMeshEnabled: enabled }),
       setEew: (enabled) => set({ eewEnabled: enabled }),
+      setEarthquakeMonitoring: (enabled) => set({ earthquakeMonitoringEnabled: enabled }),
       setSeismicSensor: (enabled) => set({ seismicSensorEnabled: enabled }),
       setAlarmSound: (enabled) => set({ alarmSoundEnabled: enabled }),
       setVibration: (enabled) => set({ vibrationEnabled: enabled }),
@@ -273,6 +284,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       // ELITE: Accessibility Features Actions
       setFontScale: (scale) => set({ fontScale: Math.max(1.0, Math.min(1.5, scale)) }),
       setHighContrast: (enabled) => set({ highContrastEnabled: enabled }),
+      setDebugMode: (enabled) => set({ debugModeEnabled: enabled }),
+      setVerboseLogging: (enabled) => set({ verboseLoggingEnabled: enabled }),
 
       // ELITE: Comprehensive Earthquake Settings Actions
       setMinMagnitudeForNotification: (magnitude) => set({ minMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)) }),
@@ -333,4 +346,3 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     },
   ),
 );
-

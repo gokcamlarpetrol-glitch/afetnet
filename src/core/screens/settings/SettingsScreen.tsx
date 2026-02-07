@@ -74,9 +74,11 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const locationEnabled = useSettingsStore((state) => state.locationEnabled);
   const bleMeshEnabled = useSettingsStore((state) => state.bleMeshEnabled);
   const eewEnabled = useSettingsStore((state) => state.eewEnabled);
+  const earthquakeMonitoringEnabled = useSettingsStore((state) => state.earthquakeMonitoringEnabled);
   const seismicSensorEnabled = useSettingsStore((state) => state.seismicSensorEnabled);
   const alarmSoundEnabled = useSettingsStore((state) => state.alarmSoundEnabled);
   const vibrationEnabled = useSettingsStore((state) => state.vibrationEnabled);
+  const voiceCommandEnabled = useSettingsStore((state) => state.voiceCommandEnabled);
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
 
@@ -84,6 +86,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const [aiFeaturesEnabled] = useState(true);
   const [deviceId, setDeviceId] = useState<string>('...');
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
+  const fontScale = useSettingsStore((state) => state.fontScale);
+  const highContrastEnabled = useSettingsStore((state) => state.highContrastEnabled);
 
   // ELITE: New Features (previously 'Yakında' - now ACTIVE!)
   const pdrEnabled = useSettingsStore((state) => state.pdrEnabled);
@@ -107,12 +111,16 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const setLocationEnabled = useSettingsStore((state) => state.setLocation);
   const setBleMeshEnabled = useSettingsStore((state) => state.setBleMesh);
   const setEewEnabled = useSettingsStore((state) => state.setEew);
+  const setEarthquakeMonitoringEnabled = useSettingsStore((state) => state.setEarthquakeMonitoring);
   const setSeismicSensorEnabled = useSettingsStore((state) => state.setSeismicSensor);
   const setAlarmSoundEnabled = useSettingsStore((state) => state.setAlarmSound);
   const setVibrationEnabled = useSettingsStore((state) => state.setVibration);
+  const setVoiceCommandEnabled = useSettingsStore((state) => state.setVoiceCommand);
   const setBatterySaverEnabled = useSettingsStore((state) => state.setBatterySaver);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const setNewsEnabled = useSettingsStore((state) => state.setNews);
+  const setFontScale = useSettingsStore((state) => state.setFontScale);
+  const setHighContrast = useSettingsStore((state) => state.setHighContrast);
 
   // ELITE: New Features Setters
   const setPdrEnabled = useSettingsStore((state) => state.setPdr);
@@ -342,6 +350,14 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       onPress: () => setVibrationEnabled(!vibrationEnabled),
     },
     {
+      icon: 'mic',
+      title: 'Sesli Komutlar',
+      subtitle: 'Eller serbest acil komut modu',
+      type: 'switch',
+      value: voiceCommandEnabled,
+      onPress: () => setVoiceCommandEnabled(!voiceCommandEnabled),
+    },
+    {
       icon: 'flash',
       title: 'LED Uyarısı',
       subtitle: 'Fener ve düdük araçları',
@@ -361,7 +377,27 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Konum izleme ve paylaşımı',
       type: 'switch',
       value: locationEnabled,
-      onPress: () => setLocationEnabled(!locationEnabled),
+      onPress: async () => {
+        haptics.impactLight();
+        const newValue = !locationEnabled;
+        setLocationEnabled(newValue);
+
+        try {
+          const { locationService } = await import('../../services/LocationService');
+          const { familyTrackingService } = await import('../../services/FamilyTrackingService');
+
+          if (newValue) {
+            await locationService.recheckPermission();
+            await locationService.initialize();
+            Alert.alert('Konum Servisi', 'Konum servisleri aktif edildi.');
+          } else {
+            familyTrackingService.stopTracking('settings-location-toggle');
+            Alert.alert('Konum Servisi', 'Konum servisleri kapatıldı.');
+          }
+        } catch (error) {
+          logger.warn('Location toggle side-effect failed:', error);
+        }
+      },
     },
     {
       icon: 'map',
@@ -525,16 +561,27 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     {
       icon: 'pulse',
       title: 'Deprem İzleme',
-      subtitle: 'AFAD ve Kandilli verileri',
+      subtitle: 'AFAD, Kandilli ve desteklenen kaynaklar',
       type: 'switch',
-      value: true,
-      onPress: () => {
+      value: earthquakeMonitoringEnabled,
+      onPress: async () => {
         haptics.impactLight();
-        Alert.alert(
-          'Deprem İzleme',
-          'Deprem izleme sistemi her zaman aktif durumda. AFAD ve Kandilli verileri otomatik olarak çekiliyor.',
-          [{ text: 'Tamam' }],
-        );
+        const newValue = !earthquakeMonitoringEnabled;
+        setEarthquakeMonitoringEnabled(newValue);
+
+        try {
+          const { earthquakeService } = await import('../../services/EarthquakeService');
+          if (newValue) {
+            await earthquakeService.start();
+            await earthquakeService.fetchEarthquakes();
+            Alert.alert('Deprem İzleme', 'Deprem izleme aktif edildi.');
+          } else {
+            earthquakeService.stop();
+            Alert.alert('Deprem İzleme', 'Deprem izleme durduruldu.');
+          }
+        } catch (error) {
+          logger.warn('Earthquake monitoring toggle side-effect failed:', error);
+        }
       },
     },
     {
@@ -749,12 +796,6 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   ];
 
   const generalSettings = useMemo<SettingOption[]>(() => {
-    // Get store values for accessibility
-    const fontScale = useSettingsStore.getState().fontScale;
-    const highContrastEnabled = useSettingsStore.getState().highContrastEnabled;
-    const setFontScale = useSettingsStore.getState().setFontScale;
-    const setHighContrast = useSettingsStore.getState().setHighContrast;
-
     const items: SettingOption[] = [
       {
         icon: 'language',
@@ -851,7 +892,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     ];
 
     return items;
-  }, [currentLanguage, navigation]);
+  }, [currentLanguage, navigation, fontScale, highContrastEnabled, setFontScale, setHighContrast]);
 
   const aboutSettings: SettingOption[] = [
     {

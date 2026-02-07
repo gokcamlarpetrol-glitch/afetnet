@@ -52,6 +52,23 @@ service cloud.firestore {
              && exists(/databases/$(database)/documents/devices/$(senderDeviceId))
              && get(/databases/$(database)/documents/devices/$(senderDeviceId)).data.ownerUid == request.auth.uid;
     }
+
+    function isPendingRequestStatus(status) {
+      return status == 'pending';
+    }
+
+    function isTerminalRequestStatus(status) {
+      return status == 'accepted' || status == 'declined' || status == 'expired';
+    }
+
+    function isNewsSummaryJobOwner(articleId) {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/news_summary_jobs/$(articleId))
+             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.ownerUid == request.auth.uid
+             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.status == 'processing'
+             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.leaseUntil is number
+             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.leaseUntil >= request.time.toMillis() - 1000;
+    }
     
     function hasAppCheck() {
       return request.app != null;
@@ -71,7 +88,7 @@ service cloud.firestore {
     // - Rate limited (1 per second per device)
     // - Auto-expires after 5 minutes
     match /eew_pwave_detections/{detectionId} {
-      allow read: if true; // Public read for crowdsourcing
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.deviceId is string
                     && request.resource.data.timestamp is number
@@ -153,8 +170,15 @@ service cloud.firestore {
                     && request.resource.data.ownerUid == request.auth.uid;
 
       // Owner-only updates; ownerUid cannot be changed after creation
-      allow update: if isDeviceOwner(deviceId)
-                    && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow update: if (
+                      isDeviceOwner(deviceId)
+                      && request.resource.data.ownerUid == resource.data.ownerUid
+                    ) || (
+                      // Migration-safe claim: allow owner binding for legacy docs missing ownerUid
+                      isAuthenticated()
+                      && !(resource.data.ownerUid is string)
+                      && request.resource.data.ownerUid == request.auth.uid
+                    );
       allow delete: if false; // Devices should not be deleted
       
       // Family members subcollection
@@ -231,7 +255,7 @@ service cloud.firestore {
     // ============================================================
     
     match /seismicDetections/{detectionId} {
-      allow read: if true; // Public read for real-time map
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.deviceId is string
                     && request.resource.data.latitude is number
@@ -253,6 +277,15 @@ service cloud.firestore {
                             && request.resource.data.token is string
                             && request.resource.data.platform is string;
       allow delete: if isOwner(userId);
+      
+      // FIX #7: Multi-device FCM token subcollection
+      match /devices/{deviceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+                              && request.resource.data.token is string
+                              && request.resource.data.platform is string;
+        allow delete: if isOwner(userId);
+      }
     }
     
     // ============================================================
@@ -304,19 +337,55 @@ service cloud.firestore {
     
     // News summaries (shared across ALL users for cost optimization)
     // - Public read: All users can read cached summaries
-    // - Authenticated write: Any authenticated user can save a summary
+    // - Write: only active summary job owner can create/update
     // - Summaries are shared by articleId, not userId
     // - This reduces OpenAI API costs significantly
     match /news_summaries/{summaryId} {
-      allow read: if true; // Public read for shared cache
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.articleId is string
                     && request.resource.data.summary is string
-                    && request.resource.data.title is string;
+                    && request.resource.data.title is string
+                    && request.resource.data.articleId == summaryId
+                    && request.resource.data.createdBy == request.auth.uid
+                    && isNewsSummaryJobOwner(summaryId);
       allow update: if isAuthenticated()
                     && request.resource.data.articleId is string
-                    && request.resource.data.summary is string;
+                    && request.resource.data.summary is string
+                    && request.resource.data.articleId == summaryId
+                    && request.resource.data.createdBy == request.auth.uid
+                    && (
+                      !(resource.data.createdBy is string)
+                      || resource.data.createdBy == request.auth.uid
+                    )
+                    && isNewsSummaryJobOwner(summaryId);
       allow delete: if false; // Cleanup via Cloud Functions/TTL
+    }
+
+    // Summary generation leases (single-writer lock per article)
+    match /news_summary_jobs/{summaryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && request.resource.data.articleId is string
+                    && request.resource.data.articleId == summaryId
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.status == 'processing'
+                    && request.resource.data.leaseUntil is number;
+      allow update: if isAuthenticated()
+                    && request.resource.data.articleId is string
+                    && request.resource.data.articleId == summaryId
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.status is string
+                    && (
+                      // Current lock owner can update lifecycle state.
+                      resource.data.ownerUid == request.auth.uid
+                      // Expired lock can be taken over by another authenticated user.
+                      || (
+                        resource.data.leaseUntil is number
+                        && resource.data.leaseUntil < request.time.toMillis()
+                      )
+                    );
+      allow delete: if false;
     }
     
     // ============================================================
@@ -329,6 +398,60 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isOwner(userId);
       allow delete: if false;
+
+      // Private contacts for each authenticated user
+      match /contacts/{contactId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Private block list for each authenticated user
+      match /blocked/{blockedId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Private reactions mirror for each authenticated user
+      match /reactions/{reactionId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Contact requests inbox.
+      // Sender can create a pending request in recipient inbox; recipient can read/update/delete.
+      match /contactRequests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated()
+                      && request.auth.uid == requestId
+                      && request.resource.data.fromUserId == request.auth.uid
+                      && request.resource.data.toUserId == userId
+                      && request.resource.data.status is string
+                      && isPendingRequestStatus(request.resource.data.status)
+                      && request.resource.data.fromQrId is string
+                      && request.resource.data.fromName is string;
+        allow update: if (
+                        isOwner(userId)
+                        && resource.data.fromUserId is string
+                        && request.resource.data.fromUserId == resource.data.fromUserId
+                        && request.resource.data.status is string
+                        && isTerminalRequestStatus(request.resource.data.status)
+                      ) || (
+                        isAuthenticated()
+                        && request.auth.uid == requestId
+                        && request.resource.data.fromUserId == request.auth.uid
+                        && request.resource.data.toUserId == userId
+                        && request.resource.data.status is string
+                        && isPendingRequestStatus(request.resource.data.status)
+                      );
+        allow delete: if isOwner(userId);
+      }
+
+      // Per-user notifications inbox.
+      // Owner can manage; authenticated users can create notifications addressed to owner.
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isOwner(userId);
+        allow create: if isAuthenticated()
+                      && request.resource.data.type is string
+                      && request.resource.data.fromUserId is string
+                      && request.resource.data.fromUserId == request.auth.uid;
+      }
     }
     
     // Earthquakes collection (read-only for users, write via Cloud Functions)

@@ -258,7 +258,7 @@ class LoRaMeshService {
 
                 this.setModuleState('connected');
             } else {
-                logger.warn('⚠️ LoRa native module not available, using simulation');
+                logger.warn('⚠️ LoRa native module not available; LoRa transport disabled');
                 this.setModuleState('disconnected');
             }
         } catch (error) {

@@ -34,8 +34,14 @@ export const LoginScreen = () => {
 
   useEffect(() => {
     const checkAuthAvailability = async () => {
-      const isAppleAvailable = await AppleAuthentication.isAvailableAsync();
-      setIsAppleAuthAvailable(isAppleAvailable);
+      try {
+        const isAppleAvailable = await AppleAuthentication.isAvailableAsync();
+        setIsAppleAuthAvailable(isAppleAvailable);
+      } catch (error) {
+        logger.warn('Apple auth availability check failed:', error);
+        setIsAppleAuthAvailable(false);
+      }
+
       setIsGoogleAuthAvailable(AuthService.isGoogleAuthAvailable());
     };
     checkAuthAvailability();
@@ -61,15 +67,25 @@ export const LoginScreen = () => {
 
   const handleGoogleLogin = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (!isGoogleAuthAvailable) {
+      Alert.alert('Google Giriş Kullanılamıyor', 'Google kimlik doğrulama şu anda yapılandırılmamış.');
+      return;
+    }
+
     try {
       await AuthService.signInWithGoogle();
-    } catch (error) {
-      Alert.alert('Giriş Hatası', 'Google ile giriş başarısız oldu.');
+    } catch (error: unknown) {
+      Alert.alert('Google Giriş Hatası', getErrorMessage(error) || 'Google ile giriş başarısız oldu.');
     }
   };
 
   const handleAppleLogin = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (!isAppleAuthAvailable) {
+      Alert.alert('Apple Giriş Kullanılamıyor', 'Bu cihazda Apple ile giriş kullanılamıyor.');
+      return;
+    }
+
     try {
       await AuthService.signInWithApple();
     } catch (error: unknown) {
@@ -88,6 +104,16 @@ export const LoginScreen = () => {
   const handleRegister = () => {
     Haptics.selectionAsync();
     navigation.navigate('EmailRegister');
+  };
+
+  const handleOpenTerms = () => {
+    Haptics.selectionAsync();
+    navigation.navigate('TermsOfService');
+  };
+
+  const handleOpenPrivacy = () => {
+    Haptics.selectionAsync();
+    navigation.navigate('PrivacyPolicy');
   };
 
   return (
@@ -212,22 +238,27 @@ export const LoginScreen = () => {
 
           {/* Apple Button */}
           {isAppleAuthAvailable && (
-            <TouchableOpacity
-              style={styles.socialButton}
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+              cornerRadius={10}
+              style={styles.appleSignInButton}
               onPress={handleAppleLogin}
-              activeOpacity={0.85}
-            >
-              <View style={styles.socialIconWrapper}>
-                <Ionicons name="logo-apple" size={16} color="#FFFFFF" />
-              </View>
-              <Text style={styles.socialButtonText}>Apple</Text>
-            </TouchableOpacity>
+            />
           )}
         </View>
 
-        {/* Disclaimer */}
+        {/* APPLE COMPLIANCE: Clickable Legal Links */}
         <Text style={styles.disclaimer}>
-          Devam ederek Kullanım Koşulları ve Gizlilik Politikasını kabul etmiş olursunuz.
+          Devam ederek{' '}
+          <Text style={styles.disclaimerLink} onPress={handleOpenTerms}>
+            Kullanım Koşulları
+          </Text>
+          {' '}ve{' '}
+          <Text style={styles.disclaimerLink} onPress={handleOpenPrivacy}>
+            Gizlilik Politikası
+          </Text>
+          'nı kabul etmiş olursunuz.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -359,11 +390,11 @@ const styles = StyleSheet.create({
     marginHorizontal: 14,
   },
   socialContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 12,
   },
   socialButton: {
-    flex: 1,
+    width: '100%',
     height: 44,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 10,
@@ -392,11 +423,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  appleSignInButton: {
+    width: '100%',
+    height: 44,
+  },
   disclaimer: {
     fontSize: 11,
     color: 'rgba(255, 255, 255, 0.35)',
     textAlign: 'center',
     marginTop: 24,
     lineHeight: 15,
+  },
+  disclaimerLink: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    textDecorationLine: 'underline',
+    fontWeight: '500',
   },
 });

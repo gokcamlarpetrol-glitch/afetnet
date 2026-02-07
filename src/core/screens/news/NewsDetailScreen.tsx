@@ -91,7 +91,6 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   const [browserVisible, setBrowserVisible] = useState(false);
   const [browserMode, setBrowserMode] = useState<'webview' | 'html'>('html');
   const [isFullScreen, setIsFullScreen] = useState(false); // ELITE: Tam ekran modu - sadece orijinal haber sekmesine tıklandığında aktif
-  const [webViewKey, setWebViewKey] = useState(0); // CRITICAL: WebView'i zorla yeniden yüklemek için key
   const [inAppBrowserVisible, setInAppBrowserVisible] = useState(false); // ELITE: In-app browser modal state
   const [inAppBrowserUrl, setInAppBrowserUrl] = useState<string>(''); // ELITE: In-app browser URL
   const [inAppBrowserWebView, setInAppBrowserWebView] = useState<React.ComponentType<WebViewProps> | null>(null); // ELITE: In-app browser WebView component
@@ -475,21 +474,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
           }
         } catch (urlError) {
           logger.error('Invalid URL format:', urlError);
-          // Fallback: HTML parse et
-          if (!articleHtml && !articlePlainText && !articleContentLoading) {
-            loadArticleContent().catch((error) => {
-              logger.error('Failed to load article content:', error);
-            });
-          }
-        }
-      } else {
-        // Geçerli URL yok, HTML fallback yükle
-        if (!articleHtml && !articlePlainText && !articleContentLoading) {
-          loadArticleContent().catch((error) => {
-            logger.error('Failed to load article content:', error);
-          });
+          // Content is already loaded by primary useEffect [article.url, loadArticleContent]
+          // No need to call loadArticleContent() here — it would cause a redundant fetch
         }
       }
+      // If URL is invalid, HTML fallback is already loaded by primary effect
     }
     // ELITE: loadArticleContent is memoized, excluding from deps to prevent infinite loops
   }, [activeTab, hasValidUrl, article.url]);
@@ -1286,6 +1275,11 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     if (tab === 'original') {
       // CRITICAL: Orijinal haber içeriğini otomatik yükle (hem WebView hem HTML fallback için)
       if (hasValidUrl) {
+        const normalizedUrl = typeof article.url === 'string' ? article.url.trim() : '';
+        if (normalizedUrl && normalizedUrl !== '#' && !inAppBrowserUrl) {
+          setInAppBrowserUrl(normalizedUrl);
+        }
+
         // WebView için içerik yükleme (eğer yüklenmediyse)
         if (!articleHtml && !articlePlainText && !articleContentLoading) {
           logger.info('Orijinal haber sekmesine geçildi, içerik yükleniyor...', article.url);
@@ -1293,23 +1287,8 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
             logger.error('Failed to auto-load article content:', error);
           });
         }
-        // CRITICAL: WebView'i zorla yeniden yükle (eğer hazırsa)
-        if (webViewStatus === 'ready' && NativeWebView && article.url) {
-          logger.info('WebView hazır, URL zorla yükleniyor:', article.url);
-          // CRITICAL: WebView key'ini değiştirerek zorla yeniden yükle
-          setWebViewKey(prev => prev + 1);
-          // CRITICAL: WebView ref ile direkt URL yükle
-          setTimeout(() => {
-            if (webViewRef.current && article.url) {
-              try {
-                webViewRef.current.reload();
-                logger.info('WebView reload edildi:', article.url);
-              } catch (error) {
-                logger.warn('WebView reload hatası:', error);
-              }
-            }
-          }, 100);
-        } else if (webViewStatus === 'unavailable' && hasValidUrl) {
+
+        if (webViewStatus === 'unavailable') {
           // WebView yoksa HTML fallback içeriğini yükle
           logger.info('WebView yok, HTML fallback içeriği yükleniyor...', article.url);
           if (!articleHtml && !articlePlainText && !articleContentLoading) {
@@ -1317,7 +1296,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               logger.error('Failed to load HTML fallback content:', error);
             });
           }
-        } else if (webViewStatus === 'idle' && hasValidUrl) {
+        } else if (webViewStatus === 'idle') {
           // WebView henüz yüklenmediyse, yüklemeyi tetikle
           logger.info('WebView henüz yüklenmedi, yükleme tetikleniyor...', article.url);
           // useEffect otomatik olarak yükleyecek
@@ -2654,5 +2633,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-
 

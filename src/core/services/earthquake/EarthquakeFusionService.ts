@@ -28,29 +28,36 @@ class EarthquakeFusionService {
   /**
      * Fuses multiple lists of earthquakes into a single authoritative list
      */
-  fuse(afadList: Earthquake[], kandilliList: Earthquake[]): Earthquake[] {
+  fuse(
+    afadList: Earthquake[],
+    kandilliList: Earthquake[],
+    primarySource: 'AFAD' | 'KANDILLI' = 'AFAD',
+  ): Earthquake[] {
     const fusedMap = new Map<string, FusedEarthquake>();
+    const primaryList = primarySource === 'KANDILLI' ? kandilliList : afadList;
+    const secondaryList = primarySource === 'KANDILLI' ? afadList : kandilliList;
+    const secondaryLabel = primarySource === 'KANDILLI' ? 'AFAD' : 'KANDILLI';
 
-    // 1. Start with AFAD (Primary Authority)
-    afadList.forEach(eq => {
+    // 1. Start with primary authority source
+    primaryList.forEach(eq => {
       fusedMap.set(eq.id, {
         ...eq,
-        verifiedBy: ['AFAD'],
+        verifiedBy: [primarySource],
         isVerified: false, // Needs multi-source for verification
-        confidenceScore: 80, // High base confidence for AFAD
+        confidenceScore: 80, // High base confidence for selected primary
         originalSources: [eq],
       });
     });
 
-    // 2. Merge Kandilli (Validator)
-    kandilliList.forEach(kandilliEq => {
+    // 2. Merge secondary source as validator
+    secondaryList.forEach(secondaryEq => {
       let matchFound = false;
 
       // Try to match with existing fused event
       for (const [id, fusedEq] of fusedMap.entries()) {
-        if (this.isSameEarthquake(fusedEq, kandilliEq)) {
+        if (this.isSameEarthquake(fusedEq, secondaryEq)) {
           // MATCH FOUND!
-          this.mergeEvent(fusedEq, kandilliEq);
+          this.mergeEvent(fusedEq, secondaryEq, primarySource);
           matchFound = true;
           break;
         }
@@ -58,17 +65,18 @@ class EarthquakeFusionService {
 
       // If no match, add as new event (but with lower initial confidence/priority if needed)
       if (!matchFound) {
-        // Kandilli ID format usually: kandilli-2023.01.01.12.30.45
-        // We assume AFAD is missing this one.
-        const newId = kandilliEq.id.startsWith('kandilli-') ? kandilliEq.id : `kandilli-${kandilliEq.id}`;
+        const normalizedPrefix = secondaryLabel.toLowerCase();
+        const newId = secondaryEq.id.startsWith(`${normalizedPrefix}-`)
+          ? secondaryEq.id
+          : `${normalizedPrefix}-${secondaryEq.id}`;
 
         fusedMap.set(newId, {
-          ...kandilliEq,
+          ...secondaryEq,
           id: newId,
-          verifiedBy: ['Kandilli'],
+          verifiedBy: [secondaryLabel],
           isVerified: false,
-          confidenceScore: 70, // Slightly lower base for Kandilli (often faster but revises magnitudes)
-          originalSources: [kandilliEq],
+          confidenceScore: 70, // Slightly lower base confidence for secondary source
+          originalSources: [secondaryEq],
         });
       }
     });
@@ -87,7 +95,7 @@ class EarthquakeFusionService {
     return dist < DISTANCE_THRESHOLD_KM;
   }
 
-  private mergeEvent(existing: FusedEarthquake, incoming: Earthquake) {
+  private mergeEvent(existing: FusedEarthquake, incoming: Earthquake, primarySource: 'AFAD' | 'KANDILLI') {
     // Add verification source
     if (!existing.verifiedBy.includes(incoming.source)) {
       existing.verifiedBy.push(incoming.source);
@@ -108,15 +116,13 @@ class EarthquakeFusionService {
     // but if the existing was Kandilli and AFAD comes later, we might override.
     // Since we process AFAD first, 'existing' is likely AFAD.
 
-    // If existing is AFAD, we generally keep it.
-    // If existing was Kandilli (unlikely order, but possible in future), and incoming is AFAD, override.
-    if (incoming.source === 'AFAD' && existing.source !== 'AFAD') {
-      // Upgrade to Official Data
+    // Keep selected primary authority as canonical source.
+    if (incoming.source === primarySource && existing.source !== primarySource) {
       existing.magnitude = incoming.magnitude;
       existing.depth = incoming.depth;
-      existing.location = incoming.location; // AFAD locations are usually cleaner
-      existing.source = 'AFAD'; // Switch authority
-      existing.id = incoming.id; // Switch ID to AFAD
+      existing.location = incoming.location;
+      existing.source = primarySource;
+      existing.id = incoming.id;
     }
   }
 

@@ -114,12 +114,14 @@ class iOSLiveActivitiesService {
             }
 
             // Fallback: Log that we would start a Live Activity
-            logger.info(`📱 Would start Live Activity: M${params.magnitude.toFixed(1)} - ${params.location} (${params.warningSeconds}s)`);
+            if (__DEV__) {
+                logger.info(`📱 Live Activities native module missing; dev countdown only: M${params.magnitude.toFixed(1)} - ${params.location} (${params.warningSeconds}s)`);
+                this.startCountdownUpdates(params.warningSeconds);
+                return true;
+            }
 
-            // Still run the simulation for development
-            this.startCountdownUpdates(params.warningSeconds);
-
-            return true;
+            logger.warn('Live Activities unavailable: native ActivityKit bridge missing');
+            return false;
         } catch (error) {
             logger.error('Failed to start Live Activity:', error);
             return false;

@@ -85,7 +85,7 @@ const SOURCES = {
     },
     KANDILLI: {
         name: 'KANDILLI',
-        http: 'http://www.koeri.boun.edu.tr/scripts/lst0.asp',
+        http: 'https://www.koeri.boun.edu.tr/scripts/lst0.asp',
         priority: 3,
     },
 } as const;

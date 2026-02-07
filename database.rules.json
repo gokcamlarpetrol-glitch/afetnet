@@ -36,7 +36,7 @@
         },
         "seismic_reports": {
             ".write": "auth != null",
-            ".read": true,
+            ".read": "auth != null",
             "$reportId": {
                 ".validate": "newData.hasChildren(['userId', 'timestamp', 'location', 'detection'])",
                 "userId": {

@@ -71,8 +71,8 @@ async function main(){
 
   // Lint / typecheck
   section('Static checks');
-  try{ execSync('npm run lint --silent --if-present', { stdio:'ignore' }); pass('ESLint OK'); } catch{ warn('ESLint failed'); }
-  try{ execSync('npm run typecheck --silent --if-present', { stdio:'ignore' }); pass('Typecheck OK'); } catch{ warn('Typecheck failed'); }
+  try { execSync('npm --silent run lint', { stdio:'ignore' }); pass('ESLint OK'); } catch { warn('ESLint failed'); }
+  try { execSync('npm --silent run typecheck', { stdio:'ignore' }); pass('Typecheck OK'); } catch { warn('Typecheck failed'); }
 
   // Env presence (names only)
   section('Env presence');
@@ -110,5 +110,4 @@ async function main(){
 }
 
 main().catch(e=>{ console.error(e); process.exit(1); });
-
 

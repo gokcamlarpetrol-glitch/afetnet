@@ -344,7 +344,7 @@ JSON formatında döndür (sadece JSON):
     // Smaller maxTokens = faster responses, less timeout risk
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 1200, // PRODUCTION: Optimized for speed - prevents timeout
+      maxTokens: 1500, // ELITE: Raised from 1200 to reduce truncation for complex JSON plans
       temperature: 0.7,
       serviceName: 'PreparednessPlanService', // ELITE: For cost tracking
     });
@@ -461,8 +461,8 @@ JSON formatında döndür (sadece JSON):
       cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
       cleanedResponse = cleanedResponse.replace(/```\s*/g, '');
 
-      // ELITE: Find JSON object - try multiple patterns
-      let jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+      // ELITE: Find JSON object — use lazy match for initial attempt
+      let jsonMatch = cleanedResponse.match(/\{[\s\S]*?\}/);
 
       // If no match, try to find JSON after "{" or before "}"
       if (!jsonMatch) {

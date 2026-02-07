@@ -229,7 +229,7 @@ class SOSChannelRouter {
                     : 'Konum bilgisi yok'
                     }`,
                 priority: 'critical',
-                sound: 'emergency',
+                sound: 'default',
                 vibrationPattern: [0, 200, 100, 200, 100, 200, 100, 200],
                 ttsText: signal.trapped
                     ? 'ACİL DURUM! Enkaz altında biri var! Acil yardım gerekiyor!'

@@ -227,7 +227,7 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
             </View>
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>Kaynak</Text>
-              <Text style={styles.rowValue}>AFAD & Kandilli (Doğrulanmış)</Text>
+              <Text style={styles.rowValue}>{`${earthquake.source || 'AFAD'} (Doğrulanmış)`}</Text>
             </View>
           </View>
         </View>
@@ -243,14 +243,14 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
           </Text>
         </View>
 
-        {/* NEARBY ACTIVITY (Mock for design) */}
+        {/* NEARBY ACTIVITY */}
         <View style={[styles.glassCard, { marginTop: 16 }]}>
           <View style={styles.cardHeader}>
             <Ionicons name="pulse-outline" size={20} color="#B91C1C" />
             <Text style={styles.cardTitle}>Bölgesel Aktivite</Text>
           </View>
           <Text style={styles.safetyText}>
-            Bu bölgede son 24 saat içinde {Math.floor(Math.random() * 5) + 1} artçı sarsıntı daha kaydedildi. Bölge aktif fay hattı üzerindedir.
+            Bu bölge aktif fay hattı üzerindedir. Artçı sarsıntılar meydana gelebilir. Güncel bilgiler için AFAD ve Kandilli Rasathanesi kaynaklarını takip edin.
           </Text>
         </View>
 

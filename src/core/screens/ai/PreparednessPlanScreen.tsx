@@ -10,6 +10,9 @@ import * as haptics from '../../utils/haptics';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring, withSequence, withTiming } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('PreparednessPlanScreen');
 
 // ELITE: Storage key for persistence
 const CHECKLIST_STORAGE_KEY = '@afetnet_preparedness_checklist';
@@ -127,7 +130,7 @@ export default function PreparednessPlanScreen() {
         setCheckedItems(JSON.parse(saved));
       }
     } catch (e) {
-      console.warn('Failed to load progress:', e);
+      logger.warn('Failed to load progress:', e);
     } finally {
       setIsLoading(false);
     }
@@ -137,7 +140,7 @@ export default function PreparednessPlanScreen() {
     try {
       await AsyncStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(checkedItems));
     } catch (e) {
-      console.warn('Failed to save progress:', e);
+      logger.warn('Failed to save progress:', e);
     }
   };
 
@@ -188,7 +191,12 @@ export default function PreparednessPlanScreen() {
 
   // Calculate overall progress
   const { overallProgress, totalItems, completedItems } = useMemo(() => {
-    if (mode === 'kid') return { overallProgress: 25, totalItems: 4, completedItems: 1 };
+    if (mode === 'kid') {
+      const total = KIDS_ITEMS.length;
+      const completed = KIDS_ITEMS.filter(item => checkedItems[item.id]).length;
+      const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+      return { overallProgress: progress, totalItems: total, completedItems: completed };
+    }
 
     let total = 0;
     let completed = 0;
@@ -215,18 +223,27 @@ export default function PreparednessPlanScreen() {
         <Text style={styles.kidSubtitle}>Afetlere karşı süper güçlerini hazırla.</Text>
       </View>
 
-      {KIDS_ITEMS.map((item, idx) => (
-        <TouchableOpacity key={item.id} style={styles.kidItem} onPress={() => haptics.impactMedium()}>
-          <View style={[styles.kidIconBox, { backgroundColor: idx % 2 === 0 ? '#dcfce7' : '#e0f2fe' }]}>
-            <Ionicons name={item.icon as any} size={28} color={idx % 2 === 0 ? '#16a34a' : '#0284c7'} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.kidItemTitle}>{item.text}</Text>
-            <Text style={styles.kidItemDesc}>{item.desc}</Text>
-          </View>
-          <View style={styles.kidCheck}><Ionicons name="checkmark-circle-outline" size={28} color="#cbd5e1" /></View>
-        </TouchableOpacity>
-      ))}
+      {KIDS_ITEMS.map((item, idx) => {
+        const isChecked = checkedItems[item.id];
+        return (
+          <TouchableOpacity key={item.id} style={styles.kidItem} onPress={() => handleToggleItem(item.id)}>
+            <View style={[styles.kidIconBox, { backgroundColor: idx % 2 === 0 ? '#dcfce7' : '#e0f2fe' }]}>
+              <Ionicons name={item.icon as any} size={28} color={idx % 2 === 0 ? '#16a34a' : '#0284c7'} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.kidItemTitle, isChecked && { textDecorationLine: 'line-through', color: '#94a3b8' }]}>{item.text}</Text>
+              <Text style={styles.kidItemDesc}>{item.desc}</Text>
+            </View>
+            <View style={styles.kidCheck}>
+              <Ionicons
+                name={isChecked ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                size={28}
+                color={isChecked ? '#10b981' : '#cbd5e1'}
+              />
+            </View>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 

@@ -6,7 +6,7 @@
 
 ### Static checks
 
-- ⚠️ ESLint failed
+- ✅ ESLint OK
 - ✅ Typecheck OK
 
 ### Env presence

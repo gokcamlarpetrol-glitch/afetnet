@@ -102,7 +102,6 @@ export async function requestPermissions(): Promise<PermissionResult> {
         allowBadge: true,
         allowSound: true,
         allowProvisional: true, // Allow provisional notifications
-        allowCriticalAlerts: true, // Request critical alerts for earthquake warnings
       };
     }
 

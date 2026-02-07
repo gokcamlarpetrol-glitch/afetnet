@@ -43,6 +43,7 @@ import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
 import { useSOSStore, SOSSignal } from '../../services/sos';
 import { createLogger } from '../../utils/logger';
+import { useLiveLocation } from '../../hooks/useLiveLocation';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { ClusterMarker } from '../../components/map/ClusterMarker';
 import { MapClusterEngine, MapPoint } from '../../utils/MapClusterEngine';
@@ -353,8 +354,13 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
 
+  // FIX #2: Live location tracking (replaces one-shot getCurrentPositionAsync)
+  const { location: userLocation, locationData } = useLiveLocation({
+    distanceInterval: 10,
+    timeInterval: 5000,
+  });
+
   // State
-  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [region, setRegion] = useState<Region | null>(null);
   const [zoom, setZoom] = useState(15);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
@@ -408,53 +414,36 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   // Bottom sheet snap points
   const snapPoints = useMemo(() => ['15%', '45%', '90%'], []);
 
-  // Initialize location
+  // FIX #5: Remove duplicate familyStore.initialize() — already called from App init
+  // FIX #2: Location initialization is now handled by useLiveLocation hook
   useEffect(() => {
-    initializeLocation();
-    useFamilyStore.getState().initialize();
-  }, []);
-
-  const initializeLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setRegion({
-          latitude: 39.0,
-          longitude: 35.0,
-          latitudeDelta: 5,
-          longitudeDelta: 5,
-        });
-        setIsInitialized(true);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-
-      const userCoords = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      };
-
-      setUserLocation(userCoords);
-
+    if (userLocation) {
       const initialRegion = {
-        ...userCoords,
+        ...userLocation,
         ...DEFAULT_DELTA,
       };
-
       setRegion(initialRegion);
       setIsInitialized(true);
 
-      if (mapRef.current) {
+      if (mapRef.current && !isInitialized) {
         mapRef.current.animateToRegion(initialRegion, 500);
       }
-    } catch (error) {
-      logger.error('Location initialization failed:', error);
-      setIsInitialized(true);
+    } else {
+      // Fallback: if no location after 3 seconds, show Turkey overview
+      const timer = setTimeout(() => {
+        if (!userLocation) {
+          setRegion({
+            latitude: 39.0,
+            longitude: 35.0,
+            latitudeDelta: 5,
+            longitudeDelta: 5,
+          });
+          setIsInitialized(true);
+        }
+      }, 3000);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [userLocation]);
 
   // Update earthquake clusters
   useEffect(() => {
@@ -519,7 +508,8 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
     const lat = member.location?.latitude ?? member.latitude;
     const lng = member.location?.longitude ?? member.longitude;
 
-    if (lat && lng && mapRef.current) {
+    // FIX #1: Proper coordinate validation (lat=0 is valid, e.g. equator)
+    if (typeof lat === 'number' && typeof lng === 'number' && isFinite(lat) && isFinite(lng) && mapRef.current) {
       mapRef.current.animateToRegion({
         latitude: lat,
         longitude: lng,
@@ -543,7 +533,8 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
     familyMembers.forEach(member => {
       const lat = member.location?.latitude ?? member.latitude;
       const lng = member.location?.longitude ?? member.longitude;
-      if (lat && lng) {
+      // FIX #1: Proper coordinate validation
+      if (typeof lat === 'number' && typeof lng === 'number' && isFinite(lat) && isFinite(lng)) {
         allCoords.push({ latitude: lat, longitude: lng });
       }
     });
@@ -743,7 +734,7 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
               setSelectedSOS(signal);
               bottomSheetRef.current?.snapToIndex(1);
             }}
-            tracksViewChanges={true}
+            tracksViewChanges={false}  // FIX #4: Performance — SOS markers don't need per-frame re-render
           >
             <SOSSignalMarker
               signal={signal}

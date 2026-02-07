@@ -76,13 +76,13 @@ class AppCheckService {
                 return false;
             }
 
-            // For now, we'll implement a placeholder that can be enhanced
-            // when @react-native-firebase/app-check is properly configured
             this.isSupported = await this.checkAppCheckSupport();
 
             if (this.isSupported) {
                 await this.activateAppCheck();
-                logger.info('✅ AppCheckService initialized and activated');
+                if (this.isSupported) {
+                    logger.info('✅ AppCheckService initialized and activated');
+                }
             } else {
                 logger.warn('⚠️ App Check not supported on this device');
             }
@@ -127,19 +127,12 @@ class AppCheckService {
      */
     private async activateAppCheck(): Promise<void> {
         try {
-            // This is where you would activate the actual Firebase App Check
-            // For now, we log the intent and prepare for future activation
-
-            logger.info('App Check activation placeholder', {
+            // Hard-disable until native App Check provider is integrated.
+            logger.warn('App Check provider not integrated; disabling token issuance', {
                 platform: Platform.OS,
-                provider: Platform.OS === 'ios' ? 'DeviceCheck/AppAttest' : 'PlayIntegrity',
+                expectedProvider: Platform.OS === 'ios' ? 'DeviceCheck/AppAttest' : 'PlayIntegrity',
             });
-
-            // In production, this would be:
-            // import { firebase } from '@react-native-firebase/app-check';
-            // const appCheck = firebase.appCheck();
-            // await appCheck.activate('your-recaptcha-key', true);
-
+            this.isSupported = false;
         } catch (error) {
             logger.error('App Check activation failed:', error);
             throw error;
@@ -188,22 +181,9 @@ class AppCheckService {
      */
     private async fetchNewToken(): Promise<string | null> {
         try {
-            // Placeholder for actual token fetch
-            // In production:
-            // const { token } = await firebase.appCheck().getToken(true);
-
-            // For now, return a placeholder that indicates App Check is intended
-            const mockToken: AppCheckToken = {
-                token: '__APP_CHECK_PLACEHOLDER__',
-                expireTimeMillis: Date.now() + 60 * 60 * 1000, // 1 hour
-            };
-
-            this.currentToken = mockToken;
-            this.scheduleTokenRefresh();
-            this.errorCount = 0;
-
-            logger.debug('App Check token refreshed');
-            return mockToken.token;
+            logger.warn('App Check token requested but provider is not active');
+            this.currentToken = null;
+            return null;
         } catch (error) {
             logger.error('Token fetch failed:', error);
             throw error;
@@ -254,7 +234,7 @@ class AppCheckService {
     async getRequestHeaders(): Promise<Record<string, string>> {
         const token = await this.getToken();
 
-        if (token && token !== '__APP_CHECK_PLACEHOLDER__') {
+        if (token) {
             return {
                 'X-Firebase-AppCheck': token,
             };

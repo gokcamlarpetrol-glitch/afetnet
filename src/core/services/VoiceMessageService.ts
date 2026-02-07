@@ -375,7 +375,11 @@ class VoiceMessageService {
 
     try {
       const identity = identityService.getIdentity();
-      const userId = identity?.id || 'anonymous';
+      const userId = identity?.cloudUid;
+      if (!userId) {
+        logger.warn('Skipping Firebase backup: cloud identity unavailable');
+        return null;
+      }
       const storagePath = `voice/${userId}/${message.id}.m4a`;
 
       // Convert base64 to Blob for upload

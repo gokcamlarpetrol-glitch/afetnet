@@ -251,7 +251,7 @@ export function getOptimizationSuggestions(stats: CostStats | null): string[] {
   if (!stats) return suggestions;
 
   // Check daily cost
-  if (stats.dailyCost > 0.10) { // $0.10 per day threshold
+  if (stats.dailyCost > 1.00) { // $1.00 per day threshold
     suggestions.push(`Günlük maliyet yüksek (${formatCost(stats.dailyCost)}). Cache kullanımını artırın.`);
   }
 
@@ -273,7 +273,6 @@ export function getOptimizationSuggestions(stats: CostStats | null): string[] {
 
   return suggestions;
 }
-
 
 
 

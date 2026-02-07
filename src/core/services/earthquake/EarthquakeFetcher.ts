@@ -18,7 +18,7 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 function getErrorName(error: unknown): string {
-  return error instanceof Error ? getErrorName(error) : 'UnknownError';
+  return error instanceof Error ? error.name : 'UnknownError';
 }
 
 export interface FetchResult {
@@ -32,16 +32,70 @@ export interface FetchResult {
   };
 }
 
+export interface EarthquakeFetchOptions {
+  sourceAFAD: boolean;
+  sourceKOERI: boolean;
+  sourceUSGS?: boolean;
+  sourceEMSC?: boolean;
+  sourceCommunity?: boolean;
+  selectedObservatory?: 'AFAD' | 'KANDILLI';
+}
+
+function normalizeFetchOptions(
+  sourceAFADOrOptions: boolean | EarthquakeFetchOptions,
+): Required<EarthquakeFetchOptions> {
+  if (typeof sourceAFADOrOptions === 'boolean') {
+    return {
+      sourceAFAD: sourceAFADOrOptions,
+      sourceKOERI: true,
+      sourceUSGS: true,
+      sourceEMSC: true,
+      sourceCommunity: true,
+      selectedObservatory: 'AFAD',
+    };
+  }
+
+  return {
+    sourceAFAD: sourceAFADOrOptions.sourceAFAD,
+    sourceKOERI: sourceAFADOrOptions.sourceKOERI,
+    sourceUSGS: sourceAFADOrOptions.sourceUSGS ?? true,
+    sourceEMSC: sourceAFADOrOptions.sourceEMSC ?? true,
+    sourceCommunity: sourceAFADOrOptions.sourceCommunity ?? true,
+    selectedObservatory: sourceAFADOrOptions.selectedObservatory ?? 'AFAD',
+  };
+}
+
 /**
  * Fetch earthquakes from all sources using multi-tier strategy
  */
 export async function fetchAllEarthquakes(
-  sourceAFAD: boolean,
+  sourceAFADOrOptions: boolean | EarthquakeFetchOptions,
   fetchFromAFAD: () => Promise<Earthquake[]>,
   fetchFromKandilli: () => Promise<Earthquake[]>,
 ): Promise<FetchResult> {
+  const options = normalizeFetchOptions(sourceAFADOrOptions);
+  const sourceAFAD = options.sourceAFAD;
+  const sourceKOERI = options.sourceKOERI;
+  const hasAnySourceEnabled = sourceAFAD || sourceKOERI || options.sourceUSGS || options.sourceEMSC || options.sourceCommunity;
+  if (!hasAnySourceEnabled) {
+    if (__DEV__) {
+      logger.warn('⚠️ Tüm deprem kaynakları kapalı - fetch atlandı');
+    }
+    return {
+      earthquakes: [],
+      sources: {
+        unified: false,
+        afadHTML: false,
+        kandilliHTML: false,
+        afadAPI: false,
+        kandilliAPI: false,
+      },
+    };
+  }
+  const shouldFetchUnified = options.sourceUSGS || options.sourceEMSC || options.sourceCommunity || (!sourceAFAD && !sourceKOERI);
+
   if (__DEV__) {
-    logger.info(`🚀 fetchAllEarthquakes() başlatıldı (sourceAFAD: ${sourceAFAD})`);
+    logger.info(`🚀 fetchAllEarthquakes() başlatıldı (AFAD: ${sourceAFAD}, KOERI: ${sourceKOERI}, Unified: ${shouldFetchUnified})`);
   }
   const result: FetchResult = {
     earthquakes: [],
@@ -54,29 +108,29 @@ export async function fetchAllEarthquakes(
     },
   };
 
-  // ELITE: Multi-tier strategy for fastest and most reliable AFAD data only
-  // CRITICAL: Only fetch AFAD data - Kandilli removed per user request
+  // ELITE: Multi-tier strategy for fastest and most reliable multi-source data
   // Use Promise.allSettled with shorter timeouts for faster initial load
   // ELITE: Multi-tier strategy for fastest and most reliable data
   // Fetch from ALL sources in parallel for cross-verification
   const [unifiedData, afadHTMLData, afadAPIData, kandilliAPIData] = await Promise.allSettled([
-    unifiedEarthquakeAPI.fetchRecent(), // Tier 1: Unified API
+    shouldFetchUnified ? unifiedEarthquakeAPI.fetchRecent() : Promise.resolve([]), // Tier 1: Unified API
     sourceAFAD ? afadHTMLProvider.fetchRecent() : Promise.resolve([]), // Tier 2: AFAD HTML
     sourceAFAD ? fetchFromAFAD() : Promise.resolve([]), // Tier 3: Direct AFAD API
-    fetchFromKandilli(), // Tier 4: Kandilli API (Now Enabled)
+    sourceKOERI ? fetchFromKandilli() : Promise.resolve([]), // Tier 4: Kandilli API
   ]);
 
   let afadList: Earthquake[] = [];
   let kandilliList: Earthquake[] = [];
+  const unifiedList = unifiedData.status === 'fulfilled' ? unifiedData.value : [];
 
   // --- 1. PROCESS AFAD DATA ---
   // Priority: HTML > API > Unified(AFAD)
-  if (afadHTMLData.status === 'fulfilled' && afadHTMLData.value.length > 0) {
+  if (sourceAFAD && afadHTMLData.status === 'fulfilled' && afadHTMLData.value.length > 0) {
     afadList = afadHTMLData.value;
     result.sources.afadHTML = true;
     if (__DEV__) logger.info(`✅ AFAD (HTML): ${afadList.length} veri`);
   }
-  else if (afadAPIData.status === 'fulfilled' && afadAPIData.value.length > 0) {
+  else if (sourceAFAD && afadAPIData.status === 'fulfilled' && afadAPIData.value.length > 0) {
     // API fallback
     const now = Date.now();
     const oneDayAgo = now - 24 * 60 * 60 * 1000;
@@ -87,23 +141,56 @@ export async function fetchAllEarthquakes(
       if (__DEV__) logger.info(`✅ AFAD (API): ${afadList.length} veri`);
     }
   }
+  else if (sourceAFAD && unifiedList.length > 0) {
+    afadList = unifiedList.filter((eq) => eq.source === 'AFAD');
+    if (afadList.length > 0) {
+      result.sources.unified = true;
+      if (__DEV__) logger.info(`✅ AFAD (Unified fallback): ${afadList.length} veri`);
+    }
+  }
 
   // --- 2. PROCESS KANDILLI DATA ---
-  if (kandilliAPIData.status === 'fulfilled' && kandilliAPIData.value.length > 0) {
+  if (sourceKOERI && kandilliAPIData.status === 'fulfilled' && kandilliAPIData.value.length > 0) {
     kandilliList = kandilliAPIData.value;
     result.sources.kandilliAPI = true;
     if (__DEV__) logger.info(`✅ Kandilli: ${kandilliList.length} veri`);
+  } else if (sourceKOERI && unifiedList.length > 0) {
+    kandilliList = unifiedList.filter((eq) => eq.source === 'KANDILLI');
+    if (kandilliList.length > 0) {
+      result.sources.unified = true;
+      if (__DEV__) logger.info(`✅ Kandilli (Unified fallback): ${kandilliList.length} veri`);
+    }
+  }
+
+  // If both official sources are disabled, use selected observatory from unified feed as fallback.
+  if (!sourceAFAD && !sourceKOERI && unifiedList.length > 0) {
+    const unifiedAfad = unifiedList.filter((eq) => eq.source === 'AFAD');
+    const unifiedKandilli = unifiedList.filter((eq) => eq.source === 'KANDILLI');
+
+    if (options.selectedObservatory === 'KANDILLI' && unifiedKandilli.length > 0) {
+      kandilliList = unifiedKandilli;
+    } else if (options.selectedObservatory === 'AFAD' && unifiedAfad.length > 0) {
+      afadList = unifiedAfad;
+    } else {
+      afadList = unifiedAfad;
+      kandilliList = unifiedKandilli;
+    }
+    result.sources.unified = true;
   }
 
   // --- 3. FUSION & VERIFICATION ---
   // Lazy import to avoid circular dependency issues if any
   const { earthquakeFusionService } = require('./EarthquakeFusionService');
 
+  const primarySource: 'AFAD' | 'KANDILLI' = options.selectedObservatory === 'KANDILLI'
+    ? (sourceKOERI || kandilliList.length > 0 ? 'KANDILLI' : 'AFAD')
+    : (sourceAFAD || afadList.length > 0 ? 'AFAD' : 'KANDILLI');
+
   // Fuse the lists!
-  result.earthquakes = earthquakeFusionService.fuse(afadList, kandilliList);
+  result.earthquakes = earthquakeFusionService.fuse(afadList, kandilliList, primarySource);
 
   if (__DEV__) {
-    logger.info(`🧬 FÜZYON SONUCU: ${afadList.length} AFAD + ${kandilliList.length} Kandilli -> ${result.earthquakes.length} Birleştirilmiş Deprem`);
+    logger.info(`🧬 FÜZYON SONUCU: ${afadList.length} AFAD + ${kandilliList.length} Kandilli -> ${result.earthquakes.length} Birleştirilmiş Deprem (primary: ${primarySource})`);
   }
 
   return result;
@@ -293,4 +380,3 @@ export async function fetchFromKandilliAPI(): Promise<Earthquake[]> {
     return [];
   }
 }
-

@@ -1,19 +1,36 @@
 /**
  * OPENAI SERVICE
- * OpenAI GPT-4 API client
- * GÜVENLIK: API key asla kod içinde saklanmaz, sadece .env dosyasından okunur
+ * OpenAI GPT API client with secure server-side proxy first strategy.
+ *
+ * SECURITY MODEL:
+ * - Primary: Firebase Function proxy (recommended for production)
+ * - Optional fallback: direct API key from secure runtime storage (development only)
+ * - Never reads EXPO_PUBLIC_OPENAI_API_KEY from app bundle
  */
 
 import { createLogger } from '../../utils/logger';
 import { costTracker, estimateCost } from '../utils/costCalculator';
 import { safeIncludes } from '../../utils/safeString';
 import { getErrorMessage } from '../../utils/errorUtils';
+import { ENV } from '../../config/env';
 
 const logger = createLogger('OpenAIService');
 
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+interface GenerateTextOptions {
+  maxTokens?: number;
+  temperature?: number;
+  systemPrompt?: string;
+  serviceName?: string;
+}
+
+interface GenerateTextResult {
+  text: string;
+  usedFallback: boolean;
 }
 
 interface OpenAIResponse {
@@ -38,281 +55,361 @@ interface OpenAIResponse {
 
 class OpenAIService {
   private apiKey: string | null = null;
+  private proxyUrls: string[] = [];
+  private activeProxyUrl: string | null = null;
   private isInitialized = false;
+  private lastAuthWarningAt = 0;
   private readonly apiUrl = 'https://api.openai.com/v1/chat/completions';
-  private readonly model = 'gpt-4o-mini'; // Daha ekonomik model
+  private readonly model = 'gpt-4o-mini';
+  private readonly timeoutMs = 20000;
+  private readonly authTokenWaitMs = 8000;
+  private readonly authWarningThrottleMs = 10000;
 
   async initialize(apiKey?: string): Promise<void> {
     if (this.isInitialized) return;
 
-    // ELITE SECURITY: API key from multiple sources with validation
-    // Priority: Parameter > ENV config > EAS secrets > process.env
-    // NEVER hardcode API keys in source code
+    this.proxyUrls = [];
+    this.activeProxyUrl = null;
 
-    logger.info('🔧 OpenAI initialization starting...');
+    const explicitProxy = typeof ENV.OPENAI_PROXY_URL === 'string'
+      ? ENV.OPENAI_PROXY_URL.trim()
+      : '';
+    if (explicitProxy) {
+      this.proxyUrls.push(explicitProxy);
+    }
 
-    const validateAndSetKey = (source: string, key: unknown): boolean => {
-      if (!key) {
-        logger.debug(`🔍 ${source}: undefined/null`);
-        return false;
+    const projectIdCandidates = [
+      typeof ENV.FIREBASE_PROJECT_ID === 'string' ? ENV.FIREBASE_PROJECT_ID.trim() : '',
+      typeof process.env.FIREBASE_PROJECT_ID === 'string' ? process.env.FIREBASE_PROJECT_ID.trim() : '',
+      typeof process.env.EXPO_PUBLIC_PROJECT_ID === 'string' ? process.env.EXPO_PUBLIC_PROJECT_ID.trim() : '',
+    ];
+    const projectId = projectIdCandidates.find((candidate) => candidate.length > 0) || '';
+    if (projectId) {
+      // Try both endpoint names for backward compatibility across deployments.
+      this.proxyUrls.push(`https://europe-west1-${projectId}.cloudfunctions.net/openAIChatProxy`);
+      this.proxyUrls.push(`https://europe-west1-${projectId}.cloudfunctions.net/openaiChatProxy`);
+    }
+
+    this.proxyUrls = Array.from(new Set(this.proxyUrls.filter((url) => url.length > 0)));
+
+    if (apiKey && apiKey.trim().length > 0) {
+      this.apiKey = apiKey.trim();
+    }
+
+    const allowDirectKeyFallback = __DEV__ || process.env.NODE_ENV !== 'production';
+
+    // Optional secure fallback for internal/dev usage. Not bundle-public.
+    if (!this.apiKey && allowDirectKeyFallback) {
+      try {
+        const { getSecureValue } = await import('../../security/SecureKeyManager');
+        const secureKey = await getSecureValue('OPENAI_API_KEY');
+        if (secureKey && secureKey.trim().startsWith('sk-')) {
+          this.apiKey = secureKey.trim();
+        }
+      } catch {
+        // Optional source
       }
+    }
 
-      const keyStr = String(key).trim();
-      const len = keyStr.length;
-
-      logger.info(`🔍 ${source}: found (${len} chars)`);
-
-      if (len === 0) return false;
-
-      // ELITE VALIDATION:
-      // We warn but DO NOT BLOCK keys even if they look suspicious.
-      // The ultimate source of truth is the API response (401 Unauthorized).
-      const looksLikeKey = keyStr.startsWith('sk-');
-      const containsPlaceholder = keyStr.toLowerCase().includes('placeholder');
-
-      if (containsPlaceholder) {
-        logger.warn(`⚠️ ${source} potential issue: Key contains 'placeholder'. Attempting to use it anyway...`);
+    if (!this.apiKey && allowDirectKeyFallback) {
+      const privateEnvKey = process.env.OPENAI_API_KEY;
+      if (privateEnvKey && privateEnvKey.trim().startsWith('sk-')) {
+        this.apiKey = privateEnvKey.trim();
       }
+    }
 
-      if (!looksLikeKey) {
-        logger.warn(`⚠️ ${source} potential issue: Key does not start with 'sk-'. Attempting to use it anyway...`);
+    if (this.proxyUrls.length > 0) {
+      logger.info(`✅ OpenAI proxy configured (${this.proxyUrls.length} endpoint): ${this.proxyUrls[0]}`);
+    }
+
+    if (this.apiKey) {
+      logger.warn('⚠️ Direct OpenAI key fallback is active. Prefer proxy-only in production.');
+    }
+
+    if (this.proxyUrls.length === 0 && !this.apiKey) {
+      logger.warn('⚠️ OpenAI not configured (no proxy URL and no secure key fallback)');
+      this.isInitialized = false;
+      return;
+    }
+
+    this.isInitialized = true;
+  }
+
+  private warnAuthTokenUnavailable() {
+    const now = Date.now();
+    if (now - this.lastAuthWarningAt < this.authWarningThrottleMs) {
+      return;
+    }
+    this.lastAuthWarningAt = now;
+    logger.warn('OpenAI proxy auth token unavailable; user may be signed out or auth not hydrated yet');
+  }
+
+  private async waitForAuthStoreHydration(timeoutMs: number): Promise<void> {
+    if (timeoutMs <= 0) return;
+
+    try {
+      const { useAuthStore } = await import('../../stores/authStore');
+      const startedAt = Date.now();
+
+      while (useAuthStore.getState().isLoading && Date.now() - startedAt < timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
+    } catch {
+      // Optional optimization; proceed with Firebase auth fallback checks.
+    }
+  }
 
-      this.apiKey = keyStr;
-      logger.info(`✅ OpenAI key accepted from ${source} (Validation relaxed)`);
-      return true;
+  private async getFirebaseIdToken(options: { forceRefresh?: boolean; waitForUserMs?: number } = {}): Promise<string | null> {
+    const { forceRefresh = false, waitForUserMs = 0 } = options;
+
+    if (process.env.JEST_WORKER_ID) {
+      return null;
+    }
+
+    try {
+      await this.waitForAuthStoreHydration(waitForUserMs);
+
+      const [{ getAuth, onAuthStateChanged }, firebaseLib] = await Promise.all([
+        import('firebase/auth'),
+        import('../../../lib/firebase'),
+      ]);
+      const app = firebaseLib.initializeFirebase();
+      if (!app) return null;
+      const auth = getAuth(app);
+      let user = auth.currentUser;
+
+      if (!user && waitForUserMs > 0) {
+        user = await new Promise((resolve) => {
+          let unsubscribe = () => {};
+          const timeout = setTimeout(() => {
+            unsubscribe();
+            resolve(null);
+          }, waitForUserMs);
+
+          unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+            if (!nextUser) {
+              return;
+            }
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(nextUser);
+          });
+        });
+      }
+      if (!user) return null;
+      return await user.getIdToken(forceRefresh);
+    } catch (error) {
+      logger.debug('Failed to resolve Firebase ID token for OpenAI proxy:', error);
+      return null;
+    }
+  }
+
+  private async postJsonWithTimeout(
+    url: string,
+    payload: Record<string, unknown>,
+    headers: Record<string, string>,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async executeCompletion(
+    messages: OpenAIMessage[],
+    maxTokens: number,
+    temperature: number,
+  ): Promise<OpenAIResponse | null> {
+    // ELITE: Cost guardrail — check daily spending threshold before calling API
+    try {
+      const { shouldSkipAPICall } = await import('../utils/costOptimizer');
+      const estCost = estimateCost(
+        messages.map(m => m.content).join(' '),
+        undefined,
+        maxTokens,
+      );
+      const skip = await shouldSkipAPICall('OpenAIService', estCost);
+      if (skip) {
+        logger.warn('💰 API call skipped: daily cost threshold exceeded');
+        return null;
+      }
+    } catch {
+      // Don't block on cost check failure
+    }
+
+    const proxyPayload = {
+      model: this.model,
+      messages,
+      max_tokens: maxTokens,
+      temperature,
     };
 
-    // 1. Check Parameter
-    if (validateAndSetKey('Parameter', apiKey)) return this.finishInit();
+    // Primary: secure backend proxy
+    if (this.proxyUrls.length > 0) {
+      const orderedProxyUrls = this.activeProxyUrl
+        ? [this.activeProxyUrl, ...this.proxyUrls.filter((url) => url !== this.activeProxyUrl)]
+        : [...this.proxyUrls];
 
-    // 2. Check ENV config
-    try {
-      const { ENV } = await import('../../config/env');
-      if (validateAndSetKey('ENV.OPENAI_API_KEY', ENV?.OPENAI_API_KEY)) return this.finishInit();
-    } catch (envError) {
-      logger.debug('Could not load ENV config:', envError);
-    }
+      let idToken = await this.getFirebaseIdToken({ waitForUserMs: this.authTokenWaitMs });
+      if (!idToken) {
+        this.warnAuthTokenUnavailable();
+      } else {
+        for (const proxyUrl of orderedProxyUrls) {
+          try {
+            let proxyResponse = await this.postJsonWithTimeout(
+              proxyUrl,
+              proxyPayload,
+              {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+              },
+            );
 
-    // 3. Fallback: EAS secrets
-    try {
-      const Constants = await import('expo-constants');
-      const keyFromExtra = Constants.default?.expoConfig?.extra?.EXPO_PUBLIC_OPENAI_API_KEY;
-      if (validateAndSetKey('EAS Secrets', keyFromExtra)) return this.finishInit();
-    } catch (error) {
-      logger.debug('Could not load Expo Constants');
-    }
+            if (proxyResponse.status === 401 || proxyResponse.status === 403) {
+              const refreshedToken = await this.getFirebaseIdToken({ forceRefresh: true, waitForUserMs: 2500 });
+              if (refreshedToken) {
+                idToken = refreshedToken;
+                proxyResponse = await this.postJsonWithTimeout(
+                  proxyUrl,
+                  proxyPayload,
+                  {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                  },
+                );
+              }
+            }
 
-    // 4. Final fallback: process.env
-    const keyFromProcess = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
-    if (validateAndSetKey('process.env', keyFromProcess)) return this.finishInit();
+            if (proxyResponse.ok) {
+              this.activeProxyUrl = proxyUrl;
+              return await proxyResponse.json() as OpenAIResponse;
+            }
 
-    // IF WE ARE HERE, NO KEY FOUND
-    this.finishInit();
-  }
+            const errText = await proxyResponse.text();
+            logger.warn('OpenAI proxy returned non-OK response', {
+              proxyUrl,
+              status: proxyResponse.status,
+              body: errText.slice(0, 300),
+            });
 
-  private finishInit() {
-    // ELITE: Validate and log status
-    if (!this.apiKey || this.apiKey.trim() === '') {
-      logger.warn('⚠️ OpenAI API key not found - AI features will use fallback responses');
-      logger.warn('💡 Add to .env: EXPO_PUBLIC_OPENAI_API_KEY=sk-your-real-key');
-      this.apiKey = null;
-      this.isInitialized = false; // Allow retry later
-    } else {
-      const isValidFormat = this.apiKey.startsWith('sk-');
-      if (!isValidFormat) {
-        logger.warn('⚠️ OpenAI API key format may be invalid (expected sk- prefix)');
-      }
-
-      const maskedKey = this.apiKey.length > 11
-        ? this.apiKey.substring(0, 7) + '...' + this.apiKey.substring(this.apiKey.length - 4)
-        : 'sk-****';
-
-      logger.info(`✅ OpenAI API initialized with key: ${maskedKey}`);
-      this.isInitialized = true;
-    }
-  }
-
-  /**
-   * OpenAI GPT-4 ile metin üret
-   * Fallback: API key yoksa mock response döner
-   */
-  async generateText(
-    prompt: string,
-    options: {
-      maxTokens?: number;
-      temperature?: number;
-      systemPrompt?: string;
-      serviceName?: string; // ELITE: Service name for cost tracking
-    } = {},
-  ): Promise<string> {
-    const { maxTokens = 500, temperature = 0.7, systemPrompt, serviceName } = options;
-
-    // ELITE: Cost estimation before API call (for optimization)
-    const estimatedCost = estimateCost(prompt, systemPrompt, maxTokens);
-    if (__DEV__ && estimatedCost > 0.01) { // Warn if estimated cost > $0.01
-      logger.warn(`💰 Estimated cost: $${estimatedCost.toFixed(4)} for ${serviceName || 'generateText'}`);
-    }
-
-    // Mock mode: API key yoksa
-    if (!this.apiKey) {
-      // ELITE ROBUSTNESS: Try to auto-initialize one last time
-      // This protects against race conditions or missing initialization
-      if (!this.isInitialized) {
-        logger.warn('⚠️ OpenAI not initialized, attempting lazy initialization...');
-        await this.initialize();
-
-        // If still no key after lazy init, then use fallback
-        if (!this.apiKey) {
-          logger.warn('🤖 OpenAI dev fallback aktif (Key not found after lazy init)');
-          return this.getFallbackResponse(prompt);
+            // Try next endpoint for routing/name issues; otherwise fallback to direct key path.
+            if (
+              proxyResponse.status === 404
+              || proxyResponse.status === 405
+              || proxyResponse.status >= 500
+            ) {
+              continue;
+            }
+            break;
+          } catch (error) {
+            logger.warn(`OpenAI proxy request failed (${proxyUrl}), trying next endpoint/fallback:`, getErrorMessage(error));
+          }
         }
-      } else {
-        logger.warn('🤖 OpenAI dev fallback aktif (No API Key configured)');
-        return this.getFallbackResponse(prompt);
       }
     }
 
-    try {
-      const messages: OpenAIMessage[] = [];
-
-      // System prompt varsa ekle
-      if (systemPrompt) {
-        messages.push({
-          role: 'system',
-          content: systemPrompt,
-        });
-      } else {
-        // ELITE: Default Turkish system prompt for AI assistant
-        messages.push({
-          role: 'system',
-          content: 'Sen Türkçe konuşan, Gemini seviyesinde gelişmiş bir afet yönetimi asistanısın. Tüm yanıtlarını Türkçe ver. Kullanıcılara deprem hazırlığı, acil durum yönetimi ve güvenlik konularında en üst düzeyde, profesyonel ve hayat kurtarıcı tavsiyelerle yardımcı ol.',
-        });
-      }
-
-      // User prompt
-      messages.push({
-        role: 'user',
-        content: prompt,
-      });
-
-      logger.info('🚀 OpenAI API request:', {
-        model: this.model,
-        messagesCount: messages.length,
-        maxTokens,
-      });
-
-      // CRITICAL: Validate prompt before sending
-      if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-        logger.error('❌ Invalid prompt provided to generateText');
-        return this.getFallbackResponse('Invalid prompt');
-      }
-
-      // CRITICAL: Validate messages array
-      if (!messages || !Array.isArray(messages) || messages.length === 0) {
-        logger.error('❌ Invalid messages array');
-        return this.getFallbackResponse(prompt);
-      }
-
-      // CRITICAL: Add timeout to fetch request with retry mechanism
-      // ELITE: Reduced to 20s for better user experience - fallback is better than waiting
-      const controller = new AbortController();
-      const timeoutDuration = 20000; // 20 seconds timeout (reduced from 45s for UX)
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, timeoutDuration);
-
-      let response: Response;
+    // Secondary: direct OpenAI call (dev/internal fallback)
+    if (this.apiKey) {
       try {
-        response = await fetch(this.apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`, // GÜVENLIK: Header'da gönderilir
-          },
-          body: JSON.stringify({
+        const response = await this.postJsonWithTimeout(
+          this.apiUrl,
+          {
             model: this.model,
             messages,
             max_tokens: maxTokens,
             temperature,
-            // ELITE: Language is controlled via system prompt, not API parameter
-            // OpenAI API doesn't support 'language' parameter - removed to fix 400 error
-          }),
-          signal: controller.signal,
-        });
+          },
+          {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+        );
 
-        // CRITICAL: Clear timeout on success
-        clearTimeout(timeoutId);
-      } catch (fetchError: unknown) {
-        // CRITICAL: Clear timeout on error
-        clearTimeout(timeoutId);
-
-        const errorMessage = getErrorMessage(fetchError);
-        const errorName = fetchError instanceof Error ? fetchError.name : 'UnknownError';
-        const isTimeout =
-          errorName === 'AbortError' ||
-          errorMessage.includes('timeout') ||
-          errorMessage.includes('network request failed');
-
-        if (isTimeout) {
-          // ELITE: Log timeout as warning, not error (expected in some scenarios)
-          // Don't show error popup to user - gracefully fallback
-          if (__DEV__) {
-            logger.warn(`⚠️ OpenAI API request timeout after ${timeoutDuration}ms - using fallback response`);
-          } else {
-            logger.debug('OpenAI API request timeout - using fallback');
-          }
-          return this.getFallbackResponse(prompt);
-        }
-
-        // Network/other fetch error - log once and fallback gracefully
-        if (__DEV__) {
-          logger.warn('⚠️ OpenAI API network error - using fallback response', {
-            error: errorMessage,
-            name: errorName,
+        if (!response.ok) {
+          const errText = await response.text();
+          logger.warn('Direct OpenAI request returned non-OK response:', {
+            status: response.status,
+            body: errText.slice(0, 300),
           });
-        } else {
-          logger.debug('OpenAI API network error - using fallback response');
+          return null;
         }
-        return this.getFallbackResponse(prompt);
+
+        return await response.json() as OpenAIResponse;
+      } catch (error) {
+        logger.warn('Direct OpenAI request failed:', getErrorMessage(error));
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * OpenAI GPT ile metin üret
+   * Fallback: servis erişilemezse güvenli yerel yanıt döner
+   */
+  async generateText(
+    prompt: string,
+    options: GenerateTextOptions = {},
+  ): Promise<string> {
+    const result = await this.generateTextWithMetadata(prompt, options);
+    return result.text;
+  }
+
+  async generateTextWithMetadata(
+    prompt: string,
+    options: GenerateTextOptions = {},
+  ): Promise<GenerateTextResult> {
+    const { maxTokens = 500, temperature = 0.7, systemPrompt, serviceName } = options;
+
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    const estimatedCost = estimateCost(prompt, systemPrompt, maxTokens);
+    if (__DEV__ && estimatedCost > 0.01) {
+      logger.warn(`💰 Estimated cost: $${estimatedCost.toFixed(4)} for ${serviceName || 'generateText'}`);
+    }
+
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      logger.warn('Invalid prompt provided to generateText');
+      return { text: this.getFallbackResponse('invalid-prompt'), usedFallback: true };
+    }
+
+    const messages: OpenAIMessage[] = [];
+
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    } else {
+      messages.push({
+        role: 'system',
+        content: 'Sen Türkçe konuşan, afet yönetimi odaklı bir asistansın. Yanıtların kısa, net, doğru ve uygulanabilir olsun.',
+      });
+    }
+
+    messages.push({ role: 'user', content: prompt });
+
+    try {
+      const data = await this.executeCompletion(messages, maxTokens, temperature);
+      if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+        return { text: this.getFallbackResponse(prompt), usedFallback: true };
       }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.warn('⚠️ OpenAI API responded with non-OK status (fallbacking):', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText,
-        });
-
-        // Hata durumunda fallback döndür
-        logger.warn('⚠️ Falling back to safe response');
-        return this.getFallbackResponse(prompt);
+      const content = data.choices[0]?.message?.content;
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        return { text: this.getFallbackResponse(prompt), usedFallback: true };
       }
 
-      const data: OpenAIResponse = await response.json();
+      const generatedText = content.trim();
 
-      // CRITICAL: Validate API response structure
-      if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-        logger.warn('⚠️ Invalid OpenAI API response structure, using fallback:', data);
-        return this.getFallbackResponse(prompt);
-      }
-
-      const firstChoice = data.choices[0];
-      if (!firstChoice || !firstChoice.message || typeof firstChoice.message.content !== 'string') {
-        logger.warn('⚠️ Invalid OpenAI API response content, using fallback:', firstChoice);
-        return this.getFallbackResponse(prompt);
-      }
-
-      const generatedText = firstChoice.message.content.trim();
-
-      // CRITICAL: Validate generated text is not empty
-      if (!generatedText || generatedText.length === 0) {
-        logger.warn('⚠️ OpenAI returned empty text, using fallback');
-        return this.getFallbackResponse(prompt);
-      }
-
-      // ELITE: Track cost for this API call
       const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
       const trackingServiceName = serviceName || (systemPrompt ? 'generateText' : 'generateText-default');
       await costTracker.recordCall(
@@ -322,21 +419,10 @@ class OpenAIService {
         this.model,
       );
 
-      logger.info('✅ OpenAI API response:', {
-        tokens: usage.total_tokens,
-        inputTokens: usage.prompt_tokens,
-        outputTokens: usage.completion_tokens,
-        length: generatedText.length,
-      });
-
-      return generatedText;
+      return { text: generatedText, usedFallback: false };
     } catch (error) {
-      logger.warn('⚠️ OpenAI API exception (fallback response will be used):', {
-        error: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : 'UnknownError',
-      });
-      // Hata durumunda fallback döndür
-      return this.getFallbackResponse(prompt);
+      logger.warn('OpenAI generateText exception (using fallback):', getErrorMessage(error));
+      return { text: this.getFallbackResponse(prompt), usedFallback: true };
     }
   }
 
@@ -352,75 +438,25 @@ class OpenAIService {
   ): Promise<string> {
     const { maxTokens = 500, temperature = 0.7 } = options;
 
-    if (!this.apiKey) {
-      logger.warn('🤖 OpenAI dev fallback aktif (chat)');
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!Array.isArray(messages) || messages.length === 0) {
       return this.getUnavailableMessage();
     }
 
     try {
-      // CRITICAL: Add timeout to chat request as well
-      // ELITE: Reduced to 20s for better user experience
-      const controller = new AbortController();
-      const timeoutDuration = 20000; // 20 seconds timeout (reduced from 45s for UX)
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, timeoutDuration);
-
-      let response: Response;
-      try {
-        response = await fetch(this.apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: this.model,
-            messages,
-            max_tokens: maxTokens,
-            temperature,
-            // ELITE: Language is controlled via system prompt, not API parameter
-            // OpenAI API doesn't support 'language' parameter - removed to fix 400 error
-          }),
-          signal: controller.signal,
-        });
-
-        // CRITICAL: Clear timeout on success
-        clearTimeout(timeoutId);
-      } catch (fetchError: unknown) {
-        // CRITICAL: Clear timeout on error
-        clearTimeout(timeoutId);
-
-        const errorName = fetchError instanceof Error ? fetchError.name : 'UnknownError';
-        const errorMessage = getErrorMessage(fetchError);
-        if (errorName === 'AbortError' || errorMessage.includes('timeout')) {
-          if (__DEV__) {
-            logger.warn(`⚠️ OpenAI API chat timeout after ${timeoutDuration}ms`);
-          }
-          throw new Error('OpenAI API request timeout');
-        }
-        throw fetchError;
+      const data = await this.executeCompletion(messages, maxTokens, temperature);
+      if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+        return this.getUnavailableMessage();
       }
 
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.status}`);
+      const content = data.choices[0]?.message?.content;
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        return this.getUnavailableMessage();
       }
 
-      const data: OpenAIResponse = await response.json();
-
-      // CRITICAL: Validate API response structure
-      if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-        logger.error('❌ Invalid OpenAI API response structure (chat):', data);
-        throw new Error('Invalid API response structure');
-      }
-
-      const firstChoice = data.choices[0];
-      if (!firstChoice || !firstChoice.message || typeof firstChoice.message.content !== 'string') {
-        logger.error('❌ Invalid OpenAI API response content (chat):', firstChoice);
-        throw new Error('Invalid API response content');
-      }
-
-      // ELITE: Track cost for chat API call
       const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
       await costTracker.recordCall(
         'chat',
@@ -429,26 +465,17 @@ class OpenAIService {
         this.model,
       );
 
-      const generatedText = firstChoice.message.content.trim();
-
-      // CRITICAL: Validate generated text is not empty
-      if (!generatedText || generatedText.length === 0) {
-        logger.warn('⚠️ OpenAI returned empty text (chat), throwing error');
-        throw new Error('Empty response from API');
-      }
-
-      return generatedText;
+      return content.trim();
     } catch (error) {
-      logger.error('OpenAI chat error:', error);
-      throw error;
+      logger.warn('OpenAI chat exception (returning unavailable message):', getErrorMessage(error));
+      return this.getUnavailableMessage();
     }
   }
 
   /**
-   * Mock response generator (API key olmadığında)
+   * Fallback response generator
    */
   private getFallbackResponse(prompt: string): string {
-    // Prompt'a göre bilgilendirici fallback yanıtları
     if (safeIncludes(prompt, 'risk')) {
       return 'Risk analizi: Orta seviye risk. Deprem hazırlığı yapmanız önerilir. Acil durum çantası hazırlayın ve toplanma noktanızı belirleyin.';
     }
@@ -469,12 +496,11 @@ class OpenAIService {
   }
 
   /**
-   * API key durumunu kontrol et
+   * OpenAI provider status
    */
   isConfigured(): boolean {
-    return this.apiKey !== null && this.apiKey.length > 0;
+    return Boolean(this.proxyUrls.length > 0 || (this.apiKey && this.apiKey.length > 0));
   }
 }
 
 export const openAIService = new OpenAIService();
-

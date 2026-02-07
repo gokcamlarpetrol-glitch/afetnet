@@ -19,8 +19,8 @@ export class KandilliHTMLProvider {
       // lst0.asp = Son 500 deprem (fastest updates)
       // ELITE: Only try 2 URLs with short timeout to prevent blocking main fetch
       const urls = [
-        'http://www.koeri.boun.edu.tr/scripts/lst0.asp',   // PRIMARY: Son 500 deprem - fastest updates
-        'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTTPS fallback
+        'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // PRIMARY: HTTPS (ATS compliant)
+        'http://www.koeri.boun.edu.tr/scripts/lst0.asp',  // HTTP fallback (ATS exception may be needed)
       ];
 
       let lastError: Error | null = null;
@@ -191,72 +191,74 @@ export class KandilliHTMLProvider {
         }
 
         try {
-          // CRITICAL: Parse Kandilli fixed-width format accurately
-          // Real format: "2025.11.10 22:54:37  39.2353   28.1785        8.5      -.-  1.7  -.-   SINDIRGI (BALIKESIR)"
+          // CRITICAL: Try strict fixed-width parse first, then a tokenized fallback.
+          // Kandilli format can drift between deployments (spacing/column alignment).
+          let dateStr = '';
+          let timeStr = '';
+          let latStr = '';
+          let lonStr = '';
+          let depthStr = '';
+          let mdStr = '';
+          let mlStr = '';
+          let mwStr = '';
+          let rawLocation = '';
 
-          if (trimmed.length < 60) continue;
+          const rowMatch = trimmed.match(
+            /^(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(-?\d{1,2}\.\d{2,5})\s+(-?\d{1,3}\.\d{2,5})\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(.+)$/,
+          );
 
-          // Use regex for more flexible parsing (handles variable spacing)
-          const dateTimeMatch = trimmed.match(/^(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2}:\d{2})/);
-          if (!dateTimeMatch) continue;
-
-          const dateStr = dateTimeMatch[1]; // YYYY.MM.DD
-          const timeStr = dateTimeMatch[2]; // HH:MM:SS
-
-          // Extract coordinates and magnitude using regex (more reliable)
-          // ELITE: More flexible regex to handle varying decimal precision
-          // Example: "39.2335   29.0528       10.2" or "36.9675   29.4153        3.9"
-          const coordsMatch = trimmed.match(/\s+(\d{2}\.\d{2,5})\s+(\d{2}\.\d{2,5})\s+(\d+\.?\d*)\s+/);
-          if (!coordsMatch) {
-            if (__DEV__ && parsedCount < 2) {
-              logger.debug(`⚠️ Kandilli: Koordinat regex eşleşmedi: ${trimmed.substring(0, 80)}`);
+          if (rowMatch) {
+            dateStr = rowMatch[1];
+            timeStr = rowMatch[2];
+            latStr = rowMatch[3];
+            lonStr = rowMatch[4];
+            depthStr = rowMatch[5];
+            mdStr = rowMatch[6];
+            mlStr = rowMatch[7];
+            mwStr = rowMatch[8];
+            rawLocation = rowMatch[9];
+          } else {
+            const tokens = trimmed.split(/\s+/);
+            if (tokens.length < 9) {
+              if (__DEV__ && parsedCount < 2) {
+                logger.debug(`⚠️ Kandilli: Satır formatı eşleşmedi: ${trimmed.substring(0, 90)}`);
+              }
+              skippedCount++;
+              continue;
             }
-            skippedCount++;
-            continue;
+
+            dateStr = tokens[0];
+            timeStr = tokens[1];
+            latStr = tokens[2];
+            lonStr = tokens[3];
+            depthStr = tokens[4];
+            mdStr = tokens[5];
+            mlStr = tokens[6];
+            mwStr = tokens[7];
+            rawLocation = tokens.slice(8).join(' ');
           }
 
-          const latStr = coordsMatch[1];
-          const lonStr = coordsMatch[2];
-          const depthStr = coordsMatch[3];
-
-          // Extract ML magnitude (main magnitude field)
-          // Format: "MD   ML   Mw" -> we want ML (second value)
-          // Example: "      -.-  1.7  -.-   " -> ML = 1.7
-          // More flexible regex to handle variable spacing
-          const magPattern = /\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+/;
-          let magMatch = trimmed.match(magPattern);
-
-          if (!magMatch) {
-            // Fallback: Try simpler pattern
-            const simpleMagMatch = trimmed.match(/\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)/);
-            if (!simpleMagMatch) continue;
-            magMatch = simpleMagMatch;
-          }
-
-          // ML is the second magnitude value (index 2 in match array)
-          // Priority: ML > Mw > MD (use first valid magnitude)
+          // Prefer ML, then Mw, then MD
           let magStr = '-1';
-          const magnitudes = [magMatch[1], magMatch[2], magMatch[3]]; // MD, ML, Mw
-
-          // Prefer ML (index 1), then Mw (index 2), then MD (index 0)
-          const priority = [1, 2, 0]; // ML first, then Mw, then MD
-          for (const idx of priority) {
-            if (magnitudes[idx] && magnitudes[idx] !== '-.-') {
-              const magValue = parseFloat(magnitudes[idx]);
-              if (!isNaN(magValue) && magValue > 0) {
-                magStr = magnitudes[idx];
+          const magnitudes = [mdStr, mlStr, mwStr];
+          for (const idx of [1, 2, 0]) {
+            const value = magnitudes[idx];
+            if (value && value !== '-.-') {
+              const parsedMagnitude = parseFloat(value);
+              if (!isNaN(parsedMagnitude) && parsedMagnitude > 0) {
+                magStr = value;
                 break;
               }
             }
           }
 
-          if (magStr === '-1') continue; // No valid magnitude found
+          if (magStr === '-1') continue;
 
-          // Extract location (everything after the magnitude fields)
-          const locationMatch = trimmed.match(/\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(-\.-|\d+\.\d+)\s+(.+?)(?:\s+İlksel|$)/);
-          const location = locationMatch && locationMatch[4]
-            ? locationMatch[4].trim().replace(/\s+/g, ' ')
-            : trimmed.substring(61).trim().replace(/\s+/g, ' ').split(/\s+/)[0] || 'Türkiye';
+          const location = rawLocation
+            .replace(/\s+İlksel.*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!location) continue;
 
           // Validate date format (YYYY.MM.DD)
           if (!/^\d{4}\.\d{2}\.\d{2}$/.test(dateStr)) continue;
@@ -266,30 +268,20 @@ export class KandilliHTMLProvider {
 
           // Parse date/time (Kandilli uses Turkey timezone UTC+3)
           // CRITICAL: Kandilli verileri Türkiye saatine göre (UTC+3) geliyor
-          const dateTimeStr = `${dateStr.replace(/\./g, '-')} ${timeStr}`;
-
-          // CRITICAL: Parse as Turkey timezone (UTC+3) explicitly
-          // Add timezone indicator to ensure correct parsing
-          const dateTimeWithTz = `${dateTimeStr}+03:00`;
+          const dateTimeWithTz = `${dateStr.replace(/\./g, '-')}T${timeStr}+03:00`;
           const parsedDate = new Date(dateTimeWithTz);
 
-          // If timezone parsing fails, fallback to manual conversion
-          let utcTime: number;
-          if (!isNaN(parsedDate.getTime())) {
-            utcTime = parsedDate.getTime();
-          } else {
-            // Fallback: Parse as local and convert from Turkey timezone (UTC+3)
-            const localDate = new Date(dateTimeStr);
-            const localTime = localDate.getTime();
-            const localOffset = localDate.getTimezoneOffset() * 60 * 1000; // Local timezone offset in ms
-            const turkeyOffset = -3 * 60 * 60 * 1000; // UTC+3 = -180 minutes
-            // Convert: local time -> UTC -> Turkey time -> UTC (subtract Turkey offset)
-            utcTime = localTime - localOffset - turkeyOffset;
+          let utcTime = parsedDate.getTime();
+          if (isNaN(utcTime)) {
+            // Fallback: construct UTC by subtracting Turkey offset (+03:00)
+            const [year, month, day] = dateStr.split('.').map(Number);
+            const [hour, minute, second] = timeStr.split(':').map(Number);
+            utcTime = Date.UTC(year, month - 1, day, hour - 3, minute, second);
           }
 
           const latitude = parseFloat(latStr);
           const longitude = parseFloat(lonStr);
-          const depth = parseFloat(depthStr);
+          const depth = depthStr === '-.-' ? 0 : parseFloat(depthStr);
           const magnitude = parseFloat(magStr);
 
           // Validate parsed values
@@ -398,4 +390,3 @@ export class KandilliHTMLProvider {
 }
 
 export const kandilliHTMLProvider = new KandilliHTMLProvider();
-

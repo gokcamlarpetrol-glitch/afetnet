@@ -18,6 +18,9 @@ import * as haptics from '../utils/haptics';
 
 const logger = createLogger('MagnitudeBasedNotificationService');
 
+// ELITE: Module-level flag to prevent repeated log noise
+let _notifModuleWarned = false;
+
 export interface MagnitudeNotificationConfig {
   magnitude: number;
   location: string;
@@ -26,6 +29,17 @@ export interface MagnitudeNotificationConfig {
   timestamp?: number;
   depth?: number;
   source?: string;
+}
+
+interface NotificationSettingsSnapshot {
+  notificationsEnabled: boolean;
+  notificationPush: boolean;
+  notificationMode: 'silent' | 'vibrate' | 'sound' | 'sound+vibrate' | 'critical-only';
+  notificationSoundType: 'default' | 'alarm' | 'sos' | 'beep' | 'chime' | 'siren' | 'custom';
+  notificationSoundVolume: number;
+  notificationSoundRepeat: number;
+  magnitudeBasedSound: boolean;
+  magnitudeBasedVibration: boolean;
 }
 
 /**
@@ -55,7 +69,16 @@ export async function showMagnitudeBasedNotification(
 
     // ELITE: Determine notification priority based on magnitude
     const priority = getPriorityForMagnitude(magnitude);
-    
+
+    // Respect user notification mode/preferences before delivery.
+    const settings = await getNotificationSettingsSnapshot();
+    if (!settings.notificationsEnabled || settings.notificationMode === 'silent') {
+      return;
+    }
+    if (settings.notificationMode === 'critical-only' && priority !== 'critical') {
+      return;
+    }
+
     // ELITE: Format notification content
     const config: MagnitudeNotificationConfig = {
       magnitude,
@@ -72,44 +95,49 @@ export async function showMagnitudeBasedNotification(
     // ELITE: Load notifications module
     const Notifications = await loadNotificationsModule();
     if (!Notifications) {
-      logger.warn('Notifications module not available - using fallback');
+      if (!_notifModuleWarned) {
+        logger.warn('Notifications module not available - using fallback');
+        _notifModuleWarned = true;
+      }
       // Fallback: Use haptic feedback
       await sendHapticFeedback(magnitude);
       return;
     }
 
     // ELITE: Setup Android notification channels
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' && settings.notificationPush) {
       await setupAndroidChannels(Notifications, priority);
     }
 
-    // ELITE: Send instant notification (trigger: null = immediate)
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: formatted.title,
-        body: formatted.body,
-        sound: formatted.sound,
-        priority: formatted.priority,
-        data: formatted.data,
-        sticky: priority === 'critical' || priority === 'high', // High/Critical alerts stay until dismissed
-        badge: priority === 'critical' ? 999 : priority === 'high' ? 5 : 1,
-      },
-      trigger: null, // CRITICAL: Instant delivery - no delay
-      ...(Platform.OS === 'android' && {
-        android: {
-          channelId: formatted.channelId,
-          importance: formatted.androidImportance,
-          vibrationPattern: formatted.vibrationPattern,
-          priority: formatted.androidPriority,
+    // ELITE: Send instant push notification (trigger: null = immediate) if enabled
+    if (settings.notificationPush) {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: formatted.title,
+          body: formatted.body,
           sound: formatted.sound,
-          autoCancel: false, // Don't auto-cancel critical alerts
+          priority: formatted.priority,
+          data: formatted.data,
+          sticky: priority === 'critical' || priority === 'high', // High/Critical alerts stay until dismissed
+          badge: priority === 'critical' ? 999 : priority === 'high' ? 5 : 1,
         },
-      }),
-    });
+        trigger: null, // CRITICAL: Instant delivery - no delay
+        ...(Platform.OS === 'android' && {
+          android: {
+            channelId: formatted.channelId,
+            importance: formatted.androidImportance,
+            vibrationPattern: formatted.vibrationPattern,
+            priority: formatted.androidPriority,
+            sound: formatted.sound,
+            autoCancel: false, // Don't auto-cancel critical alerts
+          },
+        }),
+      });
+    }
 
     // ELITE: Multi-channel alerts for high/critical priority
     if (priority === 'critical' || priority === 'high') {
-      await sendMultiChannelAlert(formatted, priority, magnitude);
+      await sendMultiChannelAlert(formatted, priority, magnitude, settings);
     }
 
     // ELITE: Haptic feedback based on magnitude
@@ -163,7 +191,7 @@ function formatNotificationContent(
   // ELITE: Format magnitude with appropriate emoji and urgency
   let emoji = '🌍';
   let urgencyText = '';
-  
+
   if (magnitude >= 6.0) {
     emoji = '🚨';
     urgencyText = 'BÜYÜK DEPREM! ';
@@ -188,8 +216,9 @@ function formatNotificationContent(
     body += '\n⚠️ ACİL DURUM MODU AKTİF';
   }
 
-  // ELITE: Sound selection based on priority
-  const sound = priority === 'critical' ? 'emergency' : priority === 'high' ? 'alert' : 'default';
+  // PREMIUM: Always use 'default' for native push notification sound
+  // The actual emergency alarm audio is played separately via UltraFastEEWNotification / MultiChannelAlertService
+  const sound = 'default';
 
   // ELITE: Vibration pattern based on priority
   const vibrationPattern = priority === 'critical'
@@ -263,15 +292,18 @@ async function sendMultiChannelAlert(
   formatted: ReturnType<typeof formatNotificationContent>,
   priority: 'critical' | 'high' | 'normal',
   magnitude: number,
+  settings: NotificationSettingsSnapshot,
 ): Promise<void> {
   try {
     const { multiChannelAlertService } = await import('./MultiChannelAlertService');
-    
+
     await multiChannelAlertService.sendAlert({
       title: formatted.title,
       body: formatted.body,
       priority,
       sound: formatted.sound,
+      soundVolume: settings.notificationSoundVolume,
+      soundRepeat: settings.notificationSoundRepeat,
       vibrationPattern: formatted.vibrationPattern,
       ttsText: magnitude >= 6.0
         ? `ACİL DURUM! Büyük deprem algılandı! ${magnitude.toFixed(1)} büyüklüğünde deprem! ${formatted.data.location}`
@@ -279,10 +311,12 @@ async function sendMultiChannelAlert(
           ? `ÖNEMLİ DEPREM! ${magnitude.toFixed(1)} büyüklüğünde deprem algılandı! ${formatted.data.location}`
           : `${magnitude.toFixed(1)} büyüklüğünde deprem algılandı. ${formatted.data.location}`,
       channels: {
-        pushNotification: true,
+        // Push already sent by this service via scheduleNotificationAsync.
+        // Keep multi-channel focused on non-push channels to prevent duplicate alerts.
+        pushNotification: false,
         fullScreenAlert: priority === 'critical' || priority === 'high',
-        alarmSound: true,
-        vibration: true,
+        alarmSound: settings.notificationMode !== 'vibrate' && settings.notificationMode !== 'silent',
+        vibration: settings.notificationMode !== 'sound' && settings.notificationMode !== 'silent',
         tts: true,
         led: Platform.OS === 'android' && (priority === 'critical' || priority === 'high'),
         bluetooth: false,
@@ -324,7 +358,7 @@ async function sendHapticFeedback(magnitude: number): Promise<void> {
 async function triggerEmergencyMode(magnitude: number, location: string, timestamp?: number): Promise<void> {
   try {
     const { emergencyModeService } = await import('./EmergencyModeService');
-    
+
     // ELITE: Create earthquake event for emergency mode
     const earthquake = {
       id: `eq_${timestamp || Date.now()}`,
@@ -349,6 +383,34 @@ async function triggerEmergencyMode(magnitude: number, location: string, timesta
   } catch (error) {
     logger.error('Failed to trigger emergency mode:', error);
     // Continue - notification already sent
+  }
+}
+
+async function getNotificationSettingsSnapshot(): Promise<NotificationSettingsSnapshot> {
+  try {
+    const { useSettingsStore } = await import('../stores/settingsStore');
+    const state = useSettingsStore.getState();
+    return {
+      notificationsEnabled: state.notificationsEnabled,
+      notificationPush: state.notificationPush,
+      notificationMode: state.notificationMode,
+      notificationSoundType: state.notificationSoundType,
+      notificationSoundVolume: state.notificationSoundVolume,
+      notificationSoundRepeat: state.notificationSoundRepeat,
+      magnitudeBasedSound: state.magnitudeBasedSound,
+      magnitudeBasedVibration: state.magnitudeBasedVibration,
+    };
+  } catch (error) {
+    return {
+      notificationsEnabled: true,
+      notificationPush: true,
+      notificationMode: 'sound+vibrate',
+      notificationSoundType: 'alarm',
+      notificationSoundVolume: 80,
+      notificationSoundRepeat: 3,
+      magnitudeBasedSound: true,
+      magnitudeBasedVibration: true,
+    };
   }
 }
 

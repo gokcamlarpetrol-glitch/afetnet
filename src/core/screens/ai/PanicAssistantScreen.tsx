@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, StatusBar, Linking, ImageBackground, Alert, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,13 +14,8 @@ import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('PanicAssistantScreen');
 
-// Mock Hardware Services (In real app, use react-native-torch, react-native-sound)
-const HardwareService = {
-  toggleFlashlight: (on: boolean) => logger.info('Flashlight:', on),
-  playWhistle: (on: boolean) => logger.info('Whistle:', on),
-  startMorseSOS: () => logger.info('SOS Started'),
-  stopMorseSOS: () => logger.info('SOS Stopped'),
-};
+// ELITE: Real navigation to FlashlightWhistleScreen for hardware tools
+// Flashlight, Whistle, and SOS are fully implemented in FlashlightWhistleScreen
 
 type HazardType = 'earthquake' | 'nuclear' | 'biohazard' | 'tsunami' | 'fire' | 'extreme_weather' | 'medical';
 
@@ -40,11 +35,7 @@ export default function PanicAssistantScreen() {
   const [activeHazard, setActiveHazard] = useState<HazardType>('earthquake');
   const [medicalNode, setMedicalNode] = useState<DecisionNode | null>(null);
 
-  // Elite Tools State
-  const [isWhistleOn, setWhistleOn] = useState(false);
-  const [isFlashlightOn, setFlashlightOn] = useState(false);
-  const [isSOSActive, setSOSActive] = useState(false);
-  const sosAnim = useRef(new Animated.Value(0)).current;
+  // Elite Tools - Navigate to FlashlightWhistleScreen for real hardware access
 
   const { panicAssistant, panicAssistantLoading } = useAIAssistantStore();
 
@@ -60,43 +51,14 @@ export default function PanicAssistantScreen() {
     if (activeHazard === 'medical') setMedicalNode(null);
   }, [activeHazard]);
 
-  // Elite Tool Handlers
-  const toggleWhistle = () => {
-    const newState = !isWhistleOn;
-    setWhistleOn(newState);
-    HardwareService.playWhistle(newState);
-    haptics.impactHeavy();
-    if (newState) Alert.alert("Düdük Aktif", "3000Hz yüksek frekans sinyali çalınıyor.");
-  };
-
-  const toggleFlashlight = () => {
-    const newState = !isFlashlightOn;
-    setFlashlightOn(newState);
-    HardwareService.toggleFlashlight(newState);
+  // ELITE: Navigate to FlashlightWhistleScreen for real hardware tools
+  const openEmergencyTools = () => {
     haptics.impactMedium();
-  };
-
-  const toggleSOS = () => {
-    const newState = !isSOSActive;
-    setSOSActive(newState);
-    if (newState) {
-      HardwareService.startMorseSOS();
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(sosAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-          Animated.timing(sosAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-          Animated.timing(sosAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-          Animated.timing(sosAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-          Animated.timing(sosAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-          Animated.timing(sosAnim, { toValue: 0, duration: 600, useNativeDriver: true }), // Short pause
-        ]),
-      ).start();
-    } else {
-      HardwareService.stopMorseSOS();
-      sosAnim.stopAnimation();
-      sosAnim.setValue(0);
+    try {
+      (navigation as any).navigate('FlashlightWhistle');
+    } catch (e) {
+      logger.warn('FlashlightWhistle navigation failed:', e);
     }
-    haptics.notificationWarning();
   };
 
   const sendSafeStatus = () => {
@@ -118,24 +80,20 @@ export default function PanicAssistantScreen() {
     <View style={styles.toolsContainer}>
       <Text style={styles.sectionHeaderTools}>HAYATTA KALMA SETİ</Text>
       <View style={styles.toolsGrid}>
-        {/* Whistle */}
-        <TouchableOpacity style={[styles.toolBtn, isWhistleOn && styles.toolBtnActive]} onPress={toggleWhistle}>
-          <Ionicons name="megaphone" size={24} color={isWhistleOn ? '#fff' : '#be123c'} />
-          <Text style={[styles.toolLabel, isWhistleOn && styles.toolLabelActive]}>DÜDÜK</Text>
+        {/* Emergency Tools - Navigate to real FlashlightWhistleScreen */}
+        <TouchableOpacity style={styles.toolBtn} onPress={openEmergencyTools}>
+          <Ionicons name="flashlight" size={24} color="#be123c" />
+          <Text style={styles.toolLabel}>FENER</Text>
         </TouchableOpacity>
 
-        {/* Flashlight */}
-        <TouchableOpacity style={[styles.toolBtn, isFlashlightOn && styles.toolBtnActive]} onPress={toggleFlashlight}>
-          <Ionicons name="flashlight" size={24} color={isFlashlightOn ? '#fff' : '#be123c'} />
-          <Text style={[styles.toolLabel, isFlashlightOn && styles.toolLabelActive]}>FENER</Text>
+        <TouchableOpacity style={styles.toolBtn} onPress={openEmergencyTools}>
+          <Ionicons name="megaphone" size={24} color="#be123c" />
+          <Text style={styles.toolLabel}>DÜDÜK</Text>
         </TouchableOpacity>
 
-        {/* SOS */}
-        <TouchableOpacity style={[styles.toolBtn, isSOSActive && styles.toolBtnAlert]} onPress={toggleSOS}>
-          <Animated.View style={{ opacity: isSOSActive ? sosAnim : 1 }}>
-            <Ionicons name="alert-circle" size={24} color={isSOSActive ? '#fff' : '#be123c'} />
-          </Animated.View>
-          <Text style={[styles.toolLabel, isSOSActive && styles.toolLabelActive]}>S.O.S</Text>
+        <TouchableOpacity style={styles.toolBtn} onPress={openEmergencyTools}>
+          <Ionicons name="alert-circle" size={24} color="#be123c" />
+          <Text style={styles.toolLabel}>S.O.S</Text>
         </TouchableOpacity>
 
         {/* I'm Safe */}

@@ -33,7 +33,7 @@ import { validateMessage, sanitizeMessage } from '../utils/messageSanitizer';
 import { LRUSet } from '../utils/LRUCache';
 import { Mutex, Debouncer, Throttle } from '../utils/Mutex';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMeshStore } from './mesh/MeshStore';
+import { useMeshStore, type MeshMessage } from './mesh/MeshStore';
 import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import { AppState, AppStateStatus } from 'react-native';
 import {
@@ -65,6 +65,7 @@ export type DeliveryStatus = 'pending' | 'sending' | 'sent' | 'delivered' | 'rea
 
 // ELITE: Message type
 export type MessageType = 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'TYPING' | 'ACK' | 'REACTION' | 'IMAGE' | 'VOICE';
+type CloudMessageType = 'text' | 'sos' | 'location' | 'status' | 'image' | 'voice';
 
 export interface HybridMessage {
   id: string;
@@ -75,7 +76,7 @@ export interface HybridMessage {
   recipientId?: string;
   timestamp: number;
   source: 'CLOUD' | 'MESH' | 'HYBRID';
-  location?: { lat: number; lng: number };
+  location?: { lat: number; lng: number; address?: string };
   status: DeliveryStatus;
   priority: MessagePriority;
   type: MessageType;
@@ -116,6 +117,9 @@ class HybridMessageService {
   // P2: Debounced queue save
   private saveDebouncer: Debouncer;
 
+  // FIX: Separate debouncer for seen IDs to prevent collision
+  private seenIdsSaveDebouncer: Debouncer;
+
   // Callbacks
   private deliveryCallbacks: Map<string, DeliveryCallback[]> = new Map();
   private typingCallbacks: Set<TypingCallback> = new Set();
@@ -132,6 +136,7 @@ class HybridMessageService {
   constructor() {
     this.seenMessageIds = new LRUSet<string>(MAX_SEEN_MESSAGE_IDS);
     this.saveDebouncer = new Debouncer(QUEUE_SAVE_DEBOUNCE_MS);
+    this.seenIdsSaveDebouncer = new Debouncer(QUEUE_SAVE_DEBOUNCE_MS);
     this.typingThrottle = new Throttle(TYPING_THROTTLE_MS);
   }
 
@@ -198,8 +203,9 @@ class HybridMessageService {
     this.activeTypingUsers.forEach(timer => clearTimeout(timer));
     this.activeTypingUsers.clear();
 
-    // Cancel save debouncer
+    // Cancel save debouncers
     this.saveDebouncer.cancel();
+    this.seenIdsSaveDebouncer.cancel();
 
     // Remove AppState listener
     if (this.appStateSubscription) {
@@ -310,6 +316,164 @@ class HybridMessageService {
     return isNew;
   }
 
+  private mapHybridTypeToCloudType(type: MessageType): CloudMessageType {
+    switch (type) {
+      case 'SOS':
+        return 'sos';
+      case 'LOCATION':
+        return 'location';
+      case 'STATUS':
+        return 'status';
+      case 'IMAGE':
+        return 'image';
+      case 'VOICE':
+        return 'voice';
+      default:
+        return 'text';
+    }
+  }
+
+  private mapCloudTypeToHybridType(
+    cloudType?: string,
+    mediaType?: HybridMessage['mediaType'],
+    hasLocation: boolean = false,
+  ): MessageType {
+    switch (cloudType) {
+      case 'sos':
+        return 'SOS';
+      case 'location':
+        return 'LOCATION';
+      case 'status':
+        return 'STATUS';
+      case 'image':
+        return 'IMAGE';
+      case 'voice':
+        return 'VOICE';
+      default:
+        if (mediaType === 'image') return 'IMAGE';
+        if (mediaType === 'voice') return 'VOICE';
+        if (mediaType === 'location' || hasLocation) return 'LOCATION';
+        return 'CHAT';
+    }
+  }
+
+  private normalizeLocationPayload(raw: unknown): HybridMessage['location'] | undefined {
+    if (!raw || typeof raw !== 'object') {
+      return undefined;
+    }
+
+    const location = raw as Record<string, unknown>;
+    const lat = typeof location.lat === 'number'
+      ? location.lat
+      : typeof location.latitude === 'number'
+        ? location.latitude
+        : null;
+    const lng = typeof location.lng === 'number'
+      ? location.lng
+      : typeof location.longitude === 'number'
+        ? location.longitude
+        : null;
+
+    if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return undefined;
+    }
+
+    const normalized: HybridMessage['location'] = { lat, lng };
+    if (typeof location.address === 'string' && location.address.trim().length > 0) {
+      normalized.address = location.address.trim();
+    }
+    return normalized;
+  }
+
+  private normalizeMediaType(raw: unknown): HybridMessage['mediaType'] | undefined {
+    if (raw === 'image' || raw === 'voice' || raw === 'location') {
+      return raw;
+    }
+    if (typeof raw !== 'string') {
+      return undefined;
+    }
+    const normalized = raw.toLowerCase();
+    if (normalized === 'image' || normalized === 'voice' || normalized === 'location') {
+      return normalized;
+    }
+    return undefined;
+  }
+
+  private isMessagePriority(value: unknown): value is MessagePriority {
+    return value === 'critical' || value === 'high' || value === 'normal' || value === 'low';
+  }
+
+  private toMeshStoreType(type: MessageType): MeshMessage['type'] {
+    switch (type) {
+      case 'SOS':
+        return 'SOS';
+      case 'STATUS':
+        return 'STATUS';
+      case 'LOCATION':
+        return 'LOCATION';
+      case 'TYPING':
+        return 'TYPING';
+      case 'ACK':
+        return 'ACK';
+      case 'REACTION':
+        return 'REACTION';
+      case 'IMAGE':
+        return 'IMAGE';
+      case 'VOICE':
+        return 'VOICE';
+      default:
+        return 'CHAT';
+    }
+  }
+
+  private toHybridTypeFromMesh(type: MeshMessage['type']): MessageType {
+    switch (type) {
+      case 'SOS':
+        return 'SOS';
+      case 'STATUS':
+        return 'STATUS';
+      case 'LOCATION':
+        return 'LOCATION';
+      case 'TYPING':
+        return 'TYPING';
+      case 'ACK':
+        return 'ACK';
+      case 'REACTION':
+        return 'REACTION';
+      case 'IMAGE':
+        return 'IMAGE';
+      case 'VOICE':
+        return 'VOICE';
+      default:
+        return 'CHAT';
+    }
+  }
+
+  private pushCloudMessageToMeshStore(message: HybridMessage): void {
+    const meshMessage: MeshMessage = {
+      id: message.id,
+      senderId: message.senderId,
+      senderName: message.senderName,
+      to: message.recipientId || 'broadcast',
+      type: this.toMeshStoreType(message.type),
+      content: message.content,
+      timestamp: message.timestamp,
+      ttl: 3,
+      priority: message.priority,
+      status: message.status === 'pending' ? 'sending' : message.status,
+      acks: [],
+      retryCount: message.retryCount,
+      hops: 0,
+      ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
+      ...(message.mediaType ? { mediaType: message.mediaType } : {}),
+      ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
+      ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
+      ...(message.location ? { location: message.location } : {}),
+    };
+
+    useMeshStore.getState().addMessage(meshMessage);
+  }
+
   /**
    * Send a message with guaranteed delivery
    */
@@ -321,7 +485,7 @@ class HybridMessageService {
       type?: MessageType;
       replyTo?: string;
       replyPreview?: string;
-      location?: { lat: number; lng: number };
+      location?: { lat: number; lng: number; address?: string };
     } = {}
   ): Promise<HybridMessage> {
     if (!this.isInitialized) await this.initialize();
@@ -413,7 +577,12 @@ class HybridMessageService {
       try {
         const { firebaseStorageService } = await import('./FirebaseStorageService');
         const extension = mediaType === 'image' ? 'jpg' : 'm4a';
-        const storagePath = `chat/${myIdentity.id}/${Date.now()}.${extension}`;
+        const storageOwnerId = myIdentity.cloudUid;
+        if (!storageOwnerId) {
+          logger.warn('Skipping media upload: cloud identity unavailable');
+          throw new Error('cloud-identity-unavailable');
+        }
+        const storagePath = `chat/${storageOwnerId}/${Date.now()}.${extension}`;
 
         // Read file and upload
         const FileSystem = require('expo-file-system');
@@ -424,6 +593,9 @@ class HybridMessageService {
         const bytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         mediaUrl = await firebaseStorageService.uploadFile(storagePath, bytes, {
           contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
+          customMetadata: {
+            userId: storageOwnerId,
+          },
         }) ?? undefined;
       } catch (error) {
         logger.error('Media upload failed:', error);
@@ -556,6 +728,12 @@ class HybridMessageService {
           type: message.type,
           content: message.content,
           timestamp: message.timestamp,
+          senderName: message.senderName,
+          ...(message.mediaType && { mediaType: message.mediaType }),
+          ...(message.mediaUrl && { mediaUrl: message.mediaUrl }),
+          ...(typeof message.mediaDuration === 'number' && { mediaDuration: message.mediaDuration }),
+          ...(message.mediaThumbnail && { mediaThumbnail: message.mediaThumbnail }),
+          ...(message.location && { location: message.location }),
         });
 
         await meshNetworkService.broadcastMessage(meshPayload, meshType, {
@@ -573,7 +751,7 @@ class HybridMessageService {
             await meshStoreForwardService.storeForPeer(
               message.recipientId,
               message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT,
-              message.content,
+              meshPayload,
               { priority: message.priority === 'critical' ? MeshPriority.CRITICAL : MeshPriority.NORMAL }
             );
           } catch {
@@ -596,17 +774,26 @@ class HybridMessageService {
           }
 
           if (firebaseDataService.isInitialized) {
+            const metadata: Record<string, unknown> = {
+              ...(message.senderName ? { senderName: message.senderName } : {}),
+              ...(message.mediaType ? { mediaType: message.mediaType } : {}),
+              ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
+              ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
+              ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
+            };
+
             const messageData = {
               id: message.id,
               fromDeviceId: message.senderId,
               toDeviceId: message.recipientId || 'broadcast',
               content: message.content,
               timestamp: message.timestamp,
-              type: message.type === 'SOS' ? 'sos' as const : 'text' as const,
+              type: this.mapHybridTypeToCloudType(message.type),
               status: 'sent' as const,
               priority: message.priority,
-              // V5: Include location for SOS
+              // V5: Include structured location/media payload
               ...(message.location && { location: message.location }),
+              ...(Object.keys(metadata).length > 0 && { metadata }),
             };
 
             const writeTargets = message.recipientId
@@ -619,9 +806,14 @@ class HybridMessageService {
               ),
             );
 
+            const senderWriteOk = !!writeResults[0];
             const inboxWriteIndex = message.recipientId ? 1 : 0;
             const inboxWriteOk = !!writeResults[inboxWriteIndex];
-            cloudSuccess = writeResults.some(Boolean);
+            cloudSuccess = message.recipientId ? inboxWriteOk : writeResults.some(Boolean);
+
+            if (message.recipientId && senderWriteOk && !inboxWriteOk) {
+              logger.warn('Cloud sender copy saved but recipient inbox write failed');
+            }
 
             if (cloudSuccess) {
               logger.debug(
@@ -765,7 +957,16 @@ class HybridMessageService {
         }
       }
 
-      if (meshMsg.type === 'CHAT' && typeof meshMsg.content === 'string') {
+      if (
+        (
+          meshMsg.type === 'CHAT' ||
+          meshMsg.type === 'SOS' ||
+          meshMsg.type === 'IMAGE' ||
+          meshMsg.type === 'VOICE' ||
+          meshMsg.type === 'LOCATION'
+        ) &&
+        typeof meshMsg.content === 'string'
+      ) {
         const msgId = meshMsg.id || Date.now().toString(36);
 
         // Deduplication
@@ -781,8 +982,13 @@ class HybridMessageService {
           source: 'MESH',
           status: 'delivered',
           priority: 'normal',
-          type: 'CHAT',
+          type: this.toHybridTypeFromMesh(meshMsg.type),
           retryCount: 0,
+          ...(meshMsg.mediaUrl ? { mediaUrl: meshMsg.mediaUrl } : {}),
+          ...(meshMsg.mediaType ? { mediaType: meshMsg.mediaType } : {}),
+          ...(typeof meshMsg.mediaDuration === 'number' ? { mediaDuration: meshMsg.mediaDuration } : {}),
+          ...(meshMsg.mediaThumbnail ? { mediaThumbnail: meshMsg.mediaThumbnail } : {}),
+          ...(meshMsg.location ? { location: meshMsg.location } : {}),
         };
         callback(hybridMsg);
       }
@@ -860,22 +1066,66 @@ class HybridMessageService {
             }
 
             const unsubscribe = await firebaseDataService.subscribeToMessages(targetId, (cloudMsgs) => {
+              const localTargetIds = new Set(targetIds.map((id) => id.trim()));
               cloudMsgs.forEach(msg => {
+                const fromDeviceId = typeof msg.fromDeviceId === 'string' ? msg.fromDeviceId.trim() : '';
+                const toDeviceId = typeof msg.toDeviceId === 'string' ? msg.toDeviceId.trim() : '';
+
+                // Ignore sender mirror copies of our own outgoing direct messages.
+                const isLocalSenderMirror =
+                  fromDeviceId.length > 0 &&
+                  localTargetIds.has(fromDeviceId) &&
+                  toDeviceId.length > 0 &&
+                  toDeviceId !== 'broadcast' &&
+                  !localTargetIds.has(toDeviceId);
+                if (isLocalSenderMirror) {
+                  return;
+                }
+
                 if (!this.recordSeenMessage(msg.id)) return;
+
+                const rawMsg = msg as unknown as Record<string, unknown>;
+                const metadata = msg.metadata && typeof msg.metadata === 'object'
+                  ? msg.metadata as Record<string, unknown>
+                  : undefined;
+                const mediaType = this.normalizeMediaType(
+                  rawMsg.mediaType ?? metadata?.mediaType,
+                );
+                const location = this.normalizeLocationPayload(
+                  rawMsg.location ?? metadata?.location,
+                );
+                const mediaUrlSource = rawMsg.mediaUrl ?? metadata?.mediaUrl;
+                const mediaDurationSource = rawMsg.mediaDuration ?? metadata?.mediaDuration;
+                const mediaThumbnailSource = rawMsg.mediaThumbnail ?? metadata?.mediaThumbnail;
+                const senderNameSource = rawMsg.senderName ?? metadata?.senderName;
+                const normalizedType = this.mapCloudTypeToHybridType(msg.type, mediaType, !!location);
+                const normalizedPriority = this.isMessagePriority(msg.priority)
+                  ? msg.priority
+                  : 'normal';
 
                 const hybridMsg: HybridMessage = {
                   id: msg.id,
                   content: sanitizeMessage(msg.content),
                   senderId: msg.fromDeviceId,
-                  senderName: 'Cloud User',
+                  senderName: typeof senderNameSource === 'string' && senderNameSource.trim().length > 0
+                    ? senderNameSource.trim()
+                    : 'Cloud User',
                   recipientId: msg.toDeviceId && msg.toDeviceId !== 'broadcast' ? msg.toDeviceId : undefined,
-                  timestamp: msg.timestamp,
+                  timestamp: typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
+                    ? msg.timestamp
+                    : Date.now(),
                   source: 'CLOUD',
                   status: 'delivered',
-                  priority: msg.priority || 'normal',
-                  type: msg.type === 'sos' ? 'SOS' : 'CHAT',
+                  priority: normalizedPriority,
+                  type: normalizedType,
                   retryCount: 0,
+                  ...(typeof mediaUrlSource === 'string' ? { mediaUrl: mediaUrlSource } : {}),
+                  ...(mediaType ? { mediaType } : {}),
+                  ...(typeof mediaDurationSource === 'number' ? { mediaDuration: mediaDurationSource } : {}),
+                  ...(typeof mediaThumbnailSource === 'string' ? { mediaThumbnail: mediaThumbnailSource } : {}),
+                  ...(location ? { location } : {}),
                 };
+                this.pushCloudMessageToMeshStore(hybridMsg);
                 callback(hybridMsg);
               });
             });
@@ -1049,7 +1299,8 @@ class HybridMessageService {
   }
 
   private saveSeenIdsDebounced(): void {
-    this.saveDebouncer.schedule(() => this.saveSeenIdsImmediate());
+    // FIX: Use separate debouncer to prevent collision with queue save
+    this.seenIdsSaveDebouncer.schedule(() => this.saveSeenIdsImmediate());
   }
 
   private async saveSeenIdsImmediate(): Promise<void> {

@@ -159,6 +159,7 @@ class WiFiDirectMeshService {
     // Native module (simulated for now)
     private nativeModule: any = null;
     private eventEmitter: NativeEventEmitter | null = null;
+    private readonly allowSimulation = __DEV__;
 
     constructor() {
         this.seenMessageIds = new LRUSet<string>(CONFIG.MAX_SEEN_MESSAGES);
@@ -212,12 +213,17 @@ class WiFiDirectMeshService {
                 }
             }
 
-            // If no native module, use simulation mode
             if (!this.nativeModule) {
-                logger.warn('⚠️ WiFi Direct native module not available, using simulation');
+                logger.warn('⚠️ WiFi Direct native module not available');
+                if (!this.allowSimulation) {
+                    this.setConnectionState('error');
+                }
             }
         } catch (error) {
-            logger.warn('WiFi Direct native setup failed, using simulation:', error);
+            logger.warn('WiFi Direct native setup failed:', error);
+            if (!this.allowSimulation) {
+                this.setConnectionState('error');
+            }
         }
     }
 
@@ -281,9 +287,13 @@ class WiFiDirectMeshService {
         try {
             if (this.nativeModule) {
                 await this.nativeModule.startDiscovery();
-            } else {
+            } else if (this.allowSimulation) {
                 // Simulation mode
                 this.simulateDiscovery();
+            } else {
+                logger.warn('WiFi Direct discovery unavailable: native module missing');
+                this.setConnectionState('error');
+                return;
             }
 
             // Set discovery timeout
@@ -385,9 +395,13 @@ class WiFiDirectMeshService {
         try {
             if (this.nativeModule) {
                 await this.nativeModule.connect(peer.deviceAddress);
-            } else {
+            } else if (this.allowSimulation) {
                 // Simulation
                 await this.simulateConnection(peer);
+            } else {
+                logger.warn('WiFi Direct connection unavailable: native module missing');
+                this.setConnectionState('error');
+                return false;
             }
 
             return true;
@@ -435,7 +449,7 @@ class WiFiDirectMeshService {
         try {
             if (this.nativeModule) {
                 await this.nativeModule.createGroup();
-            } else {
+            } else if (this.allowSimulation) {
                 // Simulation
                 this.currentGroup = {
                     groupId: `group-${Date.now()}`,
@@ -448,6 +462,10 @@ class WiFiDirectMeshService {
                     isOwner: true,
                 };
                 this.setConnectionState('connected');
+            } else {
+                logger.warn('WiFi Direct group creation unavailable: native module missing');
+                this.setConnectionState('error');
+                return null;
             }
 
             return this.currentGroup;

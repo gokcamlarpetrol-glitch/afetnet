@@ -28,7 +28,7 @@ interface CommunicationScreenProps {
 
 export default function CommunicationScreen({ navigation }: CommunicationScreenProps) {
   const insets = useSafeAreaInsets();
-  const { peers, messages, isEnabled, isSimulationMode } = useMeshStore();
+  const { peers, messages, isEnabled } = useMeshStore();
   const [inputText, setInputText] = useState('');
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>(connectionManager.getConnectionMode());
 

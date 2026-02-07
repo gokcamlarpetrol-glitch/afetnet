@@ -48,6 +48,7 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
     sourceEMSC,
     sourceKOERI,
     sourceCommunity,
+    selectedObservatory,
     notificationPush,
     notificationFullScreen,
     notificationSound,
@@ -73,6 +74,7 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
     setSourceEMSC,
     setSourceKOERI,
     setSourceCommunity,
+    setSelectedObservatory,
     setNotificationPush,
     setNotificationFullScreen,
     setNotificationSound,
@@ -443,6 +445,40 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Veri Kaynakları</Text>
 
+          <View style={styles.settingRow}>
+            <View style={styles.settingIcon}>
+              <Ionicons name="business" size={24} color={colors.brand.primary} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingTitle}>Birincil Gözlemevi</Text>
+              <Text style={styles.settingSubtitle}>Veri birleştirmede öncelikli resmi kaynak</Text>
+            </View>
+          </View>
+          <View style={styles.priorityContainer}>
+            {(['AFAD', 'KANDILLI'] as const).map((observatory) => (
+              <Pressable
+                key={observatory}
+                style={[
+                  styles.priorityChip,
+                  selectedObservatory === observatory && styles.priorityChipActive,
+                ]}
+                onPress={() => {
+                  haptics.impactLight();
+                  setSelectedObservatory(observatory);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.priorityChipText,
+                    selectedObservatory === observatory && styles.priorityChipTextActive,
+                  ]}
+                >
+                  {observatory}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           {renderSettingRow(
             'globe',
             'AFAD',
@@ -793,4 +829,3 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
-

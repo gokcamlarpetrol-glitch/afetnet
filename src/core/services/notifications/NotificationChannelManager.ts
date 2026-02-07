@@ -11,15 +11,15 @@ const logger = createLogger('NotificationChannelManager');
 
 // Channel definitions
 export interface ChannelConfig {
-    id: string;
-    name: string;
-    importance: 'MAX' | 'HIGH' | 'DEFAULT' | 'LOW' | 'MIN';
-    description?: string;
-    sound?: string;
-    vibrationPattern?: number[];
-    bypassDnd?: boolean;
-    enableLights?: boolean;
-    lightColor?: string;
+  id: string;
+  name: string;
+  importance: 'MAX' | 'HIGH' | 'DEFAULT' | 'LOW' | 'MIN';
+  description?: string;
+  sound?: string;
+  vibrationPattern?: number[];
+  bypassDnd?: boolean;
+  enableLights?: boolean;
+  lightColor?: string;
 }
 
 // ELITE: Predefined channels for AfetNet
@@ -29,7 +29,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'Deprem Uyarıları',
     importance: 'MAX',
     description: 'Acil deprem uyarı bildirimleri',
-    sound: 'siren',
+    sound: 'default',
     vibrationPattern: [0, 500, 200, 500, 200, 500],
     bypassDnd: true,
     enableLights: true,
@@ -40,7 +40,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'Erken Uyarı (Kritik)',
     importance: 'MAX',
     description: 'P-Dalga tespit kritik uyarıları',
-    sound: 'siren',
+    sound: 'default',
     vibrationPattern: [0, 1000, 500, 1000],
     bypassDnd: true,
     enableLights: true,
@@ -51,7 +51,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'SOS Bildirimleri',
     importance: 'HIGH',
     description: 'Aile üyelerinden SOS bildirimleri',
-    sound: 'alert',
+    sound: 'default',
     vibrationPattern: [0, 300, 200, 300],
     bypassDnd: true,
   },

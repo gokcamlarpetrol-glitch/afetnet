@@ -11,6 +11,8 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { firebaseService } from './FirebaseService';
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
+import { getAuth } from 'firebase/auth';
+import { initializeFirebase } from '../../lib/firebase';
 
 const logger = createLogger('TokenSyncManager');
 
@@ -42,6 +44,20 @@ class TokenSyncManager {
         return;
       }
 
+      // 2.1 Auth context is mandatory for owner-bound device documents
+      const app = initializeFirebase();
+      if (!app) {
+        logger.debug('Skipping token sync: Firebase app unavailable');
+        return;
+      }
+      const auth = getAuth(app);
+      const currentUser = auth.currentUser;
+      if (!currentUser?.uid) {
+        logger.debug('Skipping token sync: no authenticated user');
+        return;
+      }
+      const ownerUid = currentUser.uid;
+
       // 3. Check Firestore record
       const db = await getFirestoreInstanceAsync();
       if (!db) return;
@@ -64,6 +80,7 @@ class TokenSyncManager {
           token: currentPushToken, // Legacy field
           pushToken: currentPushToken,
           deviceId: deviceId,
+          ownerUid,
           createdAt: now,
           updatedAt: now,
           ...metadata,
@@ -79,6 +96,7 @@ class TokenSyncManager {
           await updateDoc(deviceRef, {
             token: currentPushToken,
             pushToken: currentPushToken,
+            ownerUid,
             updatedAt: now,
             ...metadata,
           });
@@ -87,6 +105,7 @@ class TokenSyncManager {
           // For now, we update 'lastTokenSync' to prove aliveness
           logger.debug(`✅ Token is up-to-date for ${deviceId}`);
           await updateDoc(deviceRef, {
+            ownerUid,
             lastTokenSync: now,
             // Optional: Update versions if changed
             appVersion: metadata.appVersion,

@@ -172,7 +172,7 @@ export const useMeshStore = create<MeshState>()(
       outgoingQueue: [],
       failedQueue: [],
       seenMessageIds: [],
-      isSimulationMode: __DEV__,
+      isSimulationMode: false, // ELITE: Default to real BLE — simulation must be toggled explicitly
       stats: { totalPeers: 0, totalMessages: 0, sosAlerts: 0 },
 
       // Setters
@@ -180,7 +180,13 @@ export const useMeshStore = create<MeshState>()(
       setScanning: (scanning) => set({ isScanning: scanning }),
       setAdvertising: (advertising) => set({ isAdvertising: advertising }),
       setMyDeviceId: (id) => set({ myDeviceId: id }),
-      setSimulationMode: (enabled) => set({ isSimulationMode: enabled }),
+      setSimulationMode: (enabled) => {
+        // Never allow simulation mode in production builds.
+        if (!__DEV__ && enabled) {
+          return;
+        }
+        set({ isSimulationMode: enabled });
+      },
       toggleMesh: (enabled) => set({ isConnected: enabled }), // Simplified toggle
 
       addPeer: (peer) => set((state) => {

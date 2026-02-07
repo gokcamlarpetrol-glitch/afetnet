@@ -18,13 +18,16 @@ import { firebaseDataService } from './FirebaseDataService';
 import { identityService } from './IdentityService';
 import { LOCATION_TASK_NAME } from '../tasks/BackgroundLocationTask';
 import { useFamilyStore } from '../stores/familyStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 
 const logger = createLogger('FamilyTrackingService');
 
 const STORAGE_KEY = '@afetnet:family_members';
-const LOCATION_UPDATE_INTERVAL = 60000; // 1 minute
 const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+const MIN_SHARE_INTERVAL_MS = 20 * 1000; // 20 seconds
+const CLOUD_RETRY_ATTEMPTS = 3;
+const CLOUD_RETRY_BACKOFF_MS = 800;
 
 export interface FamilyMember {
   id: string;
@@ -64,7 +67,10 @@ class FamilyTrackingService {
   private isTracking = false;
   private locationInterval: NodeJS.Timeout | null = null;
   private statusCallbacks: Array<(member: FamilyMember) => void> = [];
-  private locationSubscriptions: Map<string, () => void> = new Map();
+  private shareInFlight: Promise<boolean> | null = null;
+  private lastShareTimestamp = 0;
+  private shareThrottleMs = MIN_SHARE_INTERVAL_MS;
+  private trackingConsumers: Set<string> = new Set();
 
   private syncMembersFromStore(): void {
     const storeMembers = useFamilyStore.getState().members;
@@ -125,8 +131,16 @@ class FamilyTrackingService {
   /**
      * Start location tracking and sharing
      */
-  async startTracking() {
-    if (this.isTracking) return;
+  async startTracking(consumerId: string = 'default') {
+    if (!useSettingsStore.getState().locationEnabled) {
+      logger.info('Family tracking start skipped: location disabled in settings');
+      return;
+    }
+
+    this.trackingConsumers.add(consumerId);
+    if (this.isTracking) {
+      return;
+    }
 
     logger.info('Starting Family Tracking');
     this.syncMembersFromStore();
@@ -137,6 +151,7 @@ class FamilyTrackingService {
       const { status: reqStatus } = await Location.requestForegroundPermissionsAsync();
       if (reqStatus !== 'granted') {
         logger.warn('Foreground location permission denied');
+        this.trackingConsumers.delete(consumerId);
         return; // Don't set isTracking
       }
     }
@@ -174,22 +189,35 @@ class FamilyTrackingService {
     } catch (e) {
       logger.error('Failed to start background location task:', e);
       // Fallback to old interval method if native task fails
+      const fallbackIntervalMs = Math.max(10 * 1000, this.shareThrottleMs);
       this.locationInterval = setInterval(() => {
-        this.shareMyLocation();
-      }, LOCATION_UPDATE_INTERVAL);
+        void this.shareMyLocation({ reason: 'fallback-interval' });
+      }, fallbackIntervalMs);
     }
 
-    // Subscribe to online locations of all members
-    await this.subscribeToMemberLocations();
+    // FIX #4: Location subscriptions are managed centrally by familyStore.
+    // This prevents duplicate Firestore listeners.
 
     // Share immediately
-    await this.shareMyLocation();
+    await this.shareMyLocation({ force: true, reason: 'startTracking' });
   }
 
   /**
      * Stop tracking
      */
-  stopTracking() {
+  stopTracking(consumerId?: string) {
+    if (consumerId) {
+      this.trackingConsumers.delete(consumerId);
+      if (this.trackingConsumers.size > 0) {
+        if (__DEV__) {
+          logger.debug(`Tracking still active for ${this.trackingConsumers.size} consumer(s)`);
+        }
+        return;
+      }
+    } else {
+      this.trackingConsumers.clear();
+    }
+
     // Stop native background task
     Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
       .then((started) => {
@@ -205,12 +233,13 @@ class FamilyTrackingService {
       this.locationInterval = null;
     }
 
-    // Unsubscribe from all online streams
-    this.locationSubscriptions.forEach(unsubscribe => unsubscribe());
-    this.locationSubscriptions.clear();
-
     this.isTracking = false;
     logger.info('Family Tracking Stopped');
+  }
+
+  setShareThrottleMs(intervalMs: number): void {
+    const normalized = Math.max(10 * 1000, Math.min(5 * 60 * 1000, Math.floor(intervalMs)));
+    this.shareThrottleMs = normalized;
   }
 
   /**
@@ -285,6 +314,7 @@ class FamilyTrackingService {
     batteryLevel?: number,
     source: 'gps' | 'mesh' | 'cloud' | 'manual' = 'cloud',
   ) {
+    this.syncMembersFromStore();
     const member = this.members.find((m) => m.id === memberId);
     if (member) {
       const newTimestamp = location.timestamp || Date.now();
@@ -327,6 +357,8 @@ class FamilyTrackingService {
       useFamilyStore.getState().updateMemberLocation(memberId, location.latitude, location.longitude).catch((error) => {
         logger.warn('Failed to sync member location to FamilyStore', error);
       });
+    } else if (__DEV__) {
+      logger.debug(`Member not found for location update: ${memberId}`);
     }
   }
 
@@ -334,6 +366,7 @@ class FamilyTrackingService {
      * Update member safety status
      */
   updateMemberStatus(memberId: string, status: FamilyMember['status']) {
+    this.syncMembersFromStore();
     const member = this.members.find((m) => m.id === memberId);
     if (member) {
       member.status = status;
@@ -357,61 +390,110 @@ class FamilyTrackingService {
   /**
      * Share my location with family (via mesh and/or server)
      */
-  async shareMyLocation() {
-    try {
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+  async shareMyLocation(options: { force?: boolean; reason?: string } = {}): Promise<boolean> {
+    const { force = false, reason = 'manual' } = options;
 
-      const timestamp = Date.now();
-      const identity = identityService.getIdentity();
-      const cloudTargetIds = new Set<string>();
-      if (identity?.id && identity.id !== 'unknown') {
-        cloudTargetIds.add(identity.id);
+    if (!useSettingsStore.getState().locationEnabled) {
+      if (__DEV__) {
+        logger.debug('Skipping location share because location is disabled in settings');
       }
-      if (identity?.deviceId && identity.deviceId !== 'unknown') {
-        cloudTargetIds.add(identity.deviceId);
-      }
-      try {
-        const physicalDeviceId = await getDeviceIdFromLib();
-        if (physicalDeviceId) {
-          cloudTargetIds.add(physicalDeviceId);
-        }
-      } catch (error) {
-        logger.debug('Could not resolve physical device ID for location fan-out', error);
-      }
-
-      // 1. Share via Mesh (Always, for offline peer-to-peer)
-      bleMeshService.shareLocation(loc.coords.latitude, loc.coords.longitude);
-
-      // 2. Share via Cloud (QR ID + physical device ID fan-out for compatibility)
-      if (cloudTargetIds.size > 0) {
-        const payload = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          timestamp: timestamp, // Use number for consistency
-          accuracy: loc.coords.accuracy || 0,
-          speed: loc.coords.speed || 0,
-          heading: loc.coords.heading || 0,
-        };
-
-        Promise.all(
-          Array.from(cloudTargetIds).map((targetId) =>
-            firebaseDataService.saveLocationUpdate(targetId, payload),
-          ),
-        )
-          .then((results) => {
-            if (!results.some(Boolean)) {
-              logger.warn('Cloud location fan-out returned false for all IDs');
-            }
-          })
-          .catch(e => logger.warn('Failed to push online location', e));
-      }
-
-      logger.debug('Location shared (Hybrid)');
-    } catch (e) {
-      logger.warn('Failed to share location', e);
+      return false;
     }
+
+    if (this.shareInFlight) {
+      return this.shareInFlight;
+    }
+
+    const now = Date.now();
+    if (!force && this.lastShareTimestamp > 0 && now - this.lastShareTimestamp < this.shareThrottleMs) {
+      if (__DEV__) {
+        logger.debug(`Skipping location share (${reason}) due to throttle window`);
+      }
+      return false;
+    }
+
+    this.shareInFlight = (async () => {
+      try {
+        const loc = await this.getCurrentPositionWithTimeout();
+        if (!loc?.coords) {
+          logger.warn('Location fetch timed out or returned empty coordinates');
+          return false;
+        }
+
+        const latitude = loc.coords.latitude;
+        const longitude = loc.coords.longitude;
+        if (!this.isValidCoordinatePair(latitude, longitude)) {
+          logger.warn('Location share aborted due to invalid coordinates', { latitude, longitude });
+          return false;
+        }
+
+        const timestamp = Date.now();
+        const identity = identityService.getIdentity();
+        const cloudTargetIds = new Set<string>();
+        if (identity?.id && identity.id !== 'unknown') {
+          cloudTargetIds.add(identity.id);
+        }
+        if (identity?.deviceId && identity.deviceId !== 'unknown') {
+          cloudTargetIds.add(identity.deviceId);
+        }
+        try {
+          const physicalDeviceId = await getDeviceIdFromLib();
+          if (physicalDeviceId) {
+            cloudTargetIds.add(physicalDeviceId);
+          }
+        } catch (error) {
+          logger.debug('Could not resolve physical device ID for location fan-out', error);
+        }
+
+        // 1. Share via Mesh first (offline-first)
+        try {
+          bleMeshService.shareLocation(latitude, longitude);
+        } catch (meshError) {
+          logger.warn('Mesh location share failed', meshError);
+        }
+
+        this.lastShareTimestamp = timestamp;
+
+        // 2. Share via Cloud (QR ID + physical device ID fan-out for compatibility)
+        // Cloud fan-out runs only when auth is ready.
+        const { getAuth } = await import('firebase/auth');
+        const currentUser = getAuth().currentUser;
+        if (cloudTargetIds.size > 0 && currentUser) {
+          const payload = {
+            latitude,
+            longitude,
+            timestamp,
+            accuracy: loc.coords.accuracy || 0,
+            speed: loc.coords.speed || 0,
+            heading: loc.coords.heading || 0,
+          };
+
+          const targetIds = Array.from(cloudTargetIds);
+          const results = await Promise.all(
+            targetIds.map((targetId) => this.saveLocationWithRetry(targetId, payload)),
+          );
+
+          const successCount = results.filter(Boolean).length;
+          if (successCount === 0) {
+            logger.warn('Cloud location fan-out failed for all target IDs');
+          } else if (successCount < targetIds.length) {
+            logger.warn(`Cloud location fan-out partial success: ${successCount}/${targetIds.length}`);
+          }
+        } else if (cloudTargetIds.size > 0 && !currentUser) {
+          logger.debug('Cloud fan-out skipped: auth not ready (mesh still active)');
+        }
+
+        logger.debug(`Location shared (Hybrid, reason: ${reason})`);
+        return true;
+      } catch (e) {
+        logger.warn('Failed to share location', e);
+        return false;
+      } finally {
+        this.shareInFlight = null;
+      }
+    })();
+
+    return this.shareInFlight;
   }
 
   /**
@@ -451,49 +533,72 @@ class FamilyTrackingService {
   }
 
   /**
-     * subscribe to all family members' online locations
-     */
-  private async subscribeToMemberLocations() {
-    // Clear existing
-    this.locationSubscriptions.forEach(unsubscribe => unsubscribe());
-    this.locationSubscriptions.clear();
-    this.syncMembersFromStore();
-
-    for (const member of this.members) {
-      const targetDeviceId = member.deviceId || member.id;
-      if (!targetDeviceId) continue;
-
-      // Subscribe to each member's device location
-      const unsubscribe = await firebaseDataService.subscribeToDeviceLocation(
-        targetDeviceId,
-        (location) => {
-          // ELITE: Use typeof check instead of truthy check to allow 0 coordinates
-          if (location &&
-            typeof location.latitude === 'number' && !isNaN(location.latitude) &&
-            typeof location.longitude === 'number' && !isNaN(location.longitude)) {
-            this.updateMemberLocation(
-              member.id,
-              {
-                latitude: location.latitude,
-                longitude: location.longitude,
-                timestamp: location.timestamp,
-              },
-              location.batteryLevel, // Assuming Cloud location object includes battery
-            );
-          }
-        },
-      );
-
-      this.locationSubscriptions.set(targetDeviceId, unsubscribe);
-    }
-  }
-
-  /**
-     * Send check-in request to a member
-     */
+   * Send check-in request to a family member
+   * CRITICAL: Real multi-channel delivery (Firebase + BLE mesh)
+   */
   async requestCheckIn(memberId: string) {
-    // In production, send push notification or mesh message
-    logger.info(`Check-in request sent to ${memberId}`);
+    this.syncMembersFromStore();
+    const member = this.members.find(m => m.id === memberId);
+    if (!member) {
+      logger.warn(`Check-in request failed: member ${memberId} not found`);
+      return;
+    }
+
+    const targetDeviceId = member.deviceId || member.id;
+    logger.info(`📤 Sending check-in request to ${member.name} (${targetDeviceId})`);
+
+    let sent = false;
+
+    // CHANNEL 1: Firebase cloud message (works online)
+    try {
+      if (firebaseDataService.isInitialized) {
+        const myDeviceId = await getDeviceIdFromLib();
+        const messageData = {
+          id: `checkin_${Date.now()}_${targetDeviceId}`,
+          fromDeviceId: myDeviceId,
+          toDeviceId: targetDeviceId,
+          content: '📍 Güvende misiniz? Lütfen durumunuzu bildirin.',
+          timestamp: Date.now(),
+          type: 'status' as const,
+          status: 'sent' as const,
+          priority: 'high' as const,
+        };
+
+        // FIX: Write to RECIPIENT's inbox so they actually receive it
+        await firebaseDataService.saveMessage(targetDeviceId, messageData);
+
+        // Also save sender's copy for conversation history
+        await firebaseDataService.saveMessage(myDeviceId, messageData);
+
+        sent = true;
+        logger.info(`✅ Check-in request sent to ${member.name} via Firebase`);
+      }
+    } catch (fbError) {
+      logger.warn(`Firebase check-in request failed for ${member.name}:`, fbError);
+    }
+
+    // CHANNEL 2: BLE mesh message (works offline)
+    try {
+      await bleMeshService.broadcastMessage({
+        type: 'status',
+        content: JSON.stringify({
+          action: 'CHECK_IN_REQUEST',
+          targetDeviceId,
+          targetName: member.name,
+          timestamp: Date.now(),
+        }),
+        priority: 'high',
+        ttl: 5,
+      });
+      sent = true;
+      logger.info(`✅ Check-in request sent to ${member.name} via BLE mesh`);
+    } catch (bleError) {
+      logger.warn(`BLE check-in request failed for ${member.name}:`, bleError);
+    }
+
+    if (!sent) {
+      logger.error(`❌ Failed to send check-in request to ${member.name} via any channel`);
+    }
   }
 
   /**
@@ -525,6 +630,65 @@ class FamilyTrackingService {
         logger.error('Status callback error', e);
       }
     }
+  }
+
+  private isValidCoordinatePair(latitude: number, longitude: number): boolean {
+    return Number.isFinite(latitude)
+      && Number.isFinite(longitude)
+      && latitude >= -90
+      && latitude <= 90
+      && longitude >= -180
+      && longitude <= 180;
+  }
+
+  private async getCurrentPositionWithTimeout(timeoutMs: number = 12000): Promise<Location.LocationObject | null> {
+    let timeoutId: NodeJS.Timeout | null = null;
+    try {
+      const locationPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), timeoutMs);
+      });
+
+      return await Promise.race([locationPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private async saveLocationWithRetry(
+    targetId: string,
+    payload: {
+      latitude: number;
+      longitude: number;
+      timestamp: number;
+      accuracy: number;
+      speed: number;
+      heading: number;
+    },
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= CLOUD_RETRY_ATTEMPTS; attempt++) {
+      try {
+        const ok = await firebaseDataService.saveLocationUpdate(targetId, payload);
+        if (ok) {
+          return true;
+        }
+      } catch (error) {
+        if (__DEV__) {
+          logger.debug(`Cloud location save attempt ${attempt} failed for ${targetId}`, error);
+        }
+      }
+
+      if (attempt < CLOUD_RETRY_ATTEMPTS) {
+        const backoffMs = CLOUD_RETRY_BACKOFF_MS * attempt;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+    return false;
   }
 }
 

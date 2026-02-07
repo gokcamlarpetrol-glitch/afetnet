@@ -44,14 +44,21 @@ import { EvacuationOverlay } from './components/EvacuationOverlay';
 import { IncidentReportModal } from './components/IncidentReportModal';
 import { RiskOverlay, RiskLegend } from './components/RiskOverlay';
 import { SeismicAlertBanner } from '../../components/design-system/SeismicAlertBanner';
-import { trustMapStyle, trustDarkMapStyle } from '../../theme/mapStyles'; // Updated import
-// NOTE: Premium overlays (WavePropagation, AssemblyPoints, TsunamiZone) removed 
-// due to react-native-maps index bounds crash. These features will be added 
-// in a future update with proper lazy loading implementation.
+import { trustMapStyle, trustDarkMapStyle } from '../../theme/mapStyles';
+
+// FAZ 2: Lazy-loaded overlays with ErrorBoundary (prevents react-native-maps crash)
+const LazyWaveOverlay = React.lazy(() => import('../../components/map/WavePropagationOverlay'));
+const LazyTsunamiOverlay = React.lazy(() => import('../../components/map/TsunamiZoneOverlay').then(m => ({ default: m.TsunamiZoneOverlay })));
+const LazyAssemblyPoints = React.lazy(() => import('../../components/map/AssemblyPointMarkers').then(m => ({ default: m.AssemblyPointMarkers })));
+const LazyOfflineMapManager = React.lazy(() => import('../../components/map/OfflineMapManager').then(m => ({ default: m.OfflineMapManager })));
 
 import { clusterMarkers, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
 import { useViewportData } from '../../hooks/useViewportData';
 import { useCompass } from '../../hooks/useCompass';
+import { useLiveLocation } from '../../hooks/useLiveLocation';
+import { useMapVoiceGuidance } from '../../hooks/useMapVoiceGuidance';
+import { FamilyTrailOverlay } from '../../components/map/FamilyTrailOverlay';
+import { SafeZoneNavigator } from '../../components/map/SafeZoneNavigator';
 import { RescueCompass } from '../../components/map/RescueCompass';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase, RouteProp } from '@react-navigation/native';
@@ -106,6 +113,20 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const [currentZoom, setCurrentZoom] = useState(10);
   const [hazardZones, setHazardZones] = useState<any[]>([]);
   const [isSampleMapData, setIsSampleMapData] = useState(false);
+  const [showOfflineManager, setShowOfflineManager] = useState(false);
+
+  // FAZ 3: Live location tracking
+  const { location: liveLocation, locationData } = useLiveLocation({
+    distanceInterval: 10,
+    timeInterval: 5000,
+  });
+
+  // Sync live location to state
+  useEffect(() => {
+    if (liveLocation) {
+      setUserLocation(liveLocation);
+    }
+  }, [liveLocation]);
 
   // Region Refs to prevent infinite loops
   const currentRegionRef = useRef<any>(null);
@@ -155,61 +176,44 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   }, []);
 
   // ELITE: Real-Time Family Location Tracking
-  // Automatically refresh family member locations based on configured interval
+  // FamilyTrackingService is the single owner of live location loop/timing.
   useEffect(() => {
-    if (!realTimeTracking) return;
-
-    const intervalMs = Math.max(10, familyTrackingInterval) * 1000;
-    let intervalId: NodeJS.Timeout | null = null;
-    let trackingStarted = false;
     let isUnmounted = false;
-    let isRefreshing = false;
+    const consumerId = 'map-screen';
 
-    const refreshFamilyLocations = async () => {
-      if (isRefreshing) return;
-      isRefreshing = true;
+    const configureTracking = async () => {
       try {
-        // Trigger FamilyTrackingService to share our location
         const { familyTrackingService } = await import('../../services/FamilyTrackingService');
 
-        if (!trackingStarted) {
-          // CRITICAL: Start tracking first (activates background updates + Firebase subs)
-          await familyTrackingService.startTracking();
-          trackingStarted = true;
+        if (!realTimeTracking) {
+          familyTrackingService.stopTracking(consumerId);
+          return;
         }
 
-        // Share our own location with family (via mesh + cloud)
-        await familyTrackingService.shareMyLocation();
+        const intervalMs = Math.max(10, familyTrackingInterval) * 1000;
+        familyTrackingService.setShareThrottleMs(intervalMs);
+        await familyTrackingService.startTracking(consumerId);
+        await familyTrackingService.shareMyLocation({ force: true, reason: 'map-screen-initial' });
 
-        if (isUnmounted) return;
-        logger.debug('Real-time family locations refreshed');
+        if (!isUnmounted) {
+          logger.debug('Real-time family tracking enabled from map');
+        }
       } catch (err) {
-        logger.warn('Family location refresh error:', err);
-      } finally {
-        isRefreshing = false;
+        logger.warn('Family tracking configuration error:', err);
       }
     };
 
-    // Initial refresh
-    refreshFamilyLocations();
-
-    // Set up interval
-    intervalId = setInterval(refreshFamilyLocations, intervalMs);
+    configureTracking();
 
     return () => {
       isUnmounted = true;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-      if (trackingStarted) {
-        import('../../services/FamilyTrackingService')
-          .then(({ familyTrackingService }) => {
-            familyTrackingService.stopTracking();
-          })
-          .catch((error) => {
-            logger.warn('Failed to stop family tracking service on unmount:', error);
-          });
-      }
+      import('../../services/FamilyTrackingService')
+        .then(({ familyTrackingService }) => {
+          familyTrackingService.stopTracking(consumerId);
+        })
+        .catch((error) => {
+          logger.warn('Failed to stop family tracking service on map cleanup:', error);
+        });
     };
   }, [familyTrackingInterval, realTimeTracking]);
 
@@ -227,23 +231,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
     loadOffline();
   }, []);
 
-  const getUserLocation = useCallback(async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setUserLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-    } catch (error) {
-      logger.error('Location error:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    getUserLocation();
-  }, []);
+  // FAZ 3: getUserLocation is now handled by useLiveLocation hook above
 
   // ELITE: Handle Focus Member Navigation
   useEffect(() => {
@@ -251,23 +239,26 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       const memberId = route.params.focusOnMember;
       const member = familyMembers.find(m => m.id === memberId);
 
-      if (member && (member.location?.latitude || member.latitude) && mapRef.current) {
+      if (member) {
         const lat = member.location?.latitude ?? member.latitude;
         const lng = member.location?.longitude ?? member.longitude;
 
-        // 1. Animate Camera
-        mapRef.current.animateToRegion({
-          latitude: lat,
-          longitude: lng,
-          latitudeDelta: 0.01, // Tight zoom
-          longitudeDelta: 0.01,
-        }, 1000);
+        if (typeof lat === 'number' && isFinite(lat) && typeof lng === 'number' && isFinite(lng) && !(lat === 0 && lng === 0) && mapRef.current) {
 
-        // 2. Select Member (Open Modal)
-        setSelectedItem(member);
+          // 1. Animate Camera
+          mapRef.current.animateToRegion({
+            latitude: lat,
+            longitude: lng,
+            latitudeDelta: 0.01, // Tight zoom
+            longitudeDelta: 0.01,
+          }, 1000);
 
-        // 3. Clear param (optional, to avoid re-focus on re-render if nav stack preserved)
-        navigation.setParams({ focusOnMember: undefined });
+          // 2. Select Member (Open Modal)
+          setSelectedItem(member);
+
+          // 3. Clear param (optional, to avoid re-focus on re-render if nav stack preserved)
+          navigation.setParams({ focusOnMember: undefined });
+        }
       }
     }
   }, [route.params?.focusOnMember, familyMembers]);
@@ -557,8 +548,42 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           );
         })}
 
-        {/* NOTE: Premium overlays (AssemblyPoints, TsunamiZone, WavePropagation) 
-            removed for stability. Will be re-added with lazy loading in future update. */}
+        {/* NOTE: Premium overlays (AssemblyPoints, TsunamiZone, WavePropagation)
+            Re-enabled with lazy loading + error boundaries (Faz 2) */}
+
+        {/* FAZ 2: Lazy-loaded EEW Wave Propagation Overlay */}
+        {layers.heatmap && (
+          <React.Suspense fallback={null}>
+            <LazyWaveOverlay
+              sources={[]}
+              userLocation={userLocation || undefined}
+              showPWave={true}
+              showSWave={true}
+            />
+          </React.Suspense>
+        )}
+
+        {/* FAZ 2: Lazy-loaded Tsunami Zone Overlay */}
+        <React.Suspense fallback={null}>
+          <LazyTsunamiOverlay
+            visible={layers.pois}
+            userLocation={userLocation}
+          />
+        </React.Suspense>
+
+        {/* FAZ 2: Lazy-loaded Assembly Point Markers */}
+        <React.Suspense fallback={null}>
+          <LazyAssemblyPoints
+            visible={layers.pois}
+            userLocation={userLocation}
+          />
+        </React.Suspense>
+
+        {/* FAZ 4: Family Movement Trail Overlay */}
+        <FamilyTrailOverlay
+          members={familyMembers}
+          visible={layers.family}
+        />
       </MapView>
 
       {/* 6. RESCUE COMPASS HUD (Elite) */}
@@ -686,7 +711,39 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
         >
           <Ionicons name="cube-outline" size={18} color={is3DMode ? '#fff' : '#1F4E79'} />
         </Pressable>
+
+        {/* ELITE: Separator */}
+        <View style={{ width: 1, height: 24, backgroundColor: 'rgba(31, 78, 121, 0.2)', marginHorizontal: 4 }} />
+
+        {/* FAZ 8: Offline Map Button */}
+        <Pressable
+          style={[
+            styles.mapTypeButton,
+            showOfflineManager && styles.mapTypeButtonActive,
+          ]}
+          onPress={() => { haptics.impactLight(); setShowOfflineManager(true); }}
+        >
+          <Ionicons name="cloud-download-outline" size={18} color={showOfflineManager ? '#fff' : '#1F4E79'} />
+        </Pressable>
       </View>
+
+      {/* FAZ 5: Safe Zone Navigator */}
+      <SafeZoneNavigator
+        visible={mode === 'evacuation'}
+        userLocation={userLocation}
+        onClose={() => setMode('view')}
+      />
+
+      {/* FAZ 8: Offline Map Manager Modal */}
+      {showOfflineManager && currentRegionRef.current && (
+        <React.Suspense fallback={null}>
+          <LazyOfflineMapManager
+            visible={showOfflineManager}
+            onClose={() => setShowOfflineManager(false)}
+            currentRegion={currentRegionRef.current}
+          />
+        </React.Suspense>
+      )}
 
 
       {/* Modals */}

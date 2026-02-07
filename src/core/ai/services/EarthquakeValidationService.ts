@@ -55,6 +55,10 @@ class EarthquakeValidationService {
     crossValidation?: CrossValidationData,
   ): Promise<ValidationResult> {
     try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
       const anomalies: string[] = [];
       let confidence = 100;
       const verifiedSources: string[] = [earthquake.source];
@@ -564,4 +568,3 @@ Sadece JSON formatında yanıt ver:
 }
 
 export const earthquakeValidationService = new EarthquakeValidationService();
-

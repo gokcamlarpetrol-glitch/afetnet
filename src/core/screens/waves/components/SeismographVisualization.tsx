@@ -53,22 +53,14 @@ export default function SeismographVisualization({
   const lastRealTimeDataRef = useRef<number[]>([]);
   const isUsingRealDataRef = useRef<boolean>(false);
   const realTimeDataRef = useRef<number[] | undefined>(realTimeData); // CRITICAL: Always have latest realTimeData
-  const elapsedRef = useRef<number>(elapsed); // CRITICAL: Always have latest elapsed time
-  const pWaveArrivalTimeRef = useRef<number>(pWaveArrivalTime); // CRITICAL: Always have latest P-wave time
-  const sWaveArrivalTimeRef = useRef<number>(sWaveArrivalTime); // CRITICAL: Always have latest S-wave time
-  const magnitudeRef = useRef<number>(magnitude); // CRITICAL: Always have latest magnitude
   
   // CRITICAL: Keep refs updated with latest values
   useEffect(() => {
     realTimeDataRef.current = realTimeData;
-    elapsedRef.current = elapsed;
-    pWaveArrivalTimeRef.current = pWaveArrivalTime;
-    sWaveArrivalTimeRef.current = sWaveArrivalTime;
-    magnitudeRef.current = magnitude;
-  }, [realTimeData, elapsed, pWaveArrivalTime, sWaveArrivalTime, magnitude]);
+  }, [realTimeData]);
 
   // CRITICAL: Unified waveform generation - prevents continuous restarts
-  // ELITE: Single effect handles both real and simulated data intelligently
+  // Uses real sensor data when available; otherwise renders a neutral baseline (no synthetic quake pattern).
   useEffect(() => {
     // CRITICAL: Always show if monitoring is active (7/24 continuous monitoring)
     if (!isMonitoringActive && !isAnimating) {
@@ -120,42 +112,8 @@ export default function SeismographVisualization({
       return normalizedData.slice(-SAMPLES);
     };
 
-    // ELITE: Generate simulated waveform with realistic earthquake patterns
-    const generateSimulatedWaveform = () => {
-      const data: number[] = [];
-      const timeWindow = 60; // seconds
-      const samples = Math.floor(timeWindow * SAMPLE_RATE);
-      
-      // CRITICAL: Use refs to get latest values
-      const currentElapsed = elapsedRef.current;
-      const currentPWaveTime = pWaveArrivalTimeRef.current;
-      const currentSWaveTime = sWaveArrivalTimeRef.current;
-      const currentMagnitude = magnitudeRef.current;
-      
-      for (let i = 0; i < samples; i++) {
-        const t = i / SAMPLE_RATE;
-        let amplitude = 0;
-        
-        // ELITE: Realistic background noise (seismic background)
-        amplitude += (Math.random() * 0.1 - 0.05) * 0.5;
-        
-        // P-wave arrival (if earthquake is happening)
-        if (currentElapsed >= currentPWaveTime && currentElapsed < currentSWaveTime) {
-          const pWaveTime = currentElapsed - currentPWaveTime;
-          // P-wave: High frequency, low amplitude
-          amplitude += Math.sin(pWaveTime * 20) * Math.exp(-pWaveTime * 0.5) * currentMagnitude * 0.3;
-        }
-        
-        // S-wave arrival (if earthquake is happening)
-        if (currentElapsed >= currentSWaveTime) {
-          const sWaveTime = currentElapsed - currentSWaveTime;
-          // S-wave: Lower frequency, higher amplitude
-          amplitude += Math.sin(sWaveTime * 5) * Math.exp(-sWaveTime * 0.2) * currentMagnitude * 0.8;
-        }
-        
-        data.push(amplitude);
-      }
-      
+    const generateBaselineWaveform = () => {
+      const data: number[] = new Array(SAMPLES).fill(0);
       return data;
     };
 
@@ -168,8 +126,7 @@ export default function SeismographVisualization({
         setWaveformData(realData);
       } else {
         isUsingRealDataRef.current = false;
-        const simulatedData = generateSimulatedWaveform();
-        setWaveformData(simulatedData);
+        setWaveformData(generateBaselineWaveform());
       }
     };
 
@@ -189,7 +146,7 @@ export default function SeismographVisualization({
     // ELITE: High-frequency updates ensure smooth, uninterrupted real-time visualization
     // CRITICAL: This interval runs CONTINUOUSLY - never stops
     intervalRef.current = setInterval(() => {
-      // CRITICAL: Always update waveform - check for real data first, fallback to simulated
+      // CRITICAL: Always update waveform - check for real data first, fallback to neutral baseline
       // ELITE: Use ref to always get latest realTimeData value
       const currentRealData = processRealTimeData();
       if (currentRealData) {
@@ -198,8 +155,7 @@ export default function SeismographVisualization({
         setWaveformData(currentRealData);
       } else {
         isUsingRealDataRef.current = false;
-        const simulatedData = generateSimulatedWaveform();
-        setWaveformData(simulatedData);
+        setWaveformData(generateBaselineWaveform());
       }
     }, 50); // 50ms = 20 Hz - CRITICAL: Continuous, never-stopping updates
 
@@ -622,7 +578,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-
 
 

@@ -15,11 +15,13 @@
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import {
   getAuth,
   signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  reload,
   GoogleAuthProvider,
   OAuthProvider,
   User,
@@ -85,12 +87,37 @@ interface AuthError extends Error {
 
 // Google Auth Readiness State
 let googleAuthAvailable = false;
+const PROFILE_SYNC_RETRY_CONFIG = { maxRetries: 3, baseDelayMs: 500, maxDelayMs: 5000 };
+
+function getRuntimeConfigValue(key: string): string | undefined {
+  const fromEnv = process.env[key];
+  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) {
+    return fromEnv.trim();
+  }
+
+  if (process.env.JEST_WORKER_ID) {
+    return undefined;
+  }
+
+  try {
+    const Constants = require('expo-constants');
+    const extra = Constants?.expoConfig?.extra || Constants?.manifest2?.extra || Constants?.manifest?.extra;
+    const fromExtra = extra?.[key];
+    if (typeof fromExtra === 'string' && fromExtra.trim().length > 0) {
+      return fromExtra.trim();
+    }
+  } catch {
+    // ignore runtime config lookup failures
+  }
+
+  return undefined;
+}
 
 // Initialize Google Sign-In safely
 const initGoogleSignIn = () => {
   try {
-    const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-    const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+    const webClientId = getRuntimeConfigValue('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
+    const iosClientId = getRuntimeConfigValue('EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID');
 
     if (webClientId) {
       const config: GoogleSignInConfig = {
@@ -135,7 +162,9 @@ export const AuthService = {
    */
   signInWithGoogle: async (): Promise<User | null> => {
     try {
-      await GoogleSignin.hasPlayServices();
+      if (Platform.OS === 'android') {
+        await GoogleSignin.hasPlayServices();
+      }
       const userInfo = await GoogleSignin.signIn() as GoogleSignInResponse;
       const idToken = userInfo.data?.idToken || userInfo.idToken;
 
@@ -152,10 +181,13 @@ export const AuthService = {
       try {
         await retryWithBackoff(
           () => AuthService.syncUserProfile(userCredential.user),
-          { maxRetries: 2, baseDelayMs: 500 },
+          PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+        logger.error('Kritik profil senkronizasyonu başarısız (Google):', syncError);
+        await firebaseSignOut(auth).catch(() => undefined);
+        await identityService.clearIdentity().catch(() => undefined);
+        throw new Error('Google ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
       }
 
       // ELITE: Sync identity and contacts after successful auth
@@ -246,10 +278,13 @@ export const AuthService = {
 
         await retryWithBackoff(
           () => AuthService.syncUserProfile(userCredential.user, nameToSync),
-          { maxRetries: 2, baseDelayMs: 500 },
+          PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+        logger.error('Kritik profil senkronizasyonu başarısız (Apple):', syncError);
+        await firebaseSignOut(auth).catch(() => undefined);
+        await identityService.clearIdentity().catch(() => undefined);
+        throw new Error('Apple ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
       }
 
       // ELITE: Sync identity and contacts after successful auth
@@ -295,20 +330,30 @@ export const AuthService = {
 
       const auth = getAuth(app);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      await reload(userCredential.user);
+
+      const refreshedUser = auth.currentUser ?? userCredential.user;
+      if (!refreshedUser.emailVerified) {
+        await firebaseSignOut(auth);
+        throw new Error('E-posta adresiniz henüz doğrulanmamış. Lütfen doğruladıktan sonra giriş yapın.');
+      }
 
       // Sync user profile
       try {
         await retryWithBackoff(
-          () => AuthService.syncUserProfile(userCredential.user),
-          { maxRetries: 2, baseDelayMs: 500 },
+          () => AuthService.syncUserProfile(refreshedUser),
+          PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+        logger.error('Kritik profil senkronizasyonu başarısız (Email login):', syncError);
+        await firebaseSignOut(auth).catch(() => undefined);
+        await identityService.clearIdentity().catch(() => undefined);
+        throw new Error('E-posta ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
       }
 
       // Sync identity and contacts after successful auth
       try {
-        await identityService.syncFromFirebase(userCredential.user);
+        await identityService.syncFromFirebase(refreshedUser);
         await contactService.initialize();
         await presenceService.initialize();
         await contactRequestService.initialize();
@@ -317,7 +362,7 @@ export const AuthService = {
         logger.warn('Service sync failed (non-blocking):', syncError);
       }
 
-      return userCredential.user;
+      return refreshedUser;
     } catch (error: unknown) {
       const authError = error as AuthError;
       logger.error('E-posta Giriş Hatası', authError);
@@ -350,10 +395,13 @@ export const AuthService = {
       try {
         await retryWithBackoff(
           () => AuthService.syncUserProfile(userCredential.user, displayName ? { givenName: displayName } as AppleFullName : null),
-          { maxRetries: 2, baseDelayMs: 500 },
+          PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+        logger.error('Kritik profil senkronizasyonu başarısız (Email signup):', syncError);
+        await firebaseSignOut(auth).catch(() => undefined);
+        await identityService.clearIdentity().catch(() => undefined);
+        throw new Error('Kayıt tamamlanamadı: hesap verileri senkronize edilemedi.');
       }
 
       // Sync identity and contacts after successful auth

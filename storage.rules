@@ -14,7 +14,7 @@ service firebase.storage {
     function isValidDeviceId(deviceId) {
       return deviceId != null && 
              deviceId is string && 
-             deviceId.matches('^afn-[a-zA-Z0-9]{8}$') &&
+             deviceId.matches('^[Aa][Ff][Nn]-[A-Za-z0-9]{8}$') &&
              deviceId.size() == 12;
     }
 
@@ -98,4 +98,3 @@ service firebase.storage {
     }
   }
 }
-

@@ -72,7 +72,7 @@ interface FamilyActions {
   addMember: (member: Omit<FamilyMember, 'id'> & { id?: string }) => Promise<void>;
   updateMember: (id: string, updates: Partial<FamilyMember>) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
-  updateMemberLocation: (id: string, latitude: number, longitude: number) => Promise<void>;
+  updateMemberLocation: (id: string, latitude: number, longitude: number, source?: 'local' | 'remote') => Promise<void>;
   updateMemberStatus: (id: string, status: FamilyMember['status']) => Promise<void>;
   clear: () => Promise<void>;
 }
@@ -108,7 +108,13 @@ const loadMembers = async (): Promise<FamilyMember[]> => {
       }
     }
     if (data) {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // CRITICAL: Validate parsed data is an array to protect against corrupt storage
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+      logger.warn('familyStore: corrupt data (not an array), resetting to empty');
+      return [];
     }
   } catch (error) {
     logger.error('Failed to load family members:', error);
@@ -209,9 +215,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     // First load from AsyncStorage (fast)
     const localMembers = await loadMembers();
     set({ members: localMembers });
-    await syncMemberLocationSubscriptions(localMembers, (memberId, latitude, longitude) => {
-      void get().updateMemberLocation(memberId, latitude, longitude);
-    });
+    // FIX #2: Don't sync subscriptions here — wait for Firebase real-time callback
 
     // Then try to sync from Firebase (lazy load to avoid circular dependency)
     try {
@@ -230,9 +234,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             set({ members: cloudMembers });
             // Save merged data to AsyncStorage
             await saveMembers(cloudMembers);
-            await syncMemberLocationSubscriptions(cloudMembers, (memberId, latitude, longitude) => {
-              void get().updateMemberLocation(memberId, latitude, longitude);
-            });
+            // FIX #2: Don't sync subscriptions here — wait for Firebase real-time callback
           }
 
           // ELITE: Subscribe to real-time family member updates
@@ -253,8 +255,9 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
                 const mergedMembers = Array.from(memberMap.values());
                 set({ members: mergedMembers });
                 await saveMembers(mergedMembers);
+                // FIX #1: Pass 'remote' source to prevent Firebase write-back loop
                 await syncMemberLocationSubscriptions(mergedMembers, (memberId, latitude, longitude) => {
-                  void get().updateMemberLocation(memberId, latitude, longitude);
+                  void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
                 });
               } catch (error) {
                 logger.error('Error processing real-time family members:', error);
@@ -276,10 +279,27 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
               logger.error('Firebase family subscription error:', subscribeError);
             }
           }
+
+          // FIX #2: Fallback — if Firebase subscription wasn't created, sync with current members
+          if (!get().firebaseUnsubscribe) {
+            const currentMembers = get().members;
+            if (currentMembers.length > 0) {
+              await syncMemberLocationSubscriptions(currentMembers, (memberId, latitude, longitude) => {
+                void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
+              });
+            }
+          }
         }
       }
     } catch (error) {
       logger.error('Firebase sync failed, using local data:', error);
+      // FIX #2: Even on Firebase failure, sync location subscriptions for locally cached members
+      const failoverMembers = get().members;
+      if (failoverMembers.length > 0) {
+        await syncMemberLocationSubscriptions(failoverMembers, (memberId, latitude, longitude) => {
+          void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
+        });
+      }
     }
   },
 
@@ -293,7 +313,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMembers = [...members, newMember];
     set({ members: updatedMembers });
     await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
-      void get().updateMemberLocation(memberId, latitude, longitude);
+      void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
     });
 
     // Save to AsyncStorage
@@ -384,7 +404,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
     await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
-      void get().updateMemberLocation(memberId, latitude, longitude);
+      void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
     });
 
     // Save to AsyncStorage
@@ -472,7 +492,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMembers = members.filter(m => m.id !== id);
     set({ members: updatedMembers });
     await syncMemberLocationSubscriptions(updatedMembers, (memberId, latitude, longitude) => {
-      void get().updateMemberLocation(memberId, latitude, longitude);
+      void get().updateMemberLocation(memberId, latitude, longitude, 'remote');
     });
 
     // Save to AsyncStorage
@@ -541,7 +561,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     }
   },
 
-  updateMemberLocation: async (id, latitude, longitude) => {
+  updateMemberLocation: async (id, latitude, longitude, source = 'local') => {
     // ELITE: Validate inputs
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       logger.error('Invalid member ID for location update:', id);
@@ -578,25 +598,33 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     }
 
     // ELITE: Update both latitude/longitude (for backward compatibility) and location object
-    const updatedMembers = members.map(m =>
-      m.id === id
-        ? {
-          ...m,
-          latitude, // Update direct properties for backward compatibility
-          longitude,
-          location: { latitude, longitude, timestamp: Date.now() }, // Update location object
-          lastSeen: Date.now(),
-        }
-        : m,
-    );
+    // FAZ 4: Also record location history for trail tracking
+    const updatedMembers = members.map(m => {
+      if (m.id !== id) return m;
+
+      // Build location history (max 100 entries)
+      const prevHistory = m.locationHistory || [];
+      const newEntry = { latitude, longitude, timestamp: Date.now() };
+      const updatedHistory = [...prevHistory, newEntry].slice(-100);
+
+      return {
+        ...m,
+        latitude,
+        longitude,
+        location: { latitude, longitude, timestamp: Date.now() },
+        lastSeen: Date.now(),
+        locationHistory: updatedHistory,
+      };
+    });
     const updatedMember = updatedMembers.find(m => m.id === id);
     set({ members: updatedMembers });
 
     // Save to AsyncStorage
     await saveMembers(updatedMembers);
 
-    // Save to Firebase (lazy load to avoid circular dependency)
-    if (updatedMember) {
+    // FIX #1: Save to Firebase ONLY if update originated locally (not from onSnapshot)
+    // This breaks the write-back loop: onSnapshot → updateMemberLocation → saveFamilyMember → onSnapshot
+    if (updatedMember && source === 'local') {
       try {
         const deviceId = await getDeviceId();
         if (deviceId) {

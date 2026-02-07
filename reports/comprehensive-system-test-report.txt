@@ -1,0 +1,34 @@
+[2026-02-07T13:50:26.367Z] ℹ️ ========================================
+[2026-02-07T13:50:26.369Z] ℹ️ COMPREHENSIVE SYSTEM TEST
+[2026-02-07T13:50:26.369Z] ℹ️ ========================================
+[2026-02-07T13:50:26.369Z] ℹ️ 
+[2026-02-07T13:50:26.369Z] ℹ️ Testing AFAD API...
+[2026-02-07T13:50:26.384Z] ⚠️ AFAD HTML: ⚠️ Status undefined
+[2026-02-07T13:50:26.385Z] ⚠️ AFAD API: ⚠️ Status undefined
+[2026-02-07T13:50:26.385Z] ℹ️ 
+[2026-02-07T13:50:26.385Z] ℹ️ Testing Kandilli API...
+[2026-02-07T13:50:26.386Z] ⚠️ Kandilli HTML: ⚠️ Status undefined
+[2026-02-07T13:50:26.386Z] ⚠️ Kandilli Unified API: ⚠️ Status undefined
+[2026-02-07T13:50:26.387Z] ℹ️ 
+[2026-02-07T13:50:26.387Z] ℹ️ Testing USGS API...
+[2026-02-07T13:50:26.387Z] ⚠️ USGS API: ⚠️ Status undefined
+[2026-02-07T13:50:26.388Z] ⚠️ USGS Real-time Feed: ⚠️ Status undefined
+[2026-02-07T13:50:26.388Z] ℹ️ 
+[2026-02-07T13:50:26.388Z] ℹ️ Testing EMSC API...
+[2026-02-07T13:50:26.388Z] ⚠️ EMSC API: ⚠️ Status undefined
+[2026-02-07T13:50:26.388Z] ℹ️ 
+[2026-02-07T13:50:26.388Z] ℹ️ Testing Backend Services...
+[2026-02-07T13:50:26.389Z] ⚠️ Backend Health: ⚠️ Status undefined
+[2026-02-07T13:50:26.389Z] ℹ️ 
+[2026-02-07T13:50:26.389Z] ℹ️ Testing OpenAI Configuration...
+[2026-02-07T13:50:26.389Z] ⚠️ OpenAI API Key: ⚠️ Not configured (fallback mode)
+[2026-02-07T13:50:26.389Z] ℹ️ 
+[2026-02-07T13:50:26.389Z] ℹ️ ========================================
+[2026-02-07T13:50:26.389Z] ℹ️ TEST SUMMARY
+[2026-02-07T13:50:26.389Z] ℹ️ ========================================
+[2026-02-07T13:50:26.389Z] ✅ ✅ All critical systems operational
+[2026-02-07T13:50:26.389Z] ℹ️ 
+[2026-02-07T13:50:26.389Z] ℹ️ Total tests: 1
+[2026-02-07T13:50:26.389Z] ℹ️ Success: 1
+[2026-02-07T13:50:26.389Z] ℹ️ Failed: 0
+[2026-02-07T13:50:26.389Z] ℹ️ Warnings: 9

@@ -6,90 +6,193 @@
     <title>Gizlilik Politikası - AfetNet</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #fff; min-height: 100vh; }
-        h1 { color: #C62828; margin-bottom: 10px; font-size: 28px; }
-        .date { color: #666; margin-bottom: 30px; font-size: 14px; }
-        h2 { color: #1a1a1a; margin: 30px 0 15px; font-size: 20px; border-bottom: 2px solid #C62828; padding-bottom: 8px; }
-        p { margin-bottom: 15px; }
-        ul { margin: 15px 0 15px 30px; }
-        li { margin-bottom: 8px; }
-        .highlight { background: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #C62828; }
-        .contact { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 30px; }
-        a { color: #C62828; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.8; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { color: #f8fafc; font-size: 28px; margin-bottom: 8px; }
+        h2 { color: #38bdf8; font-size: 20px; margin-top: 32px; margin-bottom: 12px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; }
+        h3 { color: #94a3b8; font-size: 16px; margin-top: 16px; margin-bottom: 8px; }
+        p, li { font-size: 15px; color: #cbd5e1; margin-bottom: 8px; }
+        ul { padding-left: 20px; }
+        a { color: #38bdf8; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .date { color: #64748b; font-size: 14px; margin-bottom: 24px; }
+        .highlight { background: #1e293b; border-left: 4px solid #38bdf8; padding: 16px; border-radius: 8px; margin: 16px 0; }
+        .important { background: #1e293b; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 8px; margin: 16px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        th { color: #38bdf8; font-weight: 600; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🛡️ Gizlilik Politikası</h1>
-        <p class="date">Son güncelleme: 3 Şubat 2026</p>
+    <h1>🛡️ Gizlilik Politikası</h1>
+    <p class="date">Son güncelleme: 7 Şubat 2026 | Sürüm 2.0</p>
 
-        <div class="highlight">
-            <strong>AfetNet</strong>, kullanıcılarının gizliliğine saygı gösterir. Bu politika, uygulamayı kullanırken hangi bilgilerin toplandığını ve nasıl kullanıldığını açıklar.
-        </div>
-
-        <h2>1. Toplanan Bilgiler</h2>
-        <p>AfetNet aşağıdaki bilgileri toplar:</p>
-        <ul>
-            <li><strong>Hesap Bilgileri:</strong> E-posta adresi, görünen ad (Google/Apple ile giriş yapıldığında)</li>
-            <li><strong>Konum Bilgileri:</strong> GPS koordinatları (yalnızca izin verildiğinde)</li>
-            <li><strong>Cihaz Bilgileri:</strong> Cihaz modeli, işletim sistemi sürümü</li>
-            <li><strong>Kullanım Verileri:</strong> Uygulama kullanım istatistikleri (anonim)</li>
-        </ul>
-
-        <h2>2. Bilgilerin Kullanımı</h2>
-        <p>Toplanan bilgiler şu amaçlarla kullanılır:</p>
-        <ul>
-            <li>Acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek</li>
-            <li>Aile üyelerinizin güvenlik durumunu takip etmenizi sağlamak</li>
-            <li>Deprem erken uyarı sistemi için bölgesel bildirimler göndermek</li>
-            <li>Uygulama performansını iyileştirmek</li>
-        </ul>
-
-        <h2>3. Bluetooth ve Mesh Ağı</h2>
-        <p>AfetNet, şebeke bağlantısı olmadığında bile iletişim kurabilmeniz için Bluetooth mesh ağı teknolojisini kullanır. Bluetooth üzerinden:</p>
-        <ul>
-            <li>Yakındaki AfetNet kullanıcılarıyla anonim olarak bağlantı kurulur</li>
-            <li>SOS mesajları ve güvenlik durumu bilgileri iletilir</li>
-            <li>Hiçbir kişisel veri Bluetooth üzerinden paylaşılmaz</li>
-        </ul>
-
-        <h2>4. Veri Güvenliği</h2>
-        <p>Verileriniz:</p>
-        <ul>
-            <li>Firebase altyapısında şifreli olarak saklanır</li>
-            <li>SSL/TLS protokolleriyle iletilir</li>
-            <li>Yalnızca yetkili personel tarafından erişilebilir</li>
-        </ul>
-
-        <h2>5. Üçüncü Taraf Hizmetler</h2>
-        <p>AfetNet aşağıdaki üçüncü taraf hizmetleri kullanır:</p>
-        <ul>
-            <li><strong>Firebase (Google):</strong> Kimlik doğrulama, veritabanı, analitik</li>
-            <li><strong>Apple Sign-In:</strong> Kimlik doğrulama</li>
-            <li><strong>Google Sign-In:</strong> Kimlik doğrulama</li>
-        </ul>
-
-        <h2>6. Çocukların Gizliliği</h2>
-        <p>AfetNet, 13 yaşın altındaki çocuklardan bilerek kişisel bilgi toplamaz. Bir çocuğun bilgi sağladığını fark ederseniz, lütfen bizimle iletişime geçin.</p>
-
-        <h2>7. Haklarınız</h2>
-        <p>Şu haklara sahipsiniz:</p>
-        <ul>
-            <li>Verilerinize erişim talep etme</li>
-            <li>Verilerinizin düzeltilmesini isteme</li>
-            <li>Hesabınızı ve tüm verilerinizi silme (Ayarlar > Hesabı Sil)</li>
-        </ul>
-
-        <h2>8. Politika Değişiklikleri</h2>
-        <p>Bu gizlilik politikası zaman zaman güncellenebilir. Önemli değişiklikler uygulama içi bildirimle duyurulacaktır.</p>
-
-        <div class="contact">
-            <h2 style="margin-top: 0; border: none;">📧 İletişim</h2>
-            <p>Gizlilik ile ilgili sorularınız için:</p>
-            <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
-            <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
-        </div>
+    <div class="highlight">
+        <p>Bu gizlilik politikası, AfetNet uygulamasının ("Uygulama") kişisel verilerinizi nasıl topladığını, kullandığını, sakladığını ve koruduğunu açıklar. AfetNet, Türkiye Cumhuriyeti 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) ve Avrupa Birliği Genel Veri Koruma Tüzüğü (GDPR) kapsamında veri koruma yükümlülüklerine uygundur.</p>
     </div>
+
+    <h2>1. Veri Sorumlusu</h2>
+    <p><strong>Veri sorumlusu:</strong> Gökhan Çamcı (Bireysel Geliştirici)</p>
+    <p><strong>İletişim:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+    <p><strong>Uygulama:</strong> AfetNet — Şebekesiz Acil İletişim</p>
+
+    <h2>2. Toplanan Veriler</h2>
+    <p>AfetNet, yalnızca uygulamanın temel işlevselliği için gerekli olan verileri toplar:</p>
+
+    <table>
+        <tr><th>Veri Türü</th><th>Amaç</th><th>Zorunlu mu?</th></tr>
+        <tr><td>E-posta adresi</td><td>Hesap oluşturma ve kimlik doğrulama</td><td>Evet</td></tr>
+        <tr><td>Görünen ad</td><td>Aile üyeleri arasında tanınabilirlik</td><td>Hayır</td></tr>
+        <tr><td>GPS konum bilgisi</td><td>Deprem erken uyarı, SOS sinyali, aile takibi</td><td>İzne bağlı</td></tr>
+        <tr><td>Cihaz tanımlayıcı</td><td>Push bildirim gönderimi (Firebase Cloud Messaging)</td><td>Evet</td></tr>
+        <tr><td>Cihaz modeli / İşletim sistemi</td><td>Uygulama performans optimizasyonu</td><td>Otomatik</td></tr>
+        <tr><td>Hata raporu (crash verileri)</td><td>Uygulama kararlılık iyileştirmesi (Firebase Crashlytics)</td><td>Otomatik</td></tr>
+        <tr><td>Performans verileri</td><td>Uygulama hız optimizasyonu</td><td>Anonim</td></tr>
+    </table>
+
+    <div class="important">
+        <p><strong>⚠️ Önemli:</strong> AfetNet hiçbir finansal bilgi, sağlık verisi, telefon rehberi içeriği veya fotoğraf/video içeriğini sunucularına <strong>yüklemez</strong>. Kamera yalnızca QR kod okuma, fotoğraf kütüphanesi yalnızca yerel görüntüleme için kullanılır.</p>
+    </div>
+
+    <h2>3. Konum Verisi Kullanımı</h2>
+    <p>Konum verisi AfetNet'in en kritik özelliklerinden biridir ve şu amaçlarla kullanılır:</p>
+    <ul>
+        <li><strong>Deprem Erken Uyarı:</strong> Bölgenize yaklaşan deprem dalgalarının tahmini varış süresini hesaplamak</li>
+        <li><strong>SOS Acil Çağrı:</strong> Konumunuzu kurtarma ekiplerine iletmek</li>
+        <li><strong>Aile Güvenlik Takibi:</strong> Aile üyelerinizin gerçek zamanlı konumunu görmek (karşılıklı izin gereklidir)</li>
+    </ul>
+    <p>Konum verisi yalnızca sizin izninizle toplanır. Arka plan konum izni, aile takibi özelliği için kullanılır ve istediğiniz zaman cihaz ayarlarından kapatılabilir.</p>
+
+    <h2>4. Bluetooth ve Mesh Ağı</h2>
+    <p>AfetNet, şebeke bağlantısı olmadığında bile iletişim kurabilmeniz için Bluetooth Low Energy (BLE) mesh ağı teknolojisini kullanır:</p>
+    <ul>
+        <li>Yakındaki AfetNet kullanıcılarıyla <strong>anonim</strong> olarak bağlantı kurulur</li>
+        <li>SOS mesajları ve güvenlik durumu bilgileri iletilir</li>
+        <li>Bluetooth üzerinden <strong>hiçbir kişisel tanımlayıcı bilgi</strong> paylaşılmaz</li>
+        <li>Tüm mesh iletişimi uçtan uca şifrelenir</li>
+    </ul>
+
+    <h2>5. Yapay Zeka (AI) Kullanımı</h2>
+    <p>AfetNet, acil durum rehberliği için yapay zeka destekli bir asistan sunar:</p>
+    <ul>
+        <li>AI sorguları, OpenAI API'si aracılığıyla işlenir</li>
+        <li>Sorgularınız <strong>anonim olarak</strong> gönderilir — kişisel bilgileriniz AI sağlayıcısıyla paylaşılmaz</li>
+        <li>AI yanıtları cihazınızda önbelleğe alınır ve tekrar gönderilmez</li>
+        <li>İnternet bağlantısı olmadığında 241 maddeden oluşan çevrimdışı bilgi tabanı kullanılır</li>
+    </ul>
+
+    <h2>6. Veri Güvenliği</h2>
+    <p>Verilerinizin güvenliği en yüksek önceliğimizdir:</p>
+    <ul>
+        <li>Tüm veriler Firebase altyapısında <strong>AES-256 şifreleme</strong> ile saklanır</li>
+        <li>İletişim <strong>TLS 1.3</strong> protokolüyle korunur</li>
+        <li>Kimlik doğrulama Firebase Authentication üzerinden güvenli şekilde yönetilir</li>
+        <li>Biyometrik doğrulama (Face ID / Touch ID) desteklenmektedir</li>
+        <li>Uygulama jailbreak/root algılaması ve güvenlik kontrolü yapar</li>
+    </ul>
+
+    <h2>7. Üçüncü Taraf Hizmetler</h2>
+    <table>
+        <tr><th>Hizmet</th><th>Sağlayıcı</th><th>Amaç</th><th>Gizlilik Politikası</th></tr>
+        <tr><td>Firebase Authentication</td><td>Google LLC</td><td>Kimlik doğrulama</td><td><a href="https://firebase.google.com/support/privacy" target="_blank">Link</a></td></tr>
+        <tr><td>Cloud Firestore</td><td>Google LLC</td><td>Veritabanı</td><td><a href="https://firebase.google.com/support/privacy" target="_blank">Link</a></td></tr>
+        <tr><td>Firebase Crashlytics</td><td>Google LLC</td><td>Hata raporlama</td><td><a href="https://firebase.google.com/support/privacy" target="_blank">Link</a></td></tr>
+        <tr><td>Firebase Cloud Messaging</td><td>Google LLC</td><td>Push bildirimler</td><td><a href="https://firebase.google.com/support/privacy" target="_blank">Link</a></td></tr>
+        <tr><td>Apple Sign-In</td><td>Apple Inc.</td><td>Kimlik doğrulama</td><td><a href="https://www.apple.com/legal/privacy/" target="_blank">Link</a></td></tr>
+        <tr><td>Google Sign-In</td><td>Google LLC</td><td>Kimlik doğrulama</td><td><a href="https://policies.google.com/privacy" target="_blank">Link</a></td></tr>
+        <tr><td>OpenAI API</td><td>OpenAI Inc.</td><td>AI rehberlik</td><td><a href="https://openai.com/policies/privacy-policy" target="_blank">Link</a></td></tr>
+    </table>
+
+    <h2>8. Veri Aktarımı ve Saklama</h2>
+    <h3>Veri Aktarım Ülkeleri</h3>
+    <p>Firebase hizmetleri, Google'ın küresel veri merkezi altyapısını kullanır. Verileriniz Avrupa Ekonomik Alanı (AEA) içinde ve dışında (Amerika Birleşik Devletleri dahil) işlenebilir. Google, Standart Sözleşme Maddeleri (SCC) kapsamında uygun güvenlik önlemlerini sağlamaktadır.</p>
+
+    <h3>Veri Saklama Süreleri</h3>
+    <table>
+        <tr><th>Veri Türü</th><th>Saklama Süresi</th></tr>
+        <tr><td>Hesap bilgileri</td><td>Hesap silinene kadar</td></tr>
+        <tr><td>Konum geçmişi</td><td>Son 24 saat (cihaz üzerinde), sunucuda saklanmaz</td></tr>
+        <tr><td>SOS mesaj geçmişi</td><td>30 gün</td></tr>
+        <tr><td>Chat mesajları</td><td>90 gün</td></tr>
+        <tr><td>Crash raporları</td><td>90 gün (Firebase Crashlytics)</td></tr>
+        <tr><td>Aile takip verileri</td><td>Gerçek zamanlı — kalıcı saklanmaz</td></tr>
+    </table>
+
+    <h2>9. KVKK Kapsamındaki Haklarınız (6698 Sayılı Kanun)</h2>
+    <p>Türkiye Cumhuriyeti Kişisel Verilerin Korunması Kanunu kapsamında şu haklara sahipsiniz:</p>
+    <ul>
+        <li>Kişisel verilerinizin işlenip işlenmediğini öğrenme</li>
+        <li>İşlenmiş ise buna ilişkin bilgi talep etme</li>
+        <li>İşlenme amacını ve amacına uygun kullanılıp kullanılmadığını öğrenme</li>
+        <li>Yurt içinde veya yurt dışında aktarıldığı üçüncü kişileri bilme</li>
+        <li>Eksik veya yanlış işlenmiş ise düzeltilmesini isteme</li>
+        <li>KVKK madde 7'deki şartlar çerçevesinde silinmesini veya yok edilmesini isteme</li>
+        <li>İşlenen verilerin münhasıran otomatik sistemler vasıtasıyla analiz edilmesi suretiyle aleyhinize bir sonucun ortaya çıkmasına itiraz etme</li>
+        <li>Kanuna aykırı olarak işlenmesi sebebiyle zarara uğramanız hâlinde zararın giderilmesini talep etme</li>
+    </ul>
+
+    <h2>10. GDPR Kapsamındaki Haklarınız</h2>
+    <p>Avrupa Birliği Genel Veri Koruma Tüzüğü kapsamında ek olarak şu haklara sahipsiniz:</p>
+    <ul>
+        <li><strong>Erişim hakkı:</strong> Hangi verilerinizin işlendiğini öğrenme</li>
+        <li><strong>Düzeltme hakkı:</strong> Yanlış verilerin düzeltilmesini talep etme</li>
+        <li><strong>Silme hakkı ("Unutulma hakkı"):</strong> Verilerinizin silinmesini talep etme</li>
+        <li><strong>İşlemeyi kısıtlama hakkı:</strong> Belirli durumlarda veri işlemenin sınırlandırılmasını talep etme</li>
+        <li><strong>Veri taşınabilirliği hakkı:</strong> Verilerinizi yapılandırılmış formatta alma</li>
+        <li><strong>İtiraz hakkı:</strong> Belirli koşullarda veri işlemeye itiraz etme</li>
+    </ul>
+
+    <h2>11. Hesap Silme</h2>
+    <div class="important">
+        <p>Hesabınızı ve tüm kişisel verilerinizi istediğiniz zaman silebilirsiniz:</p>
+        <p><strong>Ayarlar → Hesabı Sil</strong></p>
+        <p>Hesap silme işlemi şunları içerir:</p>
+        <ul>
+            <li>Tüm hesap bilgilerinizin kalıcı olarak silinmesi</li>
+            <li>Firebase Authentication kaydınızın kaldırılması</li>
+            <li>"Apple ile Giriş" kullanıldıysa token'ın iptal edilmesi</li>
+            <li>Firestore'daki kişisel verilerinizin tamamen temizlenmesi</li>
+        </ul>
+        <p>Silme işlemi <strong>30 gün içinde</strong> tamamlanır. Bu süre zarfında hesabınızı kurtarabilirsiniz.</p>
+    </div>
+
+    <h2>12. Çocukların Gizliliği</h2>
+    <p>AfetNet, <strong>13 yaşın altındaki</strong> çocuklardan bilerek kişisel bilgi toplamaz. Uygulamayı kullanmak için en az 13 yaşında olmanız gerekmektedir. 13 yaşın altındaki bir bireyin uygulama üzerinden bilgi sağladığını fark ederseniz, lütfen <a href="mailto:support@afetnet.app">support@afetnet.app</a> adresinden bizimle iletişime geçin.</p>
+
+    <h2>13. Takip (Tracking)</h2>
+    <p>AfetNet, <strong>kullanıcıları takip etmez</strong>. Apple'ın App Tracking Transparency (ATT) kapsamında:</p>
+    <ul>
+        <li>Reklam tanımlayıcısı (IDFA) kullanılmamaktadır</li>
+        <li>Üçüncü taraf reklamlar gösterilmemektedir</li>
+        <li>Kullanıcı profilleme yapılmamaktadır</li>
+        <li>Veriler reklam veya pazarlama amaçlı satılmamaktadır</li>
+    </ul>
+
+    <h2>14. Politika Değişiklikleri</h2>
+    <p>Bu gizlilik politikası zaman zaman güncellenebilir. Önemli değişiklikler:</p>
+    <ul>
+        <li>Uygulama içi bildirimle duyurulacaktır</li>
+        <li>Bu sayfada güncellenmiş tarih ile yayınlanacaktır</li>
+        <li>Gerektiğinde yeniden onay istenecektir</li>
+    </ul>
+
+    <h2>15. Yasal Dayanak</h2>
+    <p>Kişisel verileriniz aşağıdaki hukuki dayanaklar çerçevesinde işlenmektedir:</p>
+    <ul>
+        <li><strong>Açık rıza:</strong> Konum bilgisi ve opsiyonel veriler</li>
+        <li><strong>Sözleşmenin ifası:</strong> Hesap oluşturma ve temel hizmet sunumu</li>
+        <li><strong>Meşru menfaat:</strong> Hata raporlama ve performans iyileştirme</li>
+        <li><strong>Hukuki yükümlülük:</strong> Yasal düzenlemelerle uyumluluk</li>
+    </ul>
+
+    <h2>📧 İletişim</h2>
+    <p>Gizlilik ile ilgili sorularınız, talepleriniz veya KVKK/GDPR kapsamındaki başvurularınız için:</p>
+    <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+    <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
+    <p><strong>Adres:</strong> İstanbul, Türkiye</p>
+
+    <hr style="border-color: #1e293b; margin-top: 32px;">
+    <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 16px;">
+        © 2026 AfetNet. Tüm hakları saklıdır. | Bu politika Apple App Store ve Google Play Store gereksinimleriyle tam uyumludur.
+    </p>
 </body>
 </html>

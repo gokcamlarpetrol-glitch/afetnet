@@ -16,8 +16,10 @@ import {
     getAuth,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
+    signOut,
     sendPasswordResetEmail,
     sendEmailVerification,
+    reload,
     updateProfile,
     updatePassword,
     updateEmail,
@@ -27,13 +29,39 @@ import {
     User,
     UserCredential,
 } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { initializeFirebase } from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
+import { retryWithBackoff } from '../utils/retry';
 import { identityService } from './IdentityService';
 import { contactService } from './ContactService';
 import { presenceService } from './PresenceService';
 import { contactRequestService } from './ContactRequestService';
 import { AuthService } from './AuthService';
+
+// ELITE: Premium email sender via Cloud Function
+const FUNCTIONS_REGION = 'europe-west1';
+
+async function sendPremiumVerificationEmail(displayName?: string): Promise<void> {
+    try {
+        const app = initializeFirebase();
+        if (!app) return;
+        const functions = getFunctions(app, FUNCTIONS_REGION);
+        const sendEmail = httpsCallable(functions, 'sendCustomEmail');
+        await sendEmail({ type: 'verification', displayName });
+        logger.info('📧 Premium doğrulama e-postası gönderildi');
+    } catch (error) {
+        logger.warn('Premium e-posta gönderilemedi, Firebase varsayılanı kullanılıyor:', error);
+        // Fallback: Firebase's built-in (plain) email
+        const app = initializeFirebase();
+        if (app) {
+            const auth = getAuth(app);
+            if (auth.currentUser) {
+                await sendEmailVerification(auth.currentUser);
+            }
+        }
+    }
+}
 
 const logger = createLogger('EmailAuthService');
 
@@ -83,6 +111,7 @@ function getErrorMessage(error: any): string {
 
 // ELITE: Minimum password length constant (synced with UI)
 const MIN_PASSWORD_LENGTH = 8;
+const PROFILE_SYNC_RETRY_CONFIG = { maxRetries: 3, baseDelayMs: 500, maxDelayMs: 5000 };
 
 /**
  * Şifre geçerliliğini kontrol et
@@ -155,31 +184,55 @@ export const EmailAuthService = {
                 await updateProfile(user, { displayName: displayName.trim() });
             }
 
-            // ELITE: E-posta doğrulama gönder
+            // ELITE: Premium branded e-posta doğrulama gönder
             try {
-                await sendEmailVerification(user);
-                logger.info('📧 E-posta doğrulama gönderildi:', email);
+                await sendPremiumVerificationEmail(displayName);
+                logger.info('📧 Premium e-posta doğrulama gönderildi:', email);
             } catch (verifyError) {
                 logger.warn('E-posta doğrulama gönderilemedi (engelleyici değil):', verifyError);
             }
 
             // ELITE: Profil senkronizasyonu
             try {
-                await AuthService.syncUserProfile(user);
+                await retryWithBackoff(
+                    () => AuthService.syncUserProfile(user),
+                    PROFILE_SYNC_RETRY_CONFIG,
+                );
             } catch (syncError) {
-                logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+                logger.error('Kritik profil senkronizasyonu başarısız:', syncError);
+                try {
+                    await signOut(auth);
+                } catch (signOutError) {
+                    logger.warn('Kayıt sonrası zorunlu çıkış başarısız:', signOutError);
+                }
+                await identityService.clearIdentity().catch(() => undefined);
+                throw new Error('Kayıt tamamlandı ancak hesap profili hazırlanamadı. Lütfen tekrar giriş yapın.');
             }
 
-            // ELITE: Servis senkronizasyonu
-            try {
-                await identityService.syncFromFirebase(user);
-                await contactService.initialize();
-                await presenceService.initialize();
-                await contactRequestService.initialize();
-                logger.info('✅ Tüm servisler kayıt sonrası senkronize edildi');
-            } catch (syncError) {
-                logger.warn('Servis senkronizasyonu başarısız (engelleyici değil):', syncError);
+            // CRITICAL: Keep post-register session minimal until email is verified
+            if (user.emailVerified) {
+                try {
+                    await identityService.syncFromFirebase(user);
+                    await contactService.initialize();
+                    await presenceService.initialize();
+                    await contactRequestService.initialize();
+                    logger.info('✅ Tüm servisler kayıt sonrası senkronize edildi');
+                } catch (syncError) {
+                    logger.warn('Servis senkronizasyonu başarısız (engelleyici değil):', syncError);
+                }
+            } else {
+                logger.info('ℹ️ E-posta doğrulanmadan servis senkronizasyonu atlandı');
             }
+
+            // CRITICAL: Do not keep session active until email ownership is verified
+            try {
+                await signOut(auth);
+            } catch (signOutError) {
+                logger.warn('Kayıt sonrası otomatik çıkış başarısız (engelleyici değil):', signOutError);
+            }
+            await identityService.clearIdentity().catch((clearError) => {
+                logger.warn('Kayıt sonrası identity temizliği başarısız (engelleyici değil):', clearError);
+            });
 
             logger.info('✅ E-posta ile kayıt başarılı:', user.uid);
             return user;
@@ -219,16 +272,48 @@ export const EmailAuthService = {
 
             const user = userCredential.user;
 
+            // CRITICAL: Refresh auth profile and enforce verification for password accounts
+            await reload(user);
+            const refreshedUser = auth.currentUser ?? user;
+            if (!refreshedUser.emailVerified) {
+                try {
+                    await sendPremiumVerificationEmail(refreshedUser.displayName || undefined);
+                } catch (verifyError) {
+                    logger.warn('Doğrulama e-postası yeniden gönderilemedi (engelleyici değil):', verifyError);
+                }
+
+                try {
+                    await signOut(auth);
+                } catch (signOutError) {
+                    logger.warn('Doğrulanmamış hesap çıkışı başarısız (engelleyici değil):', signOutError);
+                }
+                await identityService.clearIdentity().catch((clearError) => {
+                    logger.warn('Doğrulanmamış hesap identity temizliği başarısız (engelleyici değil):', clearError);
+                });
+
+                throw new Error('E-posta adresiniz henüz doğrulanmamış. Lütfen e-posta kutunuzu kontrol edin ve doğruladıktan sonra giriş yapın.');
+            }
+
             // ELITE: Profil senkronizasyonu
             try {
-                await AuthService.syncUserProfile(user);
+                await retryWithBackoff(
+                    () => AuthService.syncUserProfile(refreshedUser),
+                    PROFILE_SYNC_RETRY_CONFIG,
+                );
             } catch (syncError) {
-                logger.warn('Profil senkronizasyonu başarısız (engelleyici değil):', syncError);
+                logger.error('Kritik profil senkronizasyonu başarısız:', syncError);
+                try {
+                    await signOut(auth);
+                } catch (signOutError) {
+                    logger.warn('Profil senkronizasyonu sonrası zorunlu çıkış başarısız:', signOutError);
+                }
+                await identityService.clearIdentity().catch(() => undefined);
+                throw new Error('Giriş tamamlanamadı: hesap verileri senkronize edilemedi. Lütfen tekrar deneyin.');
             }
 
             // ELITE: Servis senkronizasyonu
             try {
-                await identityService.syncFromFirebase(user);
+                await identityService.syncFromFirebase(refreshedUser);
                 await contactService.initialize();
                 await presenceService.initialize();
                 await contactRequestService.initialize();
@@ -237,8 +322,8 @@ export const EmailAuthService = {
                 logger.warn('Servis senkronizasyonu başarısız (engelleyici değil):', syncError);
             }
 
-            logger.info('✅ E-posta ile giriş başarılı:', user.uid);
-            return user;
+            logger.info('✅ E-posta ile giriş başarılı:', refreshedUser.uid);
+            return refreshedUser;
 
         } catch (error: any) {
             logger.error('E-posta giriş hatası:', error);
@@ -289,8 +374,8 @@ export const EmailAuthService = {
                 throw new Error('E-posta zaten doğrulanmış.');
             }
 
-            await sendEmailVerification(user);
-            logger.info('📧 Doğrulama e-postası tekrar gönderildi');
+            await sendPremiumVerificationEmail(user.displayName || undefined);
+            logger.info('📧 Premium doğrulama e-postası tekrar gönderildi');
 
         } catch (error: any) {
             logger.error('Doğrulama e-postası hatası:', error);

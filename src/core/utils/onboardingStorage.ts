@@ -5,18 +5,52 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from './logger';
+import { useOnboardingStore } from '../stores/onboardingStore';
 
 const logger = createLogger('OnboardingStorage');
 
-const ONBOARDING_COMPLETED_KEY = 'AFETNET_ONBOARDING_COMPLETED';
+const LEGACY_ONBOARDING_COMPLETED_KEY = 'AFETNET_ONBOARDING_COMPLETED';
+const ONBOARDING_STORE_KEY = 'afetnet-onboarding';
+
+async function getPersistedStoreCompleted(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(ONBOARDING_STORE_KEY);
+    if (!raw) return false;
+
+    const parsed = JSON.parse(raw) as {
+      state?: {
+        completed?: boolean;
+      };
+    };
+
+    return parsed?.state?.completed === true;
+  } catch (error) {
+    logger.warn('Persisted onboarding store parse failed:', error);
+    return false;
+  }
+}
 
 /**
  * Check if user has completed onboarding
  */
 export async function hasCompletedOnboarding(): Promise<boolean> {
   try {
-    const value = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
-    return value === '1';
+    const inMemoryCompleted = useOnboardingStore.getState().completed;
+    if (inMemoryCompleted) return true;
+
+    const persistedStoreCompleted = await getPersistedStoreCompleted();
+    if (persistedStoreCompleted) {
+      useOnboardingStore.setState({ completed: true, isHydrated: true });
+      return true;
+    }
+
+    const legacyValue = await AsyncStorage.getItem(LEGACY_ONBOARDING_COMPLETED_KEY);
+    const completed = legacyValue === '1';
+    if (completed) {
+      useOnboardingStore.setState({ completed: true, isHydrated: true });
+    }
+
+    return completed;
   } catch (error) {
     logger.error('Error checking onboarding status:', error);
     // Fail-safe: assume onboarding not completed
@@ -29,7 +63,8 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
  */
 export async function setOnboardingCompleted(): Promise<void> {
   try {
-    await AsyncStorage.setItem(ONBOARDING_COMPLETED_KEY, '1');
+    await AsyncStorage.setItem(LEGACY_ONBOARDING_COMPLETED_KEY, '1');
+    useOnboardingStore.setState({ completed: true, isHydrated: true });
     logger.info('Onboarding marked as completed');
 
     // ELITE: Sync with backend (fire-and-forget)
@@ -58,7 +93,9 @@ export async function setOnboardingCompleted(): Promise<void> {
  */
 export async function resetOnboarding(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(ONBOARDING_COMPLETED_KEY);
+    await AsyncStorage.removeItem(LEGACY_ONBOARDING_COMPLETED_KEY);
+    await AsyncStorage.removeItem(ONBOARDING_STORE_KEY);
+    useOnboardingStore.setState({ completed: false, isHydrated: true });
     logger.info('Onboarding reset');
   } catch (error) {
     logger.error('Error resetting onboarding:', error);

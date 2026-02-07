@@ -8,8 +8,7 @@ import { NewsArticle, NewsCategory } from '../types/news.types';
 import { createLogger } from '../../utils/logger';
 import { openAIService } from './OpenAIService';
 import { AICache } from '../utils/AICache';
-import type { NewsSummaryRecord } from '../../services/FirebaseDataService';
-import { getDeviceId } from '../../utils/device';
+import type { NewsSummaryRecord, NewsSummaryJobClaimResult } from '../../services/FirebaseDataService';
 import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 import { getErrorMessage } from '../../utils/errorUtils';
 
@@ -126,8 +125,13 @@ class NewsAggregatorService {
   private readonly REQUEST_TIMEOUT = 12_000; // 12 seconds
   private readonly DEFAULT_KEYWORDS = ['deprem', 'sarsıntı', 'afet'];
   private readonly MAX_TOTAL_ARTICLES = 60;
-  private cachedDeviceId: string | null = null;
-  private deviceIdPromise: Promise<string | null> | null = null;
+  private readonly ENABLE_BACKGROUND_PREFETCH = false; // Cost-first: on-demand summaries only
+  private readonly PREFETCH_TARGET_COUNT = 3;
+  private readonly SUMMARY_JOB_LEASE_MS = 45_000;
+  private readonly SUMMARY_WAIT_POLL_MS = 1_200;
+  private readonly SUMMARY_WAIT_MAX_MS = 20_000;
+  private readonly NEWS_SUMMARY_MODEL = 'gpt-4o-mini';
+  private readonly NEWS_PROMPT_VERSION = 4;
 
   // ELITE COST OPTIMIZATION: In-flight request tracking
   // Aynı haber için eş zamanlı isteklerde yalnızca BİR API çağrısı yapılır
@@ -151,9 +155,9 @@ class NewsAggregatorService {
    */
   private async prefetchSummaries(articles: NewsArticle[]): Promise<void> {
     try {
-      // ELITE: Process significant number of articles (User request: "ne kadar haber varsa")
-      // We cap at 30 to respect rate limits while covering virtually all visible news
-      const TARGET_COUNT = 30;
+      if (!this.ENABLE_BACKGROUND_PREFETCH) {
+        return;
+      }
 
       if (articles.length === 0) return;
 
@@ -165,7 +169,7 @@ class NewsAggregatorService {
         const scoreA = this.calculatePriorityScore(a);
         const scoreB = this.calculatePriorityScore(b);
         return scoreB - scoreA; // Descending priority
-      }).slice(0, TARGET_COUNT); // Take top N highest priority
+      }).slice(0, this.PREFETCH_TARGET_COUNT); // Keep very small to control spend
 
       if (__DEV__) {
         logger.info(`🚀 Starting Massive Pre-fetch for ${sortedTargets.length} articles (Priority Ordered)`);
@@ -181,17 +185,14 @@ class NewsAggregatorService {
         }
       }
 
-      // ELITE: High-Speed Batch Processing
-      // We use a "sliding window" of concurrency to maximize speed without hitting 429s
-      // Faster than sequential, safer than all-at-once
-      const BATCH_SIZE = 3; // Process 3 articles simultaneously
-      const DELAY_BETWEEN_BATCHES = 400; // ms
+      const BATCH_SIZE = 1; // Cost/traffic safe mode
+      const DELAY_BETWEEN_BATCHES = 500; // ms
 
       for (let i = 0; i < sortedTargets.length; i += BATCH_SIZE) {
         const batch = sortedTargets.slice(i, i + BATCH_SIZE);
 
-        // Process batch in parallel
-        Promise.all(batch.map(article =>
+        // Process batch in parallel — ELITE: await to respect batch cadence
+        await Promise.all(batch.map(article =>
           this.summarizeArticle(article).catch(err => {
             if (__DEV__) logger.debug(`Background prefetch info for ${article.id}:`, err?.message || 'processed');
             // Swallow error to prevent stopping the chain
@@ -258,11 +259,11 @@ class NewsAggregatorService {
 
       logger.info(`Aggregated ${stableArticles.length} news articles from ${NEWS_SOURCES.length} sources`);
 
-      // ELITE: Pre-fetch summaries for top articles in background
-      // This ensures "instant" summaries when user clicks
-      this.prefetchSummaries(stableArticles).catch(err => {
-        logger.warn('Background summary prefetch failed:', err);
-      });
+      if (this.ENABLE_BACKGROUND_PREFETCH) {
+        this.prefetchSummaries(stableArticles).catch(err => {
+          logger.warn('Background summary prefetch failed:', err);
+        });
+      }
 
       return stableArticles;
     } catch (error) {
@@ -594,6 +595,11 @@ class NewsAggregatorService {
         url: article.url || '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        ttlMs,
+        model: this.NEWS_SUMMARY_MODEL,
+        promptVersion: this.NEWS_PROMPT_VERSION,
+        sourceHash: this.buildSourceHash(article),
+        isFallback: false,
       });
 
       if (__DEV__) {
@@ -618,6 +624,59 @@ class NewsAggregatorService {
       logger.warn('Failed to load news summary from Firestore:', error);
       return null;
     }
+  }
+
+  private async claimCloudSummaryJob(articleId: string): Promise<NewsSummaryJobClaimResult> {
+    try {
+      const { firebaseDataService } = await import('../../services/FirebaseDataService');
+      if (!firebaseDataService.isInitialized) {
+        await firebaseDataService.initialize();
+      }
+      if (!firebaseDataService.isInitialized) {
+        return { acquired: false, reason: 'not_initialized' };
+      }
+      return await firebaseDataService.claimNewsSummaryJob(articleId, this.SUMMARY_JOB_LEASE_MS);
+    } catch (error) {
+      logger.warn('Failed to claim cloud summary job:', error);
+      return { acquired: false, reason: 'error' };
+    }
+  }
+
+  private async finalizeCloudSummaryJob(
+    articleId: string,
+    status: 'completed' | 'failed',
+    errorMessage?: string,
+  ): Promise<void> {
+    try {
+      const { firebaseDataService } = await import('../../services/FirebaseDataService');
+      if (!firebaseDataService.isInitialized) {
+        await firebaseDataService.initialize();
+      }
+      if (!firebaseDataService.isInitialized) {
+        return;
+      }
+      await firebaseDataService.finalizeNewsSummaryJob(articleId, status, errorMessage);
+    } catch (error) {
+      if (__DEV__) {
+        logger.debug('Failed to finalize cloud summary job:', error);
+      }
+    }
+  }
+
+  private async waitForSharedSummary(articleId: string, waitMs?: number): Promise<string | null> {
+    const budgetMs = Math.max(2_000, Math.min(this.SUMMARY_WAIT_MAX_MS, Math.floor(waitMs ?? this.SUMMARY_WAIT_MAX_MS)));
+    const deadline = Date.now() + budgetMs;
+
+    while (Date.now() < deadline) {
+      const cloudRecord = await this.loadSummaryFromCloud(articleId);
+      const summary = cloudRecord?.summary ? this.cleanHTML(cloudRecord.summary) : '';
+      if (summary.trim().length > 0) {
+        return summary;
+      }
+      await new Promise((resolve) => setTimeout(resolve, this.SUMMARY_WAIT_POLL_MS));
+    }
+
+    return null;
   }
 
   private calculateRemainingTtl(record?: NewsSummaryRecord | null): number {
@@ -706,28 +765,19 @@ class NewsAggregatorService {
     return fallback;
   }
 
-  private async getDeviceIdForSummary(): Promise<string | null> {
-    if (this.cachedDeviceId) {
-      return this.cachedDeviceId;
-    }
-
-    if (!this.deviceIdPromise) {
-      this.deviceIdPromise = getDeviceId()
-        .then((id) => (id && id.toUpperCase().startsWith('AFN-') ? id : null))
-        .catch((error) => {
-          logger.warn('Failed to resolve device ID for news summary:', error);
-          return null;
-        });
-    }
-
-    this.cachedDeviceId = await this.deviceIdPromise;
-    return this.cachedDeviceId;
+  private buildSourceHash(article: NewsArticle): string {
+    const canonical = [
+      safeLowerCase(article.source || ''),
+      safeLowerCase(article.url || ''),
+      String(article.publishedAt || 0),
+    ].join('|');
+    return this.sanitizeId(canonical).slice(0, 90);
   }
 
   /**
    * Elite Security: Safe URL fetching with SSRF protection
    */
-  private async fetchWithTimeout(url: string): Promise<string> {
+  private async fetchWithTimeout(url: string, maxRedirects: number = 3): Promise<string> {
     // Elite Security: SSRF Protection - Validate URL
     if (typeof url !== 'string' || url.length === 0 || url.length > 2048) {
       throw new Error('Invalid URL');
@@ -813,13 +863,16 @@ class NewsAggregatorService {
         redirect: 'manual', // Handle redirects manually
       });
 
-      // Elite: Handle redirects safely
+      // Elite: Handle redirects safely with depth limit
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
-        if (location) {
-          // Recursively validate redirect URL
-          return this.fetchWithTimeout(location);
+        if (location && maxRedirects > 0) {
+          // Recursively validate redirect URL with decremented depth
+          return this.fetchWithTimeout(location, maxRedirects - 1);
         }
+        // Max redirects exhausted — log and return empty
+        logger.warn(`Max redirects exhausted for ${url}`);
+        return '';
       }
 
       if (!response.ok) {
@@ -1043,9 +1096,48 @@ class NewsAggregatorService {
 
       logger.info('✅ OpenAI is configured, generating AI summary...');
 
-      // ELITE COST OPTIMIZATION: Wrap API call in in-flight request tracking
-      // Bu sayede aynı anda aynı haberi isteyen TÜM kullanıcılar tek bir API çağrısını bekleyecek
-      const generateSummaryPromise = this.generateAndCacheSummary(article, cacheKey);
+      const generateSummaryPromise = (async () => {
+        const articleId = typeof article.id === 'string' ? article.id.trim() : '';
+        let hasCloudLease = false;
+
+        if (articleId) {
+          const claimResult = await this.claimCloudSummaryJob(articleId);
+          if (!claimResult.acquired) {
+            if (claimResult.reason === 'summary_exists' || claimResult.reason === 'lock_held') {
+              const waited = await this.waitForSharedSummary(articleId, claimResult.waitMs);
+              if (waited && waited.trim().length > 0) {
+                this.summaryCache.set(cacheKey, { summary: waited, timestamp: Date.now() });
+                await this.persistSummaryLocally(cacheKey, waited, this.SUMMARY_CACHE_TTL).catch(() => undefined);
+                return waited;
+              }
+
+              // Another producer currently owns the lease (or just finished),
+              // avoid fan-out and return short-lived fallback instead of duplicating API calls.
+              logger.info(`Shared summary lease not acquired (${claimResult.reason}), returning short-lived fallback`);
+              return await this.useFallbackSummary(article, cacheKey, 60_000);
+            }
+
+            // Resilience: if lock service is temporarily unavailable (no auth/init/network/rules),
+            // continue with local AI generation so the feature still works for the user.
+            logger.warn(`Cloud summary lock unavailable (${claimResult.reason}); continuing with local AI generation`);
+          }
+          hasCloudLease = claimResult.acquired;
+        }
+
+        try {
+          const generated = await this.generateAndCacheSummary(article, cacheKey);
+          if (articleId && hasCloudLease) {
+            await this.finalizeCloudSummaryJob(articleId, 'completed');
+          }
+          return generated;
+        } catch (error) {
+          if (articleId && hasCloudLease) {
+            await this.finalizeCloudSummaryJob(articleId, 'failed', getErrorMessage(error));
+          }
+          throw error;
+        }
+      })();
+
       this.inFlightRequests.set(cacheKey, generateSummaryPromise);
 
       try {
@@ -1093,38 +1185,39 @@ class NewsAggregatorService {
       ? articleSummary.substring(0, maxSummaryLength) + '...'
       : (articleSummary || articleTitle);
 
-    // ELITE ULTRA UPDATE: "Haberin Eksiksiz Tam Raporu" - Okuyucu asla kaynağa gitmesin
-    const prompt = `Aşağıdaki haberi Türkçe olarak, TÜM detaylarıyla EKSIKSIZ bir "tam haber raporu" olarak yeniden yaz.
+    const prompt = `Haberi Türkçe ve anlaşılır şekilde özetle.
+Kurallar:
+1) 4-6 cümle yaz.
+2) Yalnızca doğrulanabilir bilgi ver; tahmin ekleme.
+3) Deprem haberinde mutlaka büyüklük, konum, zaman, derinlik bilgilerini dahil et (varsa).
+4) Gereksiz tekrar, emoji ve süslü dil kullanma.
+5) "Özet" başlığı ekleme, sadece metni döndür.
 
-KRİTİK KURALLAR (MUTLAKA UYULMASI GEREKEN):
-1. KISA YAZMA! En az 12-15 cümle olmalı. Eksik bırakma, uzun ve doyurucu bir metin oluştur.
-2. Haberdeki TÜM bilgileri dahil et: isimler, sayılar, tarih/saat, konum detayları, kurum açıklamaları, mahkeme kararları vs.
-3. 5N1K kuralını KESİNLİKLE uygula: Ne oldu, Nerede oldu, Ne zaman oldu, Nasıl oldu, Neden oldu, Kim(ler) dahil.
-4. Deprem haberi ise: Büyüklük, Derinlik (km), Tam Konum (il/ilçe), Tarih ve Saat, Hissedilen iller, Hasar/yaralı bilgisi, AFAD/Kandilli verileri - HEPSİNİ dahil et.
-5. Mahkeme/dava haberi ise: Dava konusu, taraflar, karar detayları, gerekçe, sonuçlar - HEPSİNİ dahil et.
-6. Hiçbir bilgiyi atlama. Özet değil, KAPSAMLI RAPOR yaz.
-7. Akıcı, profesyonel gazetecilik diliyle yaz. Madde işareti kullanma, paragraf halinde yaz.
-8. "Haber detaylarına göre...", "Haberde belirtildiğine göre..." gibi ifadeler KULLANMA. Doğrudan anlat.
-9. Başlığı tekrarlama, doğrudan içeriğe geç.
-
-HABER VERİLERİ:
+HABER:
 Başlık: ${articleTitle}
 ${truncatedSummary ? `İçerik: ${truncatedSummary}` : ''}
 ${articleSource ? `Kaynak: ${articleSource}` : ''}
 ${(article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude)) ? `Deprem Büyüklüğü: ${article.magnitude}` : ''}
 ${(article.location && typeof article.location === 'string') ? `Konum: ${article.location.trim()}` : ''}`;
 
-    const systemPrompt = `Sen Türkiye'nin en saygın haber ajansının baş editörüsün. Görevin: verilen haberi okuyucunun kaynağa GİTMESİNE GEREK KALMAYACAK şekilde TAM ve EKSİKSİZ yazıya dökmek. Kısa yazma, her detayı dahil et. Profesyonel, güvenilir ve akıcı bir dil kullan. Minimum 12-15 cümle.`;
+    const systemPrompt = 'Sen güvenilir bir haber özetleme asistanısın. Kısa, net ve doğrulanabilir bilgi ver.';
 
     let summary: string;
     try {
       // ELITE: Ultra-kapsamlı rapor için token limitini artırdım
-      summary = await openAIService.generateText(prompt, {
+      const aiResult = await openAIService.generateTextWithMetadata(prompt, {
         systemPrompt,
-        maxTokens: 600, // ELITE: Eksiksiz içerik için 400 -> 600
-        temperature: 0.25, // Daha tutarlı raporlar için 0.3 -> 0.25
+        maxTokens: 240,
+        temperature: 0.2,
         serviceName: 'NewsAggregatorService',
       });
+      summary = aiResult.text;
+
+      // CRITICAL: OpenAI fallback metnini gerçek AI özeti gibi kalıcı cache/cloud'a yazma.
+      if (aiResult.usedFallback) {
+        logger.warn('AI summary generation fell back to local response, using fallback summary path');
+        return await this.useFallbackSummary(article, cacheKey, this.FALLBACK_SUMMARY_TTL);
+      }
 
       // CRITICAL: Validate AI response
       if (!summary || typeof summary !== 'string') {

@@ -85,6 +85,8 @@ interface PendingMeshPacket {
 class MeshNetworkService {
   // Identity
   private myId: string = '';
+  private physicalDeviceId: string | null = null;
+  private recipientAliases: Set<string> = new Set(['me']);
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
 
@@ -129,6 +131,7 @@ class MeshNetworkService {
   constructor() {
     this.myId = 'me-' + Math.floor(Math.random() * 10000).toString(16);
     this.seenMessageIds = new LRUSet<string>(MAX_SEEN_MESSAGE_IDS);
+    this.rebuildRecipientAliases();
     this.loadQueues();
   }
 
@@ -147,6 +150,7 @@ class MeshNetworkService {
    */
   async initialize(): Promise<void> {
     if (this.initialized) {
+      this.rebuildRecipientAliases();
       if (!useMeshStore.getState().myDeviceId) {
         useMeshStore.getState().setMyDeviceId(this.myId);
       }
@@ -161,14 +165,26 @@ class MeshNetworkService {
       const identity = identityService.getIdentity();
       if (identity?.id) {
         this.myId = identity.id;
-      } else {
-        try {
-          const stableDeviceId = await getDeviceIdFromLib();
-          if (stableDeviceId) {
+      }
+      if (identity?.deviceId) {
+        this.physicalDeviceId = identity.deviceId;
+      }
+
+      try {
+        const stableDeviceId = await getDeviceIdFromLib();
+        if (stableDeviceId) {
+          this.physicalDeviceId = stableDeviceId;
+          if (!identity?.id) {
             this.myId = stableDeviceId;
           }
-        } catch {
-          // Keep existing myId fallback
+        }
+      } catch {
+        // Keep existing IDs fallback
+      }
+
+      if (!this.myId) {
+        if (this.physicalDeviceId) {
+          this.myId = this.physicalDeviceId;
         }
       }
 
@@ -181,6 +197,7 @@ class MeshNetworkService {
         }
       }
 
+      this.rebuildRecipientAliases();
       useMeshStore.getState().setMyDeviceId(this.myId);
 
       // Load persisted queues
@@ -216,9 +233,15 @@ class MeshNetworkService {
     this.isRunning = true;
     useMeshStore.getState().toggleMesh(true);
 
-    const isSim = useMeshStore.getState().isSimulationMode;
+    const isSimRequested = useMeshStore.getState().isSimulationMode;
+    const isSim = __DEV__ && isSimRequested;
+    if (isSimRequested && !__DEV__) {
+      useMeshStore.getState().setSimulationMode(false);
+      logger.warn('Simulation mode request ignored in production build');
+    }
 
-    if (isSim && __DEV__) {
+    if (isSim) {
+      this.isRealMode = false;
       this.startSimulation();
     } else {
       await this.startRealBLE();
@@ -369,15 +392,21 @@ class MeshNetworkService {
       id: messageId,
       senderId,
       to,
-      type: type === MeshMessageType.SOS ? 'SOS' : 'CHAT',
+      type: this.mapEnvelopeTypeToStoreType(envelope.type),
       content: envelope.content,
-      timestamp: Date.now(),
+      senderName: envelope.senderName,
+      timestamp: envelope.timestamp,
       hops: 0,
       status: 'sending',
       ttl: MESSAGE_DEFAULT_TTL,
       priority: this.getStorePriority(type),
       acks: [],
       retryCount: 0,
+      ...(envelope.mediaType ? { mediaType: envelope.mediaType } : {}),
+      ...(envelope.mediaUrl ? { mediaUrl: envelope.mediaUrl } : {}),
+      ...(typeof envelope.mediaDuration === 'number' ? { mediaDuration: envelope.mediaDuration } : {}),
+      ...(envelope.mediaThumbnail ? { mediaThumbnail: envelope.mediaThumbnail } : {}),
+      ...(envelope.location ? { location: envelope.location } : {}),
     };
     useMeshStore.getState().addMessage(storeMsg);
 
@@ -653,6 +682,36 @@ class MeshNetworkService {
     }
   }
 
+  private normalizeRecipientId(value: string | null | undefined): string {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  }
+
+  private rebuildRecipientAliases(): void {
+    const aliases = new Set<string>(['me']);
+    const normalizedMyId = this.normalizeRecipientId(this.myId);
+    if (normalizedMyId) {
+      aliases.add(normalizedMyId);
+    }
+
+    const identity = identityService.getIdentity();
+    const identityId = this.normalizeRecipientId(identity?.id);
+    const identityDeviceId = this.normalizeRecipientId(identity?.deviceId);
+    const physicalId = this.normalizeRecipientId(this.physicalDeviceId);
+
+    if (identityId) aliases.add(identityId);
+    if (identityDeviceId) aliases.add(identityDeviceId);
+    if (physicalId) aliases.add(physicalId);
+
+    this.recipientAliases = aliases;
+  }
+
+  private isLocalRecipient(recipientId: string): boolean {
+    const normalized = this.normalizeRecipientId(recipientId);
+    if (!normalized) return false;
+    this.rebuildRecipientAliases();
+    return this.recipientAliases.has(normalized);
+  }
+
   private toMessageIdUInt32(id: string | number): number {
     const raw = String(id);
     let hash = 0;
@@ -660,6 +719,57 @@ class MeshNetworkService {
       hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
     }
     return hash >>> 0;
+  }
+
+  private mapEnvelopeTypeToStoreType(type: string): MeshMessage['type'] {
+    const normalized = typeof type === 'string' ? type.toUpperCase() : 'CHAT';
+    if (normalized === 'SOS') return 'SOS';
+    if (normalized === 'STATUS') return 'STATUS';
+    if (normalized === 'LOCATION') return 'LOCATION';
+    if (normalized === 'IMAGE') return 'IMAGE';
+    if (normalized === 'VOICE') return 'VOICE';
+    return 'CHAT';
+  }
+
+  private normalizeMediaType(value: unknown): MeshMessage['mediaType'] | undefined {
+    if (value === 'image' || value === 'voice' || value === 'location') {
+      return value;
+    }
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const normalized = value.toLowerCase();
+    if (normalized === 'image' || normalized === 'voice' || normalized === 'location') {
+      return normalized;
+    }
+    return undefined;
+  }
+
+  private normalizeEnvelopeLocation(value: unknown): MeshMessage['location'] | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+
+    const raw = value as Record<string, unknown>;
+    const lat = typeof raw.lat === 'number'
+      ? raw.lat
+      : typeof raw.latitude === 'number'
+        ? raw.latitude
+        : null;
+    const lng = typeof raw.lng === 'number'
+      ? raw.lng
+      : typeof raw.longitude === 'number'
+        ? raw.longitude
+        : null;
+    if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return undefined;
+    }
+
+    const location: MeshMessage['location'] = { lat, lng };
+    if (typeof raw.address === 'string' && raw.address.trim().length > 0) {
+      location.address = raw.address.trim();
+    }
+    return location;
   }
 
   private buildMessageEnvelope(
@@ -675,13 +785,26 @@ class MeshNetworkService {
     from: string;
     to: string;
     type: string;
+    senderName?: string;
     content: string;
     timestamp: number;
+    mediaType?: 'image' | 'voice' | 'location';
+    mediaUrl?: string;
+    mediaDuration?: number;
+    mediaThumbnail?: string;
+    location?: { lat: number; lng: number; address?: string };
   } {
     let parsedContent = sanitizedContent;
     let parsedTimestamp: number | null = null;
     let parsedFrom: string | null = null;
     let parsedTo: string | null = null;
+    let parsedType: string | null = null;
+    let parsedSenderName: string | null = null;
+    let parsedMediaType: 'image' | 'voice' | 'location' | undefined;
+    let parsedMediaUrl: string | undefined;
+    let parsedMediaDuration: number | undefined;
+    let parsedMediaThumbnail: string | undefined;
+    let parsedLocation: { lat: number; lng: number; address?: string } | undefined;
 
     try {
       const parsed = JSON.parse(sanitizedContent);
@@ -691,12 +814,29 @@ class MeshNetworkService {
         } else if (typeof parsed.message === 'string') {
           parsedContent = sanitizeMessage(parsed.message);
         }
+        if (typeof parsed.type === 'string' && parsed.type.trim().length > 0) {
+          parsedType = parsed.type.trim();
+        }
         if (typeof parsed.from === 'string' && parsed.from.trim().length > 0) {
           parsedFrom = parsed.from.trim();
         }
         if (typeof parsed.to === 'string' && parsed.to.trim().length > 0) {
           parsedTo = parsed.to.trim();
         }
+        if (typeof parsed.senderName === 'string' && parsed.senderName.trim().length > 0) {
+          parsedSenderName = parsed.senderName.trim();
+        }
+        parsedMediaType = this.normalizeMediaType(parsed.mediaType);
+        if (typeof parsed.mediaUrl === 'string' && parsed.mediaUrl.trim().length > 0) {
+          parsedMediaUrl = parsed.mediaUrl.trim();
+        }
+        if (typeof parsed.mediaDuration === 'number' && Number.isFinite(parsed.mediaDuration)) {
+          parsedMediaDuration = parsed.mediaDuration;
+        }
+        if (typeof parsed.mediaThumbnail === 'string' && parsed.mediaThumbnail.trim().length > 0) {
+          parsedMediaThumbnail = parsed.mediaThumbnail;
+        }
+        parsedLocation = this.normalizeEnvelopeLocation(parsed.location);
         if (typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)) {
           parsedTimestamp = parsed.timestamp;
         }
@@ -709,9 +849,15 @@ class MeshNetworkService {
       id: options.messageId,
       from: options.senderId || parsedFrom || this.myId || 'ME',
       to: options.to || parsedTo || 'broadcast',
-      type: options.meshType === MeshMessageType.SOS ? 'SOS' : 'CHAT',
+      type: parsedType || (options.meshType === MeshMessageType.SOS ? 'SOS' : 'CHAT'),
+      ...(parsedSenderName ? { senderName: parsedSenderName } : {}),
       content: parsedContent,
       timestamp: parsedTimestamp ?? Date.now(),
+      ...(parsedMediaType ? { mediaType: parsedMediaType } : {}),
+      ...(parsedMediaUrl ? { mediaUrl: parsedMediaUrl } : {}),
+      ...(typeof parsedMediaDuration === 'number' ? { mediaDuration: parsedMediaDuration } : {}),
+      ...(parsedMediaThumbnail ? { mediaThumbnail: parsedMediaThumbnail } : {}),
+      ...(parsedLocation ? { location: parsedLocation } : {}),
     };
   }
 
@@ -904,6 +1050,12 @@ class MeshNetworkService {
   }
 
   private async broadcastPacket(packet: PendingMeshPacket): Promise<void> {
+    if (!this.isRealMode) {
+      this.stats.packetsSent++;
+      logger.debug('Simulation mode: skipped BLE advertising for queued packet');
+      return;
+    }
+
     try {
       const payloadBuffer = Buffer.from(packet.payloadBase64, 'base64');
       const encoded = MeshProtocol.serialize(
@@ -1021,6 +1173,14 @@ class MeshNetworkService {
       let senderId = packet.header.sourceId;
       let content = rawContent;
       let messageId = transportMsgId;
+      let timestamp = Date.now();
+      let messageType: MeshMessage['type'] = packet.header.type === MeshMessageType.SOS ? 'SOS' : 'CHAT';
+      let senderName: string | undefined;
+      let mediaType: MeshMessage['mediaType'] | undefined;
+      let mediaUrl: string | undefined;
+      let mediaDuration: number | undefined;
+      let mediaThumbnail: string | undefined;
+      let location: MeshMessage['location'] | undefined;
 
       // Envelope support for direct/private messages
       try {
@@ -1042,13 +1202,34 @@ class MeshNetworkService {
           } else if (typeof parsed.message === 'string') {
             content = sanitizeMessage(parsed.message);
           }
+          if (typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)) {
+            timestamp = parsed.timestamp;
+          }
+          if (typeof parsed.type === 'string' && parsed.type.trim().length > 0) {
+            messageType = this.mapEnvelopeTypeToStoreType(parsed.type);
+          }
+          if (typeof parsed.senderName === 'string' && parsed.senderName.trim().length > 0) {
+            senderName = parsed.senderName.trim();
+          }
+          mediaType = this.normalizeMediaType(parsed.mediaType);
+          if (typeof parsed.mediaUrl === 'string' && parsed.mediaUrl.trim().length > 0) {
+            mediaUrl = parsed.mediaUrl.trim();
+          }
+          if (typeof parsed.mediaDuration === 'number' && Number.isFinite(parsed.mediaDuration)) {
+            mediaDuration = parsed.mediaDuration;
+          }
+          if (typeof parsed.mediaThumbnail === 'string' && parsed.mediaThumbnail.trim().length > 0) {
+            mediaThumbnail = parsed.mediaThumbnail.trim();
+          }
+          location = this.normalizeEnvelopeLocation(parsed.location);
         }
       } catch {
         // Not an envelope JSON; treat as legacy plaintext broadcast
       }
 
       // Drop non-targeted direct messages locally (still relayed below).
-      if (to !== 'broadcast' && to !== this.myId && to !== 'ME') {
+      const normalizedTo = this.normalizeRecipientId(to);
+      if (normalizedTo !== 'broadcast' && !this.isLocalRecipient(to)) {
         if (packet.header.ttl > 0) {
           this.relayPacket(packet);
         }
@@ -1058,16 +1239,22 @@ class MeshNetworkService {
       const message: MeshMessage = {
         id: messageId,
         senderId,
+        ...(senderName ? { senderName } : {}),
         to,
-        type: packet.header.type === MeshMessageType.SOS ? 'SOS' : 'CHAT',
+        type: messageType,
         content,
-        timestamp: Date.now(),
+        timestamp,
         hops: MESSAGE_DEFAULT_TTL - packet.header.ttl,
         status: 'delivered',
         ttl: packet.header.ttl,
         priority: 'normal',
         acks: [],
         retryCount: 0,
+        ...(mediaType ? { mediaType } : {}),
+        ...(mediaUrl ? { mediaUrl } : {}),
+        ...(typeof mediaDuration === 'number' ? { mediaDuration } : {}),
+        ...(mediaThumbnail ? { mediaThumbnail } : {}),
+        ...(location ? { location } : {}),
       };
 
       useMeshStore.getState().addMessage(message);
@@ -1108,6 +1295,12 @@ class MeshNetworkService {
   private async relayPacket(originalPacket: MeshPacket): Promise<void> {
     const newTtl = originalPacket.header.ttl - 1;
     if (newTtl <= 0) return;
+    if (!this.isRealMode) {
+      this.stats.packetsRelayed++;
+      logger.debug('Simulation mode: skipped BLE relay advertising');
+      return;
+    }
+
     const sourceIdHash = Number.parseInt(originalPacket.header.sourceId, 16);
     const relaySourceId: string | number = Number.isFinite(sourceIdHash)
       ? sourceIdHash

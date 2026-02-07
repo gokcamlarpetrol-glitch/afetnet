@@ -24,7 +24,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { EmailAuthService } from '../../services/EmailAuthService';
 import * as Haptics from 'expo-haptics';
-import { Linking } from 'react-native';
 
 // ELITE: Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -77,7 +76,7 @@ export const EmailRegisterScreen = () => {
             // ELITE: Success with navigation to login
             Alert.alert(
                 'Kayıt Başarılı',
-                'Hesabınız oluşturuldu. E-posta adresinize doğrulama bağlantısı gönderdik.',
+                'Hesabınız oluşturuldu. E-posta adresinize doğrulama bağlantısı gönderdik. E-postanızı doğrulamadan giriş yapılamaz.',
                 [{ text: 'Giriş Yap', onPress: () => navigation.navigate('Login') }]
             );
         } catch (error: any) {
@@ -97,15 +96,15 @@ export const EmailRegisterScreen = () => {
         navigation.navigate('Login');
     };
 
-    // ELITE: Open external links
+    // ELITE: Open in-app legal screens for stable review experience
     const handleOpenTerms = () => {
         Haptics.selectionAsync();
-        Linking.openURL('https://afetnet.com/kullanim-kosullari');
+        navigation.navigate('TermsOfService');
     };
 
     const handleOpenPrivacy = () => {
         Haptics.selectionAsync();
-        Linking.openURL('https://afetnet.com/gizlilik-politikasi');
+        navigation.navigate('PrivacyPolicy');
     };
 
     const passwordValid = password.length >= MIN_PASSWORD_LENGTH;

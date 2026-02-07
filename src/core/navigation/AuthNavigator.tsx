@@ -11,6 +11,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
+import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
 
 const Stack = createStackNavigator();
 
@@ -27,6 +29,8 @@ export default function AuthNavigator() {
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="EmailRegister" component={EmailRegisterScreen} />
             <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+            <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
         </Stack.Navigator>
     );
 }

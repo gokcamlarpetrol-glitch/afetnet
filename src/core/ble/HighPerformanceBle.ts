@@ -8,16 +8,17 @@ import { Buffer } from 'buffer';
 const logger = createLogger('HighPerformanceBle');
 
 export interface BlePeer {
-    id: string;
-    rssi: number;
-    manufacturerData?: string;
-    lastSeen: number;
+  id: string;
+  rssi: number;
+  manufacturerData?: string;
+  lastSeen: number;
 }
 
 class HighPerformanceBle {
   private manager: BleManager;
   private isScanning = false;
   private isAdvertising = false;
+  private hasLoggedAdvertiseUnavailable = false;
   private foundPeers: Map<string, BlePeer> = new Map();
   private scanListeners: ((peer: BlePeer) => void)[] = [];
 
@@ -49,13 +50,22 @@ class HighPerformanceBle {
   async startAdvertising(payload: Uint8Array): Promise<void> {
     if (this.isAdvertising) return;
 
-    try {
-      const manufacturerData = Buffer.from(payload).toString('hex');
+    if (!BlePeripheral || typeof BlePeripheral.startAdvertising !== 'function') {
+      if (!this.hasLoggedAdvertiseUnavailable) {
+        logger.warn('BLE advertising unavailable: native peripheral module missing');
+        this.hasLoggedAdvertiseUnavailable = true;
+      }
+      this.isAdvertising = false;
+      return;
+    }
 
-      // Allow restart
-      if (await BlePeripheral.isAdvertising()) {
+    try {
+      // ELITE: Guard against null BlePeripheral (simulator/no BLE hardware)
+      if (typeof BlePeripheral.isAdvertising === 'function' && await BlePeripheral.isAdvertising()) {
         await BlePeripheral.stopAdvertising();
       }
+
+      const manufacturerData = Buffer.from(payload).toString('hex');
 
       await BlePeripheral.startAdvertising({
         name: 'AfetNet',
@@ -75,6 +85,11 @@ class HighPerformanceBle {
   }
 
   async stopAdvertising() {
+    if (!BlePeripheral || typeof BlePeripheral.stopAdvertising !== 'function') {
+      this.isAdvertising = false;
+      return;
+    }
+
     try {
       await BlePeripheral.stopAdvertising();
       this.isAdvertising = false;

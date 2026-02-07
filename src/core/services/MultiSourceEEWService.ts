@@ -87,7 +87,7 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         name: 'Kandilli Observatory',
         enabled: true,
         priority: 2,
-        apiUrl: 'http://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTML scraping needed
+        apiUrl: 'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTML scraping needed
         pollInterval: 10000, // 10 seconds
         minMagnitude: 1.0,
         region: 'turkey',
@@ -188,6 +188,36 @@ class MultiSourceEEWService {
         this.pollingIntervals.set(sourceKey, interval);
     }
 
+    private async fetchJsonWithTimeout(
+        url: string,
+        timeoutMs: number,
+        headers?: Record<string, string>,
+    ): Promise<any | null> {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    Accept: 'application/json',
+                    ...(headers || {}),
+                },
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            if (__DEV__ && error instanceof Error && error.name !== 'AbortError') {
+                logger.debug('Multi-source fetch failed:', error.message);
+            }
+            return null;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
     private async fetchFromSource(sourceKey: string, config: DataSourceConfig): Promise<void> {
         try {
             let events: EarthquakeEvent[] = [];
@@ -239,15 +269,8 @@ class MultiSourceEEWService {
         const endDate = new Date().toISOString().split('T')[0];
 
         const url = `${config.apiUrl}?start=${startDate}&end=${endDate}&minmag=${config.minMagnitude}`;
-
-        const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(10000),
-        });
-
-        if (!response.ok) return [];
-
-        const data = await response.json();
+        const data = await this.fetchJsonWithTimeout(url, 10000);
+        if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
         const items = Array.isArray(data) ? data : [];
@@ -285,13 +308,11 @@ class MultiSourceEEWService {
         // We use a community-maintained proxy or fallback to AFAD
         try {
             // Try community proxy
-            const response = await fetch('https://api.orhanaydogdu.com.tr/deprem/kandilli/live', {
-                signal: AbortSignal.timeout(10000),
-            });
-
-            if (!response.ok) return [];
-
-            const data = await response.json();
+            const data = await this.fetchJsonWithTimeout(
+                'https://api.orhanaydogdu.com.tr/deprem/kandilli/live',
+                10000,
+            );
+            if (!data) return [];
             const events: EarthquakeEvent[] = [];
 
             const items = data?.result || [];
@@ -335,15 +356,8 @@ class MultiSourceEEWService {
         oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
         const url = `${config.apiUrl}?format=geojson&starttime=${oneDayAgo.toISOString()}&minmagnitude=${config.minMagnitude}`;
-
-        const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(15000),
-        });
-
-        if (!response.ok) return [];
-
-        const data = await response.json();
+        const data = await this.fetchJsonWithTimeout(url, 15000);
+        if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
         const features = data?.features || [];
@@ -384,15 +398,8 @@ class MultiSourceEEWService {
         oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
         const url = `${config.apiUrl}?format=json&start=${oneDayAgo.toISOString()}&minmag=${config.minMagnitude}`;
-
-        const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(15000),
-        });
-
-        if (!response.ok) return [];
-
-        const data = await response.json();
+        const data = await this.fetchJsonWithTimeout(url, 15000);
+        if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
         const features = data?.features || [];
@@ -446,45 +453,87 @@ class MultiSourceEEWService {
         }
 
         // 🚨 CRITICAL: Trigger EEW notification for significant earthquakes (M4.5+)
-        // This ensures users get immediate alerts for potentially damaging earthquakes
+        // ELITE: Distance-filtered with FAIL-SAFE — Türkiye bounding box fallback
         let wasNotified = false;
         if (event.magnitude >= 4.5) {
+            // ELITE: Magnitude-scaled distance threshold (FAIL-SAFE: Türkiye bbox if no location)
+            let shouldNotify = true;
+            let distanceKm: number | null = null;
             try {
-                const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
-                await showMagnitudeBasedNotification(
-                    event.magnitude,
-                    event.location,
-                    true, // Is EEW
-                    undefined, // Time advance (will be calculated based on distance)
-                    event.originTime,
-                );
-                wasNotified = true;
-                logger.info(`🚨 EEW NOTIFICATION TRIGGERED: M${event.magnitude.toFixed(1)} ${event.location} from ${event.source}`);
-
-                // ELITE: Trigger emergency mode for 5.0+ earthquakes
-                if (event.magnitude >= 5.0) {
-                    try {
-                        const { emergencyModeService } = await import('./EmergencyModeService');
-                        const earthquake = {
-                            id: event.id,
-                            magnitude: event.magnitude,
-                            location: event.location,
-                            depth: event.depth,
-                            time: event.originTime,
-                            latitude: event.latitude,
-                            longitude: event.longitude,
-                            source: event.source,
-                        };
-                        if (emergencyModeService.shouldTriggerEmergencyMode(earthquake)) {
-                            await emergencyModeService.activateEmergencyMode(earthquake);
-                            logger.info(`🚨 EMERGENCY MODE ACTIVATED: M${event.magnitude.toFixed(1)}`);
-                        }
-                    } catch (emergencyError) {
-                        logger.error('Emergency mode activation failed:', emergencyError);
+                const { locationService } = await import('./LocationService');
+                const userLoc = locationService.getCurrentLocation();
+                if (userLoc && userLoc.latitude !== 0 && userLoc.longitude !== 0) {
+                    const { calculateDistance } = await import('../utils/locationUtils');
+                    distanceKm = calculateDistance(userLoc.latitude, userLoc.longitude, event.latitude, event.longitude);
+                    // ELITE: Magnitude-scaled maximum notification distance
+                    // M4.5-4.9: 200km (locally felt), M5.0-5.9: 500km (regional),
+                    // M6.0-6.9: 1000km (major), M7.0+: 2000km (catastrophic)
+                    const maxDistKm = event.magnitude >= 7.0 ? 2000
+                        : event.magnitude >= 6.0 ? 1000
+                            : event.magnitude >= 5.0 ? 500
+                                : 200;
+                    if (distanceKm > maxDistKm) {
+                        shouldNotify = false;
+                        logger.info(`📍 EEW distance filter: M${event.magnitude.toFixed(1)} is ${distanceKm.toFixed(0)}km away (max: ${maxDistKm}km) — skipping notification`);
+                    }
+                } else {
+                    // FAIL-SAFE: Konum yok — Türkiye bounding box kontrolü
+                    const isInTurkey = event.latitude >= 35.8 && event.latitude <= 42.1
+                        && event.longitude >= 25.6 && event.longitude <= 44.8;
+                    if (!isInTurkey && event.magnitude < 6.5) {
+                        shouldNotify = false;
+                        logger.info(`📍 EEW fail-safe: No user location, non-Turkey M${event.magnitude.toFixed(1)} at [${event.latitude.toFixed(1)}, ${event.longitude.toFixed(1)}] — skipping`);
+                    } else {
+                        logger.info(`📍 EEW fail-safe: No user location, ${isInTurkey ? 'Turkey quake' : 'M6.5+ global'} — notifying for safety`);
                     }
                 }
-            } catch (notifError) {
-                logger.error('EEW notification failed:', notifError);
+            } catch {
+                // Fail-safe: hata durumunda Türkiye depremleri bildir
+                const isInTurkey = event.latitude >= 35.8 && event.latitude <= 42.1
+                    && event.longitude >= 25.6 && event.longitude <= 44.8;
+                if (!isInTurkey && event.magnitude < 6.5) {
+                    shouldNotify = false;
+                }
+            }
+
+            if (shouldNotify) {
+                try {
+                    const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
+                    await showMagnitudeBasedNotification(
+                        event.magnitude,
+                        event.location,
+                        true, // Is EEW
+                        undefined, // Time advance (will be calculated based on distance)
+                        event.originTime,
+                    );
+                    wasNotified = true;
+                    logger.info(`🚨 EEW NOTIFICATION TRIGGERED: M${event.magnitude.toFixed(1)} ${event.location} from ${event.source}`);
+
+                    // ELITE: Trigger emergency mode for 5.0+ earthquakes (with distance awareness)
+                    if (event.magnitude >= 5.0) {
+                        try {
+                            const { emergencyModeService } = await import('./EmergencyModeService');
+                            const earthquake = {
+                                id: event.id,
+                                magnitude: event.magnitude,
+                                location: event.location,
+                                depth: event.depth,
+                                time: event.originTime,
+                                latitude: event.latitude,
+                                longitude: event.longitude,
+                                source: event.source,
+                            };
+                            if (emergencyModeService.shouldTriggerEmergencyMode(earthquake, distanceKm)) {
+                                await emergencyModeService.activateEmergencyMode(earthquake);
+                                logger.info(`🚨 EMERGENCY MODE ACTIVATED: M${event.magnitude.toFixed(1)}`);
+                            }
+                        } catch (emergencyError) {
+                            logger.error('Emergency mode activation failed:', emergencyError);
+                        }
+                    }
+                } catch (notifError) {
+                    logger.error('EEW notification failed:', notifError);
+                }
             }
         }
 

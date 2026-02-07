@@ -14,160 +14,225 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: #f5f5f5;
-        }
-
-        .container {
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.8;
+            padding: 20px;
             max-width: 800px;
             margin: 0 auto;
-            padding: 40px 20px;
-            background: #fff;
-            min-height: 100vh;
         }
 
         h1 {
-            color: #C62828;
-            margin-bottom: 10px;
+            color: #f8fafc;
             font-size: 28px;
-        }
-
-        .date {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-
-        h2 {
-            color: #1a1a1a;
-            margin: 30px 0 15px;
-            font-size: 20px;
-            border-bottom: 2px solid #C62828;
-            padding-bottom: 8px;
-        }
-
-        p {
-            margin-bottom: 15px;
-        }
-
-        ul {
-            margin: 15px 0 15px 30px;
-        }
-
-        li {
             margin-bottom: 8px;
         }
 
-        .highlight {
-            background: #fff3e0;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #C62828;
+        h2 {
+            color: #38bdf8;
+            font-size: 20px;
+            margin-top: 32px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid #1e293b;
+            padding-bottom: 8px;
         }
 
-        .warning {
-            background: #ffebee;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #c62828;
+        h3 {
+            color: #94a3b8;
+            font-size: 16px;
+            margin-top: 16px;
+            margin-bottom: 8px;
         }
 
-        .contact {
-            background: #e3f2fd;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 30px;
+        p,
+        li {
+            font-size: 15px;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        ul {
+            padding-left: 20px;
         }
 
         a {
-            color: #C62828;
+            color: #38bdf8;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .date {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .highlight {
+            background: #1e293b;
+            border-left: 4px solid #38bdf8;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+        }
+
+        .important {
+            background: #1e293b;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px 0;
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <h1>📋 Kullanım Koşulları</h1>
-        <p class="date">Son güncelleme: 3 Şubat 2026</p>
+    <h1>📋 Kullanım Koşulları</h1>
+    <p class="date">Son güncelleme: 7 Şubat 2026 | Sürüm 2.0</p>
 
-        <div class="highlight">
-            AfetNet uygulamasını kullanarak aşağıdaki koşulları kabul etmiş olursunuz.
-        </div>
-
-        <h2>1. Hizmet Tanımı</h2>
-        <p>AfetNet, Türkiye'deki deprem ve doğal afetler için geliştirilmiş bir acil durum uygulamasıdır. Sunulan
-            özellikler:</p>
-        <ul>
-            <li>Deprem erken uyarı sistemi</li>
-            <li>Aile güvenlik takibi</li>
-            <li>Şebekesiz Bluetooth mesh iletişimi</li>
-            <li>SOS acil durum çağrısı</li>
-            <li>Yapay zeka destekli afet rehberi</li>
-        </ul>
-
-        <h2>2. Ücretsiz Kullanım</h2>
-        <p>AfetNet tamamen <strong>ücretsiz</strong> bir uygulamadır. Hiçbir özellik için ödeme yapmanız gerekmez.</p>
-
-        <h2>3. Kullanıcı Sorumlulukları</h2>
-        <p>AfetNet'i kullanırken:</p>
-        <ul>
-            <li>Doğru ve güncel bilgiler sağlamalısınız</li>
-            <li>Sahte SOS çağrısı veya yanlış alarm gönderemezsiniz</li>
-            <li>Uygulamayı kötü niyetli amaçlarla kullanamazsınız</li>
-            <li>Diğer kullanıcılara zarar verecek eylemlerden kaçınmalısınız</li>
-        </ul>
-
-        <div class="warning">
-            <strong>⚠️ Önemli Uyarı:</strong> AfetNet, resmi acil durum hizmetlerinin (112, AFAD) yerini almaz. Gerçek
-            bir acil durumda her zaman resmi kanalları da kullanın.
-        </div>
-
-        <h2>4. Garanti Reddi</h2>
-        <p>AfetNet "olduğu gibi" sunulmaktadır:</p>
-        <ul>
-            <li>Kesintisiz veya hatasız çalışacağı garanti edilmez</li>
-            <li>Deprem tahminlerinin %100 doğru olacağı garanti edilmez</li>
-            <li>İnternet veya Bluetooth bağlantısının her zaman mevcut olacağı garanti edilmez</li>
-        </ul>
-
-        <h2>5. Sorumluluk Sınırlaması</h2>
-        <p>AfetNet ve geliştiricileri:</p>
-        <ul>
-            <li>Uygulamanın kullanımından kaynaklanan doğrudan veya dolaylı zararlardan sorumlu tutulamaz</li>
-            <li>Üçüncü taraf hizmetlerinin (Firebase, Google, Apple) kesintilerinden sorumlu değildir</li>
-            <li>Doğal afetlerin sonuçlarından sorumlu tutulamaz</li>
-        </ul>
-
-        <h2>6. Hesap Sonlandırma</h2>
-        <p>Şu durumlarda hesabınız sonlandırılabilir:</p>
-        <ul>
-            <li>Kullanım koşullarını ihlal etmeniz</li>
-            <li>Sahte acil durum çağrıları göndermeniz</li>
-            <li>Diğer kullanıcılara zarar vermeniz</li>
-        </ul>
-        <p>Hesabınızı istediğiniz zaman Ayarlar > Hesabı Sil bölümünden silebilirsiniz.</p>
-
-        <h2>7. Fikri Mülkiyet</h2>
-        <p>AfetNet uygulaması, logosu ve içerikleri telif hakkı ile korunmaktadır. İzinsiz kopyalama veya dağıtım
-            yasaktır.</p>
-
-        <h2>8. Değişiklikler</h2>
-        <p>Bu kullanım koşulları zaman zaman güncellenebilir. Önemli değişiklikler uygulama içi bildirimle
-            duyurulacaktır.</p>
-
-        <h2>9. Uygulanacak Hukuk</h2>
-        <p>Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir. Uyuşmazlıklar İstanbul Mahkemeleri'nde çözülecektir.</p>
-
-        <div class="contact">
-            <h2 style="margin-top: 0; border: none;">📧 İletişim</h2>
-            <p>Sorularınız için:</p>
-            <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
-            <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
-        </div>
+    <div class="highlight">
+        <p>Bu kullanım koşulları ("Koşullar"), AfetNet uygulamasını ("Uygulama") indirip kullanmanız halinde sizinle
+            Gökhan Çamcı ("Geliştirici") arasında yasal olarak bağlayıcı bir anlaşma oluşturur. Uygulamayı kullanarak bu
+            koşulları okuduğunuzu, anladığınızı ve kabul ettiğinizi beyan edersiniz.</p>
     </div>
+
+    <h2>1. Hizmet Tanımı</h2>
+    <p>AfetNet, Türkiye'deki deprem ve doğal afetler için geliştirilmiş bir acil durum uygulamasıdır. Sunulan
+        özellikler:</p>
+    <ul>
+        <li>Deprem erken uyarı sistemi (EEW)</li>
+        <li>Aile güvenlik durumu takibi ve konum paylaşımı</li>
+        <li>Şebekesiz Bluetooth BLE mesh ağı iletişimi</li>
+        <li>SOS acil durum çağrısı ve konum iletimi</li>
+        <li>Yapay zeka destekli acil durum rehberi</li>
+        <li>Gerçek zamanlı deprem haritası</li>
+        <li>Topluluk raporlama sistemi</li>
+    </ul>
+
+    <h2>2. Yaş Sınırı</h2>
+    <div class="important">
+        <p><strong>⚠️ Yaş Gerekliliği:</strong> AfetNet'i kullanabilmek için en az <strong>13 yaşında</strong> olmanız
+            gerekmektedir. 13-18 yaş arası kullanıcılar, bir ebeveyn veya yasal vasinin gözetiminde ve onayıyla
+            uygulamayı kullanabilir.</p>
+        <p>13 yaşından küçük bireylerin AfetNet'i kullanması yasaktır. Böyle bir durum tespit edildiğinde ilgili hesap
+            derhal silinecektir.</p>
+    </div>
+
+    <h2>3. Ücretsiz Kullanım</h2>
+    <p>AfetNet <strong>tamamen ücretsiz</strong> bir uygulamadır:</p>
+    <ul>
+        <li>Hiçbir özellik için ödeme yapmanız gerekmez</li>
+        <li>Uygulama içi satın alma (In-App Purchase) bulunmamaktadır</li>
+        <li>Abonelik modeli yoktur</li>
+        <li>Reklam gösterilmemektedir</li>
+    </ul>
+
+    <h2>4. Apple Lisans Sözleşmesi (EULA)</h2>
+    <div class="highlight">
+        <p>Bu uygulama Apple, Inc. tarafından sunulan App Store üzerinden dağıtılmaktadır. Uygulamanın kullanımı, bu
+            Kullanım Koşullarına ek olarak <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+                target="_blank"><strong>Apple'ın Standart Son Kullanıcı Lisans Sözleşmesi (EULA)</strong></a> ile de
+            yönetilmektedir.</p>
+        <p>Bu koşullar ile Apple EULA arasında çelişki olması durumunda, Apple EULA geçerli olacaktır.</p>
+    </div>
+
+    <h2>5. Hesap Oluşturma ve Güvenlik</h2>
+    <p>Uygulamayı kullanmak için bir hesap oluşturmanız gerekmektedir. Hesap oluştururken:</p>
+    <ul>
+        <li>Doğru ve güncel bilgiler sağlamalısınız</li>
+        <li>Hesap güvenliğinizden siz sorumlusunuz</li>
+        <li>Hesabınızı başkalarıyla paylaşmamalısınız</li>
+        <li>Hesabınızda yapılan tüm işlemlerden siz sorumlusunuz</li>
+    </ul>
+
+    <h2>6. Kullanıcı Sorumlulukları</h2>
+    <p>AfetNet'i kullanırken aşağıdaki kurallara uymalısınız:</p>
+    <ul>
+        <li><strong>Sahte SOS çağrısı</strong> veya yanlış alarm göndermek yasaktır</li>
+        <li>Uygulamayı <strong>kötü niyetli amaçlarla</strong> kullanmak yasaktır</li>
+        <li>Diğer kullanıcılara <strong>zarar verecek eylemlerden</strong> kaçınmalısınız</li>
+        <li>Uygulamayı <strong>tersine mühendislik</strong> yapmak yasaktır</li>
+        <li>Mesh ağını <strong>spam veya kötüye kullanım</strong> amacıyla kullanmak yasaktır</li>
+        <li>Yanıltıcı veya gerçek dışı konum bilgisi paylaşmak yasaktır</li>
+    </ul>
+
+    <h2>7. Garanti Reddi</h2>
+    <p>AfetNet <strong>"olduğu gibi"</strong> (as-is) sunulmaktadır:</p>
+    <ul>
+        <li>Kesintisiz veya hatasız çalışacağı garanti edilmez</li>
+        <li>Deprem erken uyarı sisteminin %100 doğru olacağı garanti edilmez</li>
+        <li>İnternet veya Bluetooth bağlantısının her zaman mevcut olacağı garanti edilmez</li>
+        <li>Aile takip konumlarının her zaman güncel olacağı garanti edilmez</li>
+        <li>AI asistan yanıtlarının eksiksiz ve doğru olacağı garanti edilmez</li>
+    </ul>
+    <div class="important">
+        <p><strong>Kritik Uyarı:</strong> AfetNet bir yardımcı araçtır ve profesyonel acil durum hizmetlerinin (112,
+            AFAD, AKUT) yerini almaz. Gerçek bir acil durumda mutlaka resmi kurtarma hizmetlerine başvurun.</p>
+    </div>
+
+    <h2>8. Sorumluluk Sınırlaması</h2>
+    <p>Yürürlükteki yasaların izin verdiği azami ölçüde, AfetNet ve geliştiricisi:</p>
+    <ul>
+        <li>Uygulamanın kullanımından kaynaklanan doğrudan veya dolaylı zararlardan sorumlu tutulamaz</li>
+        <li>Üçüncü taraf hizmetlerinin (Firebase, Google, Apple, OpenAI) kesintilerinden sorumlu değildir</li>
+        <li>Doğal afetlerin sonuçlarından sorumlu tutulamaz</li>
+        <li>Bluetooth mesh ağı üzerinden iletilen mesajların ulaşmamasından sorumlu tutulamaz</li>
+        <li>Kullanıcı hatası veya cihaz arızasından kaynaklanan sorunlardan sorumlu tutulamaz</li>
+    </ul>
+
+    <h2>9. Hesap Sonlandırma</h2>
+    <p>Şu durumlarda hesabınız uyarı ile veya uyarısız olarak sonlandırılabilir:</p>
+    <ul>
+        <li>Kullanım koşullarını ihlal etmeniz</li>
+        <li>Sahte acil durum çağrıları göndermeniz</li>
+        <li>Diğer kullanıcılara zarar vermeniz</li>
+        <li>Uygulamayı kötüye kullanmanız</li>
+    </ul>
+    <p>Hesabınızı istediğiniz zaman <strong>Ayarlar → Hesabı Sil</strong> bölümünden silebilirsiniz. Hesap silme işlemi
+        geri alınamaz ve tüm verileriniz kalıcı olarak silinir.</p>
+
+    <h2>10. Fikri Mülkiyet</h2>
+    <p>AfetNet uygulaması, logosu, tasarımı ve tüm içerikleri telif hakkı ile korunmaktadır:</p>
+    <ul>
+        <li>Uygulama Gökhan Çamcı'nın fikri mülkiyetidir</li>
+        <li>İzinsiz kopyalama, dağıtım veya değişiklik yapılması yasaktır</li>
+        <li>Uygulama adı ve logosu tescilli ticari markadır</li>
+    </ul>
+
+    <h2>11. Gizlilik</h2>
+    <p>Kişisel verilerinizin işlenmesi hakkında detaylı bilgi için lütfen <a href="privacy-policy.html"><strong>Gizlilik
+                Politikamızı</strong></a> inceleyin. Bu Kullanım Koşullarını kabul etmekle, Gizlilik Politikamızdaki
+        veri işleme uygulamalarını da kabul etmiş olursunuz.</p>
+
+    <h2>12. Değişiklikler</h2>
+    <p>Bu kullanım koşulları zaman zaman güncellenebilir:</p>
+    <ul>
+        <li>Önemli değişiklikler uygulama içi bildirimle duyurulacaktır</li>
+        <li>Güncellenmiş koşullar bu sayfada yayınlanacaktır</li>
+        <li>Güncelleme sonrası uygulamayı kullanmaya devam etmeniz, yeni koşulları kabul ettiğiniz anlamına gelir</li>
+    </ul>
+
+    <h2>13. Uyuşmazlıkların Çözümü</h2>
+    <p>Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir. Uyuşmazlıklar <strong>İstanbul Mahkemeleri ve İcra
+            Daireleri</strong> yetkisinde çözülecektir.</p>
+
+    <h2>14. Bölünebilirlik</h2>
+    <p>Bu koşulların herhangi bir hükmünün geçersiz veya uygulanamaz bulunması durumunda, kalan hükümler tam olarak
+        yürürlükte kalmaya devam edecektir.</p>
+
+    <h2>15. İletişim</h2>
+    <p>Kullanım koşulları hakkında sorularınız için:</p>
+    <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+    <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
+    <p><strong>Adres:</strong> İstanbul, Türkiye</p>
+
+    <hr style="border-color: #1e293b; margin-top: 32px;">
+    <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 16px;">
+        © 2026 AfetNet. Tüm hakları saklıdır. | Bu koşullar Apple App Store ve Google Play Store gereksinimleriyle tam
+        uyumludur.
+    </p>
 </body>
 
 </html>

@@ -83,7 +83,6 @@ class PermissionService {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
-          allowCriticalAlerts: true,
         },
       });
       this.cachedStatus.notification = status === 'granted';

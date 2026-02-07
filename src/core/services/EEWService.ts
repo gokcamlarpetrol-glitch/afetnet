@@ -33,10 +33,16 @@ class EEWService {
   private polling = false;
   private callbacks: EEWCallback[] = [];
   private seenEvents = new Set<string>();
+  private readonly maxSeenEvents = 2000;
+  private seismicDetectionUnsubscribe: (() => void) | null = null;
+  private pollFailureCount = 0;
+  private lastPWaveAlertAt = 0;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private pollSleepTimeout: NodeJS.Timeout | null = null;
+  private pollSleepResolver: (() => void) | null = null;
   private maxAttemptsReachedLogged = false; // Track if we've already logged max attempts
 
   // WebSocket URLs (Note: WebSocket disabled, using polling mode)
@@ -90,51 +96,49 @@ class EEWService {
     try {
       const { seismicSensorService } = await import('./SeismicSensorService');
 
-      // Listen for P-wave detections (earliest possible warning)
-      // ELITE UPGRADE: P-wave ONLY is enough! No S-wave confirmation needed.
-      // This matches Deprem Ağı's approach for 17-60 second early warnings
-      seismicSensorService.onDetection((event: any) => {
-        // ELITE: P-wave detection alone is enough for early warning!
-        // S-wave confirmation is OPTIONAL - we don't wait for it
-        if (!event.pWaveDetected) {
-          if (__DEV__) {
-            logger.debug('P wave not detected - waiting for P-wave');
+      // Register only once to avoid duplicate alerts after repeated start() calls.
+      if (!this.seismicDetectionUnsubscribe) {
+        this.seismicDetectionUnsubscribe = seismicSensorService.onDetection((event: any) => {
+          if (!event.pWaveDetected) {
+            return;
           }
-          return;
-        }
 
-        // ELITE: Lower confidence threshold for faster response (like Deprem Ağı)
-        // 60% is enough when combined with multi-user verification
-        // False positives are acceptable if it saves lives!
-        if (event.confidence < 60) {
-          if (__DEV__) {
-            logger.debug(`P-wave detection confidence low: ${event.confidence}% < 60%`);
+          if (event.confidence < 60) {
+            if (__DEV__) {
+              logger.debug(`P-wave detection confidence low: ${event.confidence}% < 60%`);
+            }
+            return;
           }
-          return;
-        }
 
-        // ELITE: NO MINIMUM WARNING TIME! 
-        // Even 1 second warning can save lives!
-        // Deprem Ağı sends alerts regardless of warning time
-        const timeAdvance = event.timeAdvance || 0;
+          // Prevent local sensor alert storms from duplicated detections.
+          const now = Date.now();
+          if (now - this.lastPWaveAlertAt < 5000) {
+            if (__DEV__) {
+              logger.debug('P-wave alert throttled (5s cooldown)');
+            }
+            return;
+          }
+          this.lastPWaveAlertAt = now;
 
-        // CRITICAL: P-wave detected - IMMEDIATE early warning!
-        logger.info(`🌊⚡ INSTANT EEW: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`);
+          const timeAdvance = event.timeAdvance || 0;
+          logger.info(
+            `🌊⚡ INSTANT EEW: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`,
+          );
 
-        // ELITE: Trigger EEW immediately - don't wait for anything!
-        this.processEEWEvent({
-          id: `pwave-${Date.now()}`,
-          latitude: event.latitude || 0,
-          longitude: event.longitude || 0,
-          magnitude: event.estimatedMagnitude || 4.0,
-          depth: event.depth || 10,
-          region: event.region || 'Yerel Algılama',
-          source: 'P_WAVE_DETECTION',
-          issuedAt: Date.now(),
-          etaSec: timeAdvance,
-          certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',
-        }).catch(err => logger.error('EEW processing failed:', err));
-      });
+          this.processEEWEvent({
+            id: `pwave-${now}`,
+            latitude: event.latitude || 0,
+            longitude: event.longitude || 0,
+            magnitude: event.estimatedMagnitude || 4.0,
+            depth: event.depth || 10,
+            region: event.region || 'Yerel Algılama',
+            source: 'P_WAVE_DETECTION',
+            issuedAt: now,
+            etaSec: timeAdvance,
+            certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',
+          }).catch(err => logger.error('EEW processing failed:', err));
+        });
+      }
 
       if (__DEV__) {
         logger.info('✅ SeismicSensorService listener registered - REAL early warnings active!');
@@ -161,6 +165,18 @@ class EEWService {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
+    if (this.pollSleepTimeout) {
+      clearTimeout(this.pollSleepTimeout);
+      this.pollSleepTimeout = null;
+    }
+    if (this.pollSleepResolver) {
+      try {
+        this.pollSleepResolver();
+      } catch {
+        // Ignore resolver errors
+      }
+      this.pollSleepResolver = null;
+    }
 
     // Clean up WebSocket listeners
     if (this.ws) {
@@ -173,9 +189,19 @@ class EEWService {
     }
 
     this.polling = false;
+    this.pollFailureCount = 0;
     this.reconnectAttempts = 0;
-    this.callbacks = [];
     this.seenEvents.clear();
+    this.lastPWaveAlertAt = 0;
+
+    if (this.seismicDetectionUnsubscribe) {
+      try {
+        this.seismicDetectionUnsubscribe();
+      } catch {
+        // Ignore unsubscribe errors
+      }
+      this.seismicDetectionUnsubscribe = null;
+    }
   }
 
   onEvent(callback: EEWCallback) {
@@ -277,7 +303,7 @@ class EEWService {
             const eewEvent = this.normalizeEvent(data);
 
             if (eewEvent && !this.seenEvents.has(eewEvent.id)) {
-              this.seenEvents.add(eewEvent.id);
+              this.trackSeenEvent(eewEvent.id);
               this.notifyCallbacks(eewEvent).catch((error) => {
                 logger.error('Failed to notify EEW callbacks:', error);
               });
@@ -398,6 +424,39 @@ class EEWService {
     }, delay);
   }
 
+  private trackSeenEvent(eventId: string): void {
+    this.seenEvents.add(eventId);
+    if (this.seenEvents.size > this.maxSeenEvents) {
+      const toDelete = Math.floor(this.maxSeenEvents / 4);
+      const iterator = this.seenEvents.values();
+      for (let i = 0; i < toDelete; i++) {
+        const value = iterator.next().value;
+        if (value) {
+          this.seenEvents.delete(value);
+        }
+      }
+    }
+  }
+
+  private getNextPollDelayMs(): number {
+    const base = 5000;
+    if (this.pollFailureCount <= 0) {
+      return base;
+    }
+    return Math.min(15000, base * this.pollFailureCount);
+  }
+
+  private async waitForNextPoll(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.pollSleepResolver = resolve;
+      this.pollSleepTimeout = setTimeout(() => {
+        this.pollSleepTimeout = null;
+        this.pollSleepResolver = null;
+        resolve();
+      }, ms);
+    });
+  }
+
   private async pollLoop() {
     while (this.polling) {
       const netState = await NetInfo.fetch();
@@ -425,8 +484,8 @@ class EEWService {
             if (__DEV__) {
               logger.warn(`AFAD API response not OK: ${response.status}`);
             }
-            // Continue to next poll cycle
-            await new Promise((resolve) => setTimeout(resolve, 60000));
+            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+            await this.waitForNextPoll(this.getNextPollDelayMs());
             continue;
           }
 
@@ -436,7 +495,8 @@ class EEWService {
             if (__DEV__) {
               logger.warn(`Non-JSON response from AFAD: ${contentType}`);
             }
-            await new Promise((resolve) => setTimeout(resolve, 60000));
+            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+            await this.waitForNextPoll(this.getNextPollDelayMs());
             continue;
           }
 
@@ -447,7 +507,8 @@ class EEWService {
             if (__DEV__) {
               logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
             }
-            await new Promise((resolve) => setTimeout(resolve, 60000));
+            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+            await this.waitForNextPoll(this.getNextPollDelayMs());
             continue;
           }
 
@@ -459,12 +520,14 @@ class EEWService {
           for (const eventData of eventsArray) {
             const event = this.normalizeEvent(eventData);
             if (event && !this.seenEvents.has(event.id)) {
-              this.seenEvents.add(event.id);
+              this.trackSeenEvent(event.id);
               this.notifyCallbacks(event).catch((error) => {
                 logger.error('Failed to notify EEW callbacks:', error);
               });
             }
           }
+
+          this.pollFailureCount = 0;
 
           if (__DEV__ && eventsArray.length > 0) {
             logger.info(`Polled ${eventsArray.length} events from AFAD`);
@@ -474,13 +537,13 @@ class EEWService {
           if (__DEV__) {
             logger.debug('EEW poll error (expected in offline scenarios):', error);
           }
+          this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
         }
+      } else {
+        this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
       }
 
-      // CRITICAL: Poll every 5 seconds for continuous P and S wave monitoring
-      // This ensures users receive early warnings as fast as possible
-      // ELITE: Reduced from 10s to 5s for faster response time
-      await new Promise((resolve) => setTimeout(resolve, 5000)); // 5 seconds for continuous monitoring
+      await this.waitForNextPoll(this.getNextPollDelayMs());
     }
   }
 
@@ -577,10 +640,9 @@ class EEWService {
       return;
     }
 
-    // CRITICAL: Check if notifications are enabled
-    if (!settings.notificationPush) {
+    if (!settings.notificationsEnabled) {
       if (__DEV__) {
-        logger.debug('Push notifications disabled by user - skipping EEW callback');
+        logger.debug('Notifications disabled globally by user - skipping EEW callback');
       }
       return;
     }
@@ -789,54 +851,64 @@ class EEWService {
 
     // ELITE: Use magnitude-based notification for EEW (with formatted data)
     // CRITICAL: Instant delivery, 100% accuracy, emergency mode for 5.0+
-    try {
-      const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
-      await showMagnitudeBasedNotification(
-        magnitude,
-        event.region || 'Bilinmeyen bölge',
-        true, // Is EEW
-        Math.round(guaranteedWarningTime), // Time advance
-        event.issuedAt, // Timestamp
-      );
+    let magnitudeNotificationSent = false;
+    if (settings.notificationPush) {
+      try {
+        const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
+        await showMagnitudeBasedNotification(
+          magnitude,
+          event.region || 'Bilinmeyen bölge',
+          true, // Is EEW
+          Math.round(guaranteedWarningTime), // Time advance
+          event.issuedAt, // Timestamp
+        );
+        magnitudeNotificationSent = true;
 
-      if (__DEV__) {
-        logger.info(`✅ ELITE EEW notification sent: ${magnitude.toFixed(1)}M - ${event.region} (${Math.round(guaranteedWarningTime)}s advance)`);
+        if (__DEV__) {
+          logger.info(`✅ ELITE EEW notification sent: ${magnitude.toFixed(1)}M - ${event.region} (${Math.round(guaranteedWarningTime)}s advance)`);
+        }
+      } catch (error) {
+        logger.error('Failed to show magnitude-based EEW notification:', error);
       }
-    } catch (error) {
-      logger.error('Failed to show magnitude-based EEW notification:', error);
-      // Fallback to multi-channel alert
     }
 
-    multiChannelAlertService.sendAlert({
-      title: formatted.title,
-      body: formatted.body,
-      priority: formatted.priority,
-      ttsText: formatted.ttsText || personalizedMessage,
-      channels,
-      sound: formatted.sound,
-      vibrationPattern: formatted.vibrationPattern,
-      data: {
-        ...formatted.data,
-        eventId: event.id,
-        location: { lat: event.latitude, lng: event.longitude },
-        warningTime: waveCalculation?.warningTime || warningTime,
-        warningTimeUncertainty: waveCalculation?.warningTimeUncertainty,
-        intensity: waveCalculation?.estimatedIntensity,
-        intensityUncertainty: waveCalculation?.intensityUncertainty,
-        pga: waveCalculation?.estimatedPGA,
-        pgaUncertainty: waveCalculation?.pgaUncertainty,
-        pgv: waveCalculation?.estimatedPGV,
-        distance: waveCalculation?.epicentralDistance,
-        quality: waveCalculation?.quality,
-        calculationMethod: waveCalculation?.calculationMethod,
-      },
-      duration: magnitude >= 6.0 || (waveCalculation && waveCalculation.estimatedIntensity >= 7.0) ? 0 : 30, // Critical alerts stay until dismissed
-    }).catch(error => {
-      // Silent fail for alert errors - alerts are best-effort
-      if (__DEV__) {
-        logger.debug('Multi-channel alert skipped:', error);
-      }
-    });
+    const alertChannels = magnitudeNotificationSent
+      ? { ...channels, pushNotification: false }
+      : channels;
+
+    if (!alertChannels.pushNotification && !alertChannels.fullScreenAlert && !alertChannels.alarmSound && !alertChannels.vibration && !alertChannels.tts) {
+      // Magnitude-based notification already delivered and no extra channel remains.
+    } else {
+      multiChannelAlertService.sendAlert({
+        title: formatted.title,
+        body: formatted.body,
+        priority: formatted.priority,
+        ttsText: formatted.ttsText || personalizedMessage,
+        channels: alertChannels,
+        sound: formatted.sound,
+        vibrationPattern: formatted.vibrationPattern,
+        data: {
+          ...formatted.data,
+          eventId: event.id,
+          location: { lat: event.latitude, lng: event.longitude },
+          warningTime: waveCalculation?.warningTime || warningTime,
+          warningTimeUncertainty: waveCalculation?.warningTimeUncertainty,
+          intensity: waveCalculation?.estimatedIntensity,
+          intensityUncertainty: waveCalculation?.intensityUncertainty,
+          pga: waveCalculation?.estimatedPGA,
+          pgaUncertainty: waveCalculation?.pgaUncertainty,
+          pgv: waveCalculation?.estimatedPGV,
+          distance: waveCalculation?.epicentralDistance,
+          quality: waveCalculation?.quality,
+          calculationMethod: waveCalculation?.calculationMethod,
+        },
+        duration: magnitude >= 6.0 || (waveCalculation && waveCalculation.estimatedIntensity >= 7.0) ? 0 : 30, // Critical alerts stay until dismissed
+      }).catch(error => {
+        if (__DEV__) {
+          logger.debug('Multi-channel alert skipped:', error);
+        }
+      });
+    }
 
     // Notify callbacks with enhanced event data
     const enhancedEvent: EEWEvent & { waveCalculation?: EliteWaveCalculationResult } = {
@@ -859,4 +931,3 @@ class EEWService {
 }
 
 export const eewService = new EEWService();
-

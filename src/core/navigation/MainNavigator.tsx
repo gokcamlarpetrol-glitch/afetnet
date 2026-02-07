@@ -44,7 +44,6 @@ import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
 // ELITE: Auth screens for in-app registration/password reset navigation
 import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
-import DesignSystemScreen from '../screens/design/DesignSystemScreen';
 import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
 import MyQRScreen from '../screens/profile/MyQRScreen';
 
@@ -88,7 +87,7 @@ export default function MainNavigator() {
         <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
 
         {/* ELITE: All screens use headerShown: false because they have custom headers */}
-        <Stack.Screen name="Risk" component={RiskScoreScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="RiskScore" component={RiskScoreScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllEarthquakes" component={AllEarthquakesScreen} options={{ headerShown: false }} />
         <Stack.Screen name="EarthquakeDetail" component={EarthquakeDetailScreen} options={{ headerShown: false }} />
 
@@ -111,7 +110,6 @@ export default function MainNavigator() {
         <Stack.Screen name="NewsDetail" component={NewsDetailScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllNews" component={AllNewsScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen name="RiskScore" component={RiskScoreScreen} options={{ headerShown: false }} />
         <Stack.Screen name="PreparednessPlan" component={PreparednessPlanScreen} options={{ headerShown: false }} />
         <Stack.Screen name="PanicAssistant" component={PanicAssistantScreen} options={{ headerShown: false }} />
 
@@ -128,7 +126,6 @@ export default function MainNavigator() {
         <Stack.Screen name="PsychologicalSupport" component={PsychologicalSupportScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="MeshNetwork" component={MeshNetworkScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="DesignSystem" component={DesignSystemScreen} options={{ headerShown: false }} />
         <Stack.Screen name="MyQR" component={MyQRScreen} options={{ headerShown: false }} />
 
         {/* ELITE: Settings Sub-Screens */}

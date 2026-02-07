@@ -55,7 +55,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.tokenCleanup = exports.dailyAnalytics = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
+exports.sendCustomEmail = exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.tokenCleanup = exports.dailyAnalytics = exports.openAIChatProxy = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
@@ -258,7 +258,10 @@ exports.onPWaveDetection = functions
         .where('latitude', '>=', detection.latitude - 1)
         .where('latitude', '<=', detection.latitude + 1)
         .get();
-    const detections = nearbyDetections.docs.map(d => d.data());
+    // FIX: Client-side longitude filter — Firestore only supports range filter on one field
+    const detections = nearbyDetections.docs
+        .map(d => d.data())
+        .filter(d => Math.abs(d.longitude - detection.longitude) <= 1);
     // Check consensus
     if (detections.length >= CONSENSUS_THRESHOLD) {
         const avgConfidence = detections.reduce((sum, d) => sum + d.confidence, 0) / detections.length;
@@ -301,8 +304,14 @@ exports.registerFCMToken = functions
         lastUpdated: Date.now(),
         location: latitude && longitude ? { latitude, longitude } : undefined,
     };
-    await db.collection('fcm_tokens').doc(context.auth.uid).set(tokenDoc, { merge: true });
-    functions.logger.info(`✅ FCM token registered for user ${context.auth.uid}`);
+    // FIX #7: Multi-device support — use token hash as doc ID under user subcollection
+    // Also keep the legacy top-level doc for backward compatibility with getNearbyTokens
+    const tokenHash = token.substring(token.length - 16);
+    await Promise.all([
+        db.collection('fcm_tokens').doc(context.auth.uid).collection('devices').doc(tokenHash).set(tokenDoc, { merge: true }),
+        db.collection('fcm_tokens').doc(context.auth.uid).set(tokenDoc, { merge: true }),
+    ]);
+    functions.logger.info(`✅ FCM token registered for user ${context.auth.uid} (device: ${tokenHash})`);
     return { success: true };
 });
 // ============================================================
@@ -377,7 +386,224 @@ exports.eewWebhook = functions
     }
 });
 // ============================================================
-// 8. DAILY ANALYTICS AGGREGATION
+// 8. OPENAI CHAT PROXY (Authenticated)
+// ============================================================
+// ELITE: Per-UID rate limiting — prevents abuse (max 30 requests per minute)
+const rateLimitMap = new Map();
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+function checkRateLimit(uid) {
+    const now = Date.now();
+    const entry = rateLimitMap.get(uid);
+    if (!entry || now >= entry.resetAt) {
+        rateLimitMap.set(uid, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return true;
+    }
+    if (entry.count >= RATE_LIMIT_MAX) {
+        return false;
+    }
+    entry.count++;
+    return true;
+}
+function isOpenAIProxyRole(value) {
+    return value === 'system' || value === 'user' || value === 'assistant';
+}
+function resolveOpenAIKey() {
+    var _a, _b;
+    const envKeys = [
+        process.env.OPENAI_API_KEY,
+        process.env.OPENAI_KEY,
+        process.env.OPENAI_SECRET_KEY,
+    ];
+    for (const candidate of envKeys) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            return candidate.trim();
+        }
+    }
+    // Backward compatibility for projects still using functions config.
+    try {
+        const cfg = functions.config();
+        const configKey = typeof ((_a = cfg === null || cfg === void 0 ? void 0 : cfg.openai) === null || _a === void 0 ? void 0 : _a.key) === 'string'
+            ? cfg.openai.key.trim()
+            : typeof ((_b = cfg === null || cfg === void 0 ? void 0 : cfg.openai) === null || _b === void 0 ? void 0 : _b.api_key) === 'string'
+                ? cfg.openai.api_key.trim()
+                : '';
+        if (configKey.length > 0) {
+            return configKey;
+        }
+    }
+    catch (_c) {
+        // functions.config may throw when not configured (e.g. local tooling)
+    }
+    return '';
+}
+exports.openAIChatProxy = functions
+    .region(REGION)
+    .runWith({ timeoutSeconds: 60, memory: '256MB' })
+    .https.onRequest(async (req, res) => {
+    // FIX #6: Restrict CORS to AfetNet domains instead of wildcard
+    const proxyAllowedOrigins = [
+        'https://afetnet.com',
+        'https://www.afetnet.com',
+        'https://api.afetnet.com',
+        'https://afetnet-app.web.app',
+        'https://afetnet-app.firebaseapp.com',
+    ];
+    const reqOrigin = req.headers.origin || '';
+    if (proxyAllowedOrigins.includes(reqOrigin)) {
+        res.set('Access-Control-Allow-Origin', reqOrigin);
+    }
+    else {
+        // Allow mobile apps (no origin header) but block unknown web origins
+        if (!reqOrigin) {
+            res.set('Access-Control-Allow-Origin', '*');
+        }
+    }
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'POST only' });
+        return;
+    }
+    const authHeader = typeof req.headers.authorization === 'string'
+        ? req.headers.authorization
+        : '';
+    if (!authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ error: 'Missing bearer token' });
+        return;
+    }
+    const idToken = authHeader.substring(7).trim();
+    if (idToken.length === 0) {
+        res.status(401).json({ error: 'Invalid bearer token' });
+        return;
+    }
+    let uid;
+    try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        uid = decoded.uid;
+    }
+    catch (error) {
+        functions.logger.warn('OpenAI proxy auth failed', { error });
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    // ELITE: Per-UID rate limiting
+    if (!checkRateLimit(uid)) {
+        functions.logger.warn('OpenAI proxy rate limit exceeded', { uid });
+        res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+        return;
+    }
+    const openAIKey = resolveOpenAIKey();
+    if (!openAIKey) {
+        functions.logger.error('OPENAI_API_KEY not configured in function environment');
+        res.status(500).json({ error: 'AI backend not configured' });
+        return;
+    }
+    const body = req.body && typeof req.body === 'object'
+        ? req.body
+        : {};
+    const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+    const messages = [];
+    for (const rawMessage of rawMessages) {
+        if (!rawMessage || typeof rawMessage !== 'object') {
+            continue;
+        }
+        const candidate = rawMessage;
+        if (!isOpenAIProxyRole(candidate.role)) {
+            continue;
+        }
+        if (typeof candidate.content !== 'string') {
+            continue;
+        }
+        const content = candidate.content.trim();
+        if (content.length === 0 || content.length > 12000) {
+            continue;
+        }
+        messages.push({ role: candidate.role, content });
+    }
+    if (messages.length === 0 || messages.length > 30) {
+        res.status(400).json({ error: 'Invalid messages payload' });
+        return;
+    }
+    const model = typeof body.model === 'string' && body.model.trim().length > 0
+        ? body.model.trim()
+        : 'gpt-4o-mini';
+    const requestedMaxTokens = typeof body.max_tokens === 'number'
+        ? body.max_tokens
+        : typeof body.maxTokens === 'number'
+            ? body.maxTokens
+            : 500;
+    const requestedTemperature = typeof body.temperature === 'number'
+        ? body.temperature
+        : 0.7;
+    const maxTokens = Math.max(16, Math.min(4000, Math.floor(requestedMaxTokens)));
+    const temperature = Math.max(0, Math.min(1.5, requestedTemperature));
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        let openAIResponse;
+        try {
+            openAIResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${openAIKey}`,
+                },
+                body: JSON.stringify({
+                    model,
+                    messages,
+                    max_tokens: maxTokens,
+                    temperature,
+                }),
+                signal: controller.signal,
+            });
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+        if (!openAIResponse.ok) {
+            const errorText = await openAIResponse.text();
+            functions.logger.error('OpenAI upstream error', {
+                status: openAIResponse.status,
+                statusText: openAIResponse.statusText,
+                body: errorText.slice(0, 500),
+                uid,
+            });
+            res.status(502).json({ error: 'OpenAI upstream error' });
+            return;
+        }
+        const data = await openAIResponse.json();
+        const choices = Array.isArray(data.choices) ? data.choices : [];
+        if (choices.length === 0) {
+            res.status(502).json({ error: 'Invalid OpenAI response' });
+            return;
+        }
+        const usageRaw = data.usage;
+        const usage = {
+            prompt_tokens: typeof (usageRaw === null || usageRaw === void 0 ? void 0 : usageRaw.prompt_tokens) === 'number' ? usageRaw.prompt_tokens : 0,
+            completion_tokens: typeof (usageRaw === null || usageRaw === void 0 ? void 0 : usageRaw.completion_tokens) === 'number' ? usageRaw.completion_tokens : 0,
+            total_tokens: typeof (usageRaw === null || usageRaw === void 0 ? void 0 : usageRaw.total_tokens) === 'number' ? usageRaw.total_tokens : 0,
+        };
+        res.status(200).json({
+            id: typeof data.id === 'string' ? data.id : `proxy-${Date.now()}`,
+            object: typeof data.object === 'string' ? data.object : 'chat.completion',
+            created: typeof data.created === 'number' ? data.created : Math.floor(Date.now() / 1000),
+            model: typeof data.model === 'string' ? data.model : model,
+            choices,
+            usage,
+        });
+    }
+    catch (error) {
+        functions.logger.error('OpenAI proxy internal error', { error, uid });
+        res.status(500).json({ error: 'AI proxy request failed' });
+    }
+});
+// ============================================================
+// 9. DAILY ANALYTICS AGGREGATION
 // ============================================================
 exports.dailyAnalytics = functions
     .region(REGION)
@@ -427,10 +653,32 @@ exports.tokenCleanup = functions
         .collection('fcm_tokens')
         .where('lastUpdated', '<', thirtyDaysAgo)
         .get();
-    const batch = db.batch();
-    oldTokens.docs.forEach(doc => batch.delete(doc.ref));
-    await batch.commit();
-    functions.logger.info(`🧹 Cleaned up ${oldTokens.size} old FCM tokens`);
+    // FIX #2: Chunk batches to stay under Firestore 500 doc limit
+    const BATCH_SIZE = 450;
+    const docs = oldTokens.docs;
+    let deletedCount = 0;
+    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+        const chunk = docs.slice(i, i + BATCH_SIZE);
+        const batch = db.batch();
+        chunk.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        deletedCount += chunk.length;
+    }
+    // Also cleanup device subcollections for deleted users
+    for (const tokenDoc of docs) {
+        try {
+            const devicesSnapshot = await tokenDoc.ref.collection('devices').get();
+            if (devicesSnapshot.size > 0) {
+                const subBatch = db.batch();
+                devicesSnapshot.docs.forEach(d => subBatch.delete(d.ref));
+                await subBatch.commit();
+            }
+        }
+        catch (_a) {
+            // Subcollection may not exist — safe to ignore
+        }
+    }
+    functions.logger.info(`🧹 Cleaned up ${deletedCount} old FCM tokens`);
     return null;
 });
 // ============================================================
@@ -768,15 +1016,33 @@ async function cleanupInvalidTokens(tokens, responses) {
             invalidTokens.push(tokens[idx]);
         }
     });
-    if (invalidTokens.length > 0) {
-        const batch = db.batch();
-        for (const token of invalidTokens) {
-            const snapshot = await db.collection('fcm_tokens').where('token', '==', token).get();
-            snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    if (invalidTokens.length === 0)
+        return;
+    // FIX #3: Batch query instead of N+1 — query all invalid tokens at once
+    // Firestore `in` operator supports up to 30 values per query
+    const IN_QUERY_LIMIT = 30;
+    const BATCH_SIZE = 450;
+    const allDocsToDelete = [];
+    for (let i = 0; i < invalidTokens.length; i += IN_QUERY_LIMIT) {
+        const chunk = invalidTokens.slice(i, i + IN_QUERY_LIMIT);
+        try {
+            const snapshot = await db.collection('fcm_tokens')
+                .where('token', 'in', chunk)
+                .get();
+            snapshot.docs.forEach(doc => allDocsToDelete.push(doc.ref));
         }
-        await batch.commit();
-        functions.logger.info(`Cleaned up ${invalidTokens.length} invalid tokens`);
+        catch (error) {
+            functions.logger.warn('Token cleanup query failed for chunk:', error);
+        }
     }
+    // Delete in chunked batches to respect 500 limit
+    for (let i = 0; i < allDocsToDelete.length; i += BATCH_SIZE) {
+        const batchChunk = allDocsToDelete.slice(i, i + BATCH_SIZE);
+        const batch = db.batch();
+        batchChunk.forEach(ref => batch.delete(ref));
+        await batch.commit();
+    }
+    functions.logger.info(`Cleaned up ${allDocsToDelete.length} invalid token docs (from ${invalidTokens.length} invalid tokens)`);
 }
 // ============================================================
 // CROWDSOURCED ALERT
@@ -934,5 +1200,151 @@ exports.cleanupSeismicReports = functions
         functions.logger.info(`🧹 Cleaned up ${Object.keys(eventUpdates).length} old active events`);
     }
     return null;
+});
+// ============================================================
+// 12. CUSTOM PREMIUM EMAIL SENDER
+// Sends branded AfetNet emails for verification & email change
+// (Firebase blocks body customization for these templates)
+// ============================================================
+const nodemailer = __importStar(require("nodemailer"));
+const SMTP_EMAIL = process.env.SMTP_EMAIL || '';
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
+// Premium HTML email templates
+function getVerificationEmailHTML(displayName, link) {
+    return `<div style="max-width:600px;margin:0 auto;font-family:'Helvetica Neue',Arial,sans-serif;background:#ffffff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;">
+<div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:32px 24px;text-align:center;">
+<h1 style="color:#ffffff;font-size:24px;margin:0;font-weight:700;letter-spacing:-0.5px;">AfetNet</h1>
+<p style="color:#94a3b8;font-size:13px;margin:8px 0 0;font-weight:400;">Afet Bilgi ve Koordinasyon Platformu</p>
+</div>
+<div style="padding:32px 28px;">
+<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${displayName},</p>
+<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet ailesine hoşgeldiniz! Hesabınızı aktif hale getirmek için aşağıdaki butona tıklayarak e-posta adresinizi doğrulayın.</p>
+<div style="text-align:center;margin:28px 0;">
+<a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Hesabımı Doğrula</a>
+</div>
+<p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Bu bağlantı 24 saat geçerlidir. Eğer bu hesabı siz oluşturmadıysanız, bu e-postayı görmezden gelebilirsiniz.</p>
+</div>
+<div style="background:#f8fafc;padding:20px 28px;border-top:1px solid #e8e8e8;text-align:center;">
+<p style="font-size:12px;color:#94a3b8;margin:0;">Bu e-posta AfetNet tarafından otomatik olarak gönderilmiştir.</p>
+<p style="font-size:11px;color:#cbd5e1;margin:6px 0 0;">© 2026 AfetNet. Tüm hakları saklıdır.</p>
+</div>
+</div>`;
+}
+function getEmailChangeHTML(displayName, newEmail, link) {
+    return `<div style="max-width:600px;margin:0 auto;font-family:'Helvetica Neue',Arial,sans-serif;background:#ffffff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;">
+<div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:32px 24px;text-align:center;">
+<h1 style="color:#ffffff;font-size:24px;margin:0;font-weight:700;letter-spacing:-0.5px;">AfetNet</h1>
+<p style="color:#94a3b8;font-size:13px;margin:8px 0 0;font-weight:400;">Afet Bilgi ve Koordinasyon Platformu</p>
+</div>
+<div style="padding:32px 28px;">
+<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${displayName},</p>
+<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet hesabınızın e-posta adresi <strong>${newEmail}</strong> olarak değiştirildi. Eğer bu değişikliği siz yapmadıysanız, aşağıdaki butona tıklayarak geri alabilirsiniz.</p>
+<div style="text-align:center;margin:28px 0;">
+<a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Değişikliği Geri Al</a>
+</div>
+<p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Eğer bu değişikliği siz yaptıysanız, bu e-postayı görmezden gelebilirsiniz.</p>
+</div>
+<div style="background:#f8fafc;padding:20px 28px;border-top:1px solid #e8e8e8;text-align:center;">
+<p style="font-size:12px;color:#94a3b8;margin:0;">Bu e-posta AfetNet tarafından otomatik olarak gönderilmiştir.</p>
+<p style="font-size:11px;color:#cbd5e1;margin:6px 0 0;">© 2026 AfetNet. Tüm hakları saklıdır.</p>
+</div>
+</div>`;
+}
+exports.sendCustomEmail = functions
+    .region(REGION)
+    .https.onCall(async (data, context) => {
+    // Security: Only authenticated users can send emails
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Kimlik doğrulama gereklidir.');
+    }
+    const { type, displayName } = data;
+    const uid = context.auth.uid;
+    if (!type) {
+        throw new functions.https.HttpsError('invalid-argument', 'Geçersiz parametreler.');
+    }
+    // Rate limiting: Max 5 emails per user per hour
+    const oneHourAgo = Date.now() - 3600000;
+    const recentEmails = await db
+        .collection('email_logs')
+        .where('uid', '==', uid)
+        .where('timestamp', '>', oneHourAgo)
+        .get();
+    if (recentEmails.size >= 5) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Çok fazla e-posta gönderildi. Lütfen bir saat sonra tekrar deneyin.');
+    }
+    // Get user info from Firebase Auth
+    const userRecord = await admin.auth().getUser(uid);
+    const email = userRecord.email;
+    if (!email) {
+        throw new functions.https.HttpsError('failed-precondition', 'Kullanıcının e-posta adresi bulunamadı.');
+    }
+    // Create Nodemailer transporter
+    const transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        auth: {
+            user: SMTP_EMAIL,
+            pass: SMTP_PASSWORD,
+        },
+    });
+    let subject;
+    let html;
+    const name = displayName || userRecord.displayName || 'Kullanıcı';
+    try {
+        switch (type) {
+            case 'verification': {
+                // Generate verification link via Admin SDK
+                const actionCodeSettings = {
+                    url: 'https://afetnet-4a6b6.firebaseapp.com/__/auth/action',
+                    handleCodeInApp: false,
+                };
+                const verificationLink = await admin.auth().generateEmailVerificationLink(email, actionCodeSettings);
+                subject = 'AfetNet - E-posta Adresinizi Doğrulayın';
+                html = getVerificationEmailHTML(name, verificationLink);
+                break;
+            }
+            case 'emailChange': {
+                // For email change, we send notification about the change
+                // The actual change link is managed by Firebase internally
+                const newEmail = data.newEmail || email;
+                subject = 'AfetNet - E-posta Adresi Değişikliği';
+                html = getEmailChangeHTML(name, newEmail, '');
+                break;
+            }
+            default:
+                throw new functions.https.HttpsError('invalid-argument', 'Geçersiz e-posta tipi.');
+        }
+        await transporter.sendMail({
+            from: `"AfetNet" <${SMTP_EMAIL}>`,
+            replyTo: 'destek@afetnet.app',
+            to: email,
+            subject,
+            html,
+        });
+        // Log the email send
+        await db.collection('email_logs').add({
+            uid,
+            type,
+            email,
+            timestamp: Date.now(),
+            success: true,
+        });
+        functions.logger.info(`📧 Premium email sent: ${type} to ${email} (uid: ${uid})`);
+        return { success: true, message: 'E-posta başarıyla gönderildi.' };
+    }
+    catch (error) {
+        functions.logger.error('Email send error:', error);
+        // Log failed attempt
+        await db.collection('email_logs').add({
+            uid,
+            type,
+            email,
+            timestamp: Date.now(),
+            success: false,
+            error: String(error),
+        });
+        throw new functions.https.HttpsError('internal', 'E-posta gönderilemedi. Lütfen tekrar deneyin.');
+    }
 });
 //# sourceMappingURL=index.js.map

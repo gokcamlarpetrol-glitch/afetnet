@@ -254,7 +254,17 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         }
       }
       if (stored) {
-        const profile = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        // CRITICAL: Validate parsed health profile — corrupt data could hide life-saving info
+        const profile: HealthProfile = {
+          ...DEFAULT_PROFILE,
+          ...parsed,
+          // Ensure critical array fields are always arrays (corrupt data protection)
+          allergies: Array.isArray(parsed.allergies) ? parsed.allergies : [],
+          chronicConditions: Array.isArray(parsed.chronicConditions) ? parsed.chronicConditions : [],
+          medications: Array.isArray(parsed.medications) ? parsed.medications : [],
+          emergencyContacts: Array.isArray(parsed.emergencyContacts) ? parsed.emergencyContacts : [],
+        };
         set({ profile, isLoaded: true });
         logger.info('HealthProfile loaded from local storage');
       } else {

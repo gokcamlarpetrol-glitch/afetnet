@@ -27,11 +27,18 @@ export interface FamilyMember {
   batteryLevel?: number; // ELITE: Real-time battery percentage (0-100)
   isOnline?: boolean; // ELITE: Currently online/reachable
   deviceId?: string; // BLE mesh device ID
+  avatarUrl?: string; // ELITE: Profile avatar URL
   // ELITE: Extended fields for better member management
   relationship?: string; // Relationship type (anne, baba, kardes, etc.)
   phoneNumber?: string; // Phone number (optional)
   notes?: string; // Additional notes (optional)
   createdAt?: number; // Member creation timestamp
   updatedAt?: number; // Last update timestamp
+  // FAZ 4: Location history for trail tracking (max 100 entries)
+  locationHistory?: {
+    latitude: number;
+    longitude: number;
+    timestamp: number;
+  }[];
 }
 

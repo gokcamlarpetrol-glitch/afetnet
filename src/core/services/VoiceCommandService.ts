@@ -8,7 +8,8 @@ import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import { logger } from '../utils/logger';
 import { whistleService } from './WhistleService';
-import { getSOSService } from './SOSService';
+import { unifiedSOSController } from './sos';
+import { EmergencyReason } from './sos/SOSStateManager';
 import { safeLowerCase, safeIncludes } from '../utils/safeString';
 
 type VoiceCommand = 'yardim' | 'konum' | 'duduk' | 'sos';
@@ -19,7 +20,7 @@ interface CommandHandler {
   response: string;
 }
 
-const sosService = getSOSService();
+// FIX: Use unified SOS controller instead of legacy SOSService
 
 class VoiceCommandService {
   private isListening: boolean = false;
@@ -34,25 +35,11 @@ class VoiceCommandService {
         {
           keywords: ['yardım', 'yardim', 'help', 'imdat'],
           action: async () => {
-            const Location = await import('expo-location');
-            let location: { latitude: number; longitude: number; accuracy: number } | null = null;
-            try {
-              const { status } = await Location.default.requestForegroundPermissionsAsync();
-              if (status === 'granted') {
-                const pos = await Location.default.getCurrentPositionAsync();
-                location = {
-                  latitude: pos.coords.latitude,
-                  longitude: pos.coords.longitude,
-                  accuracy: pos.coords.accuracy || 10,
-                };
-              }
-            } catch (error) {
-              // ELITE: Log voice command errors but don't crash the app
-              if (__DEV__) {
-                logger.debug('Voice command processing failed (non-critical):', error);
-              }
-            }
-            await sosService.sendSOSSignal(location, 'Acil yardım gerekiyor!');
+            // FIX: Use unified SOS controller for consistent state management
+            await unifiedSOSController.forceActivateSOS(
+              EmergencyReason.MANUAL_SOS,
+              'Sesli komut: Acil yardım gerekiyor!',
+            );
           },
           response: 'Yardım çağrısı gönderiliyor',
         },
@@ -62,16 +49,11 @@ class VoiceCommandService {
         {
           keywords: ['konum', 'location', 'nerede', 'where'],
           action: async () => {
-            const Location = await import('expo-location');
-            const { status } = await Location.default.requestForegroundPermissionsAsync();
-            if (status === 'granted') {
-              const location = await Location.default.getCurrentPositionAsync();
-              await sosService.sendSOSSignal({
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                accuracy: location.coords.accuracy || 10,
-              }, 'Konum paylaşılıyor');
-            }
+            // FIX: Use unified SOS controller for consistent state management
+            await unifiedSOSController.forceActivateSOS(
+              EmergencyReason.MANUAL_SOS,
+              'Sesli komut: Konum paylaşılıyor',
+            );
           },
           response: 'Konumunuz paylaşılıyor',
         },
@@ -91,25 +73,11 @@ class VoiceCommandService {
         {
           keywords: ['sos', 'acil', 'emergency'],
           action: async () => {
-            const Location = await import('expo-location');
-            let location: { latitude: number; longitude: number; accuracy: number } | null = null;
-            try {
-              const { status } = await Location.default.requestForegroundPermissionsAsync();
-              if (status === 'granted') {
-                const pos = await Location.default.getCurrentPositionAsync();
-                location = {
-                  latitude: pos.coords.latitude,
-                  longitude: pos.coords.longitude,
-                  accuracy: pos.coords.accuracy || 10,
-                };
-              }
-            } catch (error) {
-              // ELITE: Log voice command errors but don't crash the app
-              if (__DEV__) {
-                logger.debug('Voice command processing failed (non-critical):', error);
-              }
-            }
-            await sosService.sendSOSSignal(location, 'Acil yardım gerekiyor!');
+            // FIX: Use unified SOS controller for consistent state management
+            await unifiedSOSController.forceActivateSOS(
+              EmergencyReason.MANUAL_SOS,
+              'Sesli komut: Acil durum sinyali!',
+            );
           },
           response: 'Acil durum sinyali gönderiliyor',
         },

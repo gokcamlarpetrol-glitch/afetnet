@@ -257,6 +257,37 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       });
   }, []);
 
+  // Keep hybrid inbox bridge active while conversation is open (cloud + mesh)
+  useEffect(() => {
+    let unsubscribeMessages: (() => void) | null = null;
+    let disposed = false;
+
+    const setupLiveMessages = async () => {
+      try {
+        await hybridMessageService.initialize();
+        if (disposed) {
+          return;
+        }
+        unsubscribeMessages = await hybridMessageService.subscribeToMessages(() => {
+          // Incoming messages are merged into mesh store by the service.
+        });
+      } catch (error) {
+        logger.warn('Failed to activate live message bridge in ConversationScreen:', error);
+      }
+    };
+
+    setupLiveMessages().catch((error) => {
+      logger.warn('Live message setup error in ConversationScreen:', error);
+    });
+
+    return () => {
+      disposed = true;
+      if (unsubscribeMessages) {
+        unsubscribeMessages();
+      }
+    };
+  }, []);
+
   // ELITE: Cleanup voice recording interval on unmount
   useEffect(() => {
     return () => {

@@ -14,7 +14,7 @@ const logger = createLogger('CostOptimizer');
 export async function shouldSkipAPICall(
   serviceName: string,
   estimatedCost: number,
-  dailyCostThreshold: number = 0.10, // $0.10 per day default threshold
+  dailyCostThreshold: number = 1.00, // $1.00 per day default threshold
 ): Promise<boolean> {
   try {
     const stats = await costTracker.getStats();
@@ -47,7 +47,7 @@ export function getOptimizedMaxTokens(serviceName: string, defaultMaxTokens: num
   const optimizations: Record<string, number> = {
     'EarthquakeValidationService': 200, // Small JSON
     'AIEarthquakePredictionService': 150, // Small JSON
-    'NewsAggregatorService': 300, // Summary doesn't need 500 tokens
+    'NewsAggregatorService': 240, // Shared summary path with concise output
     'EarthquakeAnalysisService': 300, // Analysis response
     'PanicAssistantService': 400, // Action list
     'RiskScoringService': 400, // Scoring response
@@ -96,7 +96,6 @@ export async function batchAPICalls<T>(
     }
   }
 }
-
 
 
 

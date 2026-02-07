@@ -5,7 +5,7 @@
  * Comprehensive error handling with graceful degradation
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -48,21 +48,17 @@ const authStyles = StyleSheet.create({
 export default function CoreApp() {
   const { completed: isOnboardingCompleted, isHydrated: isOnboardingHydrated } = useOnboardingStore();
   const { isAuthenticated, isLoading: isAuthLoading, initialize: initAuth } = useAuthStore();
+  const appInitializedRef = useRef(false);
 
-  // Initialize app and auth
+  // Initialize trial/auth listeners and run security check.
+  // Service bootstrap is handled in a separate auth-gated effect.
   useEffect(() => {
 
-    // CRITICAL FIX: Always initialize app, security check should not block startup
     const initializeWithSecurityCheck = async () => {
       try {
-        // Initialize trial and auth FIRST - don't wait for security
+        // Initialize trial and auth first.
         useTrialStore.getState().initializeTrial();
         initAuth();
-
-        // Start app initialization immediately
-        initializeApp().catch((error) => {
-          if (__DEV__) console.error('Init failed:', error);
-        });
 
         // Security check in background (non-blocking)
         try {
@@ -85,11 +81,10 @@ export default function CoreApp() {
           if (__DEV__) console.warn('Security check skipped:', securityError);
         }
       } catch (error) {
-        // Fallback: Initialize app even if everything fails
+        // Fallback: ensure auth flow still starts.
         if (__DEV__) console.error('Init error, using fallback:', error);
         useTrialStore.getState().initializeTrial();
         initAuth();
-        initializeApp().catch(() => { });
       }
     };
 
@@ -111,6 +106,28 @@ export default function CoreApp() {
       shutdownApp();
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
+
+    if (isAuthenticated && !appInitializedRef.current) {
+      appInitializedRef.current = true;
+      initializeApp({ authenticated: true }).catch((error) => {
+        appInitializedRef.current = false;
+        if (__DEV__) console.error('Auth-gated init failed:', error);
+      });
+      return;
+    }
+
+    if (!isAuthenticated && appInitializedRef.current) {
+      appInitializedRef.current = false;
+      shutdownApp().catch((error) => {
+        if (__DEV__) console.warn('Shutdown after logout failed:', error);
+      });
+    }
+  }, [isAuthenticated, isAuthLoading]);
 
   // ELITE: Determine which screen to show
   const getNavigatorContent = () => {

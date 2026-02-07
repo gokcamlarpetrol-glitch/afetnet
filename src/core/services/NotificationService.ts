@@ -279,6 +279,46 @@ export async function getNotificationsAsync(): Promise<any> {
   return loadNotificationsModule();
 }
 
+type NotificationPriority = 'normal' | 'high' | 'critical';
+
+interface NotificationSettingsSnapshot {
+  notificationsEnabled: boolean;
+  notificationPush: boolean;
+  notificationSound: boolean;
+  notificationSoundType: 'default' | 'alarm' | 'sos' | 'beep' | 'chime' | 'siren' | 'custom';
+  notificationSoundVolume: number;
+  notificationSoundRepeat: number;
+  notificationVibration: boolean;
+  notificationMode: 'silent' | 'vibrate' | 'sound' | 'sound+vibrate' | 'critical-only';
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursCriticalOnly: boolean;
+  notificationShowOnLockScreen: boolean;
+  notificationShowPreview: boolean;
+  notificationGroupByMagnitude: boolean;
+}
+
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsSnapshot = {
+  notificationsEnabled: true,
+  notificationPush: true,
+  notificationSound: true,
+  notificationSoundType: 'alarm',
+  notificationSoundVolume: 80,
+  notificationSoundRepeat: 3,
+  notificationVibration: true,
+  notificationMode: 'sound+vibrate',
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  quietHoursCriticalOnly: true,
+  notificationShowOnLockScreen: true,
+  notificationShowPreview: true,
+  notificationGroupByMagnitude: false,
+};
+
+const DEDUP_CLEANUP_WINDOW_MS = 5 * 60 * 1000;
+
 // ============================================================================
 // NOTIFICATION SERVICE CLASS
 // ============================================================================
@@ -287,6 +327,159 @@ class NotificationService {
   private isInitialized = false;
   private isInitializing = false; // CRITICAL: Prevent concurrent initialization
   private static hasLoggedUnavailable = false; // ELITE: Log only once
+  private recentNotificationKeys = new Map<string, number>();
+
+  private async getSettingsSnapshot(): Promise<NotificationSettingsSnapshot> {
+    try {
+      const { useSettingsStore } = await import('../stores/settingsStore');
+      const state = useSettingsStore.getState();
+      return {
+        notificationsEnabled: state.notificationsEnabled,
+        notificationPush: state.notificationPush,
+        notificationSound: state.notificationSound,
+        notificationSoundType: state.notificationSoundType,
+        notificationSoundVolume: state.notificationSoundVolume,
+        notificationSoundRepeat: state.notificationSoundRepeat,
+        notificationVibration: state.notificationVibration,
+        notificationMode: state.notificationMode,
+        quietHoursEnabled: state.quietHoursEnabled,
+        quietHoursStart: state.quietHoursStart,
+        quietHoursEnd: state.quietHoursEnd,
+        quietHoursCriticalOnly: state.quietHoursCriticalOnly,
+        notificationShowOnLockScreen: state.notificationShowOnLockScreen,
+        notificationShowPreview: state.notificationShowPreview,
+        notificationGroupByMagnitude: state.notificationGroupByMagnitude,
+      };
+    } catch (error) {
+      return DEFAULT_NOTIFICATION_SETTINGS;
+    }
+  }
+
+  private parseMinutes(value: string): number | null {
+    const match = /^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(value);
+    if (!match) {
+      return null;
+    }
+    return Number(match[1]) * 60 + Number(match[2]);
+  }
+
+  private isQuietHoursActive(settings: NotificationSettingsSnapshot): boolean {
+    if (!settings.quietHoursEnabled) {
+      return false;
+    }
+
+    const start = this.parseMinutes(settings.quietHoursStart);
+    const end = this.parseMinutes(settings.quietHoursEnd);
+    if (start === null || end === null) {
+      return false;
+    }
+
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (start === end) {
+      return false;
+    }
+    if (start < end) {
+      return nowMinutes >= start && nowMinutes < end;
+    }
+    return nowMinutes >= start || nowMinutes < end;
+  }
+
+  private async shouldDeliver(
+    priority: NotificationPriority,
+    options: { requiresPush?: boolean } = {},
+  ): Promise<{ allowed: boolean; settings: NotificationSettingsSnapshot }> {
+    const settings = await this.getSettingsSnapshot();
+
+    if (!settings.notificationsEnabled) {
+      return { allowed: false, settings };
+    }
+
+    if (options.requiresPush !== false && !settings.notificationPush) {
+      return { allowed: false, settings };
+    }
+
+    if (settings.notificationMode === 'silent') {
+      return { allowed: false, settings };
+    }
+
+    if (settings.notificationMode === 'critical-only' && priority !== 'critical') {
+      return { allowed: false, settings };
+    }
+
+    if (this.isQuietHoursActive(settings) && settings.quietHoursCriticalOnly && priority !== 'critical') {
+      return { allowed: false, settings };
+    }
+
+    return { allowed: true, settings };
+  }
+
+  private shouldSuppressDuplicate(key: string, windowMs: number): boolean {
+    const now = Date.now();
+    const lastSent = this.recentNotificationKeys.get(key);
+
+    for (const [seenKey, seenAt] of this.recentNotificationKeys.entries()) {
+      if (now - seenAt > DEDUP_CLEANUP_WINDOW_MS) {
+        this.recentNotificationKeys.delete(seenKey);
+      }
+    }
+
+    if (lastSent && now - lastSent < windowMs) {
+      return true;
+    }
+
+    this.recentNotificationKeys.set(key, now);
+    return false;
+  }
+
+  private resolveSound(
+    settings: NotificationSettingsSnapshot,
+    priority: NotificationPriority,
+    fallback: string = 'default',
+  ): string | undefined {
+    if (!settings.notificationSound || settings.notificationMode === 'vibrate' || settings.notificationSoundVolume <= 0) {
+      return undefined;
+    }
+    const typeSoundMap: Record<NotificationSettingsSnapshot['notificationSoundType'], string> = {
+      default: fallback,
+      alarm: priority === 'critical' ? fallback : 'default',
+      sos: priority === 'critical' ? fallback : 'default',
+      beep: 'default',
+      chime: 'default',
+      siren: priority === 'critical' ? fallback : 'default',
+      custom: fallback,
+    };
+    if (priority === 'critical' && fallback !== 'default') {
+      return fallback;
+    }
+    return typeSoundMap[settings.notificationSoundType] || fallback;
+  }
+
+  private resolveInterruptionLevel(
+    settings: NotificationSettingsSnapshot,
+    priority: NotificationPriority,
+  ): 'passive' | 'active' | 'timeSensitive' | undefined {
+    if (!settings.notificationShowOnLockScreen) {
+      return 'passive';
+    }
+    if (priority === 'critical') {
+      return 'timeSensitive';
+    }
+    if (priority === 'high') {
+      return 'active';
+    }
+    return undefined;
+  }
+
+  private resolveEarthquakeThreadIdentifier(
+    settings: NotificationSettingsSnapshot,
+    priority: NotificationPriority,
+  ): string {
+    if (settings.notificationGroupByMagnitude) {
+      return `earthquake-${priority}`;
+    }
+    return 'earthquake-alerts';
+  }
 
   /**
    * Initialize notification service
@@ -347,11 +540,10 @@ class NotificationService {
           handleNotification: async (notification) => {
             // ELITE: Determine behavior based on notification priority
             const priority = notification.request?.content?.data?.priority || 'normal';
-            const isCritical = priority === 'critical' || notification.request?.content?.data?.type === 'eew' || notification.request?.content?.data?.type === 'sos';
 
             return {
               shouldShowAlert: true, // Always show alert
-              shouldPlaySound: true, // Always play sound
+              shouldPlaySound: priority !== 'silent', // Always play sound unless explicitly silent
               shouldSetBadge: true, // Always update badge
               shouldShowBanner: true, // Always show banner
               shouldShowList: true, // Always add to notification list
@@ -399,21 +591,52 @@ class NotificationService {
         try {
           const channels = [
             {
-              id: 'earthquake',
-              name: 'Deprem Bildirimleri',
+              id: 'critical-alerts',
+              name: 'Kritik Uyarılar',
               importance: Notifications.AndroidImportance?.MAX || 5,
-              vibrationPattern: [0, 250, 250, 250],
+              vibrationPattern: [0, 500, 200, 500, 200, 500],
+              bypassDnd: true,
             },
             {
-              id: 'sos',
-              name: 'Acil Durum',
-              importance: Notifications.AndroidImportance?.MAX || 5,
-              vibrationPattern: [0, 500, 500, 500],
+              id: 'high-priority',
+              name: 'Yüksek Öncelik',
+              importance: Notifications.AndroidImportance?.HIGH || 4,
+              vibrationPattern: [0, 300, 120, 300],
+            },
+            {
+              id: 'normal-priority',
+              name: 'Standart Uyarılar',
+              importance: Notifications.AndroidImportance?.DEFAULT || 3,
+              vibrationPattern: [0, 200],
             },
             {
               id: 'messages',
               name: 'Mesajlar',
               importance: Notifications.AndroidImportance?.DEFAULT || 3,
+            },
+            {
+              id: 'sos',
+              name: 'Acil Durum',
+              importance: Notifications.AndroidImportance?.MAX || 5,
+              vibrationPattern: [0, 1000, 300, 1000],
+              bypassDnd: true,
+            },
+            {
+              id: 'family',
+              name: 'Aile Güncellemeleri',
+              importance: Notifications.AndroidImportance?.DEFAULT || 3,
+              vibrationPattern: [0, 180],
+            },
+            {
+              id: 'news',
+              name: 'Haber Bildirimleri',
+              importance: Notifications.AndroidImportance?.DEFAULT || 3,
+              vibrationPattern: [0, 120],
+            },
+            {
+              id: 'system',
+              name: 'Sistem Bildirimleri',
+              importance: Notifications.AndroidImportance?.LOW || 2,
             },
           ];
 
@@ -423,6 +646,7 @@ class NotificationService {
               importance: channel.importance,
               vibrationPattern: channel.vibrationPattern,
               sound: 'default',
+              bypassDnd: channel.bypassDnd,
             });
           }
         } catch (error) {
@@ -459,20 +683,32 @@ class NotificationService {
         return;
       }
 
+      const normalizedLocation = location.trim();
+      const priority: NotificationPriority = isEEW || magnitude >= 5 ? 'critical' : magnitude >= 4 ? 'high' : 'normal';
+      const { allowed, settings } = await this.shouldDeliver(priority, { requiresPush: false });
+      if (!allowed) {
+        return;
+      }
+
+      const dedupKey = `eq:${isEEW ? 'eew' : 'std'}:${normalizedLocation}:${magnitude.toFixed(1)}:${Math.floor((time?.getTime() || Date.now()) / 15000)}`;
+      if (this.shouldSuppressDuplicate(dedupKey, 5000)) {
+        return;
+      }
+
       // ELITE: Use MagnitudeBasedNotificationService for premium notifications
       // This ensures magnitude-based priority, multi-channel alerts, and emergency mode
       try {
         const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
         await showMagnitudeBasedNotification(
           magnitude,
-          location,
+          normalizedLocation,
           isEEW,
           timeAdvance,
           time?.getTime() || Date.now(),
         );
 
         if (__DEV__) {
-          logger.info(`✅ ELITE Magnitude-based notification sent: ${magnitude.toFixed(1)}M - ${location}`);
+          logger.info(`✅ ELITE Magnitude-based notification sent: ${magnitude.toFixed(1)}M - ${normalizedLocation}`);
         }
         return;
       } catch (magnitudeError) {
@@ -484,7 +720,7 @@ class NotificationService {
       const { notificationFormatterService } = await import('./NotificationFormatterService');
       const formatted = notificationFormatterService.formatEarthquakeNotification(
         magnitude,
-        location,
+        normalizedLocation,
         time,
         isEEW,
         timeAdvance,
@@ -510,13 +746,14 @@ class NotificationService {
       if (Platform.OS === 'android' && Notifications) {
         try {
           const channelId = formatted.priority === 'critical' ? 'critical-alerts' : formatted.priority === 'high' ? 'high-priority' : 'normal-priority';
+          const sound = this.resolveSound(settings, formatted.priority, formatted.sound || 'default');
           await Notifications.setNotificationChannelAsync(channelId, {
             name: formatted.priority === 'critical' ? 'Critical Alerts' : formatted.priority === 'high' ? 'High Priority Alerts' : 'Normal Alerts',
             importance: formatted.priority === 'critical' ? (Notifications.AndroidImportance?.MAX || 5) : formatted.priority === 'high' ? (Notifications.AndroidImportance?.HIGH || 4) : (Notifications.AndroidImportance?.DEFAULT || 3),
-            vibrationPattern: formatted.vibrationPattern || [0, 250, 250, 250],
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 250, 250, 250]) : undefined,
             lightColor: formatted.priority === 'critical' ? '#FF0000' : formatted.priority === 'high' ? '#FF6600' : '#000000',
-            sound: formatted.sound || 'default',
-            enableVibrate: true,
+            sound: sound || 'default',
+            enableVibrate: settings.notificationVibration,
             showBadge: true,
             bypassDnd: formatted.priority === 'critical' || formatted.priority === 'high', // Bypass Do Not Disturb for critical/high alerts
           });
@@ -531,24 +768,28 @@ class NotificationService {
       if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
         try {
           const channelId = formatted.priority === 'critical' ? 'critical-alerts' : formatted.priority === 'high' ? 'high-priority' : 'normal-priority';
+          const sound = this.resolveSound(settings, formatted.priority, formatted.sound || 'default');
 
           await Notifications.scheduleNotificationAsync({
             content: {
               title: formatted.title,
               body: formatted.body,
-              sound: formatted.sound || 'default',
+              sound,
               priority: formatted.priority === 'critical' ? 'max' : formatted.priority === 'high' ? 'high' : 'default',
               data: formatted.data,
               sticky: formatted.priority === 'critical' || formatted.priority === 'high', // Critical/High alerts stay until dismissed
+              categoryIdentifier: formatted.categoryId || 'earthquake',
+              threadIdentifier: this.resolveEarthquakeThreadIdentifier(settings, formatted.priority),
+              interruptionLevel: this.resolveInterruptionLevel(settings, formatted.priority),
             },
             trigger: null, // CRITICAL: Instant delivery - no delay
             ...(Platform.OS === 'android' && {
               android: {
                 channelId: channelId,
                 importance: formatted.priority === 'critical' ? (Notifications.AndroidImportance?.MAX || 5) : formatted.priority === 'high' ? (Notifications.AndroidImportance?.HIGH || 4) : (Notifications.AndroidImportance?.DEFAULT || 3),
-                vibrationPattern: formatted.vibrationPattern || [0, 250, 250, 250],
+                vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 250, 250, 250]) : undefined,
                 priority: formatted.priority === 'critical' ? 'high' : formatted.priority === 'high' ? 'default' : 'low',
-                sound: formatted.sound || 'default',
+                sound: sound || 'default',
                 autoCancel: false, // Don't auto-cancel critical/high alerts
               },
             }),
@@ -573,15 +814,21 @@ class NotificationService {
       // ELITE: Fallback - trigger haptic feedback even without native notifications
       try {
         const Haptics = await import('expo-haptics');
+        const repeatCount = Math.max(1, Math.min(3, settings.notificationSoundRepeat));
         if (magnitude >= 6.0) {
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          for (let i = 0; i < repeatCount + 1; i++) {
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          }
         } else if (magnitude >= 5.0) {
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          for (let i = 0; i < repeatCount; i++) {
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
         } else {
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          await Haptics.impactAsync(
+            settings.notificationSoundVolume >= 70
+              ? Haptics.ImpactFeedbackStyle.Medium
+              : Haptics.ImpactFeedbackStyle.Light,
+          );
         }
       } catch (error) {
         // Silent fail - haptics are optional
@@ -599,16 +846,6 @@ class NotificationService {
    */
   async showSOSNotification(from: string, location?: { latitude: number; longitude: number }, message?: string): Promise<void> {
     try {
-      // ELITE: Use NotificationFormatterService for professional formatting
-      const { notificationFormatterService } = await import('./NotificationFormatterService');
-      const formatted = notificationFormatterService.formatSOSNotification(from, location, message);
-
-      // ELITE: Use async getter to ensure module is loaded
-      const Notifications = await getNotificationsAsync();
-      if (!Notifications) {
-        return; // Silent fail - notifications are optional
-      }
-
       // ELITE: Validate inputs
       if (!from || typeof from !== 'string' || from.trim().length === 0) {
         if (__DEV__) {
@@ -617,16 +854,39 @@ class NotificationService {
         return;
       }
 
+      const normalizedFrom = from.trim();
+      const { allowed, settings } = await this.shouldDeliver('critical', { requiresPush: false });
+      if (!allowed) {
+        return;
+      }
+
+      const dedupKey = `sos:${normalizedFrom}:${(message || '').slice(0, 24)}`;
+      if (this.shouldSuppressDuplicate(dedupKey, 4000)) {
+        return;
+      }
+
+      // ELITE: Use NotificationFormatterService for professional formatting
+      const { notificationFormatterService } = await import('./NotificationFormatterService');
+      const formatted = notificationFormatterService.formatSOSNotification(normalizedFrom, location, message);
+
+      // ELITE: Use async getter to ensure module is loaded
+      const Notifications = await getNotificationsAsync();
+      if (!Notifications) {
+        return; // Silent fail - notifications are optional
+      }
+
+      const sound = this.resolveSound(settings, 'critical', formatted.sound || 'default');
+
       // ELITE: Setup notification channels if needed (Android)
       if (Platform.OS === 'android') {
         try {
           await Notifications.setNotificationChannelAsync('sos', {
             name: 'SOS Alerts',
             importance: Notifications.AndroidImportance?.MAX || 5,
-            vibrationPattern: formatted.vibrationPattern || [0, 1000, 200, 1000, 200, 1000],
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 1000, 200, 1000, 200, 1000]) : undefined,
             lightColor: '#FF0000',
-            sound: formatted.sound || 'siren',
-            enableVibrate: true,
+            sound: sound || 'default',
+            enableVibrate: settings.notificationVibration,
             showBadge: true,
             bypassDnd: true, // Bypass Do Not Disturb for SOS
           });
@@ -641,26 +901,29 @@ class NotificationService {
         content: {
           title: formatted.title,
           body: formatted.body,
-          sound: formatted.sound || 'siren',
+          sound,
           priority: 'max',
           data: formatted.data,
           badge: 1,
           sticky: true, // SOS alerts stay until dismissed
+          categoryIdentifier: formatted.categoryId || 'sos',
+          threadIdentifier: 'sos-alerts',
+          interruptionLevel: this.resolveInterruptionLevel(settings, 'critical') || 'timeSensitive',
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
             channelId: 'sos',
             importance: Notifications.AndroidImportance?.MAX || 5,
-            vibrationPattern: formatted.vibrationPattern || [0, 1000, 200, 1000, 200, 1000],
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 1000, 200, 1000, 200, 1000]) : undefined,
             priority: 'high',
-            sound: formatted.sound || 'siren',
+            sound: sound || 'default',
           },
         }),
       });
 
       if (__DEV__) {
-        logger.info(`✅ Formatted SOS notification sent: ${from}`);
+        logger.info(`✅ Formatted SOS notification sent: ${normalizedFrom}`);
       }
     } catch (error) {
       logger.error('SOS notification error:', error);
@@ -681,18 +944,9 @@ class NotificationService {
     articleId?: string
   }): Promise<void> {
     try {
-      // ELITE: Use NotificationFormatterService for professional formatting
-      const { notificationFormatterService } = await import('./NotificationFormatterService');
-      const formatted = notificationFormatterService.formatNewsNotification(
-        data.title,
-        data.summary,
-        data.source,
-      );
-
-      // ELITE: Use async getter to ensure module is loaded
-      const Notifications = await getNotificationsAsync();
-      if (!Notifications) {
-        return; // Silent fail - notifications are optional
+      const { allowed, settings } = await this.shouldDeliver('normal');
+      if (!allowed) {
+        return;
       }
 
       // ELITE: Validate inputs
@@ -711,15 +965,38 @@ class NotificationService {
         return;
       }
 
+      // ELITE: Use NotificationFormatterService for professional formatting
+      const { notificationFormatterService } = await import('./NotificationFormatterService');
+      const formatted = notificationFormatterService.formatNewsNotification(
+        data.title,
+        data.summary,
+        data.source,
+        undefined,
+        settings.notificationShowPreview,
+      );
+
+      // ELITE: Use async getter to ensure module is loaded
+      const Notifications = await getNotificationsAsync();
+      if (!Notifications) {
+        return; // Silent fail - notifications are optional
+      }
+
+      const dedupKey = `news:${data.articleId || `${data.source}:${data.title}`}`;
+      if (this.shouldSuppressDuplicate(dedupKey, 45_000)) {
+        return;
+      }
+
+      const sound = this.resolveSound(settings, 'normal', formatted.sound || 'default');
+
       // ELITE: Setup notification channels if needed (Android)
       if (Platform.OS === 'android') {
         try {
           await Notifications.setNotificationChannelAsync('news', {
             name: 'News Alerts',
             importance: Notifications.AndroidImportance?.DEFAULT || 3,
-            vibrationPattern: formatted.vibrationPattern || [0, 200],
-            sound: formatted.sound || 'chime',
-            enableVibrate: true,
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 200]) : undefined,
+            sound: sound || 'default',
+            enableVibrate: settings.notificationVibration,
             showBadge: true,
           });
         } catch (error) {
@@ -734,8 +1011,10 @@ class NotificationService {
           title: formatted.title,
           body: formatted.body,
           subtitle: data.source, // iOS subtitle
-          sound: formatted.sound || 'chime',
+          sound,
           priority: formatted.priority === 'high' ? 'high' : 'default',
+          categoryIdentifier: formatted.categoryId || 'news',
+          threadIdentifier: settings.notificationGroupByMagnitude ? `news-${formatted.priority}` : 'news-updates',
           data: {
             ...formatted.data,
             type: 'news',
@@ -747,10 +1026,10 @@ class NotificationService {
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
-            channelId: 'messages', // Use messages channel for news
-            importance: Notifications.AndroidImportance?.HIGH || 4,
+            channelId: 'news',
+            importance: Notifications.AndroidImportance?.DEFAULT || 3,
             priority: 'default',
-            sound: 'default',
+            sound: sound || 'default',
           },
         }),
       });
@@ -769,6 +1048,11 @@ class NotificationService {
    */
   async showBatteryLowNotification(level: number): Promise<void> {
     try {
+      const { allowed, settings } = await this.shouldDeliver('normal');
+      if (!allowed) {
+        return;
+      }
+
       // ELITE: Use async getter to ensure module is loaded
       const Notifications = await getNotificationsAsync();
       if (!Notifications) {
@@ -783,20 +1067,29 @@ class NotificationService {
         return;
       }
 
+      const levelBucket = Math.floor(level / 5);
+      if (this.shouldSuppressDuplicate(`battery:${levelBucket}`, 120_000)) {
+        return;
+      }
+
+      const sound = this.resolveSound(settings, 'normal', 'default');
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: '🔋 Düşük Pil',
           body: `Pil seviyesi %${level.toFixed(0)} - Şarj edin`,
-          sound: 'default',
+          sound,
+          categoryIdentifier: 'system',
+          threadIdentifier: 'system-battery',
           data: { type: 'battery', level },
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
-            channelId: 'messages',
+            channelId: 'system',
             importance: Notifications.AndroidImportance?.DEFAULT || 3,
             priority: 'default',
-            sound: 'default',
+            sound: sound || 'default',
           },
         }),
       });
@@ -815,6 +1108,11 @@ class NotificationService {
    */
   async showNetworkStatusNotification(isConnected: boolean): Promise<void> {
     try {
+      const { allowed, settings } = await this.shouldDeliver('normal');
+      if (!allowed) {
+        return;
+      }
+
       // ELITE: Use async getter to ensure module is loaded
       const Notifications = await getNotificationsAsync();
       if (!Notifications) {
@@ -829,20 +1127,28 @@ class NotificationService {
         return;
       }
 
+      if (this.shouldSuppressDuplicate(`network:${isConnected ? 'online' : 'offline'}`, 60_000)) {
+        return;
+      }
+
+      const sound = this.resolveSound(settings, 'normal', 'default');
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: isConnected ? '🌐 İnternet Bağlandı' : '📡 İnternet Kesildi',
           body: isConnected ? 'Ağ bağlantısı yeniden kuruldu' : 'Offline moda geçildi',
-          sound: 'default',
+          sound,
+          categoryIdentifier: 'system',
+          threadIdentifier: 'system-network',
           data: { type: 'network', connected: isConnected },
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
-            channelId: 'messages',
+            channelId: 'system',
             importance: Notifications.AndroidImportance?.DEFAULT || 3,
             priority: 'low',
-            sound: 'default',
+            sound: sound || 'default',
           },
         }),
       });
@@ -864,6 +1170,11 @@ class NotificationService {
     location: { latitude: number; longitude: number },
   ): Promise<void> {
     try {
+      const { allowed, settings } = await this.shouldDeliver('normal');
+      if (!allowed) {
+        return;
+      }
+
       // ELITE: Use async getter to ensure module is loaded
       const Notifications = await getNotificationsAsync();
       if (!Notifications) {
@@ -881,26 +1192,39 @@ class NotificationService {
         return;
       }
 
+      const normalizedName = memberName.trim();
+      const locationDigest = `${location.latitude.toFixed(3)}:${location.longitude.toFixed(3)}`;
+      if (this.shouldSuppressDuplicate(`family-location:${normalizedName}:${locationDigest}`, 45_000)) {
+        return;
+      }
+
+      const sound = this.resolveSound(settings, 'normal', 'default');
+      const body = settings.notificationShowPreview
+        ? `Yeni konum: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
+        : 'Yeni konum güncellemesi için dokunun.';
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: `📍 ${memberName.trim()} Konum Güncellendi`,
-          body: `Yeni konum: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`,
-          sound: 'default',
-          data: { type: 'family_location', memberName: memberName.trim(), location },
+          title: `📍 ${normalizedName} Konum Güncellendi`,
+          body,
+          sound,
+          categoryIdentifier: 'family',
+          threadIdentifier: `family-${normalizedName.toLowerCase()}`,
+          data: { type: 'family_location', memberName: normalizedName, location },
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
-            channelId: 'messages',
+            channelId: 'family',
             importance: Notifications.AndroidImportance?.DEFAULT || 3,
             priority: 'default',
-            sound: 'default',
+            sound: sound || 'default',
           },
         }),
       });
 
       if (__DEV__) {
-        logger.info(`✅ Family location notification sent: ${memberName}`);
+        logger.info(`✅ Family location notification sent: ${normalizedName}`);
       }
     } catch (error) {
       logger.error('Family location notification error:', error);
@@ -922,13 +1246,47 @@ class NotificationService {
     isSOS: boolean = false,
   ): Promise<void> {
     try {
+      const effectivePriority: NotificationPriority = isSOS || priority === 'critical'
+        ? 'critical'
+        : priority === 'high'
+          ? 'high'
+          : 'normal';
+      const { allowed, settings } = await this.shouldDeliver(effectivePriority, {
+        requiresPush: !(isSOS || priority === 'critical'),
+      });
+      if (!allowed) {
+        return;
+      }
+
+      const normalizedSender = senderName?.trim();
+      const normalizedContent = messageContent?.trim();
+
+      // ELITE: Validate inputs
+      if (!normalizedSender) {
+        logger.warn('Invalid senderName for message notification');
+        return;
+      }
+
+      if (!normalizedContent) {
+        logger.warn('Invalid messageContent for message notification');
+        return;
+      }
+
+      const dedupKey = messageId
+        ? `msg:${messageId}`
+        : `msg:${normalizedSender}:${userId}:${normalizedContent.slice(0, 32)}`;
+      if (this.shouldSuppressDuplicate(dedupKey, 15_000)) {
+        return;
+      }
+
       // ELITE: Use NotificationFormatterService for professional formatting
       const { notificationFormatterService } = await import('./NotificationFormatterService');
       const formatted = notificationFormatterService.formatMessageNotification(
-        senderName,
-        messageContent,
+        normalizedSender,
+        normalizedContent,
         isSOS,
         priority === 'critical',
+        settings.notificationShowPreview,
       );
 
       const Notifications = await getNotificationsAsync();
@@ -938,30 +1296,31 @@ class NotificationService {
         return;
       }
 
-      // ELITE: Validate inputs
-      if (!senderName || typeof senderName !== 'string' || senderName.trim().length === 0) {
-        logger.warn('Invalid senderName for message notification');
-        return;
-      }
-
-      if (!messageContent || typeof messageContent !== 'string' || messageContent.trim().length === 0) {
-        logger.warn('Invalid messageContent for message notification');
-        return;
-      }
+      const sound = this.resolveSound(settings, effectivePriority, formatted.sound || 'default');
+      const channelId = isSOS
+        ? 'sos'
+        : effectivePriority === 'critical'
+          ? 'critical-alerts'
+          : 'messages';
+      const importance = effectivePriority === 'critical'
+        ? (Notifications.AndroidImportance?.MAX || 5)
+        : effectivePriority === 'high'
+          ? (Notifications.AndroidImportance?.HIGH || 4)
+          : (Notifications.AndroidImportance?.DEFAULT || 3);
+      const androidPriority = effectivePriority === 'critical' ? 'high' : effectivePriority === 'high' ? 'default' : 'low';
 
       // ELITE: Setup notification channels if needed (Android)
       if (Platform.OS === 'android') {
         try {
-          const channelId = isSOS ? 'sos' : priority === 'critical' ? 'sos' : 'messages';
           await Notifications.setNotificationChannelAsync(channelId, {
-            name: isSOS ? 'SOS Alerts' : priority === 'critical' ? 'Critical Messages' : 'Messages',
-            importance: isSOS || priority === 'critical' ? (Notifications.AndroidImportance?.MAX || 5) : (Notifications.AndroidImportance?.DEFAULT || 3),
-            vibrationPattern: formatted.vibrationPattern || [0, 200],
-            lightColor: isSOS || priority === 'critical' ? '#FF0000' : '#000000',
-            sound: formatted.sound || 'default',
-            enableVibrate: true,
+            name: isSOS ? 'SOS Alerts' : effectivePriority === 'critical' ? 'Critical Messages' : 'Messages',
+            importance: importance,
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 200]) : undefined,
+            lightColor: effectivePriority === 'critical' ? '#FF0000' : '#000000',
+            sound: sound || 'default',
+            enableVibrate: settings.notificationVibration,
             showBadge: true,
-            bypassDnd: isSOS || priority === 'critical', // Bypass Do Not Disturb for SOS/critical
+            bypassDnd: isSOS || effectivePriority === 'critical', // Bypass Do Not Disturb for SOS/critical
           });
         } catch (error) {
           if (__DEV__) {
@@ -974,31 +1333,34 @@ class NotificationService {
         content: {
           title: formatted.title,
           body: formatted.body,
-          sound: formatted.sound || 'default',
-          priority: formatted.priority === 'critical' ? 'max' : formatted.priority === 'high' ? 'high' : 'default',
+          sound: sound,
+          priority: effectivePriority === 'critical' ? 'max' : effectivePriority === 'high' ? 'high' : 'default',
           data: {
             ...formatted.data,
             messageId,
             userId,
-            fullContent: messageContent, // Store full content in data
+            fullContent: normalizedContent, // Store full content in data
           },
           badge: 1,
-          sticky: isSOS || priority === 'critical', // SOS/critical messages stay until dismissed
+          sticky: isSOS || effectivePriority === 'critical', // SOS/critical messages stay until dismissed
+          categoryIdentifier: formatted.categoryId || 'message',
+          threadIdentifier: userId ? `messages-${userId}` : `messages-${normalizedSender.toLowerCase()}`,
+          interruptionLevel: this.resolveInterruptionLevel(settings, effectivePriority),
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
           android: {
-            channelId: isSOS ? 'sos' : priority === 'critical' ? 'sos' : 'messages',
-            importance: isSOS || priority === 'critical' ? (Notifications.AndroidImportance?.MAX || 5) : (Notifications.AndroidImportance?.DEFAULT || 3),
-            vibrationPattern: formatted.vibrationPattern || [0, 200],
-            priority: isSOS || priority === 'critical' ? 'high' : 'default',
-            sound: formatted.sound || 'default',
+            channelId,
+            importance,
+            vibrationPattern: settings.notificationVibration ? (formatted.vibrationPattern || [0, 200]) : undefined,
+            priority: androidPriority,
+            sound: sound || 'default',
           },
         }),
       });
 
       if (__DEV__) {
-        logger.info(`✅ Formatted message notification sent: ${senderName} - ${formatted.body.substring(0, 30)}...`);
+        logger.info(`✅ Formatted message notification sent: ${normalizedSender} - ${formatted.body.substring(0, 30)}...`);
       }
     } catch (error) {
       logger.error('Message notification error:', error);
@@ -1030,7 +1392,8 @@ class NotificationService {
             allowBadge: true,
             allowSound: true,
             allowAnnouncements: false,
-            allowCriticalAlerts: true, // CRITICAL: Allow critical alerts for EEW
+            allowCriticalAlerts: false,
+            allowDisplayInCarPlay: false,
             provideAppNotificationSettings: false,
             allowProvisional: false,
           },
@@ -1088,6 +1451,12 @@ class NotificationService {
                 }
               });
             });
+          } else {
+            Linking.openURL('afetnet://earthquakes').catch(() => {
+              if (__DEV__) {
+                logger.debug('Failed to navigate to earthquake list');
+              }
+            });
           }
           break;
 
@@ -1101,6 +1470,12 @@ class NotificationService {
                   logger.debug('Failed to navigate to message screen');
                 }
               });
+            });
+          } else {
+            Linking.openURL('afetnet://messages').catch(() => {
+              if (__DEV__) {
+                logger.debug('Failed to navigate to messages list');
+              }
             });
           }
           break;
@@ -1116,6 +1491,20 @@ class NotificationService {
                     logger.debug('Failed to open news URL');
                   }
                 });
+              }
+            });
+          } else if (data.url) {
+            Linking.openURL(data.url).catch(() => {
+              Linking.openURL('afetnet://news').catch(() => {
+                if (__DEV__) {
+                  logger.debug('Failed to navigate to news screen');
+                }
+              });
+            });
+          } else {
+            Linking.openURL('afetnet://news').catch(() => {
+              if (__DEV__) {
+                logger.debug('Failed to navigate to news list');
               }
             });
           }
@@ -1212,8 +1601,19 @@ class NotificationService {
     options: { sound?: string; vibration?: number[]; critical?: boolean } = {},
   ): Promise<void> {
     try {
+      const { allowed, settings } = await this.shouldDeliver('critical', { requiresPush: false });
+      if (!allowed) {
+        return;
+      }
+
+      if (this.shouldSuppressDuplicate(`critical:${title}:${body.slice(0, 30)}`, 4000)) {
+        return;
+      }
+
       const Notifications = await getNotificationsAsync();
       if (!Notifications) return;
+
+      const sound = this.resolveSound(settings, 'critical', options.sound || 'default');
 
       // Ensure critical channel exists (Android)
       if (Platform.OS === 'android') {
@@ -1221,10 +1621,10 @@ class NotificationService {
           await Notifications.setNotificationChannelAsync('critical-alerts', {
             name: 'Critical Alerts',
             importance: Notifications.AndroidImportance?.MAX || 5,
-            vibrationPattern: options.vibration || [0, 500, 200, 500],
+            vibrationPattern: settings.notificationVibration ? (options.vibration || [0, 500, 200, 500]) : undefined,
             lightColor: '#FF0000',
-            sound: options.sound || 'siren',
-            enableVibrate: true,
+            sound: sound || 'default',
+            enableVibrate: settings.notificationVibration,
             bypassDnd: true,
           });
         } catch (e) {
@@ -1236,11 +1636,14 @@ class NotificationService {
         content: {
           title,
           body,
-          sound: options.sound || 'siren',
+          sound,
           priority: 'max',
           data: { type: 'critical' },
           badge: 1,
           sticky: true,
+          categoryIdentifier: 'critical',
+          threadIdentifier: 'critical-alerts',
+          interruptionLevel: this.resolveInterruptionLevel(settings, 'critical') || 'timeSensitive',
         },
         trigger: null,
         ...(Platform.OS === 'android' && {
@@ -1248,8 +1651,8 @@ class NotificationService {
             channelId: 'critical-alerts',
             importance: Notifications.AndroidImportance?.MAX || 5,
             priority: 'high',
-            sound: options.sound || 'siren',
-            vibrationPattern: options.vibration || [0, 500, 200, 500],
+            sound: sound || 'default',
+            vibrationPattern: settings.notificationVibration ? (options.vibration || [0, 500, 200, 500]) : undefined,
           },
         }),
       });

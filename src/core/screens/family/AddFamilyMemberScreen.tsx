@@ -25,7 +25,7 @@ const RELATIONSHIP_TYPES = [
   { id: 'diger', label: 'Diğer', icon: 'help-circle' as const },
 ];
 
-const isValidDeviceId = (id: string) => /^[a-zA-Z0-9-]+$/.test(id);
+const isValidDeviceId = (id: string) => /^afn-[a-zA-Z0-9]{4,}$/i.test(id);
 
 interface AddFamilyMemberScreenProps {
   navigation: {
@@ -154,7 +154,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     }
 
     if (!isValidDeviceId(manualId.trim())) {
-      return { valid: false, error: 'Geçersiz ID formatı. ID "afn-" ile başlamalı ve geçerli formatta olmalıdır.' };
+      return { valid: false, error: 'Geçersiz ID formatı. ID "AFN-" ile başlamalı ve geçerli formatta olmalıdır.' };
     }
 
     // Check for duplicates
@@ -265,7 +265,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     }
 
     if (!isValidDeviceId(manualId.trim())) {
-      Alert.alert('Hata', 'Geçersiz ID formatı. ID "afn-" ile başlamalı ve geçerli formatta olmalıdır.');
+      Alert.alert('Hata', 'Geçersiz ID formatı. ID "AFN-" ile başlamalı ve geçerli formatta olmalıdır.');
       return;
     }
 

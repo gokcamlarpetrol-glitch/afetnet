@@ -30,6 +30,11 @@ class PanicAssistantService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    try {
+      await openAIService.initialize();
+    } catch (error) {
+      logger.warn('OpenAI init failed for PanicAssistantService, continuing with rule-based fallback', error);
+    }
     logger.info('PanicAssistantService initialized (AI-powered)');
     this.isInitialized = true;
   }
@@ -42,6 +47,10 @@ class PanicAssistantService {
     scenario: DisasterScenario,
     context?: EmergencyContext,
   ): Promise<EmergencyAction[]> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
     // OpenAI ile dinamik aksiyonlar
     try {
       if (openAIService.isConfigured() && context) {
@@ -153,11 +162,6 @@ Aşağıdaki JSON formatında döndür (sadece JSON, başka açıklama yok):
 - warningLevel: Kritiklik seviyesi (emergency > critical > warning > info)
 - timeCritical: Dakikalar içinde yapılması gerekenler için true
 - location: Nerede yapılacak (opsiyonel)
-- toolsNeeded: Gerekli araçlar (opsiyonel)
-- safetyNotes: Güvenlik notları (2-4 madde)
-- commonMistakes: Yaygın hatalar (2-3 madde)
-- successCriteria: Başarı kriterleri (2-4 madde)
-- estimatedRiskReduction: Risk azaltma yüzdesi (0-100)
 
 ${context.magnitude && context.magnitude >= 5.0 ? 'ÖNEMLİ: Büyük deprem (≥5.0), kritik aksiyonlar ekle! Mahsur kalanlar, yıkıntılar, tsunami riski gibi konuları dahil et.' : ''}
 ${context.magnitude && context.magnitude >= 6.5 ? 'ÇOK KRİTİK: Çok büyük deprem (≥6.5), tsunami riski, yıkıntılar, mahsur kalanlar için özel aksiyonlar ekle!' : ''}`;
@@ -182,10 +186,11 @@ DEPREM ÖNCELİKLERİ:
 
 Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi ek aksiyonlar ekle.`;
 
-    // ELITE: Cost optimization - reduced maxTokens
+    // ELITE: Token budget raised to ensure full JSON response
+    // Previous 400 tokens caused truncation for 8-12 action items with complex fields
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 400, // Optimized: Reduced from 600 to save ~$0.00012 per call
+      maxTokens: 1500, // Fixed: Was 400, too low for 8-12 JSON actions (~150 tokens each)
       temperature: 0.5, // Daha tutarlı sonuçlar için düşük temperature
       serviceName: 'PanicAssistantService', // ELITE: For cost tracking
     });
@@ -218,8 +223,8 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private parseAIResponse(response: string): { actions: Record<string, unknown>[] } {
     try {
-      // JSON'u bul
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      // JSON'u bul — ELITE: Use lazy match to avoid matching past the first complete JSON
+      const jsonMatch = response.match(/\{[\s\S]*?\}/);
       if (!jsonMatch) {
         throw new Error('JSON bulunamadı');
       }
@@ -1257,4 +1262,3 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
 }
 
 export const panicAssistantService = new PanicAssistantService();
-

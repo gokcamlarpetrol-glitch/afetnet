@@ -29,26 +29,53 @@ export interface Earthquake {
 class EmergencyModeService {
   private isEmergencyMode = false;
   private lastTriggerTime = 0;
-  private readonly COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown between triggers
+  private currentMagnitude = 0; // Track current emergency magnitude for upgrade logic
+  private readonly COOLDOWN_CRITICAL_MS = 5 * 60 * 1000; // 5 min cooldown for 6.0+
+  private readonly COOLDOWN_HIGH_MS = 2 * 60 * 1000; // 2 min cooldown for 5.0-5.9 (aftershock protection)
 
   /**
    * Check if earthquake should trigger emergency mode
    * ELITE: Updated to trigger for 5.0+ earthquakes (as requested)
    */
-  shouldTriggerEmergencyMode(earthquake: Earthquake): boolean {
+  shouldTriggerEmergencyMode(earthquake: Earthquake, distanceKm?: number | null): boolean {
     // ELITE: Significant earthquakes (5.0+) trigger emergency mode
     // CRITICAL: 5.0-5.9: High priority emergency mode
     // CRITICAL: 6.0+: Critical priority emergency mode
     if (earthquake.magnitude >= 5.0) {
-      // Check cooldown to prevent spam (only for 6.0+)
-      if (earthquake.magnitude >= 6.0) {
-        const now = Date.now();
-        if (now - this.lastTriggerTime < this.COOLDOWN_MS) {
-          logger.warn('Emergency mode cooldown active');
+      // ELITE: Distance-aware emergency mode — prevents false activation for distant quakes
+      if (distanceKm != null) {
+        // Magnitude-scaled max emergency distance (tighter than notification)
+        const maxEmergencyDist = earthquake.magnitude >= 7.0 ? 1000
+          : earthquake.magnitude >= 6.0 ? 500
+            : 200; // M5.0-5.9: only within 200km
+        if (distanceKm > maxEmergencyDist) {
+          logger.info(`📍 Emergency mode skipped: M${earthquake.magnitude.toFixed(1)} is ${distanceKm.toFixed(0)}km away (max: ${maxEmergencyDist}km)`);
+          return false;
+        }
+      } else {
+        // FAIL-SAFE: Konum yok — sadece Türkiye sınırları içindeki depremler tetiklesin
+        const isInTurkey = earthquake.latitude >= 35.8 && earthquake.latitude <= 42.1
+          && earthquake.longitude >= 25.6 && earthquake.longitude <= 44.8;
+        if (!isInTurkey && earthquake.magnitude < 7.0) {
+          logger.info(`📍 Emergency mode skipped: no location, non-Turkey M${earthquake.magnitude.toFixed(1)}`);
           return false;
         }
       }
-      // ELITE: 5.0-5.9 earthquakes bypass cooldown for faster response
+
+      const now = Date.now();
+      const cooldownMs = earthquake.magnitude >= 6.0
+        ? this.COOLDOWN_CRITICAL_MS  // 5 min for 6.0+
+        : this.COOLDOWN_HIGH_MS;     // 2 min for 5.0-5.9 (aftershock protection)
+
+      if (now - this.lastTriggerTime < cooldownMs) {
+        // ELITE: Allow upgrade if new quake is significantly larger (≥ 0.5 bigger)
+        if (earthquake.magnitude >= this.currentMagnitude + 0.5) {
+          logger.info(`📈 Emergency upgrade: M${this.currentMagnitude} → M${earthquake.magnitude} (bypassing cooldown)`);
+          return true;
+        }
+        logger.warn(`Emergency mode cooldown active (${Math.round((cooldownMs - (now - this.lastTriggerTime)) / 1000)}s remaining)`);
+        return false;
+      }
       return true;
     }
     return false;
@@ -58,8 +85,19 @@ class EmergencyModeService {
    * Activate emergency mode for major earthquake
    */
   async activateEmergencyMode(earthquake: Earthquake) {
+    // ELITE: If already active, check for magnitude upgrade
     if (this.isEmergencyMode) {
-      logger.warn('Emergency mode already active');
+      if (earthquake.magnitude >= this.currentMagnitude + 0.5) {
+        logger.info(`📈 Upgrading emergency mode: M${this.currentMagnitude} → M${earthquake.magnitude}`);
+        this.currentMagnitude = earthquake.magnitude;
+        this.lastTriggerTime = Date.now();
+        // Re-notify with upgraded severity
+        await this.sendCriticalNotification(earthquake);
+        await this.notifyFamilyMembers(earthquake);
+        this.showEmergencyModeAlert(earthquake);
+        return;
+      }
+      logger.warn('Emergency mode already active, same severity — skipping');
       return;
     }
 
@@ -70,6 +108,7 @@ class EmergencyModeService {
     logger.info(`🚨 ACTIVATING ${priority} EMERGENCY MODE - Magnitude ${earthquake.magnitude} earthquake detected`);
     this.isEmergencyMode = true;
     this.lastTriggerTime = Date.now();
+    this.currentMagnitude = earthquake.magnitude;
 
     // ELITE: Haptic feedback based on magnitude
     if (isCritical) {
@@ -97,7 +136,7 @@ class EmergencyModeService {
       await this.startLocationTracking();
 
       // STEP 4: Activate BLE mesh for offline communication
-      await this.activateBLEMesh();
+      await this.activateBLEMesh(earthquake);
 
       // STEP 5: Notify family members
       await this.notifyFamilyMembers(earthquake);
@@ -168,8 +207,9 @@ class EmergencyModeService {
 
   /**
    * Activate BLE mesh for offline communication
+   * CRITICAL: Broadcasts real earthquake data to nearby devices
    */
-  private async activateBLEMesh() {
+  private async activateBLEMesh(earthquake: Earthquake) {
     try {
       logger.info('Activating BLE mesh for offline communication');
 
@@ -179,12 +219,20 @@ class EmergencyModeService {
         await bleMeshService.start();
       }
 
-      // Broadcast emergency SOS via BLE
+      // CRITICAL FIX: Broadcast actual earthquake magnitude (was 0 before)
       await bleMeshService.broadcastEmergency(JSON.stringify({
         type: 'EARTHQUAKE_EMERGENCY',
-        magnitude: 0, // Will be set by caller
-        timestamp: Date.now(),
+        magnitude: earthquake.magnitude,
+        location: earthquake.location,
+        latitude: earthquake.latitude,
+        longitude: earthquake.longitude,
+        depth: earthquake.depth,
+        source: earthquake.source,
+        timestamp: earthquake.time,
+        broadcastTime: Date.now(),
       }));
+
+      logger.info(`✅ BLE emergency broadcast: M${earthquake.magnitude} ${earthquake.location}`);
     } catch (error) {
       logger.error('BLE mesh activation error:', error);
     }
@@ -192,6 +240,7 @@ class EmergencyModeService {
 
   /**
    * Notify all family members about emergency
+   * CRITICAL: Sends REAL notifications via BLE mesh + Firebase
    */
   private async notifyFamilyMembers(earthquake: Earthquake) {
     try {
@@ -202,17 +251,79 @@ class EmergencyModeService {
         return;
       }
 
-      logger.info(`Notifying ${familyMembers.length} family members`);
+      logger.info(`🔔 Notifying ${familyMembers.length} family members about M${earthquake.magnitude} earthquake`);
 
-      // Send status update to all family members
-      // This will use BLE mesh + Firebase
-      for (const member of familyMembers) {
-        try {
-          // Family status broadcasting handled by BLE mesh service
-          logger.info(`Notified family member: ${member.name}`);
-        } catch (error) {
-          logger.error(`Failed to notify ${member.name}:`, error);
+      const isCritical = earthquake.magnitude >= 6.0;
+      const emergencyMessage = {
+        type: 'EARTHQUAKE_EMERGENCY',
+        magnitude: earthquake.magnitude,
+        location: earthquake.location,
+        latitude: earthquake.latitude,
+        longitude: earthquake.longitude,
+        timestamp: earthquake.time,
+        priority: isCritical ? 'critical' : 'high',
+      };
+
+      // CHANNEL 1: BLE Mesh broadcast (works offline)
+      try {
+        await bleMeshService.broadcastMessage({
+          type: 'emergency',
+          content: JSON.stringify(emergencyMessage),
+          priority: 'critical',
+          ttl: 10,
+        });
+        logger.info('✅ Family notified via BLE mesh');
+      } catch (bleError) {
+        logger.warn('BLE family notification failed (will try Firebase):', bleError);
+      }
+
+      // CHANNEL 2: Firebase cloud notifications (works online)
+      try {
+        const { firebaseDataService } = await import('./FirebaseDataService');
+        if (firebaseDataService.isInitialized) {
+          const { getDeviceId } = await import('../utils/device');
+          const myDeviceId = await getDeviceId();
+
+          // Send emergency message to each family member
+          const notifyPromises = familyMembers.map(async (member) => {
+            const targetId = member.deviceId || member.id;
+            if (!targetId) return;
+
+            try {
+              await firebaseDataService.saveMessage(myDeviceId, {
+                id: `emergency_${Date.now()}_${targetId}`,
+                fromDeviceId: myDeviceId,
+                toDeviceId: targetId,
+                content: isCritical
+                  ? `🚨 ACİL! M${earthquake.magnitude} deprem: ${earthquake.location}. Güvende misiniz?`
+                  : `⚠️ M${earthquake.magnitude} deprem: ${earthquake.location}. Durumunuzu bildirin.`,
+                timestamp: Date.now(),
+                type: 'emergency',
+                status: 'sent',
+                priority: 'critical',
+              });
+              logger.info(`✅ Notified ${member.name} via Firebase`);
+            } catch (memberError) {
+              logger.warn(`Failed to notify ${member.name} via Firebase:`, memberError);
+            }
+          });
+
+          await Promise.allSettled(notifyPromises);
         }
+      } catch (firebaseError) {
+        logger.warn('Firebase family notification failed:', firebaseError);
+      }
+
+      // CHANNEL 3: Push notification to self (shows in notification tray)
+      try {
+        const { notificationService } = await import('./NotificationService');
+        await notificationService.showCriticalNotification(
+          isCritical ? '🚨 DEPREM — Aile Üyeleriniz Bilgilendirildi' : '⚠️ DEPREM — Aile Üyeleriniz Bilgilendirildi',
+          `M${earthquake.magnitude} ${earthquake.location}. ${familyMembers.length} aile üyesine acil bildirim gönderildi.`,
+          { sound: 'default', critical: true },
+        );
+      } catch (pushError) {
+        logger.warn('Push notification for family alert failed:', pushError);
       }
     } catch (error) {
       logger.error('Family notification error:', error);
@@ -280,6 +391,7 @@ class EmergencyModeService {
   deactivateEmergencyMode() {
     logger.info('Deactivating emergency mode');
     this.isEmergencyMode = false;
+    this.currentMagnitude = 0;
 
     Alert.alert(
       'Acil Durum Modu Kapatıldı',

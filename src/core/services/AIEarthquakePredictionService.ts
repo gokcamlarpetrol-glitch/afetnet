@@ -54,6 +54,11 @@ class AIEarthquakePredictionService {
 
     try {
       await ensembleDetectionService.initialize();
+      try {
+        await openAIService.initialize();
+      } catch (openAIError) {
+        logger.warn('OpenAI init failed for AIEarthquakePredictionService, continuing with ensemble-only mode', openAIError);
+      }
       this.isInitialized = true;
 
       if (__DEV__) {
@@ -73,6 +78,12 @@ class AIEarthquakePredictionService {
     location?: { latitude: number; longitude: number },
     recentEarthquakes?: EarthquakeData[],
   ): Promise<AIPredictionResult | null> {
+    if (!this.isInitialized) {
+      await this.initialize().catch((error) => {
+        logger.warn('AIEarthquakePredictionService initialize failed before predict', error);
+      });
+    }
+
     if (!this.isInitialized) {
       logger.warn('AIEarthquakePredictionService not initialized');
       return null;
@@ -445,4 +456,3 @@ Sadece JSON döndür, başka metin ekleme.`;
 }
 
 export const aiEarthquakePredictionService = new AIEarthquakePredictionService();
-

@@ -111,24 +111,11 @@ class FirebaseService {
 
       // Request notification permissions
       if (Device.isDevice) {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync({
-            ios: {
-              allowAlert: true,
-              allowBadge: true,
-              allowSound: true,
-              allowCriticalAlerts: true, // CRITICAL: For EEW notifications
-            },
-            android: {},
-          });
-          finalStatus = status;
-        }
-
-        if (finalStatus !== 'granted') {
-          if (__DEV__) logger.warn('Notification permission not granted');
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') {
+          if (__DEV__) {
+            logger.info('Notification permission not granted yet; Firebase push token registration deferred');
+          }
           return;
         }
 
@@ -534,4 +521,3 @@ class FirebaseService {
 }
 
 export const firebaseService = new FirebaseService();
-

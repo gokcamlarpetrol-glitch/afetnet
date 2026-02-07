@@ -53,7 +53,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lastUpdated}>Son Güncelleme: 5 Şubat 2026</Text>
+        <Text style={styles.lastUpdated}>Son Güncelleme: 7 Şubat 2026 | Sürüm 2.0</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. GİRİŞ</Text>
@@ -123,8 +123,31 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.sectionTitle}>6. VERİ SAKLAMA</Text>
           <Text style={styles.paragraph}>
             • Aktif Kullanım: Hesabınız aktif olduğu sürece veriler saklanır{'\n'}
-            • Hesap Silme: Hesabınızı sildiğinizde tüm veriler kalıcı olarak silinir{'\n'}
-            • Yasal Gereklilikler: Yasal zorunluluklar gereği bazı veriler saklanabilir
+            • Konum Geçmişi: Son 24 saat (cihaz üzerinde), sunucuda saklanmaz{'\n'}
+            • SOS Mesajları: 30 gün{'\n'}
+            • Chat Mesajları: 90 gün{'\n'}
+            • Crash Raporları: 90 gün (Firebase Crashlytics){'\n'}
+            • Hesap Silme: Hesabınızı sildiğinizde tüm veriler 30 gün içinde kalıcı olarak silinir
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>6.5. VERİ AKTARIM ÜLKELERİ</Text>
+          <Text style={styles.paragraph}>
+            Firebase hizmetleri, Google'ın küresel veri merkezi altyapısını kullanır. Verileriniz
+            Avrupa Ekonomik Alanı (AEA) içinde ve dışında (ABD dahil) işlenebilir. Google,
+            Standart Sözleşme Maddeleri (SCC) kapsamında uygun güvenlik önlemleri sağlar.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>6.6. YAPAY ZEKA KULLANIMI</Text>
+          <Text style={styles.paragraph}>
+            AfetNet, acil durum rehberliği için yapay zeka destekli bir asistan sunar:{'\n\n'}
+            • AI sorguları OpenAI API aracılığıyla işlenir{'\n'}
+            • Sorgular anonim olarak gönderilir — kişisel bilgiler AI sağlayıcısıyla paylaşılmaz{'\n'}
+            • AI yanıtları cihazınızda önbelleğe alınır{'\n'}
+            • İnternetsiz ortamda 241 maddeden oluşan çevrimdışı bilgi tabanı kullanılır
           </Text>
         </View>
 
@@ -169,8 +192,8 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.sectionTitle}>11. İLETİŞİM</Text>
           <Text style={styles.paragraph}>
             Gizlilik ile ilgili sorularınız için:{'\n\n'}
-            E-posta: privacy@afetnet.app{'\n'}
-            Web: https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html
+            E-posta: support@afetnet.app{'\n'}
+            Geliştirici: Gökhan Çamcı — İstanbul, Türkiye
           </Text>
         </View>
 

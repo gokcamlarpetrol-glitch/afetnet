@@ -4,6 +4,7 @@
 
 import * as Location from 'expo-location';
 import { createLogger } from '../utils/logger';
+import { useSettingsStore } from '../stores/settingsStore';
 
 const logger = createLogger('LocationService');
 
@@ -19,8 +20,22 @@ class LocationService {
   private hasPermission = false;
   private currentLocation: LocationCoords | null = null;
 
+  private isLocationEnabledBySettings(): boolean {
+    try {
+      return useSettingsStore.getState().locationEnabled;
+    } catch {
+      return true;
+    }
+  }
+
   async initialize() {
     if (this.isInitialized) return;
+
+    if (!this.isLocationEnabledBySettings()) {
+      if (__DEV__) logger.info('LocationService initialize skipped: location disabled in settings');
+      this.hasPermission = false;
+      return;
+    }
 
     if (__DEV__) logger.info('[LocationService] Initializing...');
 
@@ -52,6 +67,10 @@ class LocationService {
   }
 
   async recheckPermission(): Promise<boolean> {
+    if (!this.isLocationEnabledBySettings()) {
+      this.hasPermission = false;
+      return false;
+    }
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
       this.hasPermission = status === 'granted';
@@ -63,6 +82,11 @@ class LocationService {
   }
 
   async updateLocation(): Promise<LocationCoords | null> {
+    if (!this.isLocationEnabledBySettings()) {
+      if (__DEV__) logger.debug('Location update skipped: location disabled in settings');
+      return null;
+    }
+
     if (!this.hasPermission) {
       if (__DEV__) logger.warn('No permission');
       return null;
@@ -186,6 +210,11 @@ class LocationService {
    * Dynamically adjusts update frequency based on movement and status.
    */
   async startWatchingLocation(callback: (location: LocationCoords) => void) {
+    if (!this.isLocationEnabledBySettings()) {
+      if (__DEV__) logger.debug('Location watch skipped: location disabled in settings');
+      return null;
+    }
+
     if (!this.hasPermission) {
       if (__DEV__) logger.warn('No permission');
       return null;

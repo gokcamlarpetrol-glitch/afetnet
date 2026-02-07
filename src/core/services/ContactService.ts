@@ -19,7 +19,6 @@ import {
     getFirestore,
     collection,
     doc,
-    getDoc,
     getDocs,
     setDoc,
     deleteDoc,
@@ -476,27 +475,6 @@ class ContactService {
             throw new Error('Geçersiz QR kod');
         }
 
-        // Fetch contact profile from Firebase for richer data
-        let photoURL: string | undefined;
-        let email: string | undefined;
-
-        if (payload.uid) {
-            try {
-                const app = initializeFirebase();
-                if (app) {
-                    const db = getFirestore(app);
-                    const userDoc = await getDoc(doc(db, 'users', payload.uid));
-                    if (userDoc.exists()) {
-                        const userData = userDoc.data();
-                        photoURL = userData.photoURL;
-                        email = userData.email;
-                    }
-                }
-            } catch (error) {
-                logger.warn('Could not fetch contact profile:', error);
-            }
-        }
-
         return this.addContact(
             payload.id,
             payload.uid,
@@ -505,8 +483,6 @@ class ContactService {
                 deviceId: payload.did || payload.id,
                 addedVia: 'qr',
                 isVerified: true,
-                photoURL,
-                email,
                 sendContactRequest: true, // Trigger contact request
             }
         );

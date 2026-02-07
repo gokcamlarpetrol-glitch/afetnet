@@ -1,0 +1,52 @@
+[2026-02-07T14:00:11.252Z] ℹ️ ========================================
+[2026-02-07T14:00:11.255Z] ℹ️ AI INTEGRATION TEST
+[2026-02-07T14:00:11.255Z] ℹ️ ========================================
+[2026-02-07T14:00:11.255Z] ℹ️ 
+[2026-02-07T14:00:11.255Z] ℹ️ Testing OpenAI Service...
+[2026-02-07T14:00:11.255Z] ✅ OpenAIService.ts: ✅ File exists
+[2026-02-07T14:00:11.255Z] ✅ Model: ✅ gpt-4o-mini (cost optimized)
+[2026-02-07T14:00:11.255Z] ✅ API Key: ✅ Environment variable configured
+[2026-02-07T14:00:11.255Z] ✅ Fallback mechanism: ✅ Implemented
+[2026-02-07T14:00:11.255Z] ✅ Error handling: ✅ Implemented
+[2026-02-07T14:00:11.255Z] ✅ Timeout handling: ✅ Implemented
+[2026-02-07T14:00:11.255Z] ℹ️ 
+[2026-02-07T14:00:11.255Z] ℹ️ Testing AI Service Integrations...
+[2026-02-07T14:00:11.255Z] ✅ EarthquakeValidationService: ✅ File exists
+[2026-02-07T14:00:11.255Z] ✅ EarthquakeValidationService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.255Z] ✅ EarthquakeValidationService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.255Z] ✅ PreparednessPlanService: ✅ File exists
+[2026-02-07T14:00:11.255Z] ✅ PreparednessPlanService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.255Z] ✅ PreparednessPlanService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.255Z] ✅ RiskScoringService: ✅ File exists
+[2026-02-07T14:00:11.255Z] ✅ RiskScoringService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.255Z] ✅ RiskScoringService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.255Z] ✅ PanicAssistantService: ✅ File exists
+[2026-02-07T14:00:11.256Z] ✅ PanicAssistantService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.256Z] ✅ PanicAssistantService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.256Z] ✅ NewsAggregatorService: ✅ File exists
+[2026-02-07T14:00:11.256Z] ✅ NewsAggregatorService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.256Z] ✅ NewsAggregatorService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.256Z] ✅ EarthquakeAnalysisService: ✅ File exists
+[2026-02-07T14:00:11.256Z] ✅ EarthquakeAnalysisService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.256Z] ✅ EarthquakeAnalysisService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.256Z] ✅ AIEarthquakePredictionService: ✅ File exists
+[2026-02-07T14:00:11.256Z] ✅ AIEarthquakePredictionService: ✅ OpenAI integrated
+[2026-02-07T14:00:11.256Z] ✅ AIEarthquakePredictionService: ✅ Fallback mechanism present
+[2026-02-07T14:00:11.256Z] ℹ️ 
+[2026-02-07T14:00:11.256Z] ℹ️ Testing Backend AI Services...
+[2026-02-07T14:00:11.256Z] ⚠️ centralizedAIAnalysisService: ⚠️ File not found (may be optional)
+[2026-02-07T14:00:11.256Z] ⚠️ centralizedNewsSummaryService: ⚠️ File not found (may be optional)
+[2026-02-07T14:00:11.256Z] ⚠️ centralizedPreparednessPlanService: ⚠️ File not found (may be optional)
+[2026-02-07T14:00:11.256Z] ⚠️ BackendAIPredictionService: ⚠️ File not found (may be optional)
+[2026-02-07T14:00:11.256Z] ℹ️ 
+[2026-02-07T14:00:11.256Z] ℹ️ Testing AI Cost Optimization...
+[2026-02-07T14:00:11.256Z] ✅ Max tokens: ✅ 500 (optimized)
+[2026-02-07T14:00:11.256Z] ✅ Temperature: ✅ 0.7 (optimized)
+[2026-02-07T14:00:11.256Z] ℹ️ 
+[2026-02-07T14:00:11.256Z] ℹ️ ========================================
+[2026-02-07T14:00:11.256Z] ℹ️ TEST SUMMARY
+[2026-02-07T14:00:11.256Z] ℹ️ ========================================
+[2026-02-07T14:00:11.256Z] ℹ️ Success: 29
+[2026-02-07T14:00:11.256Z] ℹ️ Errors: 0
+[2026-02-07T14:00:11.256Z] ℹ️ Warnings: 4
+[2026-02-07T14:00:11.256Z] ✅ ✅ AI integration is properly configured

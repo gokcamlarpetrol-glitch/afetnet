@@ -1,7 +1,9 @@
-import { FeatureTile } from '../types/feature';
-import { EmergencyAlert } from '../types/alerts';
+/**
+ * Feature Service
+ * Hub data for feature tiles displayed on the home screen.
+ */
 
-const now = new Date();
+import { FeatureTile } from '../types/feature';
 
 export const featuredTiles: FeatureTile[] = [
   {
@@ -34,33 +36,6 @@ export const featuredTiles: FeatureTile[] = [
     description: 'Özel yapay zeka tavsiyeleri al',
     icon: 'sparkles-outline',
     premium: true,
-    route: 'Risk',
+    route: 'RiskScore',
   },
 ];
-
-const sampleAlerts: EmergencyAlert[] = [
-  {
-    id: 'alert-1',
-    title: 'Şiddetli sarsıntı algılandı',
-    type: 'earthquake',
-    severity: 'danger',
-    location: 'İstanbul, Avcılar',
-    message: 'Mesajlaşma kanalları devrede. Lütfen güvenli alanlara yönelin.',
-    timestamp: new Date(now.getTime() - 2 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'alert-2',
-    title: 'Yönlendirme ve yardım çağrısı',
-    type: 'rescue',
-    severity: 'warning',
-    location: 'İzmir, Bayraklı',
-    message: 'Aile üyeleriyle iletişim kurmak için özel güvenli mesajlaşıma geçildi.',
-    timestamp: new Date(now.getTime() - 14 * 60 * 1000).toISOString(),
-  },
-];
-
-export async function fetchEmergencyFeed(): Promise<EmergencyAlert[]> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(sampleAlerts), 250);
-  });
-}

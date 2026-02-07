@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { firebaseCrashlyticsService } from './FirebaseCrashlyticsService';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
+import { safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('GlobalErrorHandler');
 
@@ -25,6 +26,9 @@ class GlobalErrorHandlerService {
   private lastErrorTime = 0;
   private readonly ERROR_RATE_LIMIT = 10; // Max 10 errors per minute
   private readonly ERROR_RATE_WINDOW = 60 * 1000; // 1 minute window
+  private isHandlingError = false; // Re-entrancy guard for handler recursion
+  private isHandlingConsoleError = false; // Prevent console.error interceptor loops
+  private originalConsoleError: typeof console.error | null = null;
 
   /**
    * ELITE: Initialize global error handlers
@@ -245,8 +249,12 @@ class GlobalErrorHandlerService {
     if (__DEV__) {
       try {
         // In dev mode, enhance console.error with better logging
-        const originalConsoleError = console.error;
-        
+        const originalConsoleError =
+          (console as any)._afetnetOriginalConsoleError ||
+          console.error.bind(console);
+        (console as any)._afetnetOriginalConsoleError = originalConsoleError;
+        this.originalConsoleError = originalConsoleError;
+
         // CRITICAL: Check if console.error is writable
         if (typeof originalConsoleError !== 'function') {
           if (__DEV__) {
@@ -256,9 +264,24 @@ class GlobalErrorHandlerService {
         }
         
         console.error = (...args: any[]) => {
+          // Prevent interceptor re-entry loops.
+          if (this.isHandlingConsoleError) {
+            originalConsoleError(...args);
+            return;
+          }
+
+          this.isHandlingConsoleError = true;
           try {
             // Call original
             originalConsoleError(...args);
+
+            // Skip self-originated logs to avoid recursive handling.
+            const hasGlobalHandlerTag = args.some(
+              (arg) => typeof arg === 'string' && safeIncludes(arg, 'GlobalErrorHandler'),
+            );
+            if (hasGlobalHandlerTag) {
+              return;
+            }
 
             // Try to extract Error object from args
             for (const arg of args) {
@@ -281,6 +304,8 @@ class GlobalErrorHandlerService {
             } catch {
               // Last resort - ignore
             }
+          } finally {
+            this.isHandlingConsoleError = false;
           }
         };
       } catch (err) {
@@ -296,6 +321,17 @@ class GlobalErrorHandlerService {
    * ELITE: Handle error with rate limiting and comprehensive logging
    */
   private handleError(error: Error, context: Partial<ErrorContext> = {}) {
+    // Re-entrancy protection: avoid recursive call stack growth.
+    if (this.isHandlingError) {
+      if (__DEV__) {
+        const directError = this.originalConsoleError || console.error.bind(console);
+        directError('[GlobalErrorHandler] Nested handleError call skipped to prevent recursion');
+      }
+      return;
+    }
+    this.isHandlingError = true;
+
+    try {
     // Rate limiting: Prevent error spam
     const now = Date.now();
     if (now - this.lastErrorTime < this.ERROR_RATE_WINDOW) {
@@ -320,8 +356,16 @@ class GlobalErrorHandlerService {
       ...context,
     };
 
-    // Log error
-    logger.error('Global error handler caught:', error, errorContext);
+    // Log error.
+    // When source is console_error, avoid logger->console.error feedback loops.
+    if (errorContext.source === 'console_error') {
+      if (__DEV__) {
+        const directError = this.originalConsoleError || console.error.bind(console);
+        directError('[GlobalErrorHandler] Console error captured:', error.message);
+      }
+    } else {
+      logger.error('Global error handler caught:', error, errorContext);
+    }
 
     // Send to Crashlytics
     try {
@@ -357,6 +401,9 @@ class GlobalErrorHandlerService {
       });
     } catch (analyticsError) {
       logger.error('Failed to track error analytics:', analyticsError);
+    }
+    } finally {
+      this.isHandlingError = false;
     }
   }
 
@@ -411,4 +458,3 @@ class GlobalErrorHandlerService {
 }
 
 export const globalErrorHandlerService = new GlobalErrorHandlerService();
-

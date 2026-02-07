@@ -152,13 +152,16 @@ class OnDeviceEEWService {
     if (!isSuperConfident) {
       logger.info('🔇 Silent Sentinel: Alert suppressed (confidence not critical)');
 
-      // Still send notification, but not full countdown
+      // Still send notification, but not full countdown.
+      // NOTE: NotificationService rejects magnitude <= 0, so estimate a safe fallback magnitude.
+      const fallbackMagnitude = this.estimateMagnitudeFromGForce(event.magnitude, event.confidence);
+      const fallbackWarningTime = this.estimateWarningTime(event);
       await notificationService.showEarthquakeNotification(
-        0, // Unknown magnitude
+        fallbackMagnitude,
         'Olası P-Dalgası Algılandı',
         new Date(),
-        false,
-        0,
+        true,
+        fallbackWarningTime,
       );
       return;
     }

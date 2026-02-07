@@ -61,7 +61,7 @@ const formatTimestamp = (timestamp: number): string => {
 type TimeFilter = '1h' | '24h' | '7d' | '30d' | 'all';
 type LocationFilter = 25 | 50 | 100 | 999999; // 999999 = all Turkey
 type MagnitudeFilter = 0 | 3 | 4 | 5;
-type SourceFilter = 'AFAD' | null; // null = all sources (only AFAD now)
+type SourceFilter = 'AFAD' | 'KANDILLI' | 'USGS' | 'EMSC' | null; // null = all sources
 
 export default function AllEarthquakesScreen({ navigation }: { navigation: AllEarthquakesNavigationProp }) {
   const insets = useSafeAreaInsets();
@@ -112,10 +112,17 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
   }, [requestLocationPermission]);
 
   // CRITICAL: Open original source website in Safari View Controller
-  const openOriginalSource = async (source: 'AFAD') => {
+  const openOriginalSource = async (source: Exclude<SourceFilter, null>) => {
     haptics.impactLight();
 
-    const url = 'https://deprem.afad.gov.tr/last-earthquakes.html';
+    const sourceUrls: Record<Exclude<SourceFilter, null>, string> = {
+      AFAD: 'https://deprem.afad.gov.tr/last-earthquakes.html',
+      KANDILLI: 'https://www.koeri.boun.edu.tr/scripts/lst0.asp',
+      USGS: 'https://earthquake.usgs.gov/earthquakes/map/',
+      EMSC: 'https://www.emsc-csem.org/Earthquake/',
+    };
+
+    const url = sourceUrls[source];
 
     try {
       if (Platform.OS === 'ios') {
@@ -135,7 +142,7 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
       }
       await Linking.openURL(url);
     } catch (error) {
-      logger.error(`Failed to open AFAD:`, error);
+      logger.error(`Failed to open source ${source}:`, error);
     }
   };
 
@@ -143,9 +150,10 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
   const filteredEarthquakes = useMemo(() => {
     let filtered = [...earthquakes];
 
-    // Source filter (CRITICAL: Only show AFAD data)
-    // Always filter to show only AFAD earthquakes
-    filtered = filtered.filter((eq) => eq.source === 'AFAD');
+    // Source filter
+    if (sourceFilter) {
+      filtered = filtered.filter((eq) => eq.source === sourceFilter);
+    }
 
     // Time filter
     const now = Date.now();
@@ -207,13 +215,22 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
 
     // Source badge color
     const getSourceColor = (source: string) => {
-      // Only AFAD is shown now
-      return '#3b82f6'; // Blue
+      switch (source) {
+        case 'AFAD':
+          return '#3b82f6';
+        case 'KANDILLI':
+          return '#f59e0b';
+        case 'USGS':
+          return '#10b981';
+        case 'EMSC':
+          return '#8b5cf6';
+        default:
+          return '#64748b';
+      }
     };
 
     const getSourceLabel = (source: string) => {
-      // Only AFAD is shown now
-      return 'AFAD';
+      return source === 'KANDILLI' ? 'Kandilli' : source;
     };
 
     return (
@@ -383,6 +400,25 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Source Filter */}
+          <Text style={styles.filterLabel}>Kaynak Filtresi</Text>
+          <View style={styles.filterRow}>
+            {([null, 'AFAD', 'KANDILLI', 'USGS', 'EMSC'] as SourceFilter[]).map((filter) => (
+              <TouchableOpacity
+                key={filter ?? 'ALL'}
+                style={[styles.filterChip, sourceFilter === filter && styles.filterChipActive]}
+                onPress={() => {
+                  haptics.impactLight();
+                  setSourceFilter(filter);
+                }}
+              >
+                <Text style={[styles.filterChipText, sourceFilter === filter && styles.filterChipTextActive]}>
+                  {filter === null ? 'Tümü' : (filter === 'KANDILLI' ? 'Kandilli' : filter)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       )}
 
@@ -412,11 +448,10 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
       {/* Result Count & Info */}
       <View style={styles.resultCount}>
         <Text style={styles.resultText}>
-          {filteredEarthquakes.length} {i18nService.t('earthquake.found')}
-          {` (${i18nService.t('earthquake.sourceAFAD')})`}
+          {filteredEarthquakes.length} {i18nService.t('earthquake.found')} ({sourceFilter ?? 'Tüm Kaynaklar'})
         </Text>
         <Text style={styles.resultSubtext}>
-          {i18nService.t('earthquake.lastUpdate')}: {lastUpdatedText} • {i18nService.t('earthquake.fromSource')} AFAD {i18nService.t('earthquake.realTimeData')}
+          {i18nService.t('earthquake.lastUpdate')}: {lastUpdatedText} • {i18nService.t('earthquake.fromSource')} {sourceFilter ?? 'AFAD/Kandilli/USGS/EMSC'} {i18nService.t('earthquake.realTimeData')}
         </Text>
       </View>
 

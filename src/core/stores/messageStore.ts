@@ -177,7 +177,9 @@ const loadMessages = (): Message[] => {
   try {
     const data = readScopedStorage(STORAGE_KEY_MESSAGES_BASE);
     if (data) {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+      logger.warn('messageStore: corrupt messages data, resetting');
     }
   } catch (error) {
     logger.error('Failed to load messages:', error);
@@ -199,7 +201,9 @@ const loadConversations = (): Conversation[] => {
   try {
     const data = readScopedStorage(STORAGE_KEY_CONVERSATIONS_BASE);
     if (data) {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+      logger.warn('messageStore: corrupt conversations data, resetting');
     }
   } catch (error) {
     logger.error('Failed to load conversations:', error);

@@ -10,6 +10,7 @@ import {
   signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  reload,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 
@@ -118,6 +119,7 @@ describe('AuthService', () => {
         uid: 'user-2',
         email: 'email@example.com',
         displayName: 'Email User',
+        emailVerified: true,
       },
     });
 
@@ -129,6 +131,7 @@ describe('AuthService', () => {
       },
     });
 
+    (reload as jest.Mock).mockResolvedValue(undefined);
     (firebaseSignOut as jest.Mock).mockResolvedValue(undefined);
   });
 

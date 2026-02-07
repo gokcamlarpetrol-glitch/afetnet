@@ -93,9 +93,8 @@ export const ENV = {
   FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID', 'afetnet-4a6b6'),
 
   // OpenAI - ELITE SECURITY
-  // PRODUCTION: Set via EAS secrets (EXPO_PUBLIC_OPENAI_API_KEY)
-  // DEVELOPMENT: Set in .env file
-  OPENAI_API_KEY: getEnvVar('EXPO_PUBLIC_OPENAI_API_KEY', ''),
+  // Client must use backend proxy; API key must never be exposed to app bundle.
+  OPENAI_PROXY_URL: getEnvVar('OPENAI_PROXY_URL', getEnvVar('EXPO_PUBLIC_OPENAI_PROXY_URL', '')),
 
   // EAS
   EAS_PROJECT_ID: getEnvVar('EAS_PROJECT_ID', '072f1217-172a-40ce-af23-3fc0ad3f7f09'),
@@ -106,7 +105,8 @@ export const ENV = {
   BUNDLE_ID: getEnvVar('BUNDLE_ID', 'com.gokhancamci.afetnetapp'),
 
   // Feature Flags
-  EEW_ENABLED: getEnvVar('EEW_ENABLED', 'false') === 'true',
+  // Default to enabled unless explicitly set to false in environment.
+  EEW_ENABLED: getEnvVar('EEW_ENABLED', 'true') === 'true',
   EEW_NATIVE_ALARM: getEnvVar('EEW_NATIVE_ALARM', 'false') === 'true',
 
   // URLs

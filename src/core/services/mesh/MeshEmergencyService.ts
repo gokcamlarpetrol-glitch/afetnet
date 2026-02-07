@@ -313,12 +313,24 @@ class MeshEmergencyService {
         // Don't auto-trigger if already in emergency
         if (this.isInEmergencyMode) return;
 
-        // For now, just log - could add confirmation dialog
-        // In production: show modal asking "Are you okay?" with countdown
-        logger.warn('Potential impact event - would show confirmation dialog');
+        logger.warn('⚠️ Potential impact event detected — starting 30s confirmation timer');
 
-        // Auto-trigger after 30 seconds if no response (in real implementation)
-        // this.activateEmergencyMode(EmergencyReasonCode.IMPACT_DETECTED);
+        // Record the impact timestamp
+        const impactTime = Date.now();
+
+        // Auto-trigger after 30 seconds if no user activity since impact
+        // CRITICAL: If user is unconscious under rubble, this ensures SOS fires
+        setTimeout(() => {
+            // Only trigger if:
+            // 1. Not already in emergency mode (user didn't manually trigger)
+            // 2. No user activity recorded since the impact (user may be unconscious)
+            if (!this.isInEmergencyMode && this.lastActivityTime < impactTime) {
+                logger.warn('🚨 No activity after impact — auto-triggering SOS');
+                this.activateEmergencyMode(EmergencyReasonCode.IMPACT_DETECTED);
+            } else {
+                logger.info('✅ User activity detected after impact — SOS cancelled');
+            }
+        }, 30000);
     }
 
     // ===========================================================================

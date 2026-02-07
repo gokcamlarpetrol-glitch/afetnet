@@ -16,15 +16,11 @@ import {
     getFirestore,
     collection,
     doc,
-    getDoc,
-    getDocs,
     setDoc,
-    deleteDoc,
     query,
     where,
     orderBy,
     onSnapshot,
-    Timestamp,
     serverTimestamp
 } from 'firebase/firestore';
 import { initializeFirebase } from '../../lib/firebase';
@@ -114,7 +110,7 @@ class ContactRequestService {
                         fromQrId: data.fromQrId,
                         fromName: data.fromName,
                         fromPhotoURL: data.fromPhotoURL,
-                        toUserId: cloudUid,
+                        toUserId: data.toUserId || cloudUid,
                         status: data.status,
                         createdAt: data.createdAt?.toMillis?.() || data.createdAt,
                         updatedAt: data.updatedAt?.toMillis?.() || data.updatedAt,
@@ -167,6 +163,7 @@ class ContactRequestService {
                 fromQrId: myQrId,
                 fromName: myName,
                 fromPhotoURL: myPhoto || null,
+                toUserId,
                 status: 'pending',
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
@@ -218,7 +215,7 @@ class ContactRequestService {
             }
 
             // 3. Update mutual status on both sides
-            await this.updateMutualStatus(request.fromUserId, true);
+            await this.updateMutualStatus(request.fromUserId, request.fromQrId, true);
 
             // 4. Create a notification for the sender
             const notifyRef = doc(db, 'users', request.fromUserId, 'notifications', `accept_${cloudUid}`);
@@ -270,7 +267,7 @@ class ContactRequestService {
     /**
      * Update mutual contact status
      */
-    private async updateMutualStatus(otherUserId: string, isMutual: boolean): Promise<void> {
+    private async updateMutualStatus(otherUserId: string, otherQrId: string, isMutual: boolean): Promise<void> {
         const cloudUid = identityService.getCloudUid();
         if (!cloudUid) return;
 
@@ -279,24 +276,14 @@ class ContactRequestService {
             if (!app) return;
 
             const db = getFirestore(app);
-
-            // Get other user's QR ID from their profile
-            const otherUserDoc = await getDoc(doc(db, 'users', otherUserId));
-            if (!otherUserDoc.exists()) return;
-
-            const otherQrId = otherUserDoc.data().qrId;
-            const myQrId = identityService.getMyId();
+            if (!otherQrId) {
+                logger.warn(`Missing fromQrId for user ${otherUserId}, skipping mutual status update`);
+                return;
+            }
 
             // Update my contact
             const myContactRef = doc(db, 'users', cloudUid, 'contacts', otherQrId);
             await setDoc(myContactRef, { isMutual, updatedAt: serverTimestamp() }, { merge: true });
-
-            // Update their contact (if exists)
-            const theirContactRef = doc(db, 'users', otherUserId, 'contacts', myQrId);
-            const theirContact = await getDoc(theirContactRef);
-            if (theirContact.exists()) {
-                await setDoc(theirContactRef, { isMutual, updatedAt: serverTimestamp() }, { merge: true });
-            }
 
         } catch (error) {
             logger.error('Failed to update mutual status:', error);

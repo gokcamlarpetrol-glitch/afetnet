@@ -21,7 +21,14 @@ import type {
 import { saveDeviceId as saveDeviceIdOp, subscribeToDeviceLocation as subscribeToDeviceLocationOp } from './firebase/FirebaseDeviceOperations';
 import { saveFamilyMember as saveFamilyMemberOp, loadFamilyMembers as loadFamilyMembersOp, deleteFamilyMember as deleteFamilyMemberOp, subscribeToFamilyMembers as subscribeToFamilyMembersOp } from './firebase/FirebaseFamilyOperations';
 import { saveMessage as saveMessageOp, loadMessages as loadMessagesOp, subscribeToMessages as subscribeToMessagesOp, saveConversation as saveConversationOp, loadConversations as loadConversationsOp, deleteConversation as deleteConversationOp } from './firebase/FirebaseMessageOperations';
-import { saveNewsSummary as saveNewsSummaryOp, getNewsSummary as getNewsSummaryOp, NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
+import {
+  saveNewsSummary as saveNewsSummaryOp,
+  getNewsSummary as getNewsSummaryOp,
+  claimNewsSummaryJob as claimNewsSummaryJobOp,
+  finalizeNewsSummaryJob as finalizeNewsSummaryJobOp,
+  NewsSummaryRecord,
+  NewsSummaryJobClaimResult,
+} from './firebase/FirebaseNewsOperations';
 import { saveHealthProfile as saveHealthProfileOp, loadHealthProfile as loadHealthProfileOp, saveICE as saveICEOp, loadICE as loadICEOp } from './firebase/FirebaseHealthOperations';
 import { saveEarthquake as saveEarthquakeOp, saveFeltEarthquakeReport as saveFeltEarthquakeReportOp, getIntensityData as getIntensityDataOp } from './firebase/FirebaseEarthquakeOperations';
 import { saveLocationUpdate as saveLocationUpdateOp } from './firebase/FirebaseLocationOperations';
@@ -31,6 +38,7 @@ const logger = createLogger('FirebaseDataService');
 
 // Re-export NewsSummaryRecord for backward compatibility
 export type { NewsSummaryRecord } from './firebase/FirebaseNewsOperations';
+export type { NewsSummaryJobClaimResult } from './firebase/FirebaseNewsOperations';
 
 class FirebaseDataService {
   private _isInitialized = false;
@@ -94,6 +102,21 @@ class FirebaseDataService {
           logger.debug('Firestore not available - using AsyncStorage fallback');
         }
         return;
+      }
+
+      // ELITE: Verify user is authenticated before marking as initialized
+      // Without auth, Firestore operations will fail with permission-denied
+      try {
+        const { getAuth } = await import('firebase/auth');
+        const auth = getAuth();
+        if (!auth.currentUser) {
+          if (__DEV__) {
+            logger.debug('FirebaseDataService deferred — user not authenticated');
+          }
+          return;
+        }
+      } catch {
+        // Auth module not available — skip auth check, proceed with caution
       }
 
       this._isInitialized = true;
@@ -183,6 +206,18 @@ class FirebaseDataService {
    */
   async getNewsSummary(articleId: string): Promise<NewsSummaryRecord | null> {
     return getNewsSummaryOp(articleId, this._isInitialized);
+  }
+
+  async claimNewsSummaryJob(articleId: string, leaseMs: number): Promise<NewsSummaryJobClaimResult> {
+    return claimNewsSummaryJobOp(articleId, leaseMs, this._isInitialized);
+  }
+
+  async finalizeNewsSummaryJob(
+    articleId: string,
+    status: 'completed' | 'failed',
+    errorMessage?: string,
+  ): Promise<void> {
+    await finalizeNewsSummaryJobOp(articleId, status, this._isInitialized, errorMessage);
   }
 
   /**
