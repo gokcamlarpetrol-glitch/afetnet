@@ -985,7 +985,8 @@ class HybridMessageService {
       }
 
       this.queue.push(message);
-      this.saveQueueDebounced();
+      // Save immediately for new messages to prevent loss on crash
+      await this.saveQueueImmediate();
     });
 
     // M6: Track with DeliveryManager
@@ -1169,7 +1170,8 @@ class HybridMessageService {
         }
       }
       this.queue.push(message);
-      this.saveQueueDebounced();
+      // Save immediately for new messages to prevent loss on crash
+      await this.saveQueueImmediate();
     });
 
     // Track delivery
@@ -1361,11 +1363,15 @@ class HybridMessageService {
             message.senderId
           ).toString().trim();
 
-          // V3: Build message data with senderUid — always prefer Firebase Auth UID
+          // V3: Build message data with senderUid — MUST be Firebase Auth UID
           const authUid = identityService.getUid();
+          if (!authUid) {
+            logger.warn('☁️ Cloud write skipped: no authenticated UID available');
+            throw new Error('No auth UID for cloud write');
+          }
           const messageData = {
             id: message.id,
-            senderUid: authUid || message.senderId,
+            senderUid: authUid,
             senderName: message.senderName || '',
             content: message.content,
             timestamp: message.timestamp,

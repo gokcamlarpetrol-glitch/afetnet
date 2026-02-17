@@ -579,13 +579,12 @@ class FirebaseDataService {
       }
 
       // Determine effective recipient UID for V3 path.
-      // If resolution found a UID, use it. Otherwise, for non-broadcast messages,
-      // attempt V3 with raw identifier as last resort (better than silent skip).
-      const effectiveRecipientUid = recipientUid
-        || (rawRecipientId && rawRecipientId !== 'broadcast' && rawRecipientId.length >= 6 ? rawRecipientId : null);
+      // CRITICAL: Only use resolved UIDs — never use raw identifiers as participants.
+      // Non-UID participants break security rules (receiver can't read the conversation).
+      const effectiveRecipientUid = recipientUid && this.isLikelyUid(recipientUid) ? recipientUid : null;
 
-      if (!recipientUid && effectiveRecipientUid) {
-        logger.warn(`⚠️ saveMessage: UID resolution failed for "${rawRecipientId}" — attempting V3 with raw identifier as last resort`);
+      if (!effectiveRecipientUid && rawRecipientId && rawRecipientId !== 'broadcast') {
+        logger.warn(`⚠️ saveMessage: UID resolution failed for "${rawRecipientId}" — V3 path skipped (non-UID participants would break security rules)`);
       }
 
       if (effectiveRecipientUid) {

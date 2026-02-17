@@ -1224,7 +1224,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       // FIX: Use V3 conversation model — mark the conversation as read in inbox
       // instead of creating fake "receipt" messages that pollute the conversation
       const { findOrCreateDMConversation, markConversationRead: markConvRead } = require('../services/firebase/FirebaseMessageOperations');
-      const conversationId = await findOrCreateDMConversation(myUid, senderId);
+      const conversation = await findOrCreateDMConversation(myUid, senderId);
+      const conversationId = conversation?.id;
       if (conversationId) {
         await markConvRead(myUid, conversationId);
 
