@@ -91,7 +91,12 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const insets = useSafeAreaInsets();
 
   // Use Zustand hooks - they handle referential equality automatically
-  const members = useFamilyStore((state) => state.members);
+  // Filter out the device owner (self) — only show added family members
+  const members = useFamilyStore((state) => {
+    const myUid = identityService.getUid();
+    if (!myUid) return state.members;
+    return state.members.filter((m) => m.uid !== myUid);
+  });
 
   // ELITE: Settings integration for location control
   const locationEnabled = useSettingsStore((state) => state.locationEnabled);
