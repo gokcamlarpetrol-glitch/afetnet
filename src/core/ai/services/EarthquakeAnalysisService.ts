@@ -386,10 +386,11 @@ Mesaj sakin, bilgilendirici, panik yaratmayan olsun. Ã–neriler AFAD standartlarÄ
 
     // Parse
     try {
-      // ELITE: Use lazy match to avoid matching past the first complete JSON
-      const jsonMatch = aiResponse.match(/\{[\s\S]*?\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      // Greedy match to capture complete nested JSON object
+      const firstBrace = aiResponse.indexOf('{');
+      const lastBrace = aiResponse.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        const parsed = JSON.parse(aiResponse.substring(firstBrace, lastBrace + 1));
         return {
           message: parsed.message || this.generateFallbackAnalysis(earthquake, distance, riskLevel).message,
           recommendations: Array.isArray(parsed.recommendations)

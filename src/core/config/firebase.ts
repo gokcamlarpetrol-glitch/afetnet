@@ -39,7 +39,6 @@ function getFirebaseApiKey(): string {
       Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_API_KEY ||
       Constants.expoConfig?.extra?.FIREBASE_API_KEY ||
       process.env.EXPO_PUBLIC_FIREBASE_API_KEY ||
-      process.env.EXPO_PUBLIC_FIREBASE_API_KEY ||
       process.env.FIREBASE_API_KEY ||
       ''; // ELITE SECURITY: No hardcoded fallback
 

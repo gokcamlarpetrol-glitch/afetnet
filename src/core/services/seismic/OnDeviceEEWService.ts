@@ -17,7 +17,7 @@
 
 import * as haptics from '../../utils/haptics';
 import * as Location from 'expo-location';
-import { notificationService } from '../NotificationService';
+// NotificationCenter handles all notifications now
 import { createLogger } from '../../utils/logger';
 import { seismicEngine, DetectionEvent } from './AdvancedSeismicEngine';
 import { eewCountdownEngine, CountdownConfig } from '../EEWCountdownEngine';
@@ -31,18 +31,18 @@ const logger = createLogger('OnDeviceEEWService');
 // THRESHOLDS - ELITE OPTIMIZED FOR DEPREM AĞI-LEVEL SPEED
 // ============================================================
 
-// ELITE: Lowered thresholds for instant alerts!
-// Deprem Ağı sends alerts at lower confidence - we do the same!
-const MIN_CONFIDENCE_FOR_ALERT = 60;       // ELITE: Was 85, now 60 for faster response
-const MIN_MAGNITUDE_FOR_ALERT = 0.03;      // ELITE: Was 0.05, now 0.03g for sensitivity
+// PRODUCTION: Thresholds calibrated to eliminate false positives from normal phone usage.
+// Walking ~0.1g, typing ~0.05g, real earthquakes >0.15g at epicenter.
+const MIN_CONFIDENCE_FOR_ALERT = 85;       // High confidence required to reduce false alerts
+const MIN_MAGNITUDE_FOR_ALERT = 0.15;      // Well above walking/vibration noise floor
 
 // Super confidence threshold for FULL COUNTDOWN experience
-// Lower = more full alerts, Higher = fewer but more accurate
-const SUPER_CONFIDENCE_THRESHOLD = 75;     // ELITE: Was 90, now 75 for more full alerts
-const SUPER_MAGNITUDE_THRESHOLD = 0.05;    // ELITE: Was 0.10, now 0.05g
+// Only the most certain detections get the full countdown UI
+const SUPER_CONFIDENCE_THRESHOLD = 95;     // Must be very confident for full countdown
+const SUPER_MAGNITUDE_THRESHOLD = 0.3;     // Strong shaking required for countdown
 
-// Alert cooldown (prevent spam) - SHORTER for continuous monitoring
-const ALERT_COOLDOWN_MS = 5000;            // ELITE: Was 10s, now 5s for faster response
+// Alert cooldown (prevent spam) - 2 minutes between alerts
+const ALERT_COOLDOWN_MS = 120000;          // 120s minimum between on-device EEW alerts
 
 // ============================================================
 // SERVICE
@@ -150,19 +150,10 @@ class OnDeviceEEWService {
       event.magnitude > SUPER_MAGNITUDE_THRESHOLD;
 
     if (!isSuperConfident) {
-      logger.info('🔇 Silent Sentinel: Alert suppressed (confidence not critical)');
-
-      // Still send notification, but not full countdown.
-      // NOTE: NotificationService rejects magnitude <= 0, so estimate a safe fallback magnitude.
-      const fallbackMagnitude = this.estimateMagnitudeFromGForce(event.magnitude, event.confidence);
-      const fallbackWarningTime = this.estimateWarningTime(event);
-      await notificationService.showEarthquakeNotification(
-        fallbackMagnitude,
-        'Olası P-Dalgası Algılandı',
-        new Date(),
-        true,
-        fallbackWarningTime,
-      );
+      // PRODUCTION FIX: Do NOT send notifications for low-confidence detections.
+      // This was the #1 source of notification spam (~200 alerts from normal phone movement).
+      // Only log for debugging purposes.
+      logger.info(`🔇 Silent Sentinel: Detection logged but NOT notified (conf=${event.confidence}%, mag=${event.magnitude.toFixed(3)}g)`);
       return;
     }
 
@@ -204,14 +195,22 @@ class OnDeviceEEWService {
     // START COUNTDOWN ENGINE!
     await eewCountdownEngine.startCountdown(config);
 
-    // Show critical notification
-    await notificationService.showEarthquakeNotification(
-      estimatedMagnitude,
-      `DEPREM UYARISI! ~${estimatedWarningTime}sn`,
-      new Date(),
-      true,
-      estimatedWarningTime,
-    );
+    // Show critical notification via MagnitudeBasedNotificationService
+    // CRITICAL FIX: Do NOT use notificationService.showEarthquakeNotification —
+    // it calls showMagnitudeBasedNotification internally, adding unnecessary indirection.
+    // Route directly to MBN which has cross-system dedup + rate limiting.
+    try {
+      const { notificationCenter } = await import('../notifications/NotificationCenter');
+      await notificationCenter.notify('eew', {
+        magnitude: estimatedMagnitude,
+        location: `DEPREM UYARISI! ~${estimatedWarningTime}sn`,
+        isEEW: true,
+        timeAdvance: estimatedWarningTime,
+        timestamp: Date.now(),
+      }, 'OnDeviceEEWService');
+    } catch (error) {
+      logger.error('Failed to show on-device EEW notification:', error);
+    }
   }
 
   /**

@@ -11,14 +11,15 @@ import * as haptics from '../../utils/haptics';
 interface SwipeableConversationCardProps {
   item: Conversation;
   index: number;
+  isGroup?: boolean;
   onPress: () => void;
   onDelete: () => void;
 }
 
-export function SwipeableConversationCard({ item, index, onPress, onDelete }: SwipeableConversationCardProps) {
+export function SwipeableConversationCard({ item, index, isGroup, onPress, onDelete }: SwipeableConversationCardProps) {
   const renderRightActions = () => (
     <Pressable onPress={onDelete} style={styles.deleteButton}>
-      <Ionicons name="trash" size={24} color="#fff" />
+      <Ionicons name={isGroup ? 'exit-outline' : 'trash'} size={24} color="#fff" />
     </Pressable>
   );
 
@@ -47,19 +48,23 @@ export function SwipeableConversationCard({ item, index, onPress, onDelete }: Sw
         >
           {/* Avatar */}
           <LinearGradient
-            colors={[avatarColor1, avatarColor2]}
+            colors={isGroup ? ['#c7d2fe', '#a5b4fc'] : [avatarColor1, avatarColor2]}
             style={styles.avatarGradient}
           >
-            <Text style={styles.avatarText}>
-              {item.userName?.charAt(0)?.toUpperCase() || item.userId.charAt(0).toUpperCase()}
-            </Text>
+            {isGroup ? (
+              <Ionicons name="people" size={22} color="#4338ca" />
+            ) : (
+              <Text style={styles.avatarText}>
+                {item.userName?.charAt(0)?.toUpperCase() || item.userId.charAt(0).toUpperCase()}
+              </Text>
+            )}
           </LinearGradient>
 
           {/* Conversation Info */}
           <View style={styles.conversationInfo}>
             <View style={styles.conversationHeader}>
               <Text style={styles.userName} numberOfLines={1}>
-                {item.userName || `Cihaz ${item.userId.slice(0, 8)}...`}
+                {item.userName || (isGroup ? 'Grup' : `Cihaz ${item.userId.slice(0, 8)}...`)}
               </Text>
               <Text style={styles.time}>{displayTime}</Text>
             </View>

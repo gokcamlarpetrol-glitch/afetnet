@@ -11,7 +11,7 @@ import { createLogger } from '../core/utils/logger';
 
 const logger = createLogger('DeviceLib');
 
-const DEVICE_ID_KEY = 'afetnet_secure_device_id'; // ELITE: New key for new storage
+const DEVICE_ID_KEY = 'afetnet_secure_device_id';
 const LEGACY_SECURE_DEVICE_ID_KEY = 'afetnet_device_id';
 const LEGACY_ASYNC_DEVICE_ID_KEY = '@afetnet:device_id';
 
@@ -43,14 +43,42 @@ async function generateDeviceId(): Promise<string> {
 }
 
 /**
- * Get or create persistent device ID
+ * Get or create persistent device ID.
+ * PRIORITY: Identity service (account-based AFN-{uid}) > SecureStore > Generate new
+ * After user logs in, identityService has the correct AFN-{uid[0:8]} ID.
+ * Before login, falls back to SecureStore/crypto random ID.
  */
 export async function getDeviceId(): Promise<string> {
-  // Return cached value if available
+  // PRIORITY 1: V3 UID — Firebase Auth UID is the single source of truth
+  try {
+    const { identityService } = require('../core/services/IdentityService');
+    // Try UID first (V3 architecture)
+    const uid = identityService.getUid();
+    if (uid) {
+      cachedDeviceId = uid;
+      return uid;
+    }
+    // Fallback to legacy AFN-based ID (backward compat)
+    const identityId = identityService.getMyId();
+    if (identityId && identityId !== 'unknown') {
+      if (cachedDeviceId !== identityId) {
+        cachedDeviceId = identityId;
+        try {
+          await SecureStore.setItemAsync(DEVICE_ID_KEY, identityId);
+          await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, identityId);
+        } catch { /* best-effort persistence */ }
+      }
+      return identityId;
+    }
+  } catch {
+    // IdentityService not yet available (during bootstrap) — fall through
+  }
+
+  // PRIORITY 2: Return cached value if available
   if (cachedDeviceId) return cachedDeviceId;
 
   try {
-    // 1. Try SecureStore (The Vault)
+    // 3. Try SecureStore (The Vault)
     try {
       const secureId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (secureId && isValidDeviceId(secureId)) {
@@ -65,15 +93,10 @@ export async function getDeviceId(): Promise<string> {
       logger.warn('SecureStore access failed, falling back to legacy check', e);
     }
 
-    // 2. Migration: Check Legacy AsyncStorage
+    // 4. Migration: Check Legacy AsyncStorage
     const legacyId = await AsyncStorage.getItem(LEGACY_ASYNC_DEVICE_ID_KEY);
     if (legacyId && isValidDeviceId(legacyId)) {
       const normalizedLegacyId = normalizeDeviceId(legacyId);
-      // We found a legacy ID. We should probably keep it to avoid data loss, 
-      // OR migrate it to SecureStore. Let's list it as "legacy" but secure it.
-      // For "Maximum Security", we might prefer generating a NEW one, 
-      // but that breaks existing users. 
-      // Strategy: Keep legacy ID, but save it to SecureStore for future.
       await SecureStore.setItemAsync(DEVICE_ID_KEY, normalizedLegacyId);
       await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalizedLegacyId);
       await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedLegacyId);
@@ -81,13 +104,12 @@ export async function getDeviceId(): Promise<string> {
       return normalizedLegacyId;
     }
 
-    // 3. Generate NEW High-Entropy ID
+    // 5. Generate NEW High-Entropy ID (only for pre-login state)
     const newId = await generateDeviceId();
 
     // Save to Vault
     await SecureStore.setItemAsync(DEVICE_ID_KEY, newId);
     await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, newId);
-    // Also save to legacy storage for backward compat if needed (optional)
     await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, newId);
 
     cachedDeviceId = newId;
@@ -157,6 +179,7 @@ export function isValidDeviceId(deviceId: string | null | undefined): boolean {
 
 /**
  * Force device ID update and keep in-memory cache consistent.
+ * Called by IdentityService after syncFromFirebase to persist the correct ID.
  */
 export async function setDeviceId(deviceId: string): Promise<void> {
   if (!isValidDeviceId(deviceId)) {
@@ -165,12 +188,17 @@ export async function setDeviceId(deviceId: string): Promise<void> {
   }
 
   const normalized = normalizeDeviceId(deviceId);
+  const changed = cachedDeviceId !== normalized;
 
   try {
     await SecureStore.setItemAsync(DEVICE_ID_KEY, normalized);
     await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalized);
     await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalized);
     cachedDeviceId = normalized;
+
+    if (changed) {
+      logger.info(`🔑 Device ID updated: ${normalized}`);
+    }
   } catch (error) {
     logger.error('Failed to set device ID:', error);
   }

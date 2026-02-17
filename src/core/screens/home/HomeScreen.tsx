@@ -152,6 +152,14 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
 
         {/* 9. Footer removed - info in onboarding */}
 
+        {/* 10. EEW Disclaimer — Apple Review: Life-safety feature disclosure */}
+        <View style={styles.eewDisclaimer}>
+          <Ionicons name="information-circle-outline" size={16} color="#64748b" />
+          <Text style={styles.eewDisclaimerText}>
+            Bu uygulama resmi bir erken uyarı sistemi değildir. Deprem uyarılarının doğruluğu garanti edilmez. Acil durumlarda resmi kaynakları (AFAD, Kandilli) takip edin.
+          </Text>
+        </View>
+
         <View style={styles.bottomSpacer} />
       </Animated.ScrollView>
 
@@ -202,5 +210,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  eewDisclaimer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  eewDisclaimerText: {
+    flex: 1,
+    color: '#64748b',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '400',
   },
 });

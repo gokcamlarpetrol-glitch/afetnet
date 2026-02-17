@@ -6,6 +6,12 @@ jest.mock('expo-secure-store', () => ({
   WHEN_UNLOCKED: 'WHEN_UNLOCKED',
 }));
 
+const mockMeshStoreAddMessage = jest.fn();
+const mockMessageStoreAddMessage = jest.fn();
+const mockMessageStoreAddConversation = jest.fn();
+const mockMessageStoreUpdateStatus = jest.fn();
+const mockMessageStoreConversations: Array<{ userId: string }> = [];
+
 jest.mock('../../../lib/device', () => ({
   getDeviceId: jest.fn().mockResolvedValue('AFN-TEST0001'),
   setDeviceId: jest.fn().mockResolvedValue(undefined),
@@ -26,14 +32,39 @@ jest.mock('../mesh/MeshNetworkService', () => ({
   },
 }));
 
+jest.mock('../mesh/MeshStore', () => ({
+  useMeshStore: {
+    getState: () => ({
+      addMessage: mockMeshStoreAddMessage,
+      isConnected: false,
+      messages: [],
+      peers: [],
+    }),
+  },
+}));
+
+jest.mock('../../stores/messageStore', () => ({
+  useMessageStore: {
+    getState: () => ({
+      addMessage: mockMessageStoreAddMessage,
+      addConversation: mockMessageStoreAddConversation,
+      updateMessageStatus: mockMessageStoreUpdateStatus,
+      conversations: mockMessageStoreConversations,
+    }),
+  },
+}));
+
 jest.mock('../IdentityService', () => ({
   identityService: {
     getIdentity: jest.fn(() => ({
       id: 'AFN-TEST0001',
       deviceId: 'AFN-TEST0001',
+      uid: 'uid-test-1',
       displayName: 'Test User',
       cloudUid: 'uid-test-1',
     })),
+    getUid: jest.fn(() => 'uid-test-1'),
+    getMyId: jest.fn(() => 'AFN-TEST0001'),
   },
 }));
 
@@ -41,6 +72,14 @@ import { hybridMessageService } from '../HybridMessageService';
 
 describe('Messaging reliability hardening', () => {
   const hybrid = hybridMessageService as any;
+
+  beforeEach(() => {
+    mockMeshStoreAddMessage.mockClear();
+    mockMessageStoreAddMessage.mockClear();
+    mockMessageStoreAddConversation.mockClear();
+    mockMessageStoreUpdateStatus.mockClear();
+    mockMessageStoreConversations.splice(0, mockMessageStoreConversations.length);
+  });
 
   it('maps hybrid message types to cloud-safe types', () => {
     expect(hybrid.mapHybridTypeToCloudType('CHAT')).toBe('text');
@@ -78,5 +117,26 @@ describe('Messaging reliability hardening', () => {
 
     expect(hybrid.normalizeLocationPayload({ latitude: 'bad', longitude: 32.85 })).toBeUndefined();
     expect(hybrid.normalizeLocationPayload(null)).toBeUndefined();
+  });
+
+  it('classifies own UID-sent message as outgoing in messageStore mirror', () => {
+    hybrid.pushCloudMessageToMeshStore({
+      id: 'msg-self-uid',
+      content: 'test',
+      senderId: 'uid-test-1',
+      senderName: 'Test User',
+      recipientId: 'uid-peer-2',
+      timestamp: 1700000000000,
+      source: 'HYBRID',
+      status: 'pending',
+      priority: 'normal',
+      type: 'CHAT',
+      retryCount: 0,
+    });
+
+    expect(mockMessageStoreAddMessage).toHaveBeenCalledTimes(1);
+    const mirrored = mockMessageStoreAddMessage.mock.calls[0][0];
+    expect(mirrored.from).toBe('me');
+    expect(mirrored.to).toBe('uid-peer-2');
   });
 });

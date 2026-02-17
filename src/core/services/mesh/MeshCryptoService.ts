@@ -137,8 +137,9 @@ class MeshCryptoService {
         const privateKeyBytes = await Crypto.getRandomBytesAsync(32);
         const privateKey = Buffer.from(privateKeyBytes).toString('base64');
 
-        // For simplicity, derive public key from private key hash
-        // In production, use proper ECDH curve multiplication
+        // SECURITY WARNING: This is NOT real ECDH. Public key is SHA-256 hash of private key.
+        // In production, implement proper ECDH curve multiplication.
+        // This provides NO actual asymmetric security — only a placeholder.
         const publicKeyDigest = await Crypto.digestStringAsync(
             Crypto.CryptoDigestAlgorithm.SHA256,
             privateKey
@@ -238,8 +239,9 @@ class MeshCryptoService {
     private async computeSharedSecret(peerPublicKey: string): Promise<string> {
         if (!this.myKeyPair) throw new Error('No key pair');
 
-        // Simplified shared secret: hash of concatenated keys
-        // In production, use proper ECDH shared secret derivation
+        // SECURITY WARNING: This is NOT real ECDH shared secret derivation.
+        // It concatenates private + peer public key and hashes.
+        // In production, use proper ECDH (e.g. react-native-sodium or webcrypto).
         const combined = this.myKeyPair.privateKey + peerPublicKey;
         const secret = await Crypto.digestStringAsync(
             Crypto.CryptoDigestAlgorithm.SHA256,
@@ -297,7 +299,8 @@ class MeshCryptoService {
                 peer.sharedSecret
             );
 
-            // XOR encryption (simplified - in production use proper AES-GCM)
+            // SECURITY WARNING: XOR encryption is NOT secure. Easily broken with known-plaintext attack.
+            // TODO: Replace with AES-256-GCM via SubtleCrypto or react-native-sodium
             const plaintextBuffer = Buffer.from(plaintext, 'utf-8');
             const keyBuffer = Buffer.from(keyDigest, 'hex');
             const cipherBuffer = Buffer.alloc(plaintextBuffer.length);
@@ -355,7 +358,7 @@ class MeshCryptoService {
                 peer.sharedSecret
             );
 
-            // XOR decryption
+            // SECURITY WARNING: XOR decryption — same weakness as encryption
             const cipherBuffer = Buffer.from(payload.ciphertext, 'base64');
             const keyBuffer = Buffer.from(keyDigest, 'hex');
             const plaintextBuffer = Buffer.alloc(cipherBuffer.length);

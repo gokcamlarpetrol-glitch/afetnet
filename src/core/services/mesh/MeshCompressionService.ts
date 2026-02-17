@@ -23,6 +23,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
+import { Buffer } from 'buffer';
 
 const logger = createLogger('MeshCompressionService');
 
@@ -184,7 +185,8 @@ const LZString = {
     compressToBase64(input: string): string {
         if (!input) return '';
         const compressed = this.compress(input);
-        return btoa(unescape(encodeURIComponent(compressed)));
+        const utf8 = unescape(encodeURIComponent(compressed));
+        return Buffer.from(utf8, 'latin1').toString('base64');
     },
 
     /**
@@ -193,7 +195,8 @@ const LZString = {
     decompressFromBase64(compressed: string): string {
         if (!compressed) return '';
         try {
-            const decoded = decodeURIComponent(escape(atob(compressed)));
+            const utf8 = Buffer.from(compressed, 'base64').toString('latin1');
+            const decoded = decodeURIComponent(escape(utf8));
             return this.decompress(decoded);
         } catch (error) {
             return '';

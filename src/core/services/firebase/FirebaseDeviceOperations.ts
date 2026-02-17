@@ -18,20 +18,31 @@ async function withTimeout<T>(
   operation: () => Promise<T>,
   operationName: string,
 ): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
-  );
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS);
+  });
 
-  return Promise.race([operation(), timeoutPromise]);
+  try {
+    return await Promise.race([operation(), timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 /**
  * Save device ID to Firestore
+ * SINGLE ID ARCHITECTURE: Only writes ONE device document.
+ * Previously wrote both deviceId and qrAliasId documents, but they're now unified.
  */
 export async function saveDeviceId(deviceId: string, isInitialized: boolean): Promise<boolean> {
+  // ELITE V2: Don't gate on isInitialized — saveDeviceId creates the device document
+  // with ownerUid, which is REQUIRED for ALL downstream operations:
+  // - Firestore rules (isDeviceOwner) 
+  // - CF push token lookup (devices/{id}.ownerUid → fcm_tokens/{uid})
+  // - Location & message subscriptions
   if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, skipping saveDeviceId');
-    return false;
+    logger.info(`saveDeviceId: isInitialized=false for ${deviceId}, attempting anyway (CRITICAL operation)`);
   }
 
   try {
@@ -45,16 +56,11 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
     const auth = getAuth();
     const currentUser = auth.currentUser;
     const ownerUid = currentUser ? currentUser.uid : null;
-    const qrAliasId = ownerUid ? `AFN-${ownerUid.substring(0, 8).toUpperCase()}` : null;
 
     const deviceData: any = {
       deviceId,
       updatedAt: new Date().toISOString(),
     };
-
-    // Only set createdAt if new (merge will handle this, but for clarity)
-    // We used to set createdAt every time, which is wrong, but merge protects it partially.
-    // Better relies on merge logic.
 
     // CRITICAL: Always attach ownerUid if available. 
     // This allows the "First Write Wins" policy in Security Rules.
@@ -62,28 +68,16 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
       deviceData.ownerUid = ownerUid;
     }
 
-    const targetDeviceIds = new Set<string>([deviceId]);
-    if (qrAliasId) {
-      targetDeviceIds.add(qrAliasId);
-    }
-
+    // SINGLE ID: Write only ONE device document (no alias needed)
     await withTimeout(
       async () => {
-        await Promise.all(
-          Array.from(targetDeviceIds).map(async (targetId) => {
-            const payload = {
-              ...deviceData,
-              ...(targetId !== deviceId ? { aliasOfDeviceId: deviceId } : {}),
-            };
-            await setDoc(doc(db, 'devices', targetId), payload, { merge: true });
-          }),
-        );
+        await setDoc(doc(db, 'devices', deviceId), deviceData, { merge: true });
       },
       'Device ID save',
     );
 
     if (__DEV__) {
-      logger.info(`Device IDs saved to Firestore: ${Array.from(targetDeviceIds).join(', ')}`);
+      logger.info(`Device ID saved to Firestore: ${deviceId} (SINGLE ID)`);
     }
     return true;
   } catch (error: unknown) {
@@ -103,6 +97,47 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
   }
 }
 
+/**
+ * Ensure a device document exists in Firestore.
+ * When sender writes a message to devices/{recipientId}/messages/{msgId},
+ * the parent document devices/{recipientId} must exist with ownerUid
+ * for Firestore rules (isDeviceReadable) to allow the recipient to read.
+ * If missing, recipient's onSnapshot subscription silently receives nothing.
+ * 
+ * This function checks existence and ONLY creates a placeholder if the doc
+ * doesn't exist yet. It does NOT overwrite existing docs.
+ */
+export async function ensureDeviceDocExists(deviceId: string): Promise<boolean> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return false;
+
+    const { getDoc } = await import('firebase/firestore');
+    const deviceRef = doc(db, 'devices', deviceId);
+    const deviceSnap = await withTimeout(
+      () => getDoc(deviceRef),
+      'Device doc check',
+    );
+
+    if (deviceSnap.exists()) {
+      return true; // Already exists, nothing to do
+    }
+
+    // Device doc doesn't exist — we CANNOT create it because Firestore rules
+    // require ownerUid == request.auth.uid, and we are NOT the owner of
+    // the recipient device. The recipient must create their own device doc.
+    // Log a warning so we can diagnose delivery failures.
+    logger.warn(
+      `⚠️ Recipient device document does NOT exist: devices/${deviceId}. ` +
+      `Messages will be written to subcollection but recipient may not ` +
+      `be able to read them until they create their device doc (via saveDeviceId).`
+    );
+    return false;
+  } catch (error) {
+    logger.warn(`ensureDeviceDocExists check failed for ${deviceId}:`, error);
+    return false;
+  }
+}
 
 /**
  * Subscribe to device location updates (real-time) with auto-recovery
@@ -114,9 +149,12 @@ export async function subscribeToDeviceLocation(
   callback: (location: any) => void,
   isInitialized: boolean,
 ): Promise<() => void> {
+  // ELITE V2: Don't gate on isInitialized — try to set up listener anyway.
+  // Firestore instance can be obtained directly, and the listener will handle
+  // its own permission-denied errors. This prevents silent failure when
+  // FirebaseDataService init races with listener setup.
   if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, cannot subscribe to device location');
-    return () => { };
+    logger.info(`subscribeToDeviceLocation: isInitialized=false for ${deviceId}, attempting anyway`);
   }
 
   const MAX_RETRIES = 3;
@@ -151,7 +189,15 @@ export async function subscribeToDeviceLocation(
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data?.location) {
-              callback(data.location);
+              // CRITICAL FIX: Pass full device data including status
+              // This allows family members to see each other's status updates
+              callback({
+                ...data.location,
+                // Attach status fields so familyStore can update member status
+                _deviceStatus: data.status || undefined,
+                _statusUpdatedAt: data.statusUpdatedAt || undefined,
+                _lastSeen: data.lastSeen || undefined,
+              });
             }
           }
         },

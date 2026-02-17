@@ -52,6 +52,14 @@ class BackgroundEEWService {
         logger.info('🔄 Initializing Background EEW Service...');
 
         try {
+            // CRITICAL: Background fetch is NOT available in Expo Go
+            const Constants = require('expo-constants').default;
+            if (Constants.appOwnership === 'expo') {
+                logger.info('⏭️ Background EEW tasks skipped (Expo Go)');
+                this.isInitialized = true;
+                return;
+            }
+
             // Load modules
             TaskManager = await import('expo-task-manager');
             BackgroundFetch = await import('expo-background-fetch');
@@ -84,39 +92,46 @@ class BackgroundEEWService {
     private async defineBackgroundTasks(): Promise<void> {
         if (!TaskManager) return;
 
-        // Define EEW fetch task
-        TaskManager.defineTask(TASK_EEW_FETCH, async () => {
-            try {
-                logger.info('⏰ Background EEW fetch triggered');
+        // CRITICAL FIX: Tasks may already be defined in index.ts (entry point).
+        // Calling defineTask twice for the same name crashes iOS production builds.
+        const isEEWFetchDefined = TaskManager.isTaskDefined(TASK_EEW_FETCH);
+        const isEEWLocationDefined = TaskManager.isTaskDefined(TASK_EEW_LOCATION);
 
-                // Perform EEW check
-                await this.performBackgroundEEWCheck();
-
-                return BackgroundFetch?.BackgroundFetchResult.NewData;
-            } catch (error) {
-                logger.error('Background fetch error:', error);
-                return BackgroundFetch?.BackgroundFetchResult.Failed;
-            }
-        });
-
-        // Define location task (keeps app alive)
-        TaskManager.defineTask(TASK_EEW_LOCATION, async ({ data, error }) => {
-            if (error) {
-                logger.error('Location task error:', error);
-                return;
-            }
-
-            if (data) {
-                const { locations } = data as { locations: { coords: { latitude: number; longitude: number } }[] };
-                if (locations && locations.length > 0) {
-                    const location = locations[0];
-                    logger.debug(`📍 Background location: ${location.coords.latitude}, ${location.coords.longitude}`);
-
-                    // Perform EEW check with new location
-                    await this.performBackgroundEEWCheck(location.coords);
+        // Define EEW fetch task (only if not already defined)
+        if (!isEEWFetchDefined) {
+            TaskManager.defineTask(TASK_EEW_FETCH, async () => {
+                try {
+                    logger.info('⏰ Background EEW fetch triggered');
+                    await this.performBackgroundEEWCheck();
+                    return BackgroundFetch?.BackgroundFetchResult.NewData;
+                } catch (error) {
+                    logger.error('Background fetch error:', error);
+                    return BackgroundFetch?.BackgroundFetchResult.Failed;
                 }
-            }
-        });
+            });
+        } else {
+            logger.debug('EEW fetch task already defined (from index.ts)');
+        }
+
+        // Define location task (only if not already defined)
+        if (!isEEWLocationDefined) {
+            TaskManager.defineTask(TASK_EEW_LOCATION, async ({ data, error }) => {
+                if (error) {
+                    logger.error('Location task error:', error);
+                    return;
+                }
+                if (data) {
+                    const { locations } = data as { locations: { coords: { latitude: number; longitude: number } }[] };
+                    if (locations && locations.length > 0) {
+                        const location = locations[0];
+                        logger.debug(`📍 Background location: ${location.coords.latitude}, ${location.coords.longitude}`);
+                        await this.performBackgroundEEWCheck(location.coords);
+                    }
+                }
+            });
+        } else {
+            logger.debug('EEW location task already defined (from index.ts)');
+        }
 
         logger.info('✅ Background tasks defined');
     }
@@ -282,8 +297,13 @@ class BackgroundEEWService {
     }
 
     /**
-     * Send background EEW notification
-     */
+   * Send background EEW notification
+   * 
+   * CRITICAL FIX: Routes through MagnitudeBasedNotificationService instead of
+   * calling scheduleNotificationAsync directly. This ensures background
+   * notifications pass through the centralized rate limiter and dedup system,
+   * preventing spam when background fetch fires frequently.
+   */
     private async sendBackgroundEEWNotification(event: {
         id: string;
         magnitude: number;
@@ -292,25 +312,15 @@ class BackgroundEEWService {
         location: string;
     }): Promise<void> {
         try {
-            const Notifications = await import('expo-notifications');
-
-            await Notifications.scheduleNotificationAsync({
-                content: {
-                    title: event.magnitude >= 5.5 ? '🚨 ACİL DEPREM!' : '⚠️ Deprem Algılandı',
-                    body: `M${event.magnitude.toFixed(1)} - ${event.location}`,
-                    data: {
-                        type: 'EEW',
-                        eventId: event.id,
-                        magnitude: event.magnitude,
-                        latitude: event.latitude,
-                        longitude: event.longitude,
-                        location: event.location,
-                    },
-                    sound: 'default',
-                    priority: 'max',
-                },
-                trigger: null,
-            });
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('earthquake', {
+                magnitude: event.magnitude,
+                location: event.location,
+                timestamp: Date.now(),
+                source: 'AFAD',
+                latitude: event.latitude,
+                longitude: event.longitude,
+            }, 'BackgroundEEWService');
 
             logger.info(`🚨 Background EEW notification sent: M${event.magnitude}`);
         } catch (error) {

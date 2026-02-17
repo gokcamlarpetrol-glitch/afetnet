@@ -1,0 +1,245 @@
+/**
+ * SETTINGS SCREEN - Styles
+ * Extracted from SettingsScreen.tsx for maintainability
+ */
+
+import { StyleSheet, Platform } from 'react-native';
+import { colors } from '../../theme';
+
+export const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f8fafc',
+    },
+    headerContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+        zIndex: 10,
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#334155',
+    },
+    backButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.6)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.9)',
+    },
+    placeholderButton: {
+        width: 40,
+    },
+    scrollContent: {
+        paddingHorizontal: 20,
+        paddingTop: 8,
+    },
+    section: {
+        marginBottom: 24,
+    },
+    sectionTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#64748b',
+        marginBottom: 12,
+        marginLeft: 8,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+    },
+    sectionContent: {
+        backgroundColor: 'rgba(255, 255, 255, 0.6)',
+        borderRadius: 24,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.9)',
+        shadowColor: '#64748b',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        elevation: 2,
+    },
+    premiumBanner: {
+        marginBottom: 24,
+        borderRadius: 24,
+        shadowColor: '#0ea5e9',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    premiumGradient: {
+        borderRadius: 24,
+        padding: 2,
+    },
+    premiumContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 20,
+        backgroundColor: 'transparent',
+    },
+    premiumIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    premiumTextContainer: {
+        flex: 1,
+    },
+    premiumTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#fff',
+        marginBottom: 4,
+    },
+    premiumSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.9)',
+    },
+    versionText: {
+        textAlign: 'center',
+        color: '#94a3b8',
+        fontSize: 12,
+        marginTop: 8,
+    },
+    userIdText: {
+        textAlign: 'center',
+        color: '#cbd5e1',
+        fontSize: 10,
+        marginTop: 4,
+        marginBottom: 20,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    statsCard: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 16,
+    },
+    settingIconGradient: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: colors.brand.primary + '30',
+    },
+    settingContent: {
+        flex: 1,
+    },
+    settingTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#fff',
+        marginBottom: 2,
+    },
+    settingSubtitle: {
+        fontSize: 13,
+        color: '#94a3b8',
+    },
+    settingValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: colors.brand.primary,
+        marginRight: 8,
+    },
+    statRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        gap: 12,
+    },
+    statDivider: {
+        height: 1,
+        backgroundColor: '#334155',
+    },
+    statLabel: {
+        flex: 1,
+        fontSize: 15,
+        color: '#94a3b8',
+    },
+    statValue: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    versionContainer: {
+        alignItems: 'center',
+        paddingVertical: 20,
+        marginTop: 16,
+    },
+    versionSubtext: {
+        fontSize: 13,
+        color: '#94a3b8',
+        textAlign: 'center',
+        paddingHorizontal: 20,
+        lineHeight: 20,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    modalContent: {
+        backgroundColor: '#1e293b',
+        borderRadius: 20,
+        padding: 32,
+        width: '100%',
+        maxWidth: 400,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#334155',
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#fff',
+        marginTop: 20,
+        marginBottom: 8,
+    },
+    modalStep: {
+        fontSize: 14,
+        color: '#cbd5e1',
+        marginTop: 16,
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    progressBar: {
+        width: '100%',
+        height: 8,
+        backgroundColor: '#334155',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginBottom: 8,
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#3b82f6',
+        borderRadius: 4,
+    },
+    modalProgress: {
+        fontSize: 12,
+        color: '#94a3b8',
+        marginBottom: 16,
+    },
+    modalNote: {
+        fontSize: 13,
+        color: '#94a3b8',
+        textAlign: 'center',
+        marginTop: 8,
+    },
+});

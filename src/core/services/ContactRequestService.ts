@@ -13,7 +13,6 @@
  */
 
 import {
-    getFirestore,
     collection,
     doc,
     setDoc,
@@ -23,7 +22,7 @@ import {
     onSnapshot,
     serverTimestamp
 } from 'firebase/firestore';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { identityService } from './IdentityService';
 import { contactService } from './ContactService';
 import { createLogger } from '../utils/logger';
@@ -52,6 +51,7 @@ export type RequestCallback = (requests: ContactRequest[]) => void;
 
 class ContactRequestService {
     private isInitialized = false;
+    private activeUid: string | null = null;
     private unsubscribe: (() => void) | null = null;
     private listeners: RequestCallback[] = [];
     private pendingRequests: ContactRequest[] = [];
@@ -60,8 +60,6 @@ class ContactRequestService {
      * Initialize the service
      */
     async initialize(): Promise<void> {
-        if (this.isInitialized) return;
-
         try {
             await identityService.initialize();
             const cloudUid = identityService.getCloudUid();
@@ -71,9 +69,18 @@ class ContactRequestService {
                 return;
             }
 
+            if (this.isInitialized && this.activeUid === cloudUid) {
+                return;
+            }
+
+            if (this.isInitialized && this.activeUid && this.activeUid !== cloudUid) {
+                await this.cleanup();
+            }
+
             // Subscribe to incoming requests
             await this.subscribeToIncomingRequests();
 
+            this.activeUid = cloudUid;
             this.isInitialized = true;
             logger.info('✅ ContactRequestService initialized');
 
@@ -90,10 +97,8 @@ class ContactRequestService {
         if (!cloudUid) return;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
             const requestsRef = collection(db, 'users', cloudUid, 'contactRequests');
             const q = query(
                 requestsRef,
@@ -140,7 +145,7 @@ class ContactRequestService {
         message?: string
     ): Promise<boolean> {
         const cloudUid = identityService.getCloudUid();
-        const myQrId = identityService.getMyId();
+        const myQrId = identityService.getUid() || identityService.getMyId();
         const myName = identityService.getDisplayName();
         const myPhoto = identityService.getPhotoURL();
 
@@ -150,10 +155,8 @@ class ContactRequestService {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) return false;
-
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return false;
 
             // Create request in recipient's collection
             const requestRef = doc(db, 'users', toUserId, 'contactRequests', cloudUid);
@@ -187,10 +190,8 @@ class ContactRequestService {
         if (!cloudUid) return false;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return false;
-
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return false;
 
             // 1. Update request status
             const requestRef = doc(db, 'users', cloudUid, 'contactRequests', request.fromUserId);
@@ -203,7 +204,6 @@ class ContactRequestService {
             const existingContact = contactService.getContact(request.fromQrId);
             if (!existingContact) {
                 await contactService.addContact(
-                    request.fromQrId,
                     request.fromUserId,
                     request.fromName,
                     {
@@ -244,10 +244,9 @@ class ContactRequestService {
         if (!cloudUid) return false;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return false;
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return false;
 
-            const db = getFirestore(app);
             const requestRef = doc(db, 'users', cloudUid, 'contactRequests', request.fromUserId);
 
             await setDoc(requestRef, {
@@ -272,10 +271,9 @@ class ContactRequestService {
         if (!cloudUid) return;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
 
-            const db = getFirestore(app);
             if (!otherQrId) {
                 logger.warn(`Missing fromQrId for user ${otherUserId}, skipping mutual status update`);
                 return;
@@ -333,6 +331,7 @@ class ContactRequestService {
         this.listeners = [];
         this.pendingRequests = [];
         this.isInitialized = false;
+        this.activeUid = null;
 
         logger.info('🗑️ ContactRequestService cleaned up');
     }

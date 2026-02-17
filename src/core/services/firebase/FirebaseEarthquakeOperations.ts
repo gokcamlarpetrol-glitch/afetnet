@@ -4,6 +4,7 @@
  */
 
 import { doc, setDoc, getDocs, query, collection, where } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 import type { EarthquakeFirebaseData, FeltEarthquakeReportData } from '../../types/firebase';
@@ -21,7 +22,7 @@ async function withTimeout<T>(
   const timeoutPromise = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
-  
+
   return Promise.race([operation(), timeoutPromise]);
 }
 
@@ -45,7 +46,7 @@ export async function saveEarthquake(
     }
 
     const earthquakeId = earthquake.id || `${earthquake.timestamp}_${earthquake.magnitude}`;
-    
+
     await withTimeout(
       () => setDoc(doc(db, 'earthquakes', earthquakeId), {
         ...earthquake,
@@ -61,7 +62,7 @@ export async function saveEarthquake(
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
     const errorMessage = errorObj?.message || String(error);
-    
+
     // ELITE: Handle permission errors gracefully
     if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
       if (__DEV__) {
@@ -69,7 +70,7 @@ export async function saveEarthquake(
       }
       return false;
     }
-    
+
     logger.error('Failed to save earthquake:', error);
     return false;
   }
@@ -77,6 +78,8 @@ export async function saveEarthquake(
 
 /**
  * Save felt earthquake report to Firestore
+ * CRITICAL: Firestore rules require userId == auth.uid
+ * This function automatically injects the authenticated user's uid
  */
 export async function saveFeltEarthquakeReport(
   report: FeltEarthquakeReportData,
@@ -94,12 +97,21 @@ export async function saveFeltEarthquakeReport(
       return false;
     }
 
-    // ELITE: Generate unique report ID (FeltEarthquakeReportData doesn't have id field)
-    const reportId = `${report.earthquakeId}_${report.userId}_${Date.now()}`;
-    
+    // CRITICAL: Firestore rules require userId == auth.uid
+    // Without this, all felt earthquake reports will be rejected with permission-denied
+    const currentUser = getAuth().currentUser;
+    if (!currentUser) {
+      logger.debug('No authenticated user, skipping felt earthquake report save');
+      return false;
+    }
+
+    // ELITE: Generate unique report ID using auth.uid for consistency
+    const reportId = `${report.earthquakeId}_${currentUser.uid}_${Date.now()}`;
+
     await withTimeout(
       () => setDoc(doc(db, 'feltEarthquakes', reportId), {
         ...report,
+        userId: currentUser.uid, // CRITICAL: Override with auth.uid for rules compliance
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
       'Felt earthquake report save',
@@ -112,7 +124,7 @@ export async function saveFeltEarthquakeReport(
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
     const errorMessage = errorObj?.message || String(error);
-    
+
     // ELITE: Handle permission errors gracefully
     if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
       if (__DEV__) {
@@ -120,7 +132,7 @@ export async function saveFeltEarthquakeReport(
       }
       return false;
     }
-    
+
     logger.error('Failed to save felt earthquake report:', error);
     return false;
   }
@@ -146,12 +158,12 @@ export async function getIntensityData(
     }
 
     const q = query(collection(db, 'feltEarthquakes'), where('earthquakeId', '==', earthquakeId));
-    
+
     const snapshot = await withTimeout(
       () => getDocs(q),
       'Intensity data load',
     );
-    
+
     if (snapshot.empty) {
       return null;
     }
@@ -160,7 +172,7 @@ export async function getIntensityData(
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
     const errorMessage = errorObj?.message || String(error);
-    
+
     // ELITE: Handle permission errors gracefully
     if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
       if (__DEV__) {
@@ -168,7 +180,7 @@ export async function getIntensityData(
       }
       return null;
     }
-    
+
     logger.error('Failed to get intensity data:', error);
     return null;
   }

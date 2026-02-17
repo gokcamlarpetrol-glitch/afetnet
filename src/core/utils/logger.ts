@@ -34,6 +34,23 @@ export const setLogLevel = (level: LogLevel) => {
 
 export const getLogLevel = (): LogLevel => currentMinLogLevel;
 
+// SECURITY FIX: PII sanitizer to prevent sensitive data leaking to Crashlytics
+const PII_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  { pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, replacement: '[EMAIL_REDACTED]' },
+  { pattern: /(?:\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4,6}/g, replacement: '[PHONE_REDACTED]' },
+  { pattern: /[A-Za-z0-9_-]{100,}/g, replacement: '[TOKEN_REDACTED]' }, // FCM/auth tokens
+  { pattern: /Bearer\s+[A-Za-z0-9._-]+/gi, replacement: 'Bearer [REDACTED]' },
+  { pattern: /AIza[A-Za-z0-9_-]{35}/g, replacement: '[API_KEY_REDACTED]' }, // Firebase API keys
+];
+
+function sanitizePII(message: string): string {
+  let sanitized = message;
+  for (const { pattern, replacement } of PII_PATTERNS) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+  return sanitized;
+}
+
 // ELITE: Crashlytics service interface for type safety
 interface CrashlyticsServiceInterface {
   setUserId: (userId: string) => void;
@@ -61,8 +78,11 @@ const getCrashlytics = async () => {
   }
 };
 
-// Initialize on module load
-getCrashlytics();
+// CRITICAL FIX: Do NOT call getCrashlytics() here.
+// In production, Metro compiles dynamic import() to synchronous require().
+// FirebaseCrashlyticsService calls createLogger() at top level,
+// which would reference Logger before it's defined (causes 'prototype' crash).
+// Instead, initialize lazily on first use.
 
 class Logger {
   private prefix: string;
@@ -112,7 +132,7 @@ class Logger {
     if (!__DEV__ && crashlyticsAvailable) {
       try {
         const cs = await getCrashlytics();
-        if (cs) cs.log(message);
+        if (cs) cs.log(sanitizePII(message));
       } catch { /* Crashlytics may not be available */ }
     }
   }
@@ -153,12 +173,15 @@ class Logger {
           if (!cs) return;
           try {
             if (level === 'error') {
-              // Record error with full context
-              const error = args[0] instanceof Error ? args[0] : new Error(logMessage);
-              cs.recordError(error);
+              // Record error with full context (sanitized)
+              const errorObj = args[0] instanceof Error ? args[0] : new Error(sanitizePII(logMessage));
+              if (errorObj.message) {
+                errorObj.message = sanitizePII(errorObj.message);
+              }
+              cs.recordError(errorObj);
             } else if (level === 'warn') {
-              // Log warnings as breadcrumbs
-              cs.log(`[WARN] ${logMessage}`);
+              // Log warnings as breadcrumbs (sanitized)
+              cs.log(`[WARN] ${sanitizePII(logMessage)}`);
             }
           } catch (e) {
             // Ignore Crashlytics errors

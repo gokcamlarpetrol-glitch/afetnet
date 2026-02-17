@@ -50,10 +50,10 @@ const SAMPLING_RATES = {
     LOW_POWER: 5,         // 5Hz - Minimal power
 } as const;
 
-// Thresholds (more sensitive in background to catch events)
+// Thresholds (PRODUCTION: raised to prevent false positives from walking, typing, etc.)
 const THRESHOLDS = {
-    BACKGROUND_TRIGGER: 0.05,  // Lower threshold when background
-    FOREGROUND_TRIGGER: 0.02,  // Normal threshold
+    BACKGROUND_TRIGGER: 0.15,  // Raised from 0.05 — walking=0.1g, real earthquake>0.15g
+    FOREGROUND_TRIGGER: 0.08,  // Raised from 0.02 — must exceed normal phone vibrations
 } as const;
 
 // ============================================================
@@ -139,9 +139,14 @@ class BackgroundSeismicMonitorService {
         // Setup app state listener for adaptive sampling
         this.setupAppStateListener();
 
-        // Register background task if enabled
+        // Register background task if enabled (only in dev builds, not Expo Go)
         if (this.config.enabled) {
-            await this.registerBackgroundTask();
+            const Constants = require('expo-constants').default;
+            if (Constants.appOwnership !== 'expo') {
+                await this.registerBackgroundTask();
+            } else {
+                logger.info('⏭️ Background seismic task skipped (Expo Go)');
+            }
         }
 
         logger.info('✅ Background Seismic Monitor initialized');
@@ -300,6 +305,14 @@ class BackgroundSeismicMonitorService {
             if (saved !== null) {
                 this.config.enabled = saved === 'true';
             }
+            const savedSensitivity = await AsyncStorage.getItem('@afetnet_background_seismic_sensitivity');
+            if (savedSensitivity === 'low' || savedSensitivity === 'medium' || savedSensitivity === 'high') {
+                this.config.sensitivity = savedSensitivity;
+            }
+            const savedPowerMode = await AsyncStorage.getItem('@afetnet_background_seismic_power_mode');
+            if (savedPowerMode === 'normal' || savedPowerMode === 'aggressive' || savedPowerMode === 'battery_saver') {
+                this.config.powerMode = savedPowerMode;
+            }
         } catch (e) {
             logger.debug('Using default config');
         }
@@ -308,6 +321,8 @@ class BackgroundSeismicMonitorService {
     private async saveConfig(): Promise<void> {
         try {
             await AsyncStorage.setItem(STORAGE_KEYS.ENABLED, String(this.config.enabled));
+            await AsyncStorage.setItem('@afetnet_background_seismic_sensitivity', this.config.sensitivity);
+            await AsyncStorage.setItem('@afetnet_background_seismic_power_mode', this.config.powerMode);
         } catch (e) {
             logger.debug('Failed to save config');
         }
@@ -322,6 +337,7 @@ class BackgroundSeismicMonitorService {
         enabled: boolean;
         registered: boolean;
         powerMode: string;
+        sensitivity: string;
         samplingRate: number;
         appState: string;
     } {
@@ -329,6 +345,7 @@ class BackgroundSeismicMonitorService {
             enabled: this.config.enabled,
             registered: this.isRegistered,
             powerMode: this.config.powerMode,
+            sensitivity: this.config.sensitivity,
             samplingRate: this.config.samplingRate,
             appState: this.appState,
         };
@@ -423,20 +440,18 @@ async function saveBackgroundDetection(detection: BackgroundDetection): Promise<
 async function triggerBackgroundAlert(detection: BackgroundDetection): Promise<void> {
     // Import dynamically to avoid circular deps
     try {
-        const { ultraFastEEWNotification } = await import('./UltraFastEEWNotification');
+        const { notificationCenter } = await import('./notifications/NotificationCenter');
 
         // Estimate magnitude from acceleration
         const pgaCmS2 = detection.peakAcceleration * 980.665;
         const estimatedMagnitude = Math.max(3.0, Math.min(8.0, Math.log10(Math.max(1, pgaCmS2)) + 2.5));
 
-        await ultraFastEEWNotification.sendEEWNotification({
+        await notificationCenter.notify('earthquake', {
             magnitude: estimatedMagnitude,
             location: 'Background Detection',
-            warningSeconds: 0,
-            estimatedIntensity: Math.round(detection.peakAcceleration * 12),
-            epicentralDistance: 0,
-            source: 'BACKGROUND' as any,
-        });
+            timestamp: detection.timestamp,
+            source: 'OnDevice',
+        }, 'BackgroundSeismicMonitor');
     } catch (e) {
         logger.error('Background alert failed:', e);
     }

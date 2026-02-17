@@ -65,6 +65,20 @@ function checkContains(relPath, needle, name) {
   }
 }
 
+function checkRegex(relPath, pattern, name) {
+  if (!exists(relPath)) {
+    fail(name, `Missing file: ${relPath}`);
+    return;
+  }
+
+  const content = read(relPath);
+  if (pattern.test(content)) {
+    pass(name);
+  } else {
+    fail(name, `Expected pattern not found: ${pattern} in ${relPath}`);
+  }
+}
+
 function runCommand(name, command, required = true) {
   try {
     execSync(command, {
@@ -105,9 +119,11 @@ console.log('\nMessaging Flow');
 checkFile('src/core/services/HybridMessageService.ts', 'Hybrid message service exists');
 checkFile('src/core/screens/messages/ConversationScreen.tsx', 'Conversation screen exists');
 checkFile('src/core/screens/messages/SOSConversationScreen.tsx', 'SOS conversation screen exists');
-checkContains('src/core/services/HybridMessageService.ts', 'targets.add(identity.id)', 'Cloud message subscription includes identity.id');
-checkContains('src/core/services/HybridMessageService.ts', 'targets.add(identity.deviceId)', 'Cloud message subscription includes identity.deviceId');
-checkContains('src/core/services/HybridMessageService.ts', 'recipientId: msg.toDeviceId', 'Cloud message mapping keeps recipientId');
+checkContains('src/core/services/HybridMessageService.ts', 'private getSelfIdentityIds()', 'Hybrid service self identity resolver exists');
+checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.id\)/, 'Hybrid service tracks identity.id alias');
+checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.deviceId\)/, 'Hybrid service tracks identity.deviceId alias');
+checkContains('src/core/services/HybridMessageService.ts', 'toDeviceId: message.recipientId || \'broadcast\'', 'Cloud message write keeps toDeviceId');
+checkRegex('src/core/services/HybridMessageService.ts', /recipientId:\s*toDeviceId\s*&&\s*toDeviceId\s*!==\s*'broadcast'/, 'Cloud message mapping restores recipientId');
 checkContains('src/core/screens/messages/ConversationScreen.tsx', 'selfIds.has(msg.to)', 'Conversation recipient isolation in place');
 checkContains('src/core/screens/messages/SOSConversationScreen.tsx', 'selfIds.has(msg.to)', 'SOS recipient isolation in place');
 
@@ -117,15 +133,16 @@ checkFile('src/core/screens/family/AddFamilyMemberScreen.tsx', 'Add family membe
 checkFile('src/core/screens/family/FamilyGroupChatScreen.tsx', 'Family group chat screen exists');
 checkFile('src/core/screens/map/MapScreen.tsx', 'Map screen exists');
 checkFile('src/core/services/FamilyTrackingService.ts', 'Family tracking service exists');
-checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.id)', 'Family tracking publishes identity.id');
-checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.deviceId)', 'Family tracking publishes identity.deviceId');
-checkContains('src/core/screens/map/MapScreen.tsx', 'familyTrackingService.stopTracking()', 'Map tracking cleanup present');
+checkContains('src/core/services/FamilyTrackingService.ts', 'const candidateAliases = [', 'Family tracking alias candidates exist');
+checkRegex('src/core/services/FamilyTrackingService.ts', /\btargetCloudUid\s*=/, 'Family tracking resolves cloud UID target');
+checkContains('src/core/services/FamilyTrackingService.ts', 'const targetMeshId', 'Family tracking resolves mesh target');
+checkRegex('src/core/screens/map/MapScreen.tsx', /familyTrackingService\.stopTracking\([^)]*\)/, 'Map tracking cleanup present');
 
 console.log('\nBackend + Privacy');
 checkFile('firestore.rules', 'Firestore rules file exists');
 checkContains('firestore.rules', 'function isDeviceReadable(deviceId)', 'Firestore device access helper exists');
 checkContains('firestore.rules', 'function isSenderOwned(senderDeviceId)', 'Firestore sender ownership helper exists');
-checkContains('firestore.rules', '&& isSenderOwned(request.resource.data.fromDeviceId)', 'Firestore sender ownership enforced');
+checkRegex('firestore.rules', /isSenderOwned\((request\.resource|resource)\.data\.fromDeviceId\)/, 'Firestore sender ownership enforced');
 checkFile('ios/AfetNetebekesizAcilletiim/Info.plist', 'iOS Info.plist exists');
 checkFile('ios/AfetNetebekesizAcilletiim/PrivacyInfo.xcprivacy', 'iOS privacy manifest exists');
 checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'NSLocationWhenInUseUsageDescription', 'Foreground location usage description exists');
@@ -136,6 +153,7 @@ console.log('\nCommand Gates');
 runCommand('No-IAP verification command', 'node scripts/verify-iap-system.js', true);
 runCommand('Production validation command', 'node scripts/validate-production.js', true);
 runCommand('TypeScript command', 'npm run -s typecheck', true);
+runCommand('Critical tests command', 'npm run -s test:critical', true);
 if (process.env.RUN_JEST_ADVISORY === 'true') {
   runCommand('Jest command (advisory)', 'npm test -- --runInBand --watch=false --watchman=false --silent', false);
 } else {

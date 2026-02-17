@@ -152,28 +152,28 @@ class EmergencyModeService {
 
   /**
    * Send critical earthquake notification - ELITE IMPLEMENTATION
-   * CRITICAL: Instant delivery, magnitude-based priority, multi-channel alerts
+   * 
+   * CRITICAL FIX: This method NO LONGER sends a push notification itself.
+   * The caller (MagnitudeBasedNotificationService, EarthquakeNotificationHandler, 
+   * or MultiSourceEEWService) already sent the push notification BEFORE 
+   * triggering emergency mode. Sending another one here caused cascading 
+   * duplicate notifications for every M5.0+ earthquake.
+   * 
+   * This method now only handles emergency-specific actions:
+   * - Haptic feedback escalation (already done in activateEmergencyMode)  
+   * - Logging for audit trail
    */
   private async sendCriticalNotification(earthquake: Earthquake) {
     try {
-      // ELITE: Use magnitude-based notification for premium features
-      const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
-      await showMagnitudeBasedNotification(
-        earthquake.magnitude,
-        earthquake.location,
-        false, // Not EEW
-        undefined, // No time advance
-        earthquake.time, // Timestamp
-      ).catch(async (error) => {
-        logger.error('Failed to show magnitude-based critical notification:', error);
-        // Fallback to standard notification
-        const { notificationService } = await import('./NotificationService');
-        await notificationService.showEarthquakeNotification(
-          earthquake.magnitude,
-          earthquake.location,
-          new Date(earthquake.time),
-        );
-      });
+      // CRITICAL FIX: Do NOT call showMagnitudeBasedNotification here.
+      // The caller already sent the push notification. Calling it again
+      // creates a cascading loop:
+      //   showMagnitudeBasedNotification → triggerEmergencyMode → activateEmergencyMode
+      //   → sendCriticalNotification → showMagnitudeBasedNotification (DUPLICATE!)
+      //
+      // Emergency mode activation is the notification itself — the user
+      // is already alerted by the initial push + multi-channel alert.
+      logger.info(`🚨 Emergency notification recorded: M${earthquake.magnitude.toFixed(1)} - ${earthquake.location} (push already sent by caller)`);
     } catch (error) {
       logger.error('Critical notification error:', error);
     }
@@ -280,48 +280,53 @@ class EmergencyModeService {
       // CHANNEL 2: Firebase cloud notifications (works online)
       try {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          const { getDeviceId } = await import('../utils/device');
-          const myDeviceId = await getDeviceId();
+        const { identityService } = await import('./IdentityService');
+        const myUid = identityService.getUid();
 
-          // Send emergency message to each family member
-          const notifyPromises = familyMembers.map(async (member) => {
-            const targetId = member.deviceId || member.id;
-            if (!targetId) return;
-
-            try {
-              await firebaseDataService.saveMessage(myDeviceId, {
-                id: `emergency_${Date.now()}_${targetId}`,
-                fromDeviceId: myDeviceId,
-                toDeviceId: targetId,
-                content: isCritical
-                  ? `🚨 ACİL! M${earthquake.magnitude} deprem: ${earthquake.location}. Güvende misiniz?`
-                  : `⚠️ M${earthquake.magnitude} deprem: ${earthquake.location}. Durumunuzu bildirin.`,
-                timestamp: Date.now(),
-                type: 'emergency',
-                status: 'sent',
-                priority: 'critical',
-              });
-              logger.info(`✅ Notified ${member.name} via Firebase`);
-            } catch (memberError) {
-              logger.warn(`Failed to notify ${member.name} via Firebase:`, memberError);
-            }
-          });
-
-          await Promise.allSettled(notifyPromises);
+        if (!myUid) {
+          logger.warn('Firebase emergency notification skipped: no UID');
+          throw new Error('No UID for emergency notification');
         }
+
+        // Send emergency message to each family member
+        const notifyPromises = familyMembers.map(async (member) => {
+          const targetUid = member.uid;
+          if (!targetUid) return;
+
+          try {
+            await firebaseDataService.saveMessage(myUid, {
+              id: `emergency_${Date.now()}_${targetUid}`,
+              senderUid: myUid,
+              senderName: identityService.getIdentity()?.displayName || '',
+              fromDeviceId: myUid,
+              toDeviceId: targetUid,
+              content: isCritical
+                ? `🚨 ACİL! M${earthquake.magnitude} deprem: ${earthquake.location}. Güvende misiniz?`
+                : `⚠️ M${earthquake.magnitude} deprem: ${earthquake.location}. Durumunuzu bildirin.`,
+              timestamp: Date.now(),
+              type: 'emergency',
+              status: 'sent',
+              priority: 'critical',
+            });
+            logger.info(`✅ Notified ${member.name} via Firebase V3`);
+          } catch (memberError) {
+            logger.warn(`Failed to notify ${member.name} via Firebase:`, memberError);
+          }
+        });
+
+        await Promise.allSettled(notifyPromises);
       } catch (firebaseError) {
         logger.warn('Firebase family notification failed:', firebaseError);
       }
 
       // CHANNEL 3: Push notification to self (shows in notification tray)
       try {
-        const { notificationService } = await import('./NotificationService');
-        await notificationService.showCriticalNotification(
-          isCritical ? '🚨 DEPREM — Aile Üyeleriniz Bilgilendirildi' : '⚠️ DEPREM — Aile Üyeleriniz Bilgilendirildi',
-          `M${earthquake.magnitude} ${earthquake.location}. ${familyMembers.length} aile üyesine acil bildirim gönderildi.`,
-          { sound: 'default', critical: true },
-        );
+        const { notificationCenter } = await import('./notifications/NotificationCenter');
+        await notificationCenter.notify('system', {
+          subtype: 'generic',
+          title: isCritical ? '🚨 DEPREM — Aile Üyeleriniz Bilgilendirildi' : '⚠️ DEPREM — Aile Üyeleriniz Bilgilendirildi',
+          message: `M${earthquake.magnitude} ${earthquake.location}. ${familyMembers.length} aile üyesine acil bildirim gönderildi.`,
+        }, 'EmergencyModeService-family');
       } catch (pushError) {
         logger.warn('Push notification for family alert failed:', pushError);
       }

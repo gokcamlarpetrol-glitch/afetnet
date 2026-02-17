@@ -1,14 +1,20 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActionSheetIOS, Platform } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, FadeInDown } from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
-import { colors, typography, spacing, borderRadius } from '../../theme';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withTiming,
+  FadeInDown,
+} from 'react-native-reanimated';
+
 import * as haptics from '../../utils/haptics';
 import { FamilyMember } from '../../stores/familyStore';
-import { formatLastSeen } from '../../utils/dateUtils';
-import { formatDistance, calculateDistance } from '../../utils/mapUtils';
+import { formatLastSeen, normalizeTimestampMs } from '../../utils/dateUtils';
+import { resolveFamilyMemberLocation } from '../../utils/familyLocation';
 
 interface MemberCardProps {
   member: FamilyMember;
@@ -16,18 +22,39 @@ interface MemberCardProps {
   index: number;
   onEdit?: (member: FamilyMember) => void;
   onDelete?: (memberId: string) => void;
+  onMessage?: (member: FamilyMember) => void;
+  onLocate?: (member: FamilyMember) => void;
 }
 
-export const MemberCard = React.memo(function MemberCard({ member, onPress, index, onEdit, onDelete }: MemberCardProps) {
+export const MemberCard = React.memo(function MemberCard({
+  member, onPress, index, onEdit, onDelete, onMessage, onLocate,
+}: MemberCardProps) {
   const scale = useSharedValue(1);
-  const { color, text } = getStatusRenderInfo(member.status);
-  const [swipeableRef, setSwipeableRef] = useState<Swipeable | null>(null);
+  const { color, text: statusText, icon, bgGradient } = getStatusRenderInfo(member.status);
+
+  // PREMIUM: Pulse animation for critical/need-help status
+  const pulseOpacity = useSharedValue(1);
+  React.useEffect(() => {
+    if (member.status === 'critical' || member.status === 'need-help') {
+      pulseOpacity.value = withRepeat(
+        withTiming(0.4, { duration: 900 }),
+        -1,
+        true,
+      );
+    } else {
+      pulseOpacity.value = withTiming(1, { duration: 200 });
+    }
+  }, [member.status, pulseOpacity]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
+  }));
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
-  const handlePressIn = () => { scale.value = withSpring(0.98); };
+  const handlePressIn = () => { scale.value = withSpring(0.97); };
   const handlePressOut = () => { scale.value = withSpring(1); };
 
   const handlePress = () => {
@@ -35,44 +62,8 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
     onPress();
   };
 
-  const handleLongPress = () => {
-    haptics.impactMedium();
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['İptal', 'Düzenle', 'Sil'],
-          cancelButtonIndex: 0,
-          destructiveButtonIndex: 2,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1 && onEdit) {
-            onEdit(member);
-          } else if (buttonIndex === 2 && onDelete) {
-            handleDelete();
-          }
-        },
-      );
-    } else {
-      Alert.alert(
-        member.name,
-        'Ne yapmak istersiniz?',
-        [
-          { text: 'İptal', style: 'cancel' },
-          {
-            text: 'Düzenle',
-            onPress: () => onEdit && onEdit(member),
-          },
-          {
-            text: 'Sil',
-            style: 'destructive',
-            onPress: handleDelete,
-          },
-        ],
-      );
-    }
-  };
-
   const handleDelete = () => {
+    haptics.notificationError();
     Alert.alert(
       'Üyeyi Sil',
       `${member.name} adlı üyeyi silmek istediğinizden emin misiniz?`,
@@ -81,298 +72,415 @@ export const MemberCard = React.memo(function MemberCard({ member, onPress, inde
         {
           text: 'Sil',
           style: 'destructive',
-          onPress: () => {
-            haptics.notificationError();
-            onDelete && onDelete(member.id);
-            swipeableRef?.close();
-          },
+          onPress: () => onDelete?.(member.uid),
         },
       ],
     );
   };
 
-  const renderRightActions = () => {
-    if (!onDelete) return null;
-
-    return (
-      <View style={styles.rightActions}>
-        <Pressable
-          style={styles.deleteButton}
-          onPress={handleDelete}
-        >
-          <Ionicons name="trash" size={24} color="#fff" />
-          <Text style={styles.deleteButtonText}>Sil</Text>
-        </Pressable>
-      </View>
-    );
-  };
-
-  const renderLeftActions = () => {
-    if (!onEdit) return null;
-
-    return (
-      <View style={styles.leftActions}>
-        <Pressable
-          style={styles.editButton}
-          onPress={() => {
-            haptics.impactLight();
-            onEdit(member);
-            swipeableRef?.close();
-          }}
-        >
-          <Ionicons name="create" size={24} color="#fff" />
-          <Text style={styles.editButtonText}>Düzenle</Text>
-        </Pressable>
-      </View>
-    );
-  };
-
-  // ELITE: Check for valid location - prefer member.location, fallback to member.latitude/longitude
-  const effectiveLatitude = member.location?.latitude ?? member.latitude;
-  const effectiveLongitude = member.location?.longitude ?? member.longitude;
-  const hasLocation = effectiveLatitude !== 0 && effectiveLongitude !== 0 &&
-    !isNaN(effectiveLatitude) && !isNaN(effectiveLongitude);
+  // Location check (live -> legacy -> lastKnown fallback)
+  const resolvedLocation = resolveFamilyMemberLocation(member);
+  const hasLocation = !!resolvedLocation;
+  const locationLabel = resolvedLocation?.source === 'lastKnown'
+    ? 'Son bilinen konum'
+    : 'Konum mevcut';
   const lastSeenText = formatLastSeen(member.lastSeen);
+  const normalizedLastSeen = normalizeTimestampMs(member.lastSeen);
 
-  const cardContent = (
-    <Pressable
-      onPress={handlePress}
-      onLongPress={handleLongPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-    >
-      <LinearGradient colors={[colors.background.secondary, '#1a2436']} style={styles.memberCardGradient}>
-        {/* Header: Name and Status */}
-        <View style={styles.memberHeader}>
-          <View style={styles.memberInfo}>
-            <Text style={styles.memberName}>{member.name}</Text>
-            {/* ELITE: Relationship Badge */}
-            {member.relationship && (
-              <View style={styles.relationshipBadge}>
-                <Ionicons
-                  name={getRelationshipIcon(member.relationship)}
-                  size={12}
-                  color="#64748b"
-                />
-                <Text style={styles.relationshipText}>
-                  {getRelationshipLabel(member.relationship)}
-                </Text>
-              </View>
-            )}
-            <Text style={styles.memberTime}>{lastSeenText}</Text>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: color + '20' }]}>
-            <View style={[styles.statusDot, { backgroundColor: color }]} />
-            <Text style={[styles.statusText, { color }]}>{text}</Text>
-          </View>
-        </View>
+  // Avatar
+  const initial = member.name.charAt(0).toUpperCase();
+  const avatarGradient = getAvatarGradient(member.name);
+  const relationEmoji = member.relationship ? getRelationshipEmoji(member.relationship) : null;
+  const relationLabel = member.relationship ? getRelationshipLabel(member.relationship) : null;
 
-        {/* Location Info */}
-        {hasLocation && (
-          <View style={styles.locationRow}>
-            <Ionicons name="location" size={16} color={colors.text.tertiary} />
-            <Text style={styles.locationText}>
-              Konum: {effectiveLatitude.toFixed(4)}, {effectiveLongitude.toFixed(4)}
-            </Text>
-          </View>
-        )}
-
-        {/* View on Map Button */}
-        <Pressable style={styles.viewMapButton} onPress={handlePress}>
-          <Ionicons name="map-outline" size={16} color={colors.brand.primary} />
-          <Text style={styles.viewMapText}>Haritada Göster</Text>
-        </Pressable>
-      </LinearGradient>
-    </Pressable>
-  );
+  const isOnline = normalizedLastSeen ? normalizedLastSeen > Date.now() - 600000 : false; // active within 10min
 
   return (
-    <Animated.View entering={FadeInDown.delay(index * 100).springify()} style={animatedStyle}>
-      {(onEdit || onDelete) ? (
-        <Swipeable
-          ref={(ref) => setSwipeableRef(ref)}
-          renderRightActions={renderRightActions}
-          renderLeftActions={renderLeftActions}
-          onSwipeableOpen={() => haptics.impactMedium()}
-        >
-          {cardContent}
-        </Swipeable>
-      ) : (
-        cardContent
-      )}
+    <Animated.View entering={FadeInDown.delay(index * 60).springify()} style={animatedStyle}>
+      <Pressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={styles.cardOuter}
+      >
+        {/* Left accent bar */}
+        <LinearGradient
+          colors={bgGradient}
+          style={styles.accentBar}
+        />
+
+        <View style={styles.card}>
+          {/* Top section: Avatar + Info */}
+          <View style={styles.topRow}>
+            {/* Avatar with status indicator */}
+            <View style={styles.avatarContainer}>
+              <Animated.View style={[styles.avatarRing, { borderColor: color }, pulseStyle]}>
+                <LinearGradient
+                  colors={avatarGradient}
+                  style={styles.avatar}
+                >
+                  <Text style={styles.avatarInitial}>{initial}</Text>
+                </LinearGradient>
+              </Animated.View>
+              {/* Online/status dot */}
+              <View style={[styles.statusDot, { backgroundColor: isOnline ? '#22c55e' : '#94a3b8' }]} />
+              {/* Relationship emoji */}
+              {relationEmoji && (
+                <View style={styles.relationBadge}>
+                  <Text style={styles.relationBadgeText}>{relationEmoji}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Info */}
+            <View style={styles.infoSection}>
+              <View style={styles.nameRow}>
+                <Text style={styles.memberName} numberOfLines={1}>{member.name}</Text>
+                {relationLabel && (
+                  <View style={[styles.relationChip, { backgroundColor: color + '14' }]}>
+                    <Text style={[styles.relationChipText, { color }]}>{relationLabel}</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.metaRow}>
+                {/* Status badge */}
+                <View style={[styles.statusBadge, { backgroundColor: color + '14' }]}>
+                  <Ionicons name={icon} size={11} color={color} />
+                  <Text style={[styles.statusText, { color }]}>{statusText}</Text>
+                </View>
+                {/* Time */}
+                <View style={styles.timeBadge}>
+                  <Ionicons name="time-outline" size={10} color="#94a3b8" />
+                  <Text style={styles.timeText}>{lastSeenText}</Text>
+                </View>
+              </View>
+
+              {/* Location indicator */}
+              {hasLocation && (
+                <Pressable
+                  style={styles.locationChip}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onLocate?.(member);
+                  }}
+                >
+                  <Ionicons name="location" size={11} color="#3b82f6" />
+                  <Text style={styles.locationText}>{locationLabel}</Text>
+                  <Ionicons name="chevron-forward" size={10} color="#93c5fd" />
+                </Pressable>
+              )}
+            </View>
+          </View>
+
+          {/* Bottom: Quick action icons */}
+          <View style={styles.actionsRow}>
+            {onMessage && (
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => {
+                  haptics.impactLight();
+                  onMessage(member);
+                }}
+              >
+                <View style={[styles.actionIconCircle, { backgroundColor: '#ede9fe' }]}>
+                  <Ionicons name="chatbubble" size={15} color="#7c3aed" />
+                </View>
+                <Text style={[styles.actionLabel, { color: '#7c3aed' }]}>Mesaj</Text>
+              </Pressable>
+            )}
+            {onLocate && (
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => {
+                  haptics.impactLight();
+                  onLocate(member);
+                }}
+              >
+                <View style={[styles.actionIconCircle, { backgroundColor: '#dbeafe' }]}>
+                  <Ionicons name="navigate" size={15} color="#2563eb" />
+                </View>
+                <Text style={[styles.actionLabel, { color: '#2563eb' }]}>Konum</Text>
+              </Pressable>
+            )}
+            {onEdit && (
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => {
+                  haptics.impactLight();
+                  onEdit(member);
+                }}
+              >
+                <View style={[styles.actionIconCircle, { backgroundColor: '#fef3c7' }]}>
+                  <Ionicons name="create-outline" size={15} color="#d97706" />
+                </View>
+                <Text style={[styles.actionLabel, { color: '#d97706' }]}>Düzenle</Text>
+              </Pressable>
+            )}
+            {onDelete && (
+              <Pressable
+                style={styles.actionBtn}
+                onPress={handleDelete}
+              >
+                <View style={[styles.actionIconCircle, { backgroundColor: '#fee2e2' }]}>
+                  <Ionicons name="trash-outline" size={15} color="#dc2626" />
+                </View>
+                <Text style={[styles.actionLabel, { color: '#dc2626' }]}>Sil</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </Pressable>
     </Animated.View>
   );
 });
 
+// ============================================================================
+// Helper functions
+// ============================================================================
+
 function getStatusRenderInfo(status: FamilyMember['status']) {
   switch (status) {
-    case 'safe': return { color: colors.status.success, text: 'Güvende' };
-    case 'need-help': return { color: colors.status.warning, text: 'Yardım Gerekiyor' };
-    case 'critical': return { color: colors.status.danger, text: 'ACİL DURUM' };
-    default: return { color: colors.text.tertiary, text: 'Bilinmiyor' };
+    case 'safe': return {
+      color: '#22c55e',
+      text: 'Güvende',
+      icon: 'checkmark-circle' as const,
+      bgGradient: ['#22c55e', '#16a34a'] as [string, string],
+    };
+    case 'need-help': return {
+      color: '#f59e0b',
+      text: 'Yardım Lazım',
+      icon: 'warning' as const,
+      bgGradient: ['#f59e0b', '#d97706'] as [string, string],
+    };
+    case 'critical': return {
+      color: '#ef4444',
+      text: 'ACİL DURUM',
+      icon: 'alert-circle' as const,
+      bgGradient: ['#ef4444', '#dc2626'] as [string, string],
+    };
+    default: return {
+      color: '#94a3b8',
+      text: 'Bilinmiyor',
+      icon: 'help-circle' as const,
+      bgGradient: ['#94a3b8', '#64748b'] as [string, string],
+    };
   }
 }
 
-// ELITE: Helper functions for relationship display
-function getRelationshipIcon(relationship: string): keyof typeof Ionicons.glyphMap {
-  const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
-    anne: 'woman',
-    baba: 'man',
-    es: 'heart',
-    kardes: 'people',
-    cocuk: 'happy',
-    akraba: 'home',
-    arkadas: 'person',
-    diger: 'help-circle',
+function getAvatarGradient(name: string): [string, string] {
+  const palettes: [string, string][] = [
+    ['#6366f1', '#4f46e5'],
+    ['#8b5cf6', '#7c3aed'],
+    ['#a855f7', '#9333ea'],
+    ['#ec4899', '#db2777'],
+    ['#f43f5e', '#e11d48'],
+    ['#f59e0b', '#d97706'],
+    ['#10b981', '#059669'],
+    ['#14b8a6', '#0d9488'],
+    ['#3b82f6', '#2563eb'],
+    ['#06b6d4', '#0891b2'],
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return palettes[Math.abs(hash) % palettes.length];
+}
+
+function getRelationshipEmoji(relationship: string): string {
+  const emojis: Record<string, string> = {
+    anne: '👩', baba: '👨', es: '💕', kardes: '👫',
+    cocuk: '👶', akraba: '👥', arkadas: '🤝', diger: '👤',
   };
-  return icons[relationship] || 'person';
+  return emojis[relationship] || '👤';
 }
 
 function getRelationshipLabel(relationship: string): string {
   const labels: Record<string, string> = {
-    anne: 'Anne',
-    baba: 'Baba',
-    es: 'Eş',
-    kardes: 'Kardeş',
-    cocuk: 'Çocuk',
-    akraba: 'Akraba',
-    arkadas: 'Arkadaş',
-    diger: 'Diğer',
+    anne: 'Anne', baba: 'Baba', es: 'Eş', kardes: 'Kardeş',
+    cocuk: 'Çocuk', akraba: 'Akraba', arkadas: 'Arkadaş', diger: 'Diğer',
   };
   return labels[relationship] || relationship;
 }
 
+// ============================================================================
+// Styles
+// ============================================================================
+
 const styles = StyleSheet.create({
-  memberCardGradient: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border.primary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
+  cardOuter: {
+    marginBottom: 10,
+    borderRadius: 18,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+    // Premium shadow
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  memberHeader: {
+  accentBar: {
+    width: 4,
+  },
+  card: {
+    flex: 1,
+    paddingTop: 14,
+    paddingBottom: 8,
+    paddingHorizontal: 14,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  avatarContainer: {
+    position: 'relative',
+  },
+  avatarRing: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 2.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarInitial: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: -0.5,
+  },
+  statusDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2.5,
+    borderColor: '#ffffff',
+  },
+  relationBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -5,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  relationBadgeText: {
+    fontSize: 12,
+  },
+  infoSection: {
+    flex: 1,
+    gap: 5,
+  },
+  nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  memberInfo: {
-    flex: 1,
+    gap: 8,
   },
   memberName: {
-    ...typography.body,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: colors.text.primary,
-    marginBottom: 4,
+    color: '#1e293b',
+    letterSpacing: -0.3,
+    flexShrink: 1,
   },
-  memberTime: {
-    ...typography.small,
-    color: colors.text.secondary,
+  relationChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  relationChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   statusText: {
-    ...typography.small,
+    fontSize: 10,
     fontWeight: '700',
-    fontSize: 12,
   },
-  locationRow: {
+  timeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 12,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border.primary,
+    gap: 3,
+  },
+  timeText: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+  },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#eff6ff',
   },
   locationText: {
-    ...typography.small,
-    color: colors.text.tertiary,
-    flex: 1,
-  },
-  viewMapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border.primary,
-  },
-  viewMapText: {
-    ...typography.body,
-    color: colors.brand.primary,
+    fontSize: 10,
+    color: '#3b82f6',
     fontWeight: '600',
   },
-  rightActions: {
+  // Action buttons
+  actionsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 12,
+    justifyContent: 'space-around',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
   },
-  deleteButton: {
-    backgroundColor: colors.status.danger,
+  actionBtn: {
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+  },
+  actionIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 80,
-    height: '100%',
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    gap: 4,
   },
-  deleteButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  leftActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    marginBottom: 12,
-  },
-  editButton: {
-    backgroundColor: colors.brand.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '100%',
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
-    gap: 4,
-  },
-  editButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  // ELITE: Relationship Badge Styles
-  relationshipBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-    marginBottom: 2,
-  },
-  relationshipText: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '500',
+  actionLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
 });

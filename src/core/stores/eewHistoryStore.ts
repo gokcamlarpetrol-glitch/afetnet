@@ -90,7 +90,7 @@ export const useEEWHistoryStore = create<EEWHistoryState>()(
     persist(
         (set, get) => ({
             events: [],
-            maxEvents: 100,
+            maxEvents: 50, // Reduced from 100 to lower memory & AsyncStorage I/O
 
             addEvent: (event) => {
                 const newEvent: EEWHistoryEvent = {
@@ -105,7 +105,10 @@ export const useEEWHistoryStore = create<EEWHistoryState>()(
                         updatedEvents.splice(state.maxEvents);
                     }
 
-                    logger.info(`EEW event added: M${event.magnitude} ${event.location}`);
+                    // ELITE: Only log M4.0+ to prevent log spam (OOM fix)
+                    if (event.magnitude >= 4.0) {
+                        logger.info(`EEW event added: M${event.magnitude} ${event.location}`);
+                    }
 
                     return { events: updatedEvents };
                 });

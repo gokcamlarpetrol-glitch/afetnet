@@ -32,7 +32,7 @@ interface FamilyMemberData {
   deviceId: string;
   memberId: string;
   name: string;
-  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
+  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped' | 'danger' | 'offline';
   location?: {
     latitude: number;
     longitude: number;
@@ -72,7 +72,7 @@ interface ICEData {
 
 interface StatusUpdateData {
   deviceId: string;
-  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
+  status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped' | 'danger' | 'offline';
   location?: {
     latitude: number;
     longitude: number;

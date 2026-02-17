@@ -6,11 +6,11 @@ dotenv.config();
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "AfetNet - Şebekesiz Acil İletişim",
+  name: "AfetNet - Acil İletişim",
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.2.0",
+  version: "1.3.2",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -35,7 +35,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-font",
     "expo-localization",
-    // SDK 54: expo-av replacement packages
+    // Audio & Video (migrated from deprecated expo-av)
     "expo-audio",
     "expo-video",
     // SDK 54: expo-background-fetch replacement
@@ -56,7 +56,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           "targetSdkVersion": 34,
           "buildToolsVersion": "34.0.0",
           "jsEngine": "hermes", // ELITE SECURITY: Bytecode compilation
-          "kotlinVersion": "1.9.23",
+          "kotlinVersion": "2.1.20",
           "enableProguardInReleaseBuilds": true, // ELITE SECURITY: Obfuscation
         }
       },
@@ -66,7 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "2",
+    buildNumber: "3",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
@@ -94,6 +94,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-peripheral",
       ],
       ITSAppUsesNonExemptEncryption: false,
+      // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: false,
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: {
+          "www.koeri.boun.edu.tr": {
+            NSExceptionAllowsInsecureHTTPLoads: true,
+            NSIncludesSubdomains: false,
+          },
+        },
+      },
       // ELITE: Required URL schemes for WebView and deep linking
       LSApplicationQueriesSchemes: [
         "about",
@@ -118,7 +129,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: "com.gokhancamci.afetnetapp",
-    versionCode: 4,
+    versionCode: 8,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png",
@@ -139,7 +150,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },
-    devClient: true,
+    devClient: false,
     // EEW should default to enabled in release unless explicitly disabled.
     EEW_ENABLED: process.env.EEW_ENABLED ? process.env.EEW_ENABLED === 'true' : true,
     EEW_NATIVE_ALARM: process.env.EEW_NATIVE_ALARM === 'true' ? true : false,
@@ -150,10 +161,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
     FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
-    ORG_SECRET: process.env.ORG_SECRET || '',
+    // SECURITY FIX: ORG_SECRET removed — must never be in client bundle
+    // Use only server-side (Cloud Functions environment config)
     API_BASE_URL: process.env.API_BASE_URL || '', // DEPRECATED: Using Firebase
-    privacyPolicyUrl: "https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/privacy-policy.html",
-    termsOfServiceUrl: "https://raw.githubusercontent.com/gokcamlarpetrol-glitch/afetnet/main/docs/terms-of-service.html",
+    privacyPolicyUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/privacy-policy.html",
+    termsOfServiceUrl: "https://gokcamlarpetrol-glitch.github.io/afetnet/terms-of-service.html",
     supportEmail: "support@afetnet.app",
   },
 });

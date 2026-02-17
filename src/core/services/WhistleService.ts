@@ -3,21 +3,20 @@
  * 4000Hz high-frequency whistle sound - most audible under rubble
  * 3 modes: SOS Morse, Continuous, Vibration+Sound
  * 
- * @note expo-av is used for SDK 53/54 compatibility
+ * @note Uses expo-audio for sound playback
  * Migration to expo-audio planned for SDK 55+
  * Current implementation includes haptic fallback for reliability
  */
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - expo-av deprecated but still functional in SDK 53/54 beta
-import { Audio } from 'expo-av';
+import { setAudioModeAsync, createAudioPlayer } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { logger } from '../utils/logger';
 
 type WhistleMode = 'morse' | 'continuous' | 'vibration';
 
 class WhistleService {
-  private sound: Audio.Sound | null = null;
+  private sound: AudioPlayer | null = null;
   private isPlaying: boolean = false;
   private currentMode: WhistleMode = 'morse';
   private timeoutIds: Set<NodeJS.Timeout> = new Set();
@@ -27,12 +26,9 @@ class WhistleService {
    */
   async initialize() {
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
       });
       // Use haptic feedback instead of audio (more reliable, no audio file needed)
       logger.info('WhistleService initialized (haptic mode)');
@@ -149,16 +145,16 @@ class WhistleService {
 
     try {
       if (this.sound) {
-        // Reset position and play
-        await this.sound.setPositionAsync(0);
-        await this.sound.playAsync();
+        // Reset and play
+        this.sound.seekTo(0);
+        this.sound.play();
 
         // Wait for duration
         await this.wait(duration);
 
         // Stop sound
-        await this.sound.stopAsync();
-        await this.sound.setPositionAsync(0);
+        this.sound.pause();
+        this.sound.seekTo(0);
       }
     } catch (error) {
       logger.error('Beep failed:', error);
@@ -196,14 +192,11 @@ class WhistleService {
   private async playWhistleAudio(mode: WhistleMode) {
     try {
       // ELITE: Load real whistle sound from assets
-      const { sound } = await Audio.Sound.createAsync(
+      const sound = createAudioPlayer(
         require('../../../assets/sounds/whistle.wav'),
-        {
-          shouldPlay: false,
-          isLooping: false,
-          volume: 1.0,
-        },
       );
+      sound.loop = false;
+      sound.volume = 1.0;
 
       this.sound = sound;
 
@@ -285,9 +278,9 @@ class WhistleService {
     // Stop and unload sound
     if (this.sound) {
       try {
-        await this.sound.stopAsync();
-        await this.sound.setPositionAsync(0);
-        await this.sound.unloadAsync();
+        this.sound.pause();
+        this.sound.seekTo(0);
+        this.sound.remove();
       } catch (error) {
         logger.error('WhistleService stop failed:', error);
       }

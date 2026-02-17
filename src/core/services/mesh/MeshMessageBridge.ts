@@ -81,6 +81,18 @@ class MeshMessageBridge {
 
         try {
             this.myDeviceId = await getDeviceId();
+
+            // Retry once if device ID is empty
+            if (!this.myDeviceId) {
+                logger.warn('Device ID empty on first attempt, retrying...');
+                await new Promise(r => setTimeout(r, 500));
+                this.myDeviceId = await getDeviceId();
+            }
+
+            if (!this.myDeviceId) {
+                logger.warn('Device ID could not be resolved - own-message deduplication will be unreliable');
+            }
+
             await this.loadSeenIds();
 
             // Subscribe to mesh messages
@@ -93,7 +105,7 @@ class MeshMessageBridge {
             this.startSyncLoop();
 
             this.isInitialized = true;
-            logger.info('Mesh Message Bridge initialized');
+            logger.info(`Mesh Message Bridge initialized (deviceId=${this.myDeviceId ? 'OK' : 'EMPTY'})`);
         } catch (error) {
             logger.error('Failed to initialize bridge:', error);
         }
@@ -265,13 +277,19 @@ class MeshMessageBridge {
     private async syncToCloud(message: BridgedMessage): Promise<void> {
         try {
             const { firebaseDataService } = await import('../FirebaseDataService');
+            const { identityService } = await import('../IdentityService');
 
-            if (!firebaseDataService.isInitialized) {
-                return;
-            }
+            try {
+                await firebaseDataService.initialize();
+            } catch { /* best effort */ }
 
-            await firebaseDataService.saveMessage(this.myDeviceId, {
+            // V3: Use UID instead of device ID
+            const uid = identityService.getUid() || this.myDeviceId;
+
+            await firebaseDataService.saveMessage(uid, {
                 id: message.meshId || message.id,
+                senderUid: message.senderId,
+                senderName: message.senderName || '',
                 fromDeviceId: message.senderId,
                 toDeviceId: message.recipientId || 'mesh_broadcast',
                 content: message.content,

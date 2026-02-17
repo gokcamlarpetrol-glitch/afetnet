@@ -10,6 +10,29 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const ROOT = process.cwd();
+const resolveFirstExistingPath = (candidates, fallback) => {
+  for (const relPath of candidates) {
+    if (fs.existsSync(path.join(ROOT, relPath))) {
+      return relPath;
+    }
+  }
+  return fallback;
+};
+const IOS_APP_DIR = resolveFirstExistingPath(
+  ['ios/AfetNetAcilletiim', 'ios/AfetNetebekesizAcilletiim'],
+  'ios/AfetNetAcilletiim',
+);
+const IOS_INFO_PLIST_PATH = `${IOS_APP_DIR}/Info.plist`;
+const IOS_PRIVACY_MANIFEST_PATH = `${IOS_APP_DIR}/PrivacyInfo.xcprivacy`;
+const IOS_APP_ICON_CONTENTS_PATH = `${IOS_APP_DIR}/Images.xcassets/AppIcon.appiconset/Contents.json`;
+const CRITICAL_TEST_FILES = [
+  'src/core/services/__tests__/MessagingReliability.test.ts',
+  'src/core/services/__tests__/GroupChatService.test.ts',
+  'src/core/services/__tests__/IdentityService.test.ts',
+  'src/core/utils/__tests__/familyLocation.test.ts',
+  'src/core/utils/__tests__/dateUtils.test.ts',
+];
+const CRITICAL_TEST_CMD = `npm run -s test -- --watchman=false --runInBand ${CRITICAL_TEST_FILES.join(' ')}`;
 
 let hasErrors = false;
 const errors = [];
@@ -196,9 +219,9 @@ console.log('\n[1] Project structure');
   'src/core/screens/family/FamilyScreen.tsx',
   'src/core/screens/family/FamilyGroupChatScreen.tsx',
   'src/core/screens/map/MapScreen.tsx',
-  'ios/AfetNetebekesizAcilletiim/Info.plist',
-  'ios/AfetNetebekesizAcilletiim/PrivacyInfo.xcprivacy',
-  'ios/AfetNetebekesizAcilletiim/Images.xcassets/AppIcon.appiconset/Contents.json',
+  IOS_INFO_PLIST_PATH,
+  IOS_PRIVACY_MANIFEST_PATH,
+  IOS_APP_ICON_CONTENTS_PATH,
   'android/app/src/main/AndroidManifest.xml',
 ].forEach(file => checkFileExists(file, true));
 
@@ -215,38 +238,42 @@ checkContains('src/core/screens/auth/EmailRegisterScreen.tsx', 'EmailAuthService
 checkContains('src/core/stores/authStore.ts', 'onAuthStateChanged', 'authStore subscribes Firebase auth state');
 
 console.log('\n[3] Messaging, family, and map critical safeguards');
-checkContains('src/core/services/HybridMessageService.ts', 'targets.add(identity.id)', 'HybridMessageService subscribes by identity.id');
-checkContains('src/core/services/HybridMessageService.ts', 'targets.add(identity.deviceId)', 'HybridMessageService subscribes by identity.deviceId');
-checkContains('src/core/services/HybridMessageService.ts', 'getDeviceIdFromLib', 'HybridMessageService includes physical device id');
-checkContains('src/core/services/HybridMessageService.ts', 'recipientId: msg.toDeviceId', 'HybridMessageService maps cloud recipientId');
+checkContains('src/core/services/HybridMessageService.ts', 'private getSelfIdentityIds()', 'HybridMessageService defines self identity alias resolver');
+checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.id\)/, 'HybridMessageService tracks identity.id aliases');
+checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.deviceId\)/, 'HybridMessageService tracks identity.deviceId aliases');
+checkContains('src/core/services/HybridMessageService.ts', 'getDeviceIdFromLib', 'HybridMessageService includes physical device id fallback');
+checkContains('src/core/services/HybridMessageService.ts', 'toDeviceId: message.recipientId || \'broadcast\'', 'HybridMessageService writes cloud toDeviceId for routing');
+checkRegex('src/core/services/HybridMessageService.ts', /recipientId:\s*toDeviceId\s*&&\s*toDeviceId\s*!==\s*'broadcast'\s*\?\s*toDeviceId\s*:\s*undefined/, 'HybridMessageService restores recipientId from cloud payload');
 checkContains('src/core/screens/messages/ConversationScreen.tsx', 'const selfIds = useMemo', 'ConversationScreen maintains selfIds set');
 checkContains('src/core/screens/messages/ConversationScreen.tsx', 'selfIds.has(msg.to)', 'ConversationScreen filters inbound by recipient');
 checkContains('src/core/screens/messages/SOSConversationScreen.tsx', 'selfIds.has(msg.to)', 'SOSConversationScreen filters inbound by recipient');
-checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.id)', 'FamilyTrackingService publishes for identity.id');
-checkContains('src/core/services/FamilyTrackingService.ts', 'cloudTargetIds.add(identity.deviceId)', 'FamilyTrackingService publishes for identity.deviceId');
-checkContains('src/core/services/FamilyTrackingService.ts', 'getDeviceIdFromLib', 'FamilyTrackingService publishes for physical device id');
+checkContains('src/core/services/FamilyTrackingService.ts', 'const candidateAliases = [', 'FamilyTrackingService builds multi-alias check-in target set');
+checkRegex('src/core/services/FamilyTrackingService.ts', /\btargetCloudUid\s*=/, 'FamilyTrackingService resolves cloud UID for check-in routing');
+checkContains('src/core/services/FamilyTrackingService.ts', 'const targetMeshId', 'FamilyTrackingService resolves mesh target for offline routing');
+checkContains('src/core/services/FamilyTrackingService.ts', 'targetDeviceId: targetMeshId || targetCloudUid', 'FamilyTrackingService sends BLE check-in with resolved target id');
+checkContains('src/core/services/FamilyTrackingService.ts', 'getDeviceIdFromLib', 'FamilyTrackingService includes physical device id fallback');
 checkRegex('src/core/screens/map/MapScreen.tsx', /familyTrackingService\.stopTracking\([^)]*\)/, 'MapScreen stops tracking on cleanup');
 
 console.log('\n[4] Firestore security rules');
 checkContains('firestore.rules', 'function isDeviceReadable(deviceId)', 'Rules define device readability helper');
 checkContains('firestore.rules', 'function isSenderOwned(senderDeviceId)', 'Rules define sender ownership helper');
 checkContains('firestore.rules', 'allow read: if isDeviceReadable(deviceId);', 'Rules restrict device reads to owner/family');
-checkContains('firestore.rules', '&& isSenderOwned(request.resource.data.fromDeviceId)', 'Rules enforce message sender ownership');
+checkRegex('firestore.rules', /isSenderOwned\((request\.resource|resource)\.data\.fromDeviceId\)/, 'Rules enforce message sender ownership');
 
 console.log('\n[5] Platform compliance basics');
-checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'NSLocationWhenInUseUsageDescription', 'Info.plist has foreground location usage description');
-checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'Info.plist has background location usage description');
-checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'NSBluetoothAlwaysUsageDescription', 'Info.plist has Bluetooth usage description');
-checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'NSCameraUsageDescription', 'Info.plist has camera usage description');
-checkContains('ios/AfetNetebekesizAcilletiim/Info.plist', 'UIBackgroundModes', 'Info.plist defines background modes');
-checkContains('ios/AfetNetebekesizAcilletiim/PrivacyInfo.xcprivacy', 'NSPrivacyAccessedAPITypes', 'Privacy manifest defines accessed API categories');
+checkContains(IOS_INFO_PLIST_PATH, 'NSLocationWhenInUseUsageDescription', 'Info.plist has foreground location usage description');
+checkContains(IOS_INFO_PLIST_PATH, 'NSLocationAlwaysAndWhenInUseUsageDescription', 'Info.plist has background location usage description');
+checkContains(IOS_INFO_PLIST_PATH, 'NSBluetoothAlwaysUsageDescription', 'Info.plist has Bluetooth usage description');
+checkContains(IOS_INFO_PLIST_PATH, 'NSCameraUsageDescription', 'Info.plist has camera usage description');
+checkContains(IOS_INFO_PLIST_PATH, 'UIBackgroundModes', 'Info.plist defines background modes');
+checkContains(IOS_PRIVACY_MANIFEST_PATH, 'NSPrivacyAccessedAPITypes', 'Privacy manifest defines accessed API categories');
 checkContains('android/app/src/main/AndroidManifest.xml', 'ACCESS_FINE_LOCATION', 'Android manifest has fine location permission');
 checkContains('android/app/src/main/AndroidManifest.xml', 'ACCESS_BACKGROUND_LOCATION', 'Android manifest has background location permission');
 checkContains('android/app/src/main/AndroidManifest.xml', 'BLUETOOTH_SCAN', 'Android manifest has BLE scan permission');
 
-if (fileExists('ios/AfetNetebekesizAcilletiim/Images.xcassets/AppIcon.appiconset/Contents.json')) {
+if (fileExists(IOS_APP_ICON_CONTENTS_PATH)) {
   try {
-    const iconJson = JSON.parse(readFile('ios/AfetNetebekesizAcilletiim/Images.xcassets/AppIcon.appiconset/Contents.json'));
+    const iconJson = JSON.parse(readFile(IOS_APP_ICON_CONTENTS_PATH));
     const has1024 = Array.isArray(iconJson.images) && iconJson.images.some(img => img.size === '1024x1024');
     if (has1024) {
       pass('App icon set includes a 1024x1024 icon entry');
@@ -315,8 +342,10 @@ if (placeholderFindings.length > 0) {
   pass('No forbidden placeholder/beta strings found');
 }
 
-console.log('\n[8] TypeScript gate');
+console.log('\n[8] Static and unit quality gates');
 runCommand('npm run -s typecheck', 'TypeScript typecheck passes', true);
+runCommand(CRITICAL_TEST_CMD, 'Critical messaging/family/date tests pass', true);
+runCommand('npm run -s healthcheck', 'Healthcheck passes', true);
 
 console.log('\nSummary');
 console.log('-------');

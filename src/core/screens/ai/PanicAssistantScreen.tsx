@@ -238,7 +238,7 @@ export default function PanicAssistantScreen() {
 
   return (
     <ImageBackground
-      source={require('../../../assets/images/premium/red_panic_bg.png')}
+      source={require('../../../../assets/images/premium/red_panic_bg.png')}
       style={styles.container}
       resizeMode="cover"
     >

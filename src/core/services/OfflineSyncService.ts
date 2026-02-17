@@ -113,8 +113,14 @@ class OfflineSyncService {
   private async startSync() {
     if (this.isSyncing || !this.isOnline) return;
 
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
+    }
+
     this.isSyncing = true;
     logger.info(`Starting sync. Queue size: ${this.queue.length}`);
+    let nextRetryDelayMs: number | null = null;
 
     // ELITE: Sort by priority (Critical > High > Normal)
     const priorityMap = { critical: 3, high: 2, normal: 1 };
@@ -146,6 +152,12 @@ class OfflineSyncService {
           // Drop permanently failing items to prevent blocking
           this.queue = this.queue.filter(qItem => qItem.id !== item.id);
           await this.saveQueue();
+        } else {
+          const delay = Math.min(
+            INITIAL_RETRY_DELAY_MS * Math.pow(2, Math.max(0, item.retryCount - 1)),
+            60_000,
+          );
+          nextRetryDelayMs = nextRetryDelayMs === null ? delay : Math.min(nextRetryDelayMs, delay);
         }
       }
     }
@@ -155,33 +167,38 @@ class OfflineSyncService {
 
     this.isSyncing = false;
     logger.info(`Sync complete.`);
+
+    const hasPending = this.queue.some(item => !item.synced);
+    if (hasPending && this.isOnline) {
+      const delayMs = nextRetryDelayMs ?? INITIAL_RETRY_DELAY_MS;
+      this.syncTimer = setTimeout(() => {
+        this.syncTimer = null;
+        void this.startSync();
+      }, delayMs);
+      logger.info(`Scheduled next offline sync retry in ${delayMs}ms`);
+    }
   }
 
   // ... [Keep existing syncItem implementation but robustify] ...
   private async syncItem(item: SyncItem): Promise<void> {
+    // V3: Resolve UID for all operations
+    const { identityService } = await import('./IdentityService');
+    const uid = identityService.getUid() || useMeshStore.getState().myDeviceId || 'unknown';
+
     switch (item.type) {
       case 'message': {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        await firebaseDataService.saveMessage(
-          useMeshStore.getState().myDeviceId || 'unknown',
-          item.data,
-        );
+        await firebaseDataService.saveMessage(uid, item.data);
         break;
       }
       case 'location': {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        await firebaseDataService.saveLocationUpdate(
-          useMeshStore.getState().myDeviceId || 'unknown',
-          item.data,
-        );
+        await firebaseDataService.saveLocationUpdate(uid, item.data);
         break;
       }
       case 'status': {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        await firebaseDataService.saveStatusUpdate(
-          useMeshStore.getState().myDeviceId || 'unknown',
-          item.data,
-        );
+        await firebaseDataService.saveStatusUpdate(uid, item.data);
         break;
       }
       case 'sos': {
@@ -192,12 +209,11 @@ class OfflineSyncService {
       case 'save':
       case 'update': {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        const ownerDeviceId = item.data?.ownerDeviceId || useMeshStore.getState().myDeviceId || 'unknown';
         const member = item.data?.member;
-        if (!member || ownerDeviceId === 'unknown') {
+        if (!member || uid === 'unknown') {
           throw new Error(`Invalid ${item.type} payload for family sync`);
         }
-        const ok = await firebaseDataService.saveFamilyMember(ownerDeviceId, member);
+        const ok = await firebaseDataService.saveFamilyMember(uid, member);
         if (!ok) {
           throw new Error(`Family ${item.type} sync returned false`);
         }
@@ -205,12 +221,11 @@ class OfflineSyncService {
       }
       case 'delete': {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        const ownerDeviceId = item.data?.ownerDeviceId || useMeshStore.getState().myDeviceId || 'unknown';
         const memberId = item.data?.memberId;
-        if (!memberId || ownerDeviceId === 'unknown') {
+        if (!memberId || uid === 'unknown') {
           throw new Error('Invalid delete payload for family sync');
         }
-        const ok = await firebaseDataService.deleteFamilyMember(ownerDeviceId, memberId);
+        const ok = await firebaseDataService.deleteFamilyMember(uid, memberId);
         if (!ok) {
           throw new Error('Family delete sync returned false');
         }
@@ -260,7 +275,8 @@ class OfflineSyncService {
 
   destroy() {
     if (this.unsubscribeNetInfo) this.unsubscribeNetInfo();
-    if (this.syncTimer) clearInterval(this.syncTimer);
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = null;
   }
 }
 

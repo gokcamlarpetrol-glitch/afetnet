@@ -9,18 +9,18 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { Camera } from 'expo-camera';
 import * as Contacts from 'expo-contacts';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, getRecordingPermissionsAsync } from 'expo-audio';
 
 const logger = createLogger('PermissionService');
 
 // ELITE: Permission status interface
 export interface PermissionStatus {
-    location: boolean;
-    locationBackground: boolean;
-    notification: boolean;
-    camera: boolean;
-    contacts: boolean;
-    microphone: boolean;
+  location: boolean;
+  locationBackground: boolean;
+  notification: boolean;
+  camera: boolean;
+  contacts: boolean;
+  microphone: boolean;
 }
 
 // ELITE: Default permission status
@@ -168,7 +168,7 @@ class PermissionService {
   // ==================== MICROPHONE ====================
   async requestMicrophonePermission(): Promise<boolean> {
     try {
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status } = await requestRecordingPermissionsAsync();
       this.cachedStatus.microphone = status === 'granted';
       if (this.cachedStatus.microphone) {
         logger.info('Microphone permission granted');
@@ -184,7 +184,7 @@ class PermissionService {
 
   async checkMicrophonePermission(): Promise<boolean> {
     try {
-      const { status } = await Audio.getPermissionsAsync();
+      const { status } = await getRecordingPermissionsAsync();
       this.cachedStatus.microphone = status === 'granted';
       return this.cachedStatus.microphone;
     } catch (error) {

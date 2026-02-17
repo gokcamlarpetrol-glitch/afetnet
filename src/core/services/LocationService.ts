@@ -110,7 +110,7 @@ class LocationService {
         const { firebaseDataService } = await import('./FirebaseDataService');
         const { getDeviceId } = await import('../../lib/device');
 
-        if (firebaseDataService?.isInitialized) {
+        if (firebaseDataService) {
           const deviceId = await getDeviceId();
           if (deviceId) {
             // ELITE: Save location update to Firebase (fire and forget - don't block return)
@@ -281,7 +281,7 @@ class LocationService {
               const { firebaseDataService } = await import('./FirebaseDataService');
               const { getDeviceId } = await import('../../lib/device');
 
-              if (firebaseDataService?.isInitialized) {
+              if (firebaseDataService) {
                 const deviceId = await getDeviceId();
                 if (deviceId) {
                   // ELITE: Save location update to Firebase (fire and forget - don't block callback)

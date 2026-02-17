@@ -32,7 +32,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
-import { ultraFastEEWNotification, EEWNotificationConfig } from './UltraFastEEWNotification';
+import { notificationCenter } from './notifications/NotificationCenter';
 import { useEarthquakeStore } from '../stores/earthquakeStore';
 
 const logger = createLogger('RealtimeEarthquakeMonitor');
@@ -566,7 +566,16 @@ class RealtimeEarthquakeMonitorService {
         const eventKey = this.generateEventKey(event);
         this.seenEvents.set(eventKey, event);
 
-        logger.info(`🆕 New earthquake: M${event.magnitude.toFixed(1)} ${event.location} (${event.source})`);
+        // ELITE: Cap seenEvents to prevent unbounded memory growth (OOM fix)
+        if (this.seenEvents.size > 200) {
+            const keysToDelete = Array.from(this.seenEvents.keys()).slice(0, 100);
+            keysToDelete.forEach(k => this.seenEvents.delete(k));
+        }
+
+        // ELITE: Only log M3.0+ to prevent log spam
+        if (event.magnitude >= 3.0) {
+            logger.info(`🆕 New earthquake: M${event.magnitude.toFixed(1)} ${event.location} (${event.source})`);
+        }
 
         // For major earthquakes (M >= 5.0), alert immediately
         // For smaller ones, wait for verification
@@ -577,16 +586,18 @@ class RealtimeEarthquakeMonitorService {
             this.pendingVerification.set(eventKey, event);
 
             // Check after delay if still unverified
+            // PRODUCTION FIX: Increased window to 60s and threshold to M5.0+
+            // M4.0 unverified single-source alerts were a significant spam source
             setTimeout(() => {
                 const pending = this.pendingVerification.get(eventKey);
                 if (pending && !pending.verified) {
-                    // If still only 1 source but magnitude is notable, alert anyway
-                    if (pending.magnitude >= 4.0) {
+                    // Only alert unverified if magnitude is significant (M5.0+)
+                    if (pending.magnitude >= 5.0) {
                         this.triggerAlert(pending);
                     }
                     this.pendingVerification.delete(eventKey);
                 }
-            }, 30000); // 30 second verification window
+            }, 60000); // 60 second verification window
         }
     }
 
@@ -645,21 +656,18 @@ class RealtimeEarthquakeMonitorService {
         }
 
         // Prepare notification config
-        const config: EEWNotificationConfig = {
+        const notifData = {
             magnitude: event.magnitude,
             location: event.location,
-            warningSeconds,
-            estimatedIntensity: this.estimateIntensity(event.magnitude, epicentralDistance),
-            epicentralDistance,
-            source: event.source as any,
-            epicenter: {
-                latitude: event.latitude,
-                longitude: event.longitude,
-            },
+            timestamp: event.time,
+            latitude: event.latitude,
+            longitude: event.longitude,
+            depth: event.depth,
+            source: event.source,
         };
 
-        // Send notification
-        const result = await ultraFastEEWNotification.sendEEWNotification(config);
+        // Send notification through unified center
+        const result = await notificationCenter.notify('earthquake', notifData, 'RealtimeEarthquakeMonitor');
 
         // Update earthquake store - add new earthquake to existing items
         const store = useEarthquakeStore.getState();
@@ -686,7 +694,7 @@ class RealtimeEarthquakeMonitorService {
             magnitude: event.magnitude,
             source: event.source,
             verified: event.verified,
-            delivery_time_ms: result.deliveryTimeMs,
+            delivery_time_ms: result.delivered ? 0 : -1,
         });
     }
 
@@ -815,8 +823,10 @@ class RealtimeEarthquakeMonitorService {
      */
     private async saveSeenEvents(): Promise<void> {
         try {
-            const events = Array.from(this.seenEvents.entries());
-            await AsyncStorage.setItem(STORAGE_KEYS.SEEN_EVENTS, JSON.stringify(events));
+            // ELITE: Only save last 100 events to prevent AsyncStorage bloat (OOM fix)
+            const allEntries = Array.from(this.seenEvents.entries());
+            const recentEntries = allEntries.slice(-100);
+            await AsyncStorage.setItem(STORAGE_KEYS.SEEN_EVENTS, JSON.stringify(recentEntries));
         } catch (e) {
             logger.debug('Failed to save seen events:', e);
         }

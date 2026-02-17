@@ -33,21 +33,37 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { contactService } from '../../services/ContactService';
 import { identityService } from '../../services/IdentityService';
+import { firebaseDataService } from '../../services/FirebaseDataService';
+import { useFamilyStore } from '../../stores/familyStore';
+import { formatLastSeen } from '../../utils/dateUtils';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { MainStackParamList } from '../../types/navigation';
+import { styles } from './NewMessageScreen.styles';
 
 const logger = createLogger('NewMessageScreen');
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+
+const SELF_ACCOUNT_WARNING_TITLE = 'Aynı Hesap Tespit Edildi';
+const SELF_ACCOUNT_WARNING_MESSAGE =
+  'Bu cihazda zaten aynı Apple/Firebase hesabı açık. Aynı hesapla kendinizle sohbet başlatamazsınız. ' +
+  'Mesaj testleri için ikinci telefonda farklı bir hesap kullanın.';
+const toNormalizedId = (value?: string | null): string => {
+  if (!value) return '';
+  return value.trim();
+};
 
 // ELITE: Type-safe navigation props
+type NewMessageNavigationProp = StackNavigationProp<MainStackParamList, 'NewMessage'>;
 interface NewMessageScreenProps {
-  navigation: {
-    navigate: (screen: string, params?: Record<string, unknown>) => void;
-    goBack: () => void;
-  };
+  navigation: NewMessageNavigationProp;
 }
 
 export default function NewMessageScreen({ navigation }: NewMessageScreenProps) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
-  const [activeTab, setActiveTab] = useState<'qr' | 'id' | 'scan'>('qr');
+  const [activeTab, setActiveTab] = useState<'qr' | 'id' | 'scan' | 'contacts'>('contacts');
+  const [contactSearch, setContactSearch] = useState('');
+  const familyMembers = useFamilyStore((state) => state.members);
   const [deviceId, setDeviceId] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [scannedDevices, setScannedDevices] = useState<Array<{ deviceId: string; name?: string; rssi?: number }>>([]);
@@ -56,11 +72,13 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [qrValue, setQrValue] = useState<string | null>(null);
+  const [qrScanLocked, setQrScanLocked] = useState(false);
   const isScanningRef = useRef(isScanning);
   const scanCountdownStateRef = useRef(0);
   const discoveryUnsubscribeRef = useRef<(() => void) | null>(null);
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const scanCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const qrScanCooldownRef = useRef<NodeJS.Timeout | null>(null);
   const scannedDevicesRef = useRef(0);
   const initRequestedRef = useRef(false);
   const [scanCountdown, setScanCountdown] = useState(0);
@@ -68,9 +86,10 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   const meshStoreDeviceId = useMeshStore((state) => state.myDeviceId);
 
   const tabOptions = useMemo<
-    ReadonlyArray<{ key: 'qr' | 'id' | 'scan'; label: string; icon: keyof typeof Ionicons.glyphMap }>
+    ReadonlyArray<{ key: 'qr' | 'id' | 'scan' | 'contacts'; label: string; icon: keyof typeof Ionicons.glyphMap }>
   >(
     () => [
+      { key: 'contacts', label: 'Kişiler', icon: 'people' },
       { key: 'qr', label: 'QR Kod', icon: 'qr-code' },
       { key: 'id', label: 'ID ile Ekle', icon: 'key-outline' },
       { key: 'scan', label: 'Tarama', icon: 'bluetooth' },
@@ -108,6 +127,34 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   useEffect(() => {
     myDeviceIdRef.current = myDeviceId;
   }, [myDeviceId]);
+
+  const selfIdCandidates = useMemo(() => {
+    const ids = new Set<string>();
+    const add = (value?: string | null) => {
+      const normalized = toNormalizedId(value);
+      if (!normalized) return;
+      ids.add(normalized);
+    };
+
+    add(myDeviceId);
+    add(meshStoreDeviceId);
+    add(identityService.getUid());
+
+    const identity = identityService.getIdentity();
+    add(identity?.uid);
+
+    return ids;
+  }, [meshStoreDeviceId, myDeviceId]);
+
+  const getPreferredMemberTargetId = useCallback((member: { uid?: string; deviceId?: string }): string => {
+    const uid = toNormalizedId(member.uid);
+    if (uid) return uid;
+
+    const device = toNormalizedId(member.deviceId);
+    if (device) return device;
+
+    return '';
+  }, []);
 
   const ensureMeshReady = useCallback(async (): Promise<string | null> => {
     const meshStore = useMeshStore.getState();
@@ -194,6 +241,17 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     setIsScanning((prev) => (prev ? false : prev));
     setScanCountdown((prev) => (prev !== 0 ? 0 : prev));
     scannedDevicesRef.current = 0;
+  }, []);
+
+  const lockQrScanner = useCallback((cooldownMs: number = 1800) => {
+    setQrScanLocked(true);
+    if (qrScanCooldownRef.current) {
+      clearTimeout(qrScanCooldownRef.current);
+    }
+    qrScanCooldownRef.current = setTimeout(() => {
+      setQrScanLocked(false);
+      qrScanCooldownRef.current = null;
+    }, cooldownMs);
   }, []);
 
   const startBLEScan = useCallback(async () => {
@@ -348,6 +406,10 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
 
     return () => {
       stopBLEScan();
+      if (qrScanCooldownRef.current) {
+        clearTimeout(qrScanCooldownRef.current);
+        qrScanCooldownRef.current = null;
+      }
     };
   }, [ensureMeshReady, stopBLEScan]);
 
@@ -364,71 +426,145 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   }, [activeTab, startBLEScan, stopBLEScan]);
 
   const handleQRScan = async ({ data }: { data: string }) => {
+    if (qrScanLocked) {
+      return;
+    }
+    lockQrScanner();
+
     try {
       // ELITE: Use IdentityService to parse QR and ContactService to save
-      const payload = identityService.parseQRPayload(data);
+      const rawData = typeof data === 'string' ? data.trim() : '';
+      let payload = await identityService.parseQRPayload(rawData);
 
-      if (payload && payload.id) {
-        // Save contact to Firebase via ContactService
-        await contactService.addContactFromQR(data);
+      if (!payload && rawData) {
+        try {
+          const decoded = decodeURIComponent(rawData);
+          if (decoded !== rawData) {
+            payload = await identityService.parseQRPayload(decoded);
+          }
+        } catch {
+          // best effort fallback
+        }
+      }
+
+      if (payload && payload.uid) {
+        const payloadCandidates = [payload.uid]
+          .map((value) => toNormalizedId(value))
+          .filter((value) => value.length > 0);
+        if (payloadCandidates.some((value) => selfIdCandidates.has(value))) {
+          Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+          return;
+        }
+
+        // CRITICAL FIX: Wrap addContactFromQR in its own try-catch so that
+        // a Firebase/network error doesn't prevent starting the conversation.
+        try {
+          await contactService.addContactFromQR(rawData);
+        } catch (contactError) {
+          logger.warn('addContactFromQR failed (continuing to conversation):', contactError);
+          // Contact save failed but we can still open conversation
+        }
+
+        // Use the best available ID for conversation
+        const targetId = payload.uid;
 
         haptics.notificationSuccess();
-        startConversation(payload.id);
+        await startConversation(targetId);
 
         Alert.alert(
           'Kişi Eklendi ✅',
           `${payload.name || 'Yeni kişi'} başarıyla kaydedildi.`
         );
       } else {
-        // Fallback: try legacy format
-        const parsed = JSON.parse(data);
-        const scannedId = parsed.deviceId || parsed.id || data;
+        // Fallback: try legacy format or raw ID
+        try {
+          const parsed = JSON.parse(data);
+          const scannedId = parsed.deviceId || parsed.id || parsed.uid || rawData;
 
-        if (isValidDeviceId(scannedId)) {
-          haptics.notificationSuccess();
-          startConversation(scannedId);
-        } else {
-          Alert.alert('Geçersiz QR Kod', 'Bu QR kod geçerli bir cihaz ID\'si içermiyor.');
+          if (scannedId && typeof scannedId === 'string' && scannedId.length >= 4) {
+            const normalizedScannedId = scannedId.trim();
+            if (selfIdCandidates.has(normalizedScannedId)) {
+              Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+              return;
+            }
+            haptics.notificationSuccess();
+            await startConversation(normalizedScannedId);
+          } else {
+            Alert.alert('Geçersiz QR Kod', 'Bu QR kod geçerli bir kullanıcı bilgisi içermiyor.');
+          }
+        } catch {
+          // Not JSON — try as raw ID string
+          if (rawData.length >= 4) {
+            if (selfIdCandidates.has(rawData)) {
+              Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+              return;
+            }
+            haptics.notificationSuccess();
+            await startConversation(rawData);
+          } else {
+            Alert.alert('Geçersiz QR Kod', 'QR kod okunamadı.');
+          }
         }
       }
     } catch (error) {
-      // Try direct device ID
-      if (isValidDeviceId(data)) {
+      logger.error('QR scan error:', error);
+      // CRITICAL FIX: Accept any string with length >= 4 as potential ID
+      const trimmedData = data?.trim();
+      if (trimmedData && trimmedData.length >= 4) {
+        if (selfIdCandidates.has(trimmedData)) {
+          Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+          return;
+        }
         haptics.notificationSuccess();
-        startConversation(data);
+        await startConversation(trimmedData);
       } else {
         Alert.alert('Geçersiz QR Kod', 'QR kod okunamadı.');
       }
     }
   };
 
+  // CRITICAL FIX: Accept broader ID formats — Firebase UID, publicUserCode, AFN-*
+  const isValidContactId = (id: string): boolean => {
+    if (!id || typeof id !== 'string') return false;
+    const trimmed = id.trim();
+    // AFN-XXXXXXXX format
+    if (isValidDeviceId(trimmed)) return true;
+    // Firebase UID format (alphanumeric, 20-40 chars)
+    if (/^[a-zA-Z0-9]{20,40}$/.test(trimmed)) return true;
+    // publicUserCode format (alphanumeric with dashes, min 4 chars)
+    if (/^[a-zA-Z0-9-]{4,}$/.test(trimmed)) return true;
+    return false;
+  };
+
   const handleManualAdd = () => {
-    if (!deviceId.trim()) {
-      Alert.alert('Hata', 'Lütfen bir cihaz ID girin.');
+    const trimmedDeviceId = deviceId.trim();
+    if (!trimmedDeviceId) {
+      Alert.alert('Hata', 'Lütfen bir kullanıcı ID girin.');
       return;
     }
 
-    if (!isValidDeviceId(deviceId.trim())) {
-      Alert.alert('Geçersiz ID', 'Lütfen geçerli bir cihaz ID girin.');
+    if (!isValidContactId(trimmedDeviceId)) {
+      Alert.alert('Geçersiz ID', 'Lütfen geçerli bir kullanıcı ID girin (AFN-XXXXXXXX veya Firebase UID).');
       return;
     }
 
-    if (deviceId.trim() === myDeviceId) {
-      Alert.alert('Hata', 'Kendi ID\'nizi giremezsiniz.');
+    if (selfIdCandidates.has(trimmedDeviceId)) {
+      Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
       return;
     }
 
     haptics.impactMedium();
-    startConversation(deviceId.trim());
+    startConversation(trimmedDeviceId);
   };
 
   const handleDeviceSelect = (selectedDeviceId: string) => {
-    if (selectedDeviceId === myDeviceId) {
-      Alert.alert('Hata', 'Kendi cihazınızı seçemezsiniz.');
+    const normalizedTarget = selectedDeviceId.trim();
+    if (selfIdCandidates.has(normalizedTarget)) {
+      Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
       return;
     }
     haptics.impactMedium();
-    startConversation(selectedDeviceId);
+    startConversation(normalizedTarget);
   };
 
   const handleCopyId = useCallback(async (explicitId?: string) => {
@@ -459,35 +595,358 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     },
   ], [handleCopyId, isMeshConnected, meshStoreDeviceId, myDeviceId, scannedDevices.length]);
 
+  const resolveConversationTargetId = useCallback((rawId: string): string => {
+    const trimmed = rawId.trim();
+    if (!trimmed) return '';
+    if (UID_REGEX.test(trimmed)) return trimmed;
+
+    const fromContact = contactService.resolveCloudUid(trimmed);
+    if (fromContact && UID_REGEX.test(fromContact)) {
+      return fromContact;
+    }
+
+    const fromFamily = familyMembers.find((m) =>
+      m.uid === trimmed || m.deviceId === trimmed
+    );
+    if (fromFamily?.uid && UID_REGEX.test(fromFamily.uid)) {
+      return fromFamily.uid;
+    }
+    if (fromFamily?.deviceId) {
+      return fromFamily.deviceId;
+    }
+
+    return trimmed;
+  }, [familyMembers]);
+
+  const resolveExistingConversationId = useCallback((rawId: string, canonicalId: string): string | null => {
+    const candidateIds = new Set<string>();
+    const add = (value?: string | null) => {
+      const normalized = toNormalizedId(value);
+      if (!normalized) return;
+      candidateIds.add(normalized);
+    };
+
+    add(rawId);
+    add(canonicalId);
+
+    const contact = contactService.getContactByAnyId(rawId) || contactService.getContactByAnyId(canonicalId);
+    if (contact) {
+      add(contact.uid);
+    }
+
+    const familyMatch = familyMembers.find((member) => {
+      const preferredTarget = getPreferredMemberTargetId(member);
+      return (
+        preferredTarget === rawId ||
+        preferredTarget === canonicalId ||
+        member.uid === rawId ||
+        member.uid === canonicalId ||
+        member.deviceId === rawId ||
+        member.deviceId === canonicalId
+      );
+    });
+    if (familyMatch) {
+      add(getPreferredMemberTargetId(familyMatch));
+      add(familyMatch.uid);
+      add(familyMatch.deviceId);
+    }
+
+    if (candidateIds.size === 0) return null;
+
+    const existing = useMessageStore.getState().conversations.find((conversation) => candidateIds.has(conversation.userId));
+    return existing?.userId || null;
+  }, [familyMembers, getPreferredMemberTargetId]);
+
+  const resolveCanonicalConversationTargetId = useCallback(async (rawId: string): Promise<string> => {
+    const baseTarget = resolveConversationTargetId(rawId);
+    if (!baseTarget) return '';
+    if (baseTarget === 'broadcast' || UID_REGEX.test(baseTarget)) {
+      return baseTarget;
+    }
+
+    try {
+      await firebaseDataService.initialize();
+      const resolvedUid = await firebaseDataService.resolveRecipientUid(baseTarget);
+      if (resolvedUid && UID_REGEX.test(resolvedUid)) {
+        return resolvedUid;
+      }
+    } catch (error) {
+      logger.debug('Failed to canonicalize recipient to UID in NewMessageScreen', error);
+    }
+
+    return baseTarget;
+  }, [resolveConversationTargetId]);
+
   const startConversation = async (targetDeviceId: string) => {
     try {
-      // Check if conversation already exists
-      const existing = useMessageStore.getState().conversations.find(
-        c => c.userId === targetDeviceId,
-      );
-
-      if (existing) {
-        // Navigate to existing conversation
-        navigation.navigate('Conversation', { userId: targetDeviceId });
-      } else {
-        // Create new conversation
-        const newConversation = {
-          userId: targetDeviceId,
-          userName: `Cihaz ${targetDeviceId.slice(0, 8)}...`,
-          lastMessage: 'Yeni konuşma başlatıldı',
-          lastMessageTime: Date.now(),
-          unreadCount: 0,
-        };
-
-        // ELITE: Await async addConversation to ensure proper state update
-        await useMessageStore.getState().addConversation(newConversation);
-        navigation.navigate('Conversation', { userId: targetDeviceId });
+      const normalizedTarget = toNormalizedId(targetDeviceId);
+      const targetId = await resolveCanonicalConversationTargetId(normalizedTarget);
+      if (!targetId) {
+        Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
+        return;
       }
+
+      const existingConversationId = resolveExistingConversationId(normalizedTarget, targetId);
+      const conversationId = existingConversationId || targetId;
+
+      if (existingConversationId) {
+        navigation.navigate('Conversation', { userId: conversationId });
+        return;
+      }
+
+      const contact = contactService.getContactByAnyId(normalizedTarget) || contactService.getContactByAnyId(targetId);
+      const familyMatch = familyMembers.find((member) =>
+        member.uid === normalizedTarget ||
+        member.uid === targetId ||
+        member.deviceId === normalizedTarget ||
+        member.deviceId === targetId
+      );
+      const displayName = familyMatch?.name || contact?.displayName || contact?.nickname || `Kişi ${targetId.slice(0, 8)}...`;
+
+      await useMessageStore.getState().addConversation({
+        userId: conversationId,
+        userName: displayName,
+        lastMessage: 'Yeni konuşma başlatıldı',
+        lastMessageTime: Date.now(),
+        unreadCount: 0,
+      });
+
+      navigation.navigate('Conversation', { userId: conversationId });
     } catch (error) {
       logger.error('Failed to start conversation:', error);
       Alert.alert('Hata', 'Konuşma başlatılamadı. Lütfen tekrar deneyin.');
     }
   };
+
+  // ELITE: Merged contacts list (ContactService + Family Members)
+  const mergedContacts = useMemo(() => {
+    const searchLower = contactSearch.toLowerCase().trim();
+    type MergedContact = {
+      id: string;
+      conversationId: string;
+      deviceId: string;
+      cloudUid?: string;
+      displayName: string;
+      isFavorite: boolean;
+      isFamily: boolean;
+      status?: string;
+      lastSeen?: number;
+      avatarInitial: string;
+    };
+
+    const contactsMap = new Map<string, MergedContact>();
+
+    // Add contacts from ContactService
+    try {
+      const allContacts = contactService.getAllContacts();
+      for (const c of allContacts) {
+        const conversationId = c.uid;
+        if (conversationId) {
+          contactsMap.set(conversationId, {
+            id: c.uid,
+            conversationId,
+            deviceId: c.uid,
+            cloudUid: c.uid,
+            displayName: c.displayName || c.nickname || 'Bilinmeyen',
+            isFavorite: c.isFavorite,
+            isFamily: false,
+            status: c.status,
+            lastSeen: c.lastSeen,
+            avatarInitial: (c.displayName || c.nickname || '?').charAt(0).toUpperCase(),
+          });
+        }
+      }
+    } catch { /* ContactService may not be initialized */ }
+
+    // Add family members (override or merge)
+    for (const fm of familyMembers) {
+      const conversationId = getPreferredMemberTargetId(fm);
+      const deviceId = toNormalizedId(fm.deviceId) || conversationId;
+      if (!conversationId || !deviceId) continue;
+
+      const existing = contactsMap.get(conversationId);
+      contactsMap.set(conversationId, {
+        id: fm.uid || conversationId,
+        conversationId,
+        deviceId,
+        cloudUid: fm.uid || existing?.cloudUid,
+        displayName: fm.name || existing?.displayName || 'Aile Üyesi',
+        isFavorite: existing?.isFavorite ?? true, // Family = always favorited
+        isFamily: true,
+        status: fm.status,
+        lastSeen: fm.lastSeen,
+        avatarInitial: (fm.name || '?').charAt(0).toUpperCase(),
+      });
+    }
+
+    let result = Array.from(contactsMap.values());
+
+    // Apply search filter
+    if (searchLower.length > 0) {
+      result = result.filter(c =>
+        c.displayName.toLowerCase().includes(searchLower) ||
+        c.deviceId.toLowerCase().includes(searchLower) ||
+        c.conversationId.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Sort: favorites first, then alphabetical
+    result.sort((a, b) => {
+      if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+      if (a.isFamily !== b.isFamily) return a.isFamily ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+
+    return result;
+  }, [contactSearch, familyMembers, getPreferredMemberTargetId]);
+
+  const favoriteContacts = useMemo(() =>
+    mergedContacts.filter(c => c.isFavorite),
+    [mergedContacts]
+  );
+
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case 'safe': return '#22c55e';
+      case 'need-help': return '#f59e0b';
+      case 'critical': case 'danger': return '#ef4444';
+      case 'online': return '#22c55e';
+      default: return '#94a3b8';
+    }
+  };
+
+  const getStatusLabel = (status?: string) => {
+    switch (status) {
+      case 'safe': return 'Güvende';
+      case 'need-help': return 'Yardım İstiyor';
+      case 'critical': case 'danger': return 'Acil Durum';
+      case 'online': return 'Çevrimiçi';
+      case 'offline': return 'Çevrimdışı';
+      default: return 'Bilinmiyor';
+    }
+  };
+
+  const handleContactSelect = useCallback((contactId: string, _displayName: string) => {
+    const normalizedContactId = toNormalizedId(contactId);
+    if (!normalizedContactId) {
+      Alert.alert('Hata', 'Geçerli bir kişi kimliği bulunamadı.');
+      return;
+    }
+    haptics.impactMedium();
+    void startConversation(normalizedContactId);
+  }, [startConversation]);
+
+  const renderContactsCard = () => (
+    <View style={styles.card}>
+      {/* Search Bar */}
+      <View style={styles.contactSearchContainer}>
+        <Ionicons name="search" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
+        <TextInput
+          style={styles.contactSearchInput}
+          placeholder="Kişi ara..."
+          placeholderTextColor="#94a3b8"
+          value={contactSearch}
+          onChangeText={setContactSearch}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {contactSearch.length > 0 && (
+          <Pressable onPress={() => setContactSearch('')}>
+            <Ionicons name="close-circle" size={18} color="#94a3b8" />
+          </Pressable>
+        )}
+      </View>
+
+      {/* Favorites Horizontal Chips */}
+      {favoriteContacts.length > 0 && contactSearch.length === 0 && (
+        <View style={styles.favoritesSection}>
+          <Text style={styles.contactSectionTitle}>⭐ Favoriler</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.favoritesScroll}>
+            {favoriteContacts.map((contact) => (
+              <Pressable
+                key={`fav-${contact.id}`}
+                style={({ pressed }) => [
+                  styles.favoriteChip,
+                  pressed && styles.favoriteChipPressed,
+                ]}
+                onPress={() => handleContactSelect(contact.conversationId, contact.displayName)}
+              >
+                <View style={[styles.favoriteAvatar, { backgroundColor: contact.isFamily ? '#dbeafe' : '#f0fdf4' }]}>
+                  <Text style={[styles.favoriteAvatarText, { color: contact.isFamily ? '#3b82f6' : '#22c55e' }]}>
+                    {contact.avatarInitial}
+                  </Text>
+                </View>
+                <Text style={styles.favoriteChipName} numberOfLines={1}>{contact.displayName}</Text>
+                <View style={[styles.contactStatusDot, { backgroundColor: getStatusColor(contact.status) }]} />
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Contact List */}
+      <View style={styles.contactListSection}>
+        {mergedContacts.length > 0 && contactSearch.length === 0 && (
+          <Text style={styles.contactSectionTitle}>Tüm Kişiler ({mergedContacts.length})</Text>
+        )}
+        {mergedContacts.length > 0 && contactSearch.length > 0 && (
+          <Text style={styles.contactSectionTitle}>{mergedContacts.length} sonuç bulundu</Text>
+        )}
+
+        {mergedContacts.length === 0 && (
+          <View style={styles.emptyContactState}>
+            <Ionicons name="people-outline" size={48} color="#cbd5e1" />
+            <Text style={styles.emptyContactTitle}>
+              {contactSearch.length > 0 ? 'Sonuç bulunamadı' : 'Henüz kişi yok'}
+            </Text>
+            <Text style={styles.emptyContactSubtitle}>
+              {contactSearch.length > 0
+                ? 'Farklı bir arama terimi deneyin'
+                : 'QR kod veya ID ile kişi ekleyebilirsiniz'}
+            </Text>
+          </View>
+        )}
+
+        {mergedContacts.map((contact, index) => (
+          <Pressable
+            key={`contact-${contact.id}-${index}`}
+            style={({ pressed }) => [
+              styles.contactRow,
+              pressed && styles.contactRowPressed,
+            ]}
+            onPress={() => handleContactSelect(contact.conversationId, contact.displayName)}
+          >
+            <View style={[styles.contactAvatar, { backgroundColor: contact.isFamily ? '#dbeafe' : '#f1f5f9' }]}>
+              <Text style={[styles.contactAvatarText, { color: contact.isFamily ? '#3b82f6' : '#475569' }]}>
+                {contact.avatarInitial}
+              </Text>
+            </View>
+            <View style={styles.contactInfo}>
+              <View style={styles.contactNameRow}>
+                <Text style={styles.contactName} numberOfLines={1}>{contact.displayName}</Text>
+                {contact.isFamily && (
+                  <View style={styles.familyBadge}>
+                    <Ionicons name="heart" size={10} color="#3b82f6" />
+                    <Text style={styles.familyBadgeText}>Aile</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.contactStatusRow}>
+                <View style={[styles.contactStatusDot, { backgroundColor: getStatusColor(contact.status) }]} />
+                <Text style={styles.contactStatusText}>{getStatusLabel(contact.status)}</Text>
+                {contact.lastSeen && (
+                  <Text style={styles.contactLastSeen}>
+                    · {formatLastSeen(contact.lastSeen)}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <Ionicons name="chatbubble-outline" size={20} color="#0ea5e9" />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
 
   const renderQRCard = () => (
     <View style={styles.card}>
@@ -506,7 +965,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         <CameraView
           style={styles.cameraView}
           facing="back"
-          onBarcodeScanned={handleQRScan}
+          onBarcodeScanned={qrScanLocked ? undefined : handleQRScan}
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         />
         <View style={styles.cameraOverlay}>
@@ -772,6 +1231,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
             ))}
           </View>
 
+          {activeTab === 'contacts' && renderContactsCard()}
           {activeTab === 'qr' && renderQRCard()}
           {activeTab === 'id' && renderIDCard()}
           {activeTab === 'scan' && renderScanCard()}
@@ -821,584 +1281,3 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     </ImageBackground>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  permissionScreen: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  gradientOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  container: {
-    flex: 1,
-    paddingHorizontal: spacing[5],
-  },
-  permissionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  permissionText: {
-    fontSize: 15,
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  permissionButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: colors.brand.primary,
-  },
-  permissionButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  headerRow: {
-    paddingBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  navButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  headerTextContainer: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    color: '#334155',
-  },
-  headerSubtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    color: '#64748b',
-  },
-  infoButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  connectionCard: {
-    borderRadius: 22,
-    padding: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    marginBottom: 18,
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  connectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  connectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  connectionSubtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    marginTop: 6,
-  },
-  connectionAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.3)',
-    backgroundColor: 'rgba(14,165,233,0.1)',
-  },
-  connectionActionDisabled: {
-    opacity: 0.5,
-  },
-  connectionActionPressed: {
-    opacity: 0.8,
-  },
-  connectionActionText: {
-    marginLeft: 8,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0284c7',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    marginHorizontal: -6,
-  },
-  statItem: {
-    flex: 1,
-    marginHorizontal: 6,
-    borderRadius: 16,
-    padding: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  statIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#64748b',
-    marginBottom: 4,
-    letterSpacing: 0.3,
-    fontWeight: '600',
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  tipBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(34,197,94,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.2)',
-    marginBottom: 20,
-  },
-  tipContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  tipTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#15803d',
-    marginBottom: 2,
-  },
-  tipSubtitle: {
-    fontSize: 12,
-    color: '#166534',
-    lineHeight: 18,
-  },
-  segmentContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 6,
-    marginBottom: 22,
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  segmentButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  segmentButtonActive: {
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  segmentLabel: {
-    marginLeft: 8,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#94a3b8',
-  },
-  segmentLabelActive: {
-    color: '#0284c7',
-  },
-  card: {
-    borderRadius: 24,
-    padding: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    marginBottom: 26,
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  cardHeaderCopy: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  cardHeaderIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(14,165,233,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 6,
-  },
-  cardSubtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    lineHeight: 20,
-  },
-  cardHint: {
-    marginTop: 16,
-    fontSize: 12,
-    color: '#94a3b8',
-    lineHeight: 18,
-  },
-  cameraWrapper: {
-    height: 260,
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.3)',
-  },
-  cameraView: {
-    flex: 1,
-  },
-  cameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.3)',
-  },
-  cameraFrame: {
-    width: 220,
-    height: 220,
-    borderRadius: 28,
-    borderWidth: 3,
-    borderColor: '#3b82f6',
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#1e293b',
-    fontSize: 15,
-    marginTop: 6,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 18,
-    overflow: 'hidden',
-    marginTop: 16,
-    backgroundColor: colors.brand.primary,
-    paddingVertical: 16,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 18,
-  },
-  primaryButtonText: {
-    marginLeft: 10,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  helperText: {
-    marginTop: 12,
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  scanStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  scanStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(14,165,233,0.1)',
-  },
-  scanStatusBadgeActive: {
-    backgroundColor: 'rgba(34,197,94,0.1)',
-  },
-  scanStatusBadgeInactive: {
-    backgroundColor: '#f1f5f9',
-  },
-  scanStatusText: {
-    marginLeft: 8,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0284c7',
-  },
-  scanStatusTextActive: {
-    color: '#15803d',
-  },
-  secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#fff',
-  },
-  secondaryButtonText: {
-    marginLeft: 6,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#334155',
-  },
-  secondaryButtonGhost: {
-    marginTop: 18,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#fff',
-  },
-  secondaryButtonGhostText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#334155',
-    textAlign: 'center',
-  },
-  deviceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(148,163,184,0.1)',
-  },
-  deviceAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(14,165,233,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  deviceInfo: {
-    flex: 1,
-  },
-  deviceName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  deviceIdText: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  deviceSignal: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#0ea5e9',
-    fontWeight: '500',
-  },
-  scanLoading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  scanLoadingText: {
-    marginLeft: 12,
-    fontSize: 13,
-    color: '#64748b',
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  emptyTitle: {
-    marginTop: 12,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  emptySubtitle: {
-    marginTop: 6,
-    fontSize: 12,
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: 16,
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(249,115,22,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.2)',
-  },
-  warningText: {
-    marginLeft: 8,
-    fontSize: 12,
-    color: '#f97316',
-    flex: 1,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 340,
-    borderRadius: 24,
-    padding: 24,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#1e293b',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  qrWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-    borderRadius: 18,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 20,
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  modalIdText: {
-    marginTop: 16,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  modalHint: {
-    fontSize: 13,
-    color: '#64748b',
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 12,
-  },
-  modalActionSecondary: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: '#f1f5f9',
-  },
-  modalActionSecondaryText: {
-    color: '#64748b',
-    fontWeight: '700',
-  },
-  modalActionPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: colors.brand.primary,
-  },
-  modalActionPrimaryText: {
-    fontWeight: '700',
-    color: '#fff',
-  },
-});

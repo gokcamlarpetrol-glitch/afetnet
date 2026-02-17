@@ -267,7 +267,7 @@ class EarthquakeService {
 
           for (const earthquake of significantEarthquakes) {
             // Save to Firebase
-            if (firebaseDataService.isInitialized) {
+            try {
               await firebaseDataService.saveEarthquake({
                 id: earthquake.id,
                 timestamp: earthquake.time,
@@ -282,7 +282,7 @@ class EarthquakeService {
                   logger.debug('Failed to save earthquake to Firebase:', error);
                 }
               });
-            }
+            } catch { /* non-critical */ }
 
             // Send to Backend
             if (backendEmergencyService.initialized) {

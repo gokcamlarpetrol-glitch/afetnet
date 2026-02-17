@@ -53,7 +53,6 @@ export class KandilliProvider {
       // Reduced number of endpoints to try faster
       const endpoints = [
         'https://www.koeri.boun.edu.tr/scripts/lst1.asp', // Primary HTTPS (most reliable)
-        'http://www.koeri.boun.edu.tr/scripts/lst1.asp',   // HTTP fallback
         'https://www.koeri.boun.edu.tr/scripts/lst0.asp',  // Alternative HTTPS
       ];
 

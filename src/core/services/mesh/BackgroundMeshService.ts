@@ -41,71 +41,77 @@ const STORAGE_KEYS = {
 // ============================================================================
 
 // Define mesh sync task
-TaskManager.defineTask(TASK_NAMES.MESH_SYNC, async () => {
-    logger.info('📡 Background mesh sync triggered');
+// CRITICAL FIX: Guard against double-define crash on iOS production
+if (!TaskManager.isTaskDefined(TASK_NAMES.MESH_SYNC)) {
+    TaskManager.defineTask(TASK_NAMES.MESH_SYNC, async () => {
+        logger.info('📡 Background mesh sync triggered');
 
-    try {
-        const startTime = Date.now();
+        try {
+            const startTime = Date.now();
 
-        // Get mesh store state
-        const meshStore = useMeshStore.getState();
-        const outgoingQueue = meshStore.outgoingQueue;
+            // Get mesh store state
+            const meshStore = useMeshStore.getState();
+            const outgoingQueue = meshStore.outgoingQueue;
 
-        // Process pending messages
-        if (outgoingQueue.length > 0) {
-            logger.info(`Processing ${outgoingQueue.length} pending messages`);
+            // Process pending messages
+            if (outgoingQueue.length > 0) {
+                logger.info(`Processing ${outgoingQueue.length} pending messages`);
 
-            // Import mesh network service dynamically
-            const { meshNetworkService, MeshMessageType } = await import('./index');
+                // Import mesh network service dynamically
+                const { meshNetworkService, MeshMessageType } = await import('./index');
 
-            for (const message of outgoingQueue) {
-                try {
-                    await meshNetworkService.broadcastMessage(message.content, MeshMessageType.TEXT);
-                    meshStore.removeFromQueue(message.id);
-                } catch (error) {
-                    logger.debug(`Failed to send message ${message.id}:`, error);
+                for (const message of outgoingQueue) {
+                    try {
+                        await meshNetworkService.broadcastMessage(message.content, MeshMessageType.TEXT);
+                        meshStore.removeFromQueue(message.id);
+                    } catch (error) {
+                        logger.debug(`Failed to send message ${message.id}:`, error);
+                    }
                 }
             }
+
+            // Update last sync time
+            await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+
+            // Increment sync count
+            const countStr = await AsyncStorage.getItem(STORAGE_KEYS.SYNC_COUNT);
+            const count = countStr ? parseInt(countStr, 10) + 1 : 1;
+            await AsyncStorage.setItem(STORAGE_KEYS.SYNC_COUNT, count.toString());
+
+            const duration = Date.now() - startTime;
+            logger.info(`✅ Background sync completed in ${duration}ms`);
+
+            return BackgroundFetch.BackgroundFetchResult.NewData;
+        } catch (error) {
+            logger.error('❌ Background sync failed:', error);
+            return BackgroundFetch.BackgroundFetchResult.Failed;
         }
-
-        // Update last sync time
-        await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
-
-        // Increment sync count
-        const countStr = await AsyncStorage.getItem(STORAGE_KEYS.SYNC_COUNT);
-        const count = countStr ? parseInt(countStr, 10) + 1 : 1;
-        await AsyncStorage.setItem(STORAGE_KEYS.SYNC_COUNT, count.toString());
-
-        const duration = Date.now() - startTime;
-        logger.info(`✅ Background sync completed in ${duration}ms`);
-
-        return BackgroundFetch.BackgroundFetchResult.NewData;
-    } catch (error) {
-        logger.error('❌ Background sync failed:', error);
-        return BackgroundFetch.BackgroundFetchResult.Failed;
-    }
-});
+    });
+}
 
 // Define SOS beacon task
-TaskManager.defineTask(TASK_NAMES.SOS_BEACON, async () => {
-    logger.warn('🆘 Background SOS beacon triggered');
+// CRITICAL FIX: Guard against double-define crash on iOS production
+if (!TaskManager.isTaskDefined(TASK_NAMES.SOS_BEACON)) {
+    TaskManager.defineTask(TASK_NAMES.SOS_BEACON, async () => {
+        logger.warn('🆘 Background SOS beacon triggered');
 
-    try {
-        // SOSBeaconService manages its own beacon loop
-        // This task just ensures it's running in background
-        const { sosBeaconService } = await import('../sos');
+        try {
+            // SOSBeaconService manages its own beacon loop
+            // This task just ensures it's running in background
+            const { sosBeaconService } = await import('../sos');
 
-        // If beacon is active, it will continue automatically
-        if (!sosBeaconService.isBeaconActive()) {
-            logger.debug('Beacon not active, skipping background task');
+            // If beacon is active, it will continue automatically
+            if (!sosBeaconService.isBeaconActive()) {
+                logger.debug('Beacon not active, skipping background task');
+            }
+
+            return BackgroundFetch.BackgroundFetchResult.NewData;
+        } catch (error) {
+            logger.error('❌ SOS beacon task failed:', error);
+            return BackgroundFetch.BackgroundFetchResult.Failed;
         }
-
-        return BackgroundFetch.BackgroundFetchResult.NewData;
-    } catch (error) {
-        logger.error('❌ SOS beacon task failed:', error);
-        return BackgroundFetch.BackgroundFetchResult.Failed;
-    }
-});
+    });
+}
 
 // ============================================================================
 // BACKGROUND MESH SERVICE CLASS

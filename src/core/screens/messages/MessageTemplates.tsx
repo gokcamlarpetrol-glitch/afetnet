@@ -162,16 +162,43 @@ export default function MessageTemplates() {
         const timestamp = Date.now();
         const messageId = `template_${template.id}_${timestamp}`;
 
+        // ELITE: Use a routable conversation ID so broadcasts appear in MessagesScreen.
+        // 'broadcast' is rejected by isRoutableConversationId(), so we use 'broadcast-alerts'.
+        const BROADCAST_CONVERSATION_ID = 'broadcast-alerts';
+
         // ELITE: Add message to store for local display (await async operation)
         await useMessageStore.getState().addMessage({
           id: messageId,
           from: 'me',
-          to: 'broadcast',
+          to: BROADCAST_CONVERSATION_ID,
           content: template.message,
           timestamp,
           delivered: true,
           read: true,
         });
+
+        // ELITE: Ensure a conversation entry exists so broadcast messages appear in the list
+        const existingConversations = useMessageStore.getState().conversations;
+        const broadcastConv = existingConversations.find(c => c.userId === BROADCAST_CONVERSATION_ID);
+        if (broadcastConv) {
+          // Update the existing broadcast conversation with the latest message
+          useMessageStore.getState().addConversation({
+            userId: BROADCAST_CONVERSATION_ID,
+            userName: 'Acil Durum Yayini',
+            lastMessage: template.message.substring(0, 80),
+            lastMessageTime: timestamp,
+            unreadCount: 0,
+          });
+        } else {
+          // Create the broadcast conversation entry
+          useMessageStore.getState().addConversation({
+            userId: BROADCAST_CONVERSATION_ID,
+            userName: 'Acil Durum Yayini',
+            lastMessage: template.message.substring(0, 80),
+            lastMessageTime: timestamp,
+            unreadCount: 0,
+          });
+        }
 
         // ELITE: Update conversations (sync operation, no await needed)
         useMessageStore.getState().updateConversations();
@@ -179,14 +206,15 @@ export default function MessageTemplates() {
         // ELITE: Send push notification for critical templates (hayati önem)
         if (template.priority === 'critical' || template.priority === 'high') {
           try {
-            const { notificationService } = await import('../../services/NotificationService');
-            await notificationService.showMessageNotification(
-              'Acil Durum Mesajı',
-              template.message,
+            const { notificationCenter } = await import('../../services/notifications/NotificationCenter');
+            await notificationCenter.notify('message', {
+              from: 'Acil Durum Mesajı',
+              senderName: 'Acil Durum Mesajı',
+              message: template.message,
               messageId,
-              'broadcast',
-              template.priority,
-            );
+              senderId: 'self',
+              isSOS: template.priority === 'critical',
+            }, 'MessageTemplates');
           } catch (notifError) {
             logger.error('Failed to send template notification:', notifError);
           }

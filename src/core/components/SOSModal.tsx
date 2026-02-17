@@ -69,16 +69,38 @@ export default function SOSModal({
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
+  // CRITICAL: Ref guard to prevent duplicate SOS triggers
+  const hasFiredRef = useRef(false);
+
   // ============================================================================
   // EFFECTS
   // ============================================================================
 
-  // Trigger SOS when modal opens
+  // Trigger SOS exactly once when modal opens (visible transitions false→true)
   useEffect(() => {
-    if (visible && !isActive && !isCountingDown) {
-      unifiedSOSController.triggerSOS(reason, message);
+    if (visible && !hasFiredRef.current) {
+      hasFiredRef.current = true;
+      const state = useSOSStore.getState();
+      // Reset any stale state from a previous crashed session
+      if (state.isCountingDown && !state.isActive) {
+        state.reset();
+      }
+      // CRITICAL: Reset stale active SOS from killed app sessions
+      // If SOS has been "active" for 30+ minutes, it's orphaned — reset
+      if (state.isActive && state.currentSignal) {
+        const ageMs = Date.now() - state.currentSignal.timestamp;
+        if (ageMs > 30 * 60 * 1000) {
+          state.reset();
+        }
+      }
+      if (!state.isActive) {
+        unifiedSOSController.triggerSOS(reason, message);
+      }
+    } else if (!visible) {
+      // Reset guard when modal closes so next open can trigger again
+      hasFiredRef.current = false;
     }
-  }, [visible, isActive, isCountingDown, reason, message]);
+  }, [visible, reason, message]);
 
   // Start health data broadcast when SOS becomes active
   useEffect(() => {

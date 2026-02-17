@@ -7,7 +7,6 @@
 import { create } from 'zustand';
 import { getAuth } from 'firebase/auth';
 import { DirectStorage } from '../utils/storage';
-import { getDeviceId } from '../utils/device';
 import { createLogger } from '../utils/logger';
 import { safeLowerCase, safeIncludes } from '../utils/safeString';
 import { initializeFirebase } from '../../lib/firebase';
@@ -69,6 +68,12 @@ export interface Message {
   // ELITE: Message deletion
   isDeleted?: boolean;
   deletedAt?: number;
+  // ELITE: Media messaging
+  mediaUrl?: string;
+  mediaType?: 'image' | 'voice' | 'location';
+  mediaDuration?: number;
+  mediaThumbnail?: string;
+  location?: { lat: number; lng: number; address?: string };
 }
 
 export interface Conversation {
@@ -96,11 +101,11 @@ export interface TypingIndicator {
 interface MessageState {
   messages: Message[];
   conversations: Conversation[];
-  // ELITE: Pending messages queue for retry
-  sendingQueue: Message[];
-  // ELITE: Typing indicators by conversation
+  // ELITE V2: Conversation-indexed Map for O(1) lookups (WhatsApp pattern)
+  conversationIndex: Map<string, Message[]>;
+  // Typing indicators by conversation
   typingUsers: Record<string, TypingIndicator>;
-  // ELITE: Store Firebase unsubscribe function for cleanup
+  // Store Firebase unsubscribe function for cleanup
   firebaseUnsubscribe: (() => void) | null;
 }
 
@@ -112,27 +117,94 @@ export interface MessageActions {
   markAsRead: (messageId: string) => Promise<void>;
   markConversationRead: (userId: string) => Promise<void>;
   getConversationMessages: (userId: string) => Message[];
+  // ELITE V2: Cursor-based pagination (WhatsApp pattern)
+  getPagedMessages: (userId: string, cursor?: number, limit?: number) => { messages: Message[]; nextCursor: number | null };
   updateConversations: () => void;
   deleteConversation: (userId: string) => Promise<void>;
   clear: () => Promise<void>;
-  // ELITE: Enhanced actions
+  // Enhanced actions
   updateMessageStatus: (messageId: string, status: Message['status']) => Promise<void>;
-  retryMessage: (messageId: string) => Promise<void>;
+  // ELITE V2: Sync read receipt to Firebase (WhatsApp 3-tick pattern)
+  syncReadReceipt: (messageId: string, senderId: string) => Promise<void>;
   setTyping: (conversationId: string, userId: string, userName?: string) => void;
   clearTyping: (conversationId: string) => void;
   getUnreadCount: () => number;
   pinConversation: (userId: string, isPinned: boolean) => Promise<void>;
   muteConversation: (userId: string, isMuted: boolean) => Promise<void>;
+  // ELITE V2: Search messages (WhatsApp pattern)
+  searchMessages: (query: string, conversationId?: string) => Message[];
   // ELITE: Message edit/delete/forward
   editMessage: (messageId: string, newContent: string) => Promise<boolean>;
   deleteMessage: (messageId: string) => Promise<boolean>;
   forwardMessage: (messageId: string, toUserId: string) => Promise<Message | null>;
   getMessage: (messageId: string) => Message | undefined;
+  // ELITE V2: Rebuild conversation index after bulk operations
+  rebuildIndex: () => void;
+  // ELITE: Import messages (Silent Hydration)
+  importMessages: (messages: Message[]) => Promise<void>;
 }
 
 const STORAGE_KEY_MESSAGES_BASE = '@afetnet:messages';
 const STORAGE_KEY_CONVERSATIONS_BASE = '@afetnet:conversations';
 const STORAGE_GUEST_SCOPE = 'guest';
+const SELF_ID_LITERALS = new Set(['me', 'ME']);
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const isNonRoutableConversationId = (value: string): boolean =>
+  value === 'broadcast' || value.startsWith('group:');
+const NON_CHAT_SYSTEM_TYPES = new Set([
+  'family_status_update',
+  'family_location_update',
+  'family_location',
+  'status_update',
+  'device_status',
+  'presence_update',
+  'typing',
+  'ack',
+  'reaction',
+]);
+
+
+const normalizeId = (value: string | null | undefined): string => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim();
+};
+
+const getEnvelopeTypeFromContent = (content: string): string => {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: unknown };
+    if (typeof parsed.type !== 'string') {
+      return '';
+    }
+    return parsed.type.trim().toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+const isSystemConversationMessage = (message: Message): boolean => {
+  if (message.type === 'STATUS') {
+    return true;
+  }
+  const content = typeof message.content === 'string' ? message.content : '';
+  if (!content) return false;
+  const envelopeType = getEnvelopeTypeFromContent(content);
+  if (!envelopeType) return false;
+  return NON_CHAT_SYSTEM_TYPES.has(envelopeType);
+};
+
+const findFamilyMemberByUid = (uid: string): { uid: string; name?: string } | undefined => {
+  if (!uid) return undefined;
+  try {
+    const { useFamilyStore } = require('./familyStore');
+    return useFamilyStore.getState().members.find((m: { uid: string }) => m.uid === uid);
+  } catch {
+    return undefined;
+  }
+};
 
 const getStorageScope = (): string => {
   try {
@@ -146,6 +218,136 @@ const getStorageScope = (): string => {
 };
 
 const getScopedStorageKey = (baseKey: string): string => `${baseKey}:${getStorageScope()}`;
+
+const getSelfIdentityCandidates = (): Set<string> => {
+  const ids = new Set<string>(SELF_ID_LITERALS);
+
+  try {
+    const app = initializeFirebase();
+    if (app) {
+      const uid = getAuth(app).currentUser?.uid;
+      if (uid) ids.add(uid);
+    }
+  } catch {
+    // best effort
+  }
+
+  try {
+    const { identityService } = require('../services/IdentityService');
+    const uid = identityService.getUid?.();
+    if (uid) ids.add(uid);
+  } catch {
+    // best effort
+  }
+
+  return ids;
+};
+
+const isSelfId = (value: string | null | undefined, selfIds: Set<string>): boolean => {
+  const normalized = normalizeId(value);
+  return normalized.length > 0 && selfIds.has(normalized);
+};
+
+const resolveCanonicalPeerId = (value: string | null | undefined): string => {
+  const normalized = normalizeId(value);
+  if (!normalized) return '';
+  if (isNonRoutableConversationId(normalized)) return '';
+  if (UID_REGEX.test(normalized)) return normalized;
+  return '';
+};
+
+const getPeerAliasCandidates = (value: string | null | undefined): Set<string> => {
+  const aliases = new Set<string>();
+  const normalized = normalizeId(value);
+  if (normalized) aliases.add(normalized);
+  return aliases;
+};
+
+const isIdentityInAliasSet = (
+  value: string | null | undefined,
+  aliasIds: Set<string>,
+): boolean => {
+  const normalized = normalizeId(value);
+  if (!normalized) return false;
+  if (aliasIds.has(normalized)) return true;
+
+  const canonical = resolveCanonicalPeerId(normalized);
+  if (canonical && aliasIds.has(canonical)) return true;
+
+  return false;
+};
+
+const areConversationTargetsEquivalent = (left: string, right: string): boolean => {
+  const leftAliases = getPeerAliasCandidates(left);
+  const rightAliases = getPeerAliasCandidates(right);
+  const leftCanonical = resolveCanonicalPeerId(left);
+  const rightCanonical = resolveCanonicalPeerId(right);
+
+  if (leftCanonical) leftAliases.add(leftCanonical);
+  if (rightCanonical) rightAliases.add(rightCanonical);
+  if (leftAliases.size === 0 || rightAliases.size === 0) return false;
+
+  for (const alias of leftAliases) {
+    if (rightAliases.has(alias)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const resolvePeerDisplayName = (
+  userId: string,
+  preferred?: string,
+): string => {
+  const normalizedUserId = normalizeId(userId);
+  const preferredName = typeof preferred === 'string' ? preferred.trim() : '';
+
+  const isGenericPreferred =
+    preferredName.length === 0 ||
+    preferredName === normalizedUserId ||
+    preferredName.toLowerCase().startsWith('kullanıcı ');
+
+  try {
+    const { contactService } = require('../services/ContactService');
+    const aliases = getPeerAliasCandidates(normalizedUserId);
+    for (const alias of aliases) {
+      const contact = contactService.getContactByAnyId?.(alias);
+      const contactName = normalizeId(contact?.displayName || contact?.nickname);
+      if (contactName) return contactName;
+    }
+  } catch {
+    // best effort
+  }
+
+  try {
+    const { useFamilyStore } = require('./familyStore');
+    const members = useFamilyStore.getState().members as Array<{ uid: string; name?: string }>;
+    const familyMatch = members.find((member) => member.uid === normalizedUserId);
+    if (familyMatch?.name) return familyMatch.name;
+  } catch {
+    // best effort
+  }
+
+  if (!isGenericPreferred && preferredName) {
+    return preferredName;
+  }
+
+  return preferredName || normalizedUserId;
+};
+
+const getOtherUserIdForMessage = (message: Message, selfIds: Set<string>): string => {
+  const from = normalizeId(message.from);
+  const to = normalizeId(message.to);
+  const rawOther = isSelfId(from, selfIds) ? to : from;
+  return resolveCanonicalPeerId(rawOther);
+};
+
+const normalizeMessageSelfFields = (message: Message, selfIds: Set<string>): Message => {
+  if (isSelfId(message.from, selfIds) && message.from !== 'me') {
+    return { ...message, from: 'me' };
+  }
+  return message;
+};
 
 const readScopedStorage = (baseKey: string): string | null => {
   const scopedKey = getScopedStorageKey(baseKey);
@@ -167,9 +369,40 @@ const readScopedStorage = (baseKey: string): string | null => {
 const initialState: MessageState = {
   messages: [],
   conversations: [],
-  sendingQueue: [],
+  conversationIndex: new Map(),
   typingUsers: {},
   firebaseUnsubscribe: null,
+};
+
+// ELITE V2: Build conversation-indexed Map from flat message array
+const buildConversationIndex = (messages: Message[]): Map<string, Message[]> => {
+  const index = new Map<string, Message[]>();
+  const selfIds = getSelfIdentityCandidates();
+  for (const msg of messages) {
+    if (isSystemConversationMessage(msg)) continue;
+    const otherUserId = getOtherUserIdForMessage(msg, selfIds);
+    if (!otherUserId) continue;
+    const existing = index.get(otherUserId);
+    if (existing) {
+      existing.push(msg);
+    } else {
+      index.set(otherUserId, [msg]);
+    }
+  }
+  // Sort each conversation by timestamp
+  for (const [, msgs] of index) {
+    msgs.sort((a, b) => a.timestamp - b.timestamp);
+  }
+  return index;
+};
+
+// ELITE V2: Debounced conversation update to prevent O(n²) rebuild on rapid message additions
+let _conversationUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+const CONVERSATION_UPDATE_DEBOUNCE_MS = 100;
+
+const debouncedConversationUpdate = (updateFn: () => void) => {
+  if (_conversationUpdateTimer) clearTimeout(_conversationUpdateTimer);
+  _conversationUpdateTimer = setTimeout(updateFn, CONVERSATION_UPDATE_DEBOUNCE_MS);
 };
 
 // ELITE: Load messages from MMKV (Sync & Fast)
@@ -239,187 +472,205 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     }
 
     // First load from MMKV (Instant)
-    const localMessages = loadMessages();
-    const localConversations = loadConversations();
-    set({ messages: localMessages, conversations: localConversations });
-
-    // Then try to sync from Firebase (lazy load to avoid circular dependency)
-    try {
-      const deviceId = await getDeviceId();
-      if (deviceId) {
-        const firebaseService = getFirebaseDataService();
-        if (firebaseService?.isInitialized) {
-          // Load messages from Firebase
-          const cloudMessages = await firebaseService.loadMessages?.(deviceId);
-          const cloudConversations = await firebaseService.loadConversations?.(deviceId);
-
-          // Merge: Firebase takes precedence if both exist
-          if (cloudMessages && cloudMessages.length > 0) {
-            set({ messages: cloudMessages });
-            saveMessages(cloudMessages);
-          }
-          if (cloudConversations && cloudConversations.length > 0) {
-            set({ conversations: cloudConversations });
-            saveConversations(cloudConversations);
-          }
-
-          // ELITE: Subscribe to real-time message updates (CRITICAL - instant delivery)
-          // Gracefully handle permission errors - app continues with BLE mesh
-          const unsubscribe = await firebaseService.subscribeToMessages?.(
-            deviceId,
-            async (firebaseMessages) => {
-              try {
-                // ELITE: Merge Firebase messages with local state
-                const currentMessages = get().messages;
-                const messageMap = new Map(currentMessages.map(m => [m.id, m]));
-
-                // Update or add Firebase messages
-                firebaseMessages.forEach((msg: Message) => {
-                  if (msg && msg.id) {
-                    messageMap.set(msg.id, msg);
-                  }
-                });
-
-                const mergedMessages = Array.from(messageMap.values());
-                set({ messages: mergedMessages });
-                saveMessages(mergedMessages);
-
-                // ELITE: Send instant notification for new messages
-                const newMessages = firebaseMessages.filter((fm: Message) =>
-                  !currentMessages.some(m => m.id === fm.id),
-                );
-
-                for (const newMsg of newMessages) {
-                  if (newMsg && newMsg.from && newMsg.from !== 'me' && newMsg.content) {
-                    try {
-                      const { notificationService } = await import('../services/NotificationService');
-                      await notificationService.showMessageNotification(
-                        newMsg.from || 'Bilinmeyen',
-                        newMsg.content,
-                        newMsg.id,
-                        newMsg.from,
-                        newMsg.priority || 'normal',
-                      );
-                    } catch (notifError) {
-                      logger.error('Failed to send Firebase message notification:', notifError);
-                    }
-                  }
-                }
-
-                // Update conversations
-                get().updateConversations();
-              } catch (error) {
-                logger.error('Error processing real-time messages:', error);
-              }
-            },
-            (error: unknown) => {
-              // ELITE: Don't log permission errors as errors - they're expected in offline-first apps
-              const errorObj = error as { code?: string; message?: string };
-              if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission') || errorObj?.message?.includes('Missing or insufficient permissions')) {
-                if (__DEV__) {
-                  logger.debug('Firebase message subscription permission denied (app continues with BLE mesh)');
-                }
-                return; // Silent fail - app continues with offline messaging
-              }
-              logger.error('Firebase message subscription error:', error);
-            },
-          );
-
-          // ELITE: Store unsubscribe function for cleanup
-          if (unsubscribe && typeof unsubscribe === 'function') {
-            set({ firebaseUnsubscribe: unsubscribe });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Firebase sync failed, using local data:', error);
+    const localMessagesRaw = loadMessages();
+    const selfIds = getSelfIdentityCandidates();
+    const localMessages = localMessagesRaw
+      .map((message) => normalizeMessageSelfFields(message, selfIds))
+      .filter((message) => !isSystemConversationMessage(message));
+    const didNormalize =
+      localMessages.length !== localMessagesRaw.length
+      || localMessages.some((message, index) => message.from !== localMessagesRaw[index]?.from);
+    if (didNormalize) {
+      saveMessages(localMessages);
     }
+    const localIndex = buildConversationIndex(localMessages);
+    set({ messages: localMessages, conversations: loadConversations(), conversationIndex: localIndex });
+
+    // Rebuild from messages to purge stale previews (e.g. old system JSON payloads)
+    // and keep startup state consistent with current filtering rules.
+    get().updateConversations();
+
+    // ARCHITECTURE: messageStore is LOCAL-ONLY (AsyncStorage/MMKV).
+    // All Firebase operations are handled by HybridMessageService using
+    // identityService.getMyId() — the single account-based ID.
+    // Previously, messageStore wrote to Firestore with getDeviceId() (random
+    // hardware ID), which was DIFFERENT from the identity ID, causing messages
+    // to be written to wrong paths and invisible to recipients.
   },
 
   addMessage: async (message: Message) => {
-    // ELITE: Compliance - Blocked User Check
-    const { blockedUsers } = require('./settingsStore').useSettingsStore.getState();
-    if (blockedUsers.includes(message.from)) {
-      if (__DEV__) logger.debug('Message blocked from:', message.from);
+    const selfIds = getSelfIdentityCandidates();
+    const normalizedMessage = normalizeMessageSelfFields(message, selfIds);
+
+    if (isSystemConversationMessage(normalizedMessage)) {
+      if (__DEV__) logger.debug('Skipping system payload in messageStore.addMessage', normalizedMessage.id);
       return;
     }
 
-    set((state) => ({ messages: [...state.messages, message] }));
-    get().updateConversations();
+    // ELITE: Compliance - Blocked User Check
+    const { blockedUsers } = require('./settingsStore').useSettingsStore.getState();
+    if (Array.isArray(blockedUsers) && blockedUsers.length > 0) {
+      const blockedAliasSet = new Set<string>();
+      blockedUsers.forEach((blockedUserId: string) => {
+        const aliases = getPeerAliasCandidates(blockedUserId);
+        aliases.forEach((alias) => blockedAliasSet.add(alias));
+        const canonical = resolveCanonicalPeerId(blockedUserId);
+        if (canonical) blockedAliasSet.add(canonical);
+      });
+
+      if (isIdentityInAliasSet(normalizedMessage.from, blockedAliasSet)) {
+        if (__DEV__) logger.debug('Message blocked from:', normalizedMessage.from);
+        return;
+      }
+    }
+
+    // CRITICAL FIX: Deduplicate by message ID.
+    const { messages: existingMessages } = get();
+    if (existingMessages.some(m => m.id === normalizedMessage.id)) {
+      if (__DEV__) logger.debug(`Message ${normalizedMessage.id} already in store, skipping duplicate`);
+      return;
+    }
+
+    set((state) => {
+      // Double-check inside set() to handle race conditions
+      if (state.messages.some(m => m.id === normalizedMessage.id)) return state;
+
+      const newMessages = [...state.messages, normalizedMessage];
+      // ELITE V2: Update conversation index incrementally
+      const newIndex = new Map(state.conversationIndex);
+      const otherUserId = getOtherUserIdForMessage(normalizedMessage, selfIds);
+      if (otherUserId) {
+        const existing = newIndex.get(otherUserId);
+        if (existing) {
+          existing.push(normalizedMessage);
+          existing.sort((a, b) => a.timestamp - b.timestamp);
+        } else {
+          newIndex.set(otherUserId, [normalizedMessage]);
+        }
+      }
+      return { messages: newMessages, conversationIndex: newIndex };
+    });
+    // ELITE V2: Debounced conversation rebuild
+    debouncedConversationUpdate(() => get().updateConversations());
 
     // ELITE: Save to AsyncStorage
     const { messages } = get();
     await saveMessages(messages);
 
-    // CRITICAL: Save to Firebase in real-time
-    // ELITE: This ensures messages are synced to Firebase instantly for emergency communication
-    try {
-      const deviceId = await getDeviceId();
-      if (deviceId) {
-        const firebaseService = getFirebaseDataService();
-        if (firebaseService?.isInitialized) {
-          // ELITE: Save message to Firebase (fire and forget - don't block UI)
-          firebaseService.saveMessage(deviceId, {
-            id: message.id,
-            fromDeviceId: message.from || deviceId,
-            toDeviceId: message.to || deviceId,
-            content: message.content || '',
-            timestamp: message.timestamp,
+    // MESSAGE SOUND & NOTIFICATION: Handled by NotificationCenter via HybridMessageService
+    // Only send SOS/emergency messages to backend for rescue coordination
+    const content = normalizedMessage.content || '';
+    const isEmergency = normalizedMessage.type === 'SOS' || normalizedMessage.priority === 'critical' ||
+      safeIncludes(content, 'sos') || safeIncludes(content, 'acil') ||
+      safeIncludes(content, 'yardım') || safeIncludes(content, 'kurtar');
+
+    if (isEmergency) {
+      try {
+        const { backendEmergencyService } = await import('../services/BackendEmergencyService');
+        if (backendEmergencyService.initialized) {
+          await backendEmergencyService.sendEmergencyMessage({
+            messageId: normalizedMessage.id,
+            content: normalizedMessage.content,
+            timestamp: normalizedMessage.timestamp,
             type: 'text',
-            status: message.status || (message.read ? 'read' : message.delivered ? 'delivered' : 'sent'),
-            priority: message.priority || 'normal',
+            priority: 'critical',
+            recipientDeviceId: normalizedMessage.to !== 'me' ? normalizedMessage.to : undefined,
           }).catch((error) => {
-            // ELITE: Message save failures are logged but don't block app
-            logger.error('Failed to save message to Firebase:', error);
+            logger.error('Failed to send emergency message to backend:', error);
           });
         }
+      } catch (error) {
+        logger.error('Failed to send emergency message to backend:', error);
       }
-    } catch (error) {
-      // ELITE: Firebase save is optional - app continues without it
-      logger.error('Failed to save message to Firebase:', error);
-    }
-
-    // CRITICAL: Send to backend for rescue coordination
-    // ELITE: This ensures rescue teams can access emergency messages
-    try {
-      const { backendEmergencyService } = await import('../services/BackendEmergencyService');
-      if (backendEmergencyService.initialized) {
-        const content = message.content || '';
-        const isEmergency = safeIncludes(content, 'sos') ||
-          safeIncludes(content, 'acil') ||
-          safeIncludes(content, 'yardım') ||
-          safeIncludes(content, 'kurtar');
-
-        await backendEmergencyService.sendEmergencyMessage({
-          messageId: message.id,
-          content: message.content,
-          timestamp: message.timestamp,
-          type: 'text',
-          priority: isEmergency ? 'critical' : 'normal',
-          recipientDeviceId: message.to !== 'me' ? message.to : undefined,
-        }).catch((error) => {
-          // ELITE: Backend save failures are logged but don't block app
-          logger.error('Failed to send message to backend:', error);
-        });
-      }
-    } catch (error) {
-      // ELITE: Backend save is optional - app continues without it
-      logger.error('Failed to send message to backend:', error);
     }
   },
-  addConversation: async (conversation: Conversation) => {
+
+  // ELITE: Silent Bulk Import for Cloud Hydration
+  // Adds messages without triggering sounds, notifications, or backend emergency calls.
+  // Use this when restoring history from cloud.
+  importMessages: async (importedMessages: Message[]) => {
+    if (!importedMessages || importedMessages.length === 0) return;
+
+    const selfIds = getSelfIdentityCandidates();
+    const normalizedImports = importedMessages
+      .map(m => normalizeMessageSelfFields(m, selfIds))
+      .filter(m => !isSystemConversationMessage(m));
+
+    if (normalizedImports.length === 0) return;
+
     set((state) => {
-      const exists = state.conversations.find(c => c.userId === conversation.userId);
-      if (exists) {
-        return state; // Don't add duplicate
+      const existingIds = new Set(state.messages.map(m => m.id));
+      const newMessages = normalizedImports.filter(m => !existingIds.has(m.id));
+
+      if (newMessages.length === 0) return state;
+
+      const updatedMessages = [...state.messages, ...newMessages];
+
+      // ELITE V2: Rebuild index smartly
+      const newIndex = new Map(state.conversationIndex);
+
+      newMessages.forEach(msg => {
+        const otherUserId = getOtherUserIdForMessage(msg, selfIds);
+        if (otherUserId) {
+          const existing = newIndex.get(otherUserId);
+          if (existing) {
+            existing.push(msg);
+          } else {
+            newIndex.set(otherUserId, [msg]);
+          }
+        }
+      });
+
+      // Sort updated conversations
+      for (const [, msgs] of newIndex) {
+        msgs.sort((a, b) => a.timestamp - b.timestamp);
       }
-      // Ensure lastMessageTime is set
-      const conv: Conversation = {
+
+      return { messages: updatedMessages, conversationIndex: newIndex };
+    });
+
+    // Update conversations and save
+    get().updateConversations();
+    const { messages } = get();
+    await saveMessages(messages);
+    logger.info(`Hydrated ${normalizedImports.length} messages from cloud.`);
+  },
+  addConversation: async (conversation: Conversation) => {
+    const resolvedConversationId = resolveCanonicalPeerId(conversation.userId);
+    if (!resolvedConversationId) {
+      logger.warn('Skipping conversation add: non-routable userId', conversation.userId);
+      return;
+    }
+
+    set((state) => {
+      const existingIndex = state.conversations.findIndex((candidate) =>
+        areConversationTargetsEquivalent(candidate.userId, resolvedConversationId),
+      );
+      const existing = existingIndex >= 0 ? state.conversations[existingIndex] : null;
+      const hasIncomingTimestamp = typeof conversation.lastMessageTime === 'number' && conversation.lastMessageTime > 0;
+      const resolvedLastMessageTime = existing
+        ? (hasIncomingTimestamp ? Math.max(existing.lastMessageTime || 0, conversation.lastMessageTime) : existing.lastMessageTime)
+        : (hasIncomingTimestamp ? conversation.lastMessageTime : Date.now());
+
+      const normalizedConversation: Conversation = {
         ...conversation,
-        lastMessageTime: conversation.lastMessageTime || Date.now(),
+        userId: existing?.userId || resolvedConversationId,
+        userName: conversation.userName || existing?.userName || resolvedConversationId,
+        lastMessage: conversation.lastMessage || existing?.lastMessage || '',
+        lastMessageTime: resolvedLastMessageTime,
+        unreadCount: existing?.unreadCount ?? conversation.unreadCount ?? 0,
+        isPinned: existing?.isPinned ?? conversation.isPinned,
+        isMuted: existing?.isMuted ?? conversation.isMuted,
       };
+
+      if (existingIndex >= 0 && existing) {
+        const updated = [...state.conversations];
+        updated[existingIndex] = normalizedConversation;
+        return { conversations: updated };
+      }
+
       return {
-        conversations: [...state.conversations, conv],
+        conversations: [...state.conversations, normalizedConversation],
       };
     });
 
@@ -427,20 +678,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     const { conversations } = get();
     saveConversations(conversations);
 
-    // ELITE: Save to Firebase
-    try {
-      const deviceId = await getDeviceId();
-      if (deviceId) {
-        const firebaseService = getFirebaseDataService();
-        if (firebaseService?.isInitialized) {
-          await firebaseService.saveConversation?.(deviceId, conversation).catch((error) => {
-            logger.error('Failed to save conversation to Firebase:', error);
-          });
-        }
-      }
-    } catch (error) {
-      logger.error('Failed to save conversation:', error);
-    }
+    // NOTE: Firebase conversation sync not done here — HybridMessageService
+    // handles all Firebase operations with the correct identity-based ID.
   },
   markAsDelivered: async (messageId: string) => {
     set((state) => ({
@@ -462,76 +701,225 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     await saveMessages(messages);
   },
   markConversationRead: async (userId: string) => {
+    const aliasIds = getPeerAliasCandidates(userId);
+    const canonicalUserId = resolveCanonicalPeerId(userId);
+    if (canonicalUserId) {
+      aliasIds.add(canonicalUserId);
+    }
+
+    // Capture unread messages BEFORE updating state
+    const unreadMessages = get().messages.filter(
+      (m) => isIdentityInAliasSet(m.from, aliasIds) && !m.read,
+    );
+
     set((state) => ({
       messages: state.messages.map((m) =>
-        m.from === userId ? { ...m, read: true } : m,
+        isIdentityInAliasSet(m.from, aliasIds) ? { ...m, read: true, status: 'read' } : m,
       ),
     }));
     get().updateConversations();
 
-    // ELITE: Save to AsyncStorage
+    // Save to AsyncStorage (local persistence)
     const { messages } = get();
     await saveMessages(messages);
+
+    // CRITICAL FIX: Sync read receipts to sender's Firestore inbox
+    // Without this, sender never sees blue double-check (✓✓🔵)
+    if (unreadMessages.length > 0) {
+      for (const msg of unreadMessages) {
+        get().syncReadReceipt(msg.id, msg.from).catch(() => { });
+      }
+    }
   },
   getConversationMessages: (userId: string) => {
-    return get().messages.filter(
-      (m) => (m.from === userId && m.to === 'me') || (m.from === 'me' && m.to === userId),
-    );
+    // ELITE V2: O(1) lookup from conversation index instead of O(n) full scan
+    const { conversationIndex } = get();
+    const canonicalUserId = resolveCanonicalPeerId(userId);
+    if (canonicalUserId && conversationIndex.has(canonicalUserId)) {
+      return (conversationIndex.get(canonicalUserId) || []).filter((message) => !isSystemConversationMessage(message));
+    }
+    if (conversationIndex.has(userId)) {
+      return (conversationIndex.get(userId) || []).filter((message) => !isSystemConversationMessage(message));
+    }
+
+    const aliasIds = getPeerAliasCandidates(userId);
+    if (canonicalUserId) {
+      aliasIds.add(canonicalUserId);
+    }
+
+    if (aliasIds.size === 0) return [];
+
+    const merged = new Map<string, Message>();
+    aliasIds.forEach((alias) => {
+      const messagesForAlias = conversationIndex.get(alias);
+      if (!messagesForAlias) return;
+      messagesForAlias.forEach((message) => {
+        merged.set(message.id, message);
+      });
+    });
+
+    if (merged.size > 0) {
+      return Array.from(merged.values())
+        .filter((message) => !isSystemConversationMessage(message))
+        .sort((a, b) => a.timestamp - b.timestamp);
+    }
+
+    const selfIds = getSelfIdentityCandidates();
+    return get().messages
+      .filter((message) => !isSystemConversationMessage(message))
+      .filter((message) => {
+        if (isSelfId(message.from, selfIds)) {
+          return isIdentityInAliasSet(message.to, aliasIds);
+        }
+        return isIdentityInAliasSet(message.from, aliasIds);
+      })
+      .sort((a, b) => a.timestamp - b.timestamp);
+  },
+
+  // ELITE V2: Cursor-based pagination for large conversations (WhatsApp pattern)
+  getPagedMessages: (userId: string, cursor?: number, limit: number = 50) => {
+    const allMessages = get().getConversationMessages(userId);
+    // Messages are sorted ascending by timestamp
+    // Cursor is a timestamp — return messages BEFORE the cursor (older messages)
+    let filtered = allMessages;
+    if (cursor !== undefined) {
+      filtered = allMessages.filter(m => m.timestamp < cursor);
+    }
+    // Take last N messages (most recent)
+    const start = Math.max(0, filtered.length - limit);
+    const page = filtered.slice(start);
+    const nextCursor = start > 0 ? filtered[start - 1]?.timestamp ?? null : null;
+    return { messages: page, nextCursor };
   },
   updateConversations: () => {
-    const { messages } = get();
-    // ELITE: Compliance - Filter blocked users
+    const { messages, conversations: existingConversations } = get();
     const { blockedUsers } = require('./settingsStore').useSettingsStore.getState();
+    const blockedAliasSet = new Set<string>();
+    blockedUsers.forEach((blockedUserId: string) => {
+      const aliases = getPeerAliasCandidates(blockedUserId);
+      aliases.forEach((alias) => blockedAliasSet.add(alias));
+      const canonical = resolveCanonicalPeerId(blockedUserId);
+      if (canonical) blockedAliasSet.add(canonical);
+    });
 
-    const conversationMap = new Map<string, Conversation>();
-    messages.forEach(msg => {
-      // Skip blocked users
-      if (blockedUsers.includes(msg.from) || blockedUsers.includes(msg.to)) {
-        return;
+    const isBlockedIdentity = (value: string | null | undefined): boolean => {
+      if (!value) return false;
+      return isIdentityInAliasSet(value, blockedAliasSet);
+    };
+
+    const selfIds = getSelfIdentityCandidates();
+
+    // Preserve existing metadata (isPinned, isMuted, userName) in a lookup map
+    const metadataMap = new Map<string, Pick<Conversation, 'isPinned' | 'isMuted' | 'userName'>>();
+    existingConversations.forEach(c => {
+      const metadataKey = resolveCanonicalPeerId(c.userId) || normalizeId(c.userId);
+      if (!metadataKey) return;
+      const existingMeta = metadataMap.get(metadataKey);
+      metadataMap.set(metadataKey, {
+        isPinned: (existingMeta?.isPinned ?? false) || (c.isPinned ?? false),
+        isMuted: (existingMeta?.isMuted ?? false) || (c.isMuted ?? false),
+        userName: existingMeta?.userName || c.userName,
+      });
+    });
+
+    // O(n) single-pass: compute unread counts and latest message per user
+    const unreadCounts = new Map<string, number>();
+    const latestMessages = new Map<string, { content: string; timestamp: number; fromName?: string }>();
+
+    for (const msg of messages) {
+      if (isBlockedIdentity(msg.from) || isBlockedIdentity(msg.to)) continue;
+      if (isSystemConversationMessage(msg)) continue;
+
+      const otherUserId = getOtherUserIdForMessage(msg, selfIds);
+      if (!otherUserId) continue;
+
+      // Track unread count
+      if (!isSelfId(msg.from, selfIds) && !msg.read) {
+        unreadCounts.set(otherUserId, (unreadCounts.get(otherUserId) || 0) + 1);
       }
 
-      const otherUserId = msg.from === 'me' ? msg.to : msg.from;
-      const existing = conversationMap.get(otherUserId);
-      if (!existing || msg.timestamp > existing.lastMessageTime) {
-        const unreadCount = messages.filter(
-          m => m.from === otherUserId && !m.read,
-        ).length;
-        conversationMap.set(otherUserId, {
-          userId: otherUserId,
-          userName: otherUserId,
-          lastMessage: (msg.content || '').substring(0, 100), // ELITE: Limit preview length
-          lastMessageTime: msg.timestamp,
-          unreadCount,
+      // Track latest message
+      const existing = latestMessages.get(otherUserId);
+      if (!existing || msg.timestamp > existing.timestamp) {
+        latestMessages.set(otherUserId, {
+          content: (msg.content || '').substring(0, 100),
+          timestamp: msg.timestamp,
+          fromName: msg.fromName,
         });
       }
-    });
-    const conversations = Array.from(conversationMap.values())
-      .sort((a, b) => b.lastMessageTime - a.lastMessageTime);
-    set({ conversations });
+    }
 
-    // ELITE: Save conversations to MMKV
+    // Build conversations from latest messages
+    const conversations: Conversation[] = [];
+    for (const [userId, latest] of latestMessages) {
+      const meta = metadataMap.get(userId);
+      const resolvedUserName = resolvePeerDisplayName(userId, meta?.userName || latest.fromName || userId);
+      conversations.push({
+        userId,
+        userName: resolvedUserName,
+        lastMessage: latest.content,
+        lastMessageTime: latest.timestamp,
+        unreadCount: unreadCounts.get(userId) || 0,
+        isPinned: meta?.isPinned,
+        isMuted: meta?.isMuted,
+      });
+    }
+
+    // Sort: pinned first, then by time
+    conversations.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return b.lastMessageTime - a.lastMessageTime;
+    });
+
+    set({ conversations });
     saveConversations(conversations);
   },
   deleteConversation: async (userId: string) => {
-    set((state) => ({
-      conversations: state.conversations.filter((c) => c.userId !== userId),
-      messages: state.messages.filter((m) => m.from !== userId && m.to !== userId),
-    }));
+    const aliasIds = getPeerAliasCandidates(userId);
+    const canonicalUserId = resolveCanonicalPeerId(userId);
+    if (canonicalUserId) {
+      aliasIds.add(canonicalUserId);
+    }
+
+    set((state) => {
+      const updatedMessages = state.messages.filter((m) => {
+        const from = normalizeId(m.from);
+        const to = normalizeId(m.to);
+        return !isIdentityInAliasSet(from, aliasIds) && !isIdentityInAliasSet(to, aliasIds);
+      });
+      return {
+        conversations: state.conversations.filter((c) => !isIdentityInAliasSet(c.userId, aliasIds)),
+        messages: updatedMessages,
+        // BUG FIX: Rebuild conversationIndex after deleting messages.
+        // Without this, stale entries remain in the index causing ghost
+        // conversations in search/lookups.
+        conversationIndex: buildConversationIndex(updatedMessages),
+      };
+    });
 
     // ELITE: Save to MMKV
     const { messages, conversations } = get();
     saveMessages(messages);
     saveConversations(conversations);
 
-    // ELITE: Delete from Firebase
+    // Delete from Firebase using correct identity-based ID
     try {
-      const deviceId = await getDeviceId();
-      if (deviceId) {
+      const { identityService } = require('../services/IdentityService');
+      const deviceId = identityService.getUid() || identityService.getMyId();
+      if (deviceId && deviceId !== 'unknown') {
         const firebaseService = getFirebaseDataService();
         if (firebaseService?.isInitialized) {
-          await firebaseService.deleteConversation?.(deviceId, userId).catch((error) => {
-            logger.error('Failed to delete conversation from Firebase:', error);
-          });
+          const remoteTargets = Array.from(aliasIds);
+          if (remoteTargets.length === 0) {
+            remoteTargets.push(userId);
+          }
+
+          await Promise.allSettled(
+            remoteTargets.map((target) =>
+              firebaseService.deleteConversation?.(deviceId, target),
+            ),
+          );
         }
       }
     } catch (error) {
@@ -570,29 +958,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     saveMessages(messages);
   },
 
-  // ELITE: Retry failed message
-  retryMessage: async (messageId: string) => {
-    const { messages, sendingQueue } = get();
-    const failedMsg = messages.find(m => m.id === messageId && m.status === 'failed');
 
-    if (failedMsg) {
-      // Update status to pending and add to sending queue
-      const updatedMsg = {
-        ...failedMsg,
-        status: 'pending' as const,
-        retryCount: (failedMsg.retryCount || 0) + 1,
-        lastRetryAt: Date.now(),
-      };
-
-      set((state) => ({
-        messages: state.messages.map(m => m.id === messageId ? updatedMsg : m),
-        sendingQueue: [...state.sendingQueue, updatedMsg],
-      }));
-
-      saveMessages(get().messages);
-      logger.info(`Retrying message ${messageId}, attempt ${updatedMsg.retryCount}`);
-    }
-  },
 
   // ELITE: Set typing indicator
   setTyping: (conversationId: string, userId: string, userName?: string) => {
@@ -628,9 +994,13 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
   // ELITE: Pin/Unpin conversation
   pinConversation: async (userId: string, isPinned: boolean) => {
+    const aliasIds = getPeerAliasCandidates(userId);
+    const canonicalUserId = resolveCanonicalPeerId(userId);
+    if (canonicalUserId) aliasIds.add(canonicalUserId);
+
     set((state) => ({
       conversations: state.conversations.map(c =>
-        c.userId === userId ? { ...c, isPinned } : c
+        isIdentityInAliasSet(c.userId, aliasIds) ? { ...c, isPinned } : c
       ).sort((a, b) => {
         // Pinned conversations first
         if (a.isPinned && !b.isPinned) return -1;
@@ -643,9 +1013,13 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
   // ELITE: Mute/Unmute conversation
   muteConversation: async (userId: string, isMuted: boolean) => {
+    const aliasIds = getPeerAliasCandidates(userId);
+    const canonicalUserId = resolveCanonicalPeerId(userId);
+    if (canonicalUserId) aliasIds.add(canonicalUserId);
+
     set((state) => ({
       conversations: state.conversations.map(c =>
-        c.userId === userId ? { ...c, isMuted } : c
+        isIdentityInAliasSet(c.userId, aliasIds) ? { ...c, isMuted } : c
       ),
     }));
     saveConversations(get().conversations);
@@ -662,7 +1036,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     }
 
     // Only allow editing own messages
-    if (message.from !== 'me') {
+    if (!isSelfId(message.from, getSelfIdentityCandidates())) {
       logger.warn('Cannot edit messages from other users');
       return false;
     }
@@ -694,6 +1068,34 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     saveMessages(get().messages);
     get().updateConversations();
 
+    // FIX: Sync edit to Firestore so other participants see the change
+    try {
+      const { identityService } = require('../services/IdentityService');
+      const uid = identityService.getUid();
+      if (uid) {
+        const { firebaseDataService } = require('../services/FirebaseDataService');
+        if (firebaseDataService?.isInitialized) {
+          const peerUid = getOtherUserIdForMessage(message, getSelfIdentityCandidates());
+          if (peerUid) {
+            await firebaseDataService.saveMessage(peerUid, {
+              id: messageId,
+              content: newContent,
+              isEdited: true,
+              editedAt: now,
+              type: 'text',
+              timestamp: message.timestamp,
+              senderUid: uid,
+              fromDeviceId: uid,
+              toDeviceId: peerUid,
+              status: 'sent',
+            });
+          }
+        }
+      }
+    } catch (syncError) {
+      logger.warn('Failed to sync edited message to cloud:', syncError);
+    }
+
     logger.info(`Edited message ${messageId}`);
     return true;
   },
@@ -709,7 +1111,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     }
 
     // Only allow deleting own messages
-    if (message.from !== 'me') {
+    if (!isSelfId(message.from, getSelfIdentityCandidates())) {
       logger.warn('Cannot delete messages from other users');
       return false;
     }
@@ -732,12 +1134,46 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     saveMessages(get().messages);
     get().updateConversations();
 
+    // FIX: Sync deletion to Firestore so other participants see the change
+    try {
+      const { identityService } = require('../services/IdentityService');
+      const uid = identityService.getUid();
+      if (uid) {
+        const { firebaseDataService } = require('../services/FirebaseDataService');
+        if (firebaseDataService?.isInitialized) {
+          const peerUid = getOtherUserIdForMessage(message, getSelfIdentityCandidates());
+          if (peerUid) {
+            await firebaseDataService.saveMessage(peerUid, {
+              id: messageId,
+              content: 'Bu mesaj silindi',
+              isDeleted: true,
+              deletedAt: now,
+              type: 'text',
+              timestamp: message.timestamp,
+              senderUid: uid,
+              fromDeviceId: uid,
+              toDeviceId: peerUid,
+              status: 'sent',
+            });
+          }
+        }
+      }
+    } catch (syncError) {
+      logger.warn('Failed to sync deleted message to cloud:', syncError);
+    }
+
     logger.info(`Deleted message ${messageId}`);
     return true;
   },
 
   // ELITE: Forward message to another user
   forwardMessage: async (messageId: string, toUserId: string) => {
+    const canonicalRecipient = resolveCanonicalPeerId(toUserId);
+    if (!canonicalRecipient) {
+      logger.warn(`Cannot forward message ${messageId}: invalid recipient ${toUserId}`);
+      return null;
+    }
+
     const { messages } = get();
     const originalMessage = messages.find(m => m.id === messageId);
 
@@ -756,7 +1192,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       id: `fwd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       localId: `local-${Date.now()}`,
       from: 'me',
-      to: toUserId,
+      to: canonicalRecipient,
       content: originalMessage.content,
       timestamp: Date.now(),
       delivered: false,
@@ -768,12 +1204,79 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
     await get().addMessage(forwardedMessage);
 
-    logger.info(`Forwarded message ${messageId} to ${toUserId}`);
+    logger.info(`Forwarded message ${messageId} to ${canonicalRecipient}`);
     return forwardedMessage;
   },
 
   // ELITE: Get single message by ID
   getMessage: (messageId: string) => {
     return get().messages.find(m => m.id === messageId);
+  },
+
+  // ELITE V2: Sync read receipt to Firebase (WhatsApp 3-tick pattern)
+  // When recipient reads a message → update readBy field on the actual message doc
+  syncReadReceipt: async (_messageId: string, senderId: string) => {
+    try {
+      const { identityService } = require('../services/IdentityService');
+      const myUid = identityService.getUid();
+      if (!myUid || myUid === 'unknown') return;
+
+      // FIX: Use V3 conversation model — mark the conversation as read in inbox
+      // instead of creating fake "receipt" messages that pollute the conversation
+      const { findOrCreateDMConversation, markConversationRead: markConvRead } = require('../services/firebase/FirebaseMessageOperations');
+      const conversationId = await findOrCreateDMConversation(myUid, senderId);
+      if (conversationId) {
+        await markConvRead(myUid, conversationId);
+
+        // Also update the readBy field on recent messages in the conversation
+        try {
+          const { getFirestoreInstanceAsync } = require('../services/firebase/FirebaseInstanceManager');
+          const { doc, updateDoc } = require('firebase/firestore');
+          const db = await getFirestoreInstanceAsync();
+          if (db) {
+            await updateDoc(
+              doc(db, 'conversations', conversationId, 'messages', _messageId),
+              { [`readBy.${myUid}`]: Date.now() }
+            ).catch(() => { /* message may not exist in this conversation */ });
+          }
+        } catch {
+          // readBy update is best-effort
+        }
+      }
+
+      logger.debug(`Read receipt synced for conversation with ${senderId}`);
+    } catch (error) {
+      // Read receipt sync is best-effort, don't block
+      logger.warn('Failed to sync read receipt:', error);
+    }
+  },
+
+  // ELITE V2: Search messages (WhatsApp pattern)
+  searchMessages: (query: string, conversationId?: string) => {
+    if (!query || query.length < 2) return [];
+
+    const lowerQuery = safeLowerCase(query);
+    const { messages } = get();
+
+    // Search within a specific conversation (O(m) where m = conversation size)
+    if (conversationId) {
+      const convMessages = get().getConversationMessages(conversationId);
+      return convMessages.filter(m =>
+        !m.isDeleted && safeIncludes(safeLowerCase(m.content), lowerQuery)
+      );
+    }
+
+    // Global search (O(n) — but unavoidable for full-text)
+    return messages.filter(m =>
+      !m.isDeleted && safeIncludes(safeLowerCase(m.content), lowerQuery)
+    );
+  },
+
+  // ELITE V2: Force rebuild conversation index after bulk operations
+  rebuildIndex: () => {
+    const { messages } = get();
+    const newIndex = buildConversationIndex(messages);
+    set({ conversationIndex: newIndex });
+    logger.debug(`Conversation index rebuilt: ${newIndex.size} conversations`);
   },
 }));

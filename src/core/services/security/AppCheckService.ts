@@ -124,13 +124,19 @@ class AppCheckService {
 
     /**
      * Activate App Check with the appropriate provider
+     * SECURITY WARNING: App Check is currently DISABLED.
+     * Without App Check, backend endpoints cannot verify request origin.
+     * TODO: Integrate @react-native-firebase/app-check native module
+     *       and enable DeviceCheck/AppAttest (iOS) or PlayIntegrity (Android).
      */
     private async activateAppCheck(): Promise<void> {
         try {
-            // Hard-disable until native App Check provider is integrated.
-            logger.warn('App Check provider not integrated; disabling token issuance', {
+            // SECURITY FIX: Hard-disable with clear security warning
+            logger.warn('⚠️ SECURITY: App Check DISABLED — backend cannot verify app authenticity', {
                 platform: Platform.OS,
+                requiredAction: 'Integrate @react-native-firebase/app-check native module',
                 expectedProvider: Platform.OS === 'ios' ? 'DeviceCheck/AppAttest' : 'PlayIntegrity',
+                impact: 'Firestore/Storage/Functions requests cannot be verified as coming from legitimate app',
             });
             this.isSupported = false;
         } catch (error) {

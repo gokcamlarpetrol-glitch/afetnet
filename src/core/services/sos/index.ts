@@ -14,6 +14,7 @@ export {
     type SOSSignal,
     type DeviceStatus,
     type ChannelState,
+    type IncomingSOSAlert,
 } from './SOSStateManager';
 
 // Controller

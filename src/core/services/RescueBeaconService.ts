@@ -299,49 +299,19 @@ class RescueBeaconService {
    */
   private async sendTrappedUserNotification(payload: BeaconPayload, rssi?: number, distance?: number) {
     try {
-      const { multiChannelAlertService } = await import('./MultiChannelAlertService');
+      const { notificationCenter } = await import('./notifications/NotificationCenter');
 
-      const distanceText = distance
-        ? distance < 1000
-          ? `${Math.round(distance)}m uzaklıkta`
-          : `${(distance / 1000).toFixed(1)}km uzaklıkta`
-        : rssi
-          ? `Sinyal gücü: ${rssi} dBm`
-          : 'Yakın bölgede';
-
-      const batteryText = payload.battery !== undefined ? `Pil: %${payload.battery}` : '';
-      const locationText = payload.location
-        ? `Konum: ${payload.location.latitude.toFixed(4)}, ${payload.location.longitude.toFixed(4)}`
-        : '';
-
-      const body = [
-        payload.message || `${payload.userName} yardım bekliyor`,
-        distanceText,
-        batteryText,
-        locationText,
-      ].filter(Boolean).join(' • ');
-
-      await multiChannelAlertService.sendAlert({
-        title: payload.status === 'trapped'
-          ? '🚨 ENKAZ ALTINDA KİŞİ TESPİT EDİLDİ'
-          : '⚠️ YARDIM GEREKEN KİŞİ TESPİT EDİLDİ',
-        body,
-        priority: payload.status === 'trapped' ? 'critical' : 'high',
-        channels: {
-          pushNotification: true,
-          fullScreenAlert: payload.status === 'trapped',
-          alarmSound: payload.status === 'trapped',
-          vibration: true,
-          tts: true,
-        },
-        data: {
-          type: 'trapped_user',
-          userId: payload.userId,
-          status: payload.status,
-          location: payload.location,
-        },
-        duration: payload.status === 'trapped' ? 0 : 30, // Critical alerts stay until dismissed
-      });
+      await notificationCenter.notify('rescue', {
+        userId: payload.userId,
+        userName: payload.userName,
+        status: payload.status,
+        distance,
+        message: payload.message || `${payload.userName} yardım bekliyor`,
+        location: payload.location ? {
+          latitude: payload.location.latitude,
+          longitude: payload.location.longitude,
+        } : undefined,
+      }, 'RescueBeaconService');
     } catch (error) {
       logger.error('Failed to send trapped user notification:', error);
     }

@@ -25,6 +25,7 @@ interface CrossValidationData {
 
 class EarthquakeValidationService {
   private isInitialized = false;
+  private initPromise: Promise<void> | null = null; // ELITE: Race condition guard for concurrent init calls
 
   // Validation thresholds
   private readonly MIN_CONFIDENCE = 60; // Minimum confidence to accept data
@@ -36,13 +37,17 @@ class EarthquakeValidationService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    // ELITE: Prevent race condition — multiple concurrent init calls
+    if (this.initPromise) return this.initPromise;
 
-    // ELITE: Ensure OpenAI service is initialized with API key
-    // This fixes the issue where AI connection drops if News service wasn't visited
-    await openAIService.initialize();
+    this.initPromise = (async () => {
+      // ELITE: Ensure OpenAI service is initialized with API key
+      await openAIService.initialize();
+      logger.info('EarthquakeValidationService initialized');
+      this.isInitialized = true;
+    })();
 
-    logger.info('EarthquakeValidationService initialized');
-    this.isInitialized = true;
+    return this.initPromise;
   }
 
   /**
@@ -206,12 +211,13 @@ class EarthquakeValidationService {
       };
     } catch (error) {
       logger.error('Validation error:', error);
-      // Fail-safe: If validation fails, accept the data but log warning
+      // Fail-safe: If validation fails unexpectedly, REJECT the data
+      // Unvalidated data must not reach users
       return {
-        isValid: true,
-        confidence: 50,
-        reason: 'Doğrulama hatası - veri kabul edildi',
-        verifiedSources: [earthquake.source],
+        isValid: false,
+        confidence: 0,
+        reason: 'Doğrulama hatası - veri reddedildi',
+        verifiedSources: [],
       };
     }
   }

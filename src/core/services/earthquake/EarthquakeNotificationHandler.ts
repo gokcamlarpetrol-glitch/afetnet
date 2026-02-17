@@ -7,10 +7,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Earthquake } from '../../stores/earthquakeStore';
 import { createLogger } from '../../utils/logger';
 import { autoCheckinService } from '../AutoCheckinService';
-import { emergencyModeService } from '../EmergencyModeService';
 
 const logger = createLogger('EarthquakeNotificationHandler');
 const LAST_CHECKED_KEY = 'last_checked_earthquake';
+
+// PRODUCTION FIX: Global notification rate limiter to prevent floods
+const MAX_NOTIFICATIONS_PER_HOUR = 3;
+const NOTIFICATION_DEDUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes per earthquake ID
+const notificationTimestamps: number[] = [];
+const recentlyNotifiedIds = new Map<string, number>(); // earthquake ID → timestamp
 
 /**
  * Process notifications and auto-checkin for new earthquakes
@@ -37,6 +42,20 @@ export async function processEarthquakeNotifications(
 
   const latestEq = earthquakes[0];
   const lastCheckedEq = await AsyncStorage.getItem(LAST_CHECKED_KEY);
+
+  // NOTIFICATION GATEWAY FIX: Skip stale earthquakes (older than 15 minutes)
+  // This prevents the notification flood when the app is reopened and
+  // re-fetches historical earthquake data that was already notified.
+  const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+  const earthquakeAge = Date.now() - latestEq.time;
+  if (earthquakeAge > STALE_THRESHOLD_MS) {
+    if (__DEV__) {
+      logger.info(`⏭️ Stale earthquake skipped: M${latestEq.magnitude.toFixed(1)} ${latestEq.location} (${Math.round(earthquakeAge / 60000)}min old)`);
+    }
+    // Still update the last-checked marker so we don't re-check it
+    await AsyncStorage.setItem(LAST_CHECKED_KEY, latestEq.id);
+    return;
+  }
 
   if (__DEV__) {
     logger.info('🔝 EN SON DEPREM:', {
@@ -92,38 +111,63 @@ export async function processEarthquakeNotifications(
       }
 
       if (shouldNotify && settings.notificationPush) {
+        // PRODUCTION FIX: Rate limiter — max 3 notifications per hour (except critical M6.0+)
+        const now = Date.now();
+        const oneHourAgo = now - 60 * 60 * 1000;
+
+        // Clean up old timestamps and dedup entries
+        while (notificationTimestamps.length > 0 && notificationTimestamps[0] < oneHourAgo) {
+          notificationTimestamps.shift();
+        }
+        for (const [id, ts] of recentlyNotifiedIds) {
+          if (now - ts > NOTIFICATION_DEDUP_WINDOW_MS) {
+            recentlyNotifiedIds.delete(id);
+          }
+        }
+
+        // Check dedup: skip if same earthquake notified within 10 min
+        if (recentlyNotifiedIds.has(latestEq.id)) {
+          logger.info(`⏭️ Notification dedup: earthquake ${latestEq.id} already notified within 10 min — skipping`);
+          shouldNotify = false;
+        }
+
+        // Check rate limit (bypass for critical M6.0+ emergencies)
+        if (shouldNotify && notificationTimestamps.length >= MAX_NOTIFICATIONS_PER_HOUR && latestEq.magnitude < 6.0) {
+          logger.info(`⏭️ Notification rate limit: ${notificationTimestamps.length}/${MAX_NOTIFICATIONS_PER_HOUR} per hour — skipping M${latestEq.magnitude.toFixed(1)}`);
+          shouldNotify = false;
+        }
+      }
+
+      if (shouldNotify && settings.notificationPush) {
+        // Record notification for rate limiting
+        notificationTimestamps.push(Date.now());
+        recentlyNotifiedIds.set(latestEq.id, Date.now());
         try {
-          // ELITE: Use magnitude-based notification system
-          // CRITICAL: Instant delivery, 100% accuracy, emergency mode for 5.0+
-          const { showMagnitudeBasedNotification } = await import('../MagnitudeBasedNotificationService');
-          await showMagnitudeBasedNotification(
-            latestEq.magnitude,
-            latestEq.location,
-            latestEq.magnitude >= settings.eewMinMagnitude && selectedPriority === 'critical',
-            latestEq.magnitude >= settings.eewMinMagnitude ? settings.eewWarningTime : undefined,
-            latestEq.time, // Timestamp - CRITICAL for instant delivery
-          ).catch(async (error) => {
-            logger.error('Failed to show magnitude-based notification:', error);
-            // Fallback to standard notification
-            try {
-              const { notificationService } = await import('../NotificationService');
-              await notificationService.showEarthquakeNotification(
-                latestEq.magnitude,
-                latestEq.location,
-                new Date(latestEq.time),
-              );
-            } catch (fallbackError) {
-              logger.error('Failed to show fallback notification:', fallbackError);
-            }
-          });
-          logger.info(`✅ ELITE Magnitude-based notification sent: ${latestEq.magnitude.toFixed(1)}M - ${latestEq.location}`);
+          // ELITE: Use unified notification center
+          const { notificationCenter } = await import('../notifications/NotificationCenter');
+          await notificationCenter.notify('earthquake', {
+            magnitude: latestEq.magnitude,
+            location: latestEq.location,
+            isEEW: latestEq.magnitude >= settings.eewMinMagnitude && selectedPriority === 'critical',
+            timeAdvance: latestEq.magnitude >= settings.eewMinMagnitude ? settings.eewWarningTime : undefined,
+            timestamp: latestEq.time,
+            latitude: latestEq.latitude,
+            longitude: latestEq.longitude,
+            depth: latestEq.depth,
+            source: latestEq.source || 'AFAD',
+            earthquakeId: latestEq.id,
+          }, 'EarthquakeNotificationHandler');
+          logger.info(`✅ Notification sent: ${latestEq.magnitude.toFixed(1)}M - ${latestEq.location}`);
         } catch (error) {
-          logger.error('Failed to load notification service:', error);
+          logger.error('Failed to send notification:', error);
         }
       }
     }
 
-    // ELITE: Trigger auto check-in and emergency mode for significant earthquakes
+    // ELITE: Trigger auto check-in for significant earthquakes (4.0+)
+    // NOTE: Emergency mode (5.0+) is now handled INTERNALLY by
+    // MagnitudeBasedNotificationService.triggerEmergencyMode().
+    // Do NOT call activateEmergencyMode here — it causes double-triggering.
     if (latestEq.magnitude >= 4.0) {
       let shouldRunProximityActions = true;
       if (epicenterDistanceKm != null) {
@@ -136,14 +180,14 @@ export async function processEarthquakeNotifications(
           : maxActionDistanceKm;
         if (epicenterDistanceKm > effectiveActionDistanceKm) {
           shouldRunProximityActions = false;
-          logger.info(`📍 Proximity guard: skipping auto-checkin/emergency (${epicenterDistanceKm.toFixed(0)}km, max ${effectiveActionDistanceKm}km)`);
+          logger.info(`📍 Proximity guard: skipping auto-checkin (${epicenterDistanceKm.toFixed(0)}km, max ${effectiveActionDistanceKm}km)`);
         }
       } else {
         const isInTurkey = latestEq.latitude >= 35.8 && latestEq.latitude <= 42.1
           && latestEq.longitude >= 25.6 && latestEq.longitude <= 44.8;
         if (!isInTurkey && latestEq.magnitude < 6.5) {
           shouldRunProximityActions = false;
-          logger.info('📍 Proximity guard: no user location + non-Turkey event, skipping auto-checkin/emergency');
+          logger.info('📍 Proximity guard: no user location + non-Turkey event, skipping auto-checkin');
         }
       }
 
@@ -156,21 +200,8 @@ export async function processEarthquakeNotifications(
         autoCheckinService.startCheckIn(latestEq.magnitude).catch((error) => {
           logger.error('AutoCheckin failed:', error);
         });
-
-        // 🚨 CRITICAL: Trigger emergency mode for significant earthquakes (5.0+)
-        // ELITE: 5.0-5.9: High priority emergency mode
-        // ELITE: 6.0+: Critical priority emergency mode
-        const forceCriticalPolicy = latestEq.magnitude >= settings.criticalMagnitudeThreshold
-          && settings.priorityCritical !== 'normal';
-        if (forceCriticalPolicy || emergencyModeService.shouldTriggerEmergencyMode(latestEq, epicenterDistanceKm)) {
-          const priority = latestEq.magnitude >= 6.0 ? 'CRITICAL' : 'HIGH';
-          logger.info(`🚨 ${priority} EARTHQUAKE DETECTED: ${latestEq.magnitude}M - Activating emergency mode`);
-          emergencyModeService.activateEmergencyMode(latestEq).catch((error) => {
-            logger.error('Emergency mode activation failed:', error);
-          });
-        }
       } catch (error) {
-        logger.error('Failed to trigger auto check-in or emergency mode:', error);
+        logger.error('Failed to trigger auto check-in:', error);
       }
     }
   }

@@ -20,6 +20,7 @@ import {
   Dimensions,
   Platform,
   Linking,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,10 +40,12 @@ import Animated, {
   interpolateColor,
 } from 'react-native-reanimated';
 import { colors } from '../../theme';
+import { styles, PREMIUM_COLORS } from './DisasterMapScreen.styles';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { useSOSStore, SOSSignal } from '../../services/sos';
+import { useSOSStore, SOSSignal, IncomingSOSAlert } from '../../services/sos';
 import { createLogger } from '../../utils/logger';
+import { formatLastSeen } from '../../utils/dateUtils';
 import { useLiveLocation } from '../../hooks/useLiveLocation';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { ClusterMarker } from '../../components/map/ClusterMarker';
@@ -53,7 +56,8 @@ import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsServic
 // Will be re-added with lazy loading in future update.
 import * as haptics from '../../utils/haptics';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import type { ParamListBase } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
+import type { MainStackParamList } from '../../types/navigation';
 import type { Region } from 'react-native-maps';
 
 const logger = createLogger('DisasterMapScreen');
@@ -63,47 +67,63 @@ interface ActiveSOSSignal {
   id: string;
   userId: string;
   userName?: string;
+  name?: string;           // Display name for rescue panel
   latitude: number;
   longitude: number;
   timestamp: number;
   message: string;
   trapped: boolean;
-  distance?: number; // Will be calculated from user location
+  distance?: number;
+  battery?: number;         // Battery percentage
+  senderDeviceId?: string;  // For ACK and messaging
+  senderUid?: string;       // Canonical UID for V3 messaging paths
+  signalId?: string;        // Original signal ID
+  healthInfo?: {
+    bloodType?: string;
+    allergies?: string;
+    chronicConditions?: string;
+    emergencyNotes?: string;
+  };
+}
+
+// Haversine formula for distance calculation (km)
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 import MapView, { Marker, Circle } from 'react-native-maps';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-type DisasterMapNavigationProp = StackNavigationProp<ParamListBase>;
+type DisasterMapNavigationProp = StackNavigationProp<MainStackParamList, 'DisasterMap'>;
+type DisasterMapRouteProp = RouteProp<MainStackParamList, 'DisasterMap'>;
 
 interface DisasterMapScreenProps {
   navigation: DisasterMapNavigationProp;
+  route?: DisasterMapRouteProp;
 }
 
 // ELITE: Premium color palette (Modern Calm Trust)
-const PREMIUM_COLORS = {
-  trustBlue: '#1F4E79',
-  trustBlueDark: '#163B5B',
-  trustBlueLight: '#4A769E',
-  cream: '#F4EFE7',
-  ivory: '#FFFCF7',
-  textPrimary: '#121416',
-  textSecondary: '#5B5F66',
-  safe: '#2E7D32',
-  warning: '#D9A441',
-  critical: '#B53A3A',
-  criticalDark: '#962A2A',
-  glass: 'rgba(255, 252, 247, 0.92)',
-  glassBorder: 'rgba(31, 78, 121, 0.12)',
-};
+// PREMIUM_COLORS imported from DisasterMapScreen.styles.ts
 
 // PREMIUM: Status colors with Modern Calm Trust palette
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
   safe: PREMIUM_COLORS.safe,
   'need-help': PREMIUM_COLORS.warning,
   unknown: PREMIUM_COLORS.textSecondary,
   critical: PREMIUM_COLORS.critical,
+  danger: PREMIUM_COLORS.critical,
+  offline: '#94a3b8',
 };
 
 // Default region settings
@@ -349,10 +369,30 @@ const SOSSignalMarker = ({
   );
 };
 
-export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps) {
+export default function DisasterMapScreen({ navigation, route }: DisasterMapScreenProps) {
   const mapRef = useRef<MapView | null>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
+
+  const toFiniteNumber = useCallback((value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  }, []);
+
+  // Route params from notification tap (SOS + family location focus)
+  const focusOnSOS = route?.params?.focusOnSOS;
+  const focusOnFamily = route?.params?.focusOnFamily;
+  const sosLatitude = toFiniteNumber(route?.params?.sosLatitude);
+  const sosLongitude = toFiniteNumber(route?.params?.sosLongitude);
+  const familyLatitude = toFiniteNumber(route?.params?.familyLatitude);
+  const familyLongitude = toFiniteNumber(route?.params?.familyLongitude);
+  const targetLatitude = sosLatitude ?? familyLatitude;
+  const targetLongitude = sosLongitude ?? familyLongitude;
+  const shouldFocusRouteLocation = Boolean((focusOnSOS || focusOnFamily) && targetLatitude !== null && targetLongitude !== null);
 
   // FIX #2: Live location tracking (replaces one-shot getCurrentPositionAsync)
   const { location: userLocation, locationData } = useLiveLocation({
@@ -368,10 +408,23 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   const [isInitialized, setIsInitialized] = useState(false);
   const [viewMode, setViewMode] = useState<'family' | 'earthquake'>('family');
 
+  // Auto-focus on location when navigated from notification
+  useEffect(() => {
+    if (shouldFocusRouteLocation && targetLatitude !== null && targetLongitude !== null && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: targetLatitude,
+        longitude: targetLongitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }, 1000);
+    }
+  }, [shouldFocusRouteLocation, targetLatitude, targetLongitude]);
+
   // Stores
   const familyMembers = useFamilyStore((state) => state.members);
   const earthquakes = useEarthquakeStore((state) => state.items);
   const currentSOSSignal = useSOSStore((state) => state.currentSignal);
+  const incomingSOSAlerts = useSOSStore((state) => state.incomingSOSAlerts);
 
   // SOS Signals state
   const [selectedSOS, setSelectedSOS] = useState<ActiveSOSSignal | null>(null);
@@ -394,14 +447,46 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
       timestamp: currentSOSSignal.timestamp,
       message: currentSOSSignal.message,
       trapped: currentSOSSignal.trapped,
+      senderUid: currentSOSSignal.userId,
     }];
   }, [currentSOSSignal]);
 
+  // Incoming SOS from other users (via SOSAlertListener → sosStore)
+  const incomingSOSMarkers = useMemo<ActiveSOSSignal[]>(() => {
+    return incomingSOSAlerts
+      .filter(alert => {
+        // Only show alerts from the last 30 minutes
+        const age = Date.now() - alert.timestamp;
+        return age < 30 * 60 * 1000;
+      })
+      .map(alert => ({
+        id: alert.id,
+        userId: alert.senderUid || alert.senderDeviceId,
+        userName: alert.senderName,
+        name: alert.senderName,
+        latitude: alert.latitude,
+        longitude: alert.longitude,
+        timestamp: alert.timestamp,
+        message: alert.message,
+        trapped: alert.trapped,
+        battery: alert.battery,
+        senderDeviceId: alert.senderDeviceId,
+        senderUid: alert.senderUid,
+        signalId: alert.signalId,
+        healthInfo: alert.healthInfo,
+      }));
+  }, [incomingSOSAlerts]);
+
+  // Combined: own SOS + incoming SOS from others
+  const allSOSSignals = useMemo(() => {
+    return [...activeSOSSignals, ...incomingSOSMarkers];
+  }, [activeSOSSignals, incomingSOSMarkers]);
+
   useEffect(() => {
-    if (selectedSOS && !activeSOSSignals.some((signal) => signal.id === selectedSOS.id)) {
+    if (selectedSOS && !allSOSSignals.some((signal) => signal.id === selectedSOS.id)) {
       setSelectedSOS(null);
     }
-  }, [activeSOSSignals, selectedSOS]);
+  }, [allSOSSignals, selectedSOS]);
 
   // Cluster Engine
   const clusterEngine = useMemo(() => new MapClusterEngine({
@@ -414,7 +499,16 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   // Bottom sheet snap points
   const snapPoints = useMemo(() => ['15%', '45%', '90%'], []);
 
-  // FIX #5: Remove duplicate familyStore.initialize() — already called from App init
+  // CRITICAL FIX: Ensure familyStore is initialized when DisasterMapScreen mounts.
+  // Previously removed (FIX #5) assuming init.ts would handle it, but init.ts gates
+  // behind isAuthed — causing empty members if auth race condition occurs.
+  // initialize() is idempotent and safe to call multiple times.
+  useEffect(() => {
+    useFamilyStore.getState().initialize().catch((error) => {
+      logger.warn('FamilyStore init from DisasterMapScreen:', error);
+    });
+  }, []);
+
   // FIX #2: Location initialization is now handled by useLiveLocation hook
   useEffect(() => {
     if (userLocation) {
@@ -578,26 +672,48 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
   }, []);
 
   // Helper functions
-  const getRelativeTime = (timestamp: number): string => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return 'Şimdi';
-    if (minutes < 60) return `${minutes}dk önce`;
-    if (hours < 24) return `${hours}sa önce`;
-    return `${days}g önce`;
-  };
+  const getRelativeTime = (timestamp: number | string | Date | null | undefined): string =>
+    formatLastSeen(timestamp);
 
   const getStatusText = (status: FamilyMember['status']): string => {
     switch (status) {
       case 'safe': return 'Güvende';
       case 'need-help': return 'Yardım Gerekiyor';
       case 'critical': return 'Kritik Durum';
+      case 'danger': return 'Tehlikede';
+      case 'offline': return 'Çevrimdışı';
+      case 'unknown': return 'Bilinmiyor';
       default: return 'Bilinmiyor';
     }
+  };
+
+  const getStatusIcon = (status: FamilyMember['status']): string => {
+    switch (status) {
+      case 'safe': return 'shield-checkmark';
+      case 'need-help': return 'alert-circle';
+      case 'critical': return 'warning';
+      case 'danger': return 'flame';
+      case 'offline': return 'cloud-offline';
+      default: return 'help-circle';
+    }
+  };
+
+  const getRelationshipEmoji = (relationship?: string): string => {
+    if (!relationship) return '👤';
+    const emojis: Record<string, string> = {
+      anne: '👩', baba: '👨', es: '💕', kardes: '👫',
+      cocuk: '👶', akraba: '👥', arkadas: '🤝', diger: '👤',
+    };
+    return emojis[relationship] || '👤';
+  };
+
+  const getRelationshipLabel = (relationship?: string): string => {
+    if (!relationship) return '';
+    const labels: Record<string, string> = {
+      anne: 'Anne', baba: 'Baba', es: 'Eş', kardes: 'Kardeş',
+      cocuk: 'Çocuk', akraba: 'Akraba', arkadas: 'Arkadaş', diger: 'Diğer',
+    };
+    return labels[relationship] || relationship;
   };
 
   // Loading state
@@ -659,15 +775,15 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
 
           return (
             <Marker
-              key={member.id}
+              key={member.uid}
               coordinate={{ latitude: lat, longitude: lng }}
               anchor={{ x: 0.5, y: 0.9 }}
-              zIndex={selectedMember?.id === member.id ? 100 : 10}
+              zIndex={selectedMember?.uid === member.uid ? 100 : 10}
               tracksViewChanges={false}
             >
               <FamilyMemberMarker
                 member={member}
-                isSelected={selectedMember?.id === member.id}
+                isSelected={selectedMember?.uid === member.uid}
                 onPress={() => focusOnMember(member)}
               />
             </Marker>
@@ -725,7 +841,7 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
         })}
 
         {/* PREMIUM: SOS Signal Markers - Always visible in both modes */}
-        {activeSOSSignals.map((signal) => (
+        {allSOSSignals.map((signal) => (
           <Marker
             key={`sos-${signal.id}`}
             coordinate={{ latitude: signal.latitude, longitude: signal.longitude }}
@@ -759,6 +875,20 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
             colors={['rgba(255,252,247,0.95)', 'rgba(244,239,231,0.9)']}
             style={styles.headerGradient}
           >
+            {/* Back Button - only when navigated from Stack */}
+            {navigation.canGoBack() && (
+              <Pressable
+                style={styles.headerBackBtn}
+                onPress={() => {
+                  haptics.impactLight();
+                  navigation.goBack();
+                }}
+                hitSlop={12}
+              >
+                <Ionicons name="chevron-back" size={24} color={PREMIUM_COLORS.textPrimary} />
+              </Pressable>
+            )}
+
             {/* View Mode Toggle */}
             <View style={styles.viewModeToggle}>
               <Pressable
@@ -902,13 +1032,13 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
                 ) : (
                   familyMembers.map((member) => (
                     <Pressable
-                      key={member.id}
+                      key={member.uid}
                       style={styles.memberCard}
                       onPress={() => focusOnMember(member)}
                     >
                       {/* Premium Avatar with gradient */}
                       <LinearGradient
-                        colors={[STATUS_COLORS[member.status], `${STATUS_COLORS[member.status]}CC`]}
+                        colors={[STATUS_COLORS[member.status] || STATUS_COLORS.unknown, `${STATUS_COLORS[member.status] || STATUS_COLORS.unknown}CC`]}
                         style={styles.memberAvatar}
                       >
                         <Text style={styles.memberAvatarText}>
@@ -923,26 +1053,26 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
                           <View
                             style={[
                               styles.statusBadge,
-                              { backgroundColor: STATUS_COLORS[member.status] + '15' },
+                              { backgroundColor: (STATUS_COLORS[member.status] || STATUS_COLORS.unknown) + '15' },
                             ]}
                           >
                             <View
                               style={[
                                 styles.statusDotSmall,
-                                { backgroundColor: STATUS_COLORS[member.status] },
+                                { backgroundColor: STATUS_COLORS[member.status] || STATUS_COLORS.unknown },
                               ]}
                             />
                             <Text
                               style={[
                                 styles.statusBadgeText,
-                                { color: STATUS_COLORS[member.status] },
+                                { color: STATUS_COLORS[member.status] || STATUS_COLORS.unknown },
                               ]}
                             >
                               {getStatusText(member.status)}
                             </Text>
                           </View>
                           <Text style={styles.lastSeenText}>
-                            {getRelativeTime(member.lastSeen)}
+                            {member.lastSeen ? getRelativeTime(member.lastSeen) : 'Bilinmiyor'}
                           </Text>
                         </View>
                       </View>
@@ -969,154 +1099,291 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
             </>
           )}
 
-          {/* Selected Member Detail */}
-          {selectedMember && (
-            <View style={styles.detailView}>
-              <Pressable
-                style={styles.backBtn}
-                onPress={() => setSelectedMember(null)}
-              >
-                <Ionicons name="chevron-back" size={20} color={PREMIUM_COLORS.trustBlue} />
-                <Text style={styles.backBtnText}>Geri</Text>
-              </Pressable>
+          {/* Selected Member Detail — PREMIUM REDESIGN */}
+          {selectedMember && (() => {
+            const statusColor = STATUS_COLORS[selectedMember.status] || STATUS_COLORS.unknown;
+            const memberLat = selectedMember.location?.latitude ?? selectedMember.latitude;
+            const memberLng = selectedMember.location?.longitude ?? selectedMember.longitude;
+            const hasLocation = typeof memberLat === 'number' && typeof memberLng === 'number' && isFinite(memberLat) && isFinite(memberLng) && (memberLat !== 0 || memberLng !== 0);
+            const distanceKm = hasLocation && userLocation
+              ? calculateDistance(userLocation.latitude, userLocation.longitude, memberLat, memberLng)
+              : null;
+            const relationEmoji = getRelationshipEmoji(selectedMember.relationship);
+            const relationLabel = getRelationshipLabel(selectedMember.relationship);
 
-              {/* Member Header */}
-              <View style={styles.memberDetail}>
-                <LinearGradient
-                  colors={[STATUS_COLORS[selectedMember.status], `${STATUS_COLORS[selectedMember.status]}CC`]}
-                  style={styles.memberDetailAvatar}
+            return (
+              <View style={styles.detailView}>
+                {/* Back button */}
+                <Pressable
+                  style={styles.backBtn}
+                  onPress={() => setSelectedMember(null)}
                 >
-                  <Text style={styles.memberDetailAvatarText}>
-                    {selectedMember.name?.charAt(0)?.toUpperCase() || '?'}
-                  </Text>
-                </LinearGradient>
+                  <Ionicons name="chevron-back" size={20} color={PREMIUM_COLORS.trustBlue} />
+                  <Text style={styles.backBtnText}>Geri</Text>
+                </Pressable>
 
-                <Text style={styles.memberDetailName}>{selectedMember.name}</Text>
+                {/* PREMIUM: Avatar with animated status ring */}
+                <View style={styles.memberDetail}>
+                  <View style={{ position: 'relative', marginBottom: 16 }}>
+                    {/* Status ring */}
+                    <View style={{
+                      width: 100,
+                      height: 100,
+                      borderRadius: 50,
+                      borderWidth: 3.5,
+                      borderColor: statusColor,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      shadowColor: statusColor,
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.35,
+                      shadowRadius: 12,
+                    }}>
+                      <LinearGradient
+                        colors={[statusColor, `${statusColor}BB`]}
+                        style={{
+                          width: 84,
+                          height: 84,
+                          borderRadius: 42,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{ fontSize: 36, fontWeight: '800', color: '#fff' }}>
+                          {selectedMember.name?.charAt(0)?.toUpperCase() || '?'}
+                        </Text>
+                      </LinearGradient>
+                    </View>
 
-                <View
-                  style={[
-                    styles.statusBadgeLarge,
-                    { backgroundColor: STATUS_COLORS[selectedMember.status] + '15' },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.statusDotLarge,
-                      { backgroundColor: STATUS_COLORS[selectedMember.status] },
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      styles.statusBadgeLargeText,
-                      { color: STATUS_COLORS[selectedMember.status] },
-                    ]}
-                  >
-                    {getStatusText(selectedMember.status)}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Info Cards */}
-              <View style={styles.infoCards}>
-                {/* Last seen */}
-                <View style={styles.infoCard}>
-                  <View style={styles.infoCardIcon}>
-                    <Ionicons name="time-outline" size={20} color={PREMIUM_COLORS.trustBlue} />
+                    {/* Relationship emoji badge */}
+                    {relationLabel ? (
+                      <View style={{
+                        position: 'absolute',
+                        bottom: -2,
+                        right: -4,
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: '#fff',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.12,
+                        shadowRadius: 4,
+                        elevation: 3,
+                      }}>
+                        <Text style={{ fontSize: 18 }}>{relationEmoji}</Text>
+                      </View>
+                    ) : null}
                   </View>
-                  <View>
-                    <Text style={styles.infoCardLabel}>Son Görülme</Text>
-                    <Text style={styles.infoCardValue}>
-                      {getRelativeTime(selectedMember.lastSeen)}
+
+                  {/* Name + relationship */}
+                  <Text style={styles.memberDetailName}>{selectedMember.name}</Text>
+                  {relationLabel ? (
+                    <Text style={{
+                      fontSize: 14,
+                      color: PREMIUM_COLORS.textSecondary,
+                      fontWeight: '500',
+                      marginBottom: 12,
+                      marginTop: -8,
+                    }}>{relationLabel}</Text>
+                  ) : null}
+
+                  {/* PREMIUM: Status banner — large, prominent */}
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: statusColor + '12',
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 16,
+                    gap: 10,
+                    borderWidth: 1.5,
+                    borderColor: statusColor + '25',
+                  }}>
+                    <Ionicons name={getStatusIcon(selectedMember.status) as any} size={22} color={statusColor} />
+                    <Text style={{
+                      fontSize: 17,
+                      fontWeight: '700',
+                      color: statusColor,
+                      letterSpacing: 0.3,
+                    }}>
+                      {getStatusText(selectedMember.status)}
                     </Text>
                   </View>
                 </View>
 
-                {/* Battery */}
-                {selectedMember.batteryLevel !== undefined && (
-                  <View style={styles.infoCard}>
-                    <View style={[
-                      styles.infoCardIcon,
-                      selectedMember.batteryLevel <= 20 && { backgroundColor: PREMIUM_COLORS.critical + '15' }
-                    ]}>
-                      <Ionicons
-                        name={selectedMember.batteryLevel <= 20 ? 'battery-dead' : 'battery-half'}
-                        size={20}
-                        color={selectedMember.batteryLevel <= 20 ? PREMIUM_COLORS.critical : PREMIUM_COLORS.trustBlue}
-                      />
-                    </View>
-                    <View>
-                      <Text style={styles.infoCardLabel}>Pil</Text>
-                      <Text
-                        style={[
-                          styles.infoCardValue,
-                          selectedMember.batteryLevel <= 20 && { color: PREMIUM_COLORS.critical },
-                        ]}
-                      >
-                        %{selectedMember.batteryLevel}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-                {/* Phone */}
-                {selectedMember.phoneNumber && (
+                {/* PREMIUM: Info cards grid */}
+                <View style={styles.infoCards}>
+                  {/* Last seen */}
                   <View style={styles.infoCard}>
                     <View style={styles.infoCardIcon}>
-                      <Ionicons name="call-outline" size={20} color={PREMIUM_COLORS.trustBlue} />
+                      <Ionicons name="time-outline" size={20} color={PREMIUM_COLORS.trustBlue} />
                     </View>
-                    <View>
-                      <Text style={styles.infoCardLabel}>Telefon</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.infoCardLabel}>Son Görülme</Text>
                       <Text style={styles.infoCardValue}>
-                        {selectedMember.phoneNumber}
+                        {selectedMember.lastSeen ? getRelativeTime(selectedMember.lastSeen) : 'Bilinmiyor'}
                       </Text>
                     </View>
+                    {/* Online indicator */}
+                    <View style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: selectedMember.isOnline ? PREMIUM_COLORS.safe : '#94a3b8',
+                    }} />
                   </View>
-                )}
-              </View>
 
-              {/* Action Buttons */}
-              <View style={styles.actionButtons}>
-                <LinearGradient
-                  colors={[PREMIUM_COLORS.trustBlue, PREMIUM_COLORS.trustBlueDark]}
-                  style={styles.actionBtnPrimary}
-                >
-                  <Pressable
-                    style={styles.actionBtnInner}
-                    onPress={() => {
-                      haptics.impactMedium();
-                      if (selectedMember?.location) {
-                        const { latitude, longitude } = selectedMember.location;
-                        const url = Platform.OS === 'ios'
-                          ? `http://maps.apple.com/?daddr=${latitude},${longitude}`
-                          : `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-                        Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
-                      }
-                    }}
+                  {/* Distance */}
+                  {distanceKm !== null && (
+                    <View style={styles.infoCard}>
+                      <View style={styles.infoCardIcon}>
+                        <Ionicons name="location-outline" size={20} color={PREMIUM_COLORS.trustBlue} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.infoCardLabel}>Uzaklık</Text>
+                        <Text style={styles.infoCardValue}>
+                          {distanceKm < 1
+                            ? `${Math.round(distanceKm * 1000)} m`
+                            : `${distanceKm.toFixed(1)} km`}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Battery */}
+                  {selectedMember.batteryLevel !== undefined && (
+                    <View style={styles.infoCard}>
+                      <View style={[
+                        styles.infoCardIcon,
+                        selectedMember.batteryLevel <= 20 && { backgroundColor: PREMIUM_COLORS.critical + '15' }
+                      ]}>
+                        <Ionicons
+                          name={selectedMember.batteryLevel <= 20 ? 'battery-dead' : selectedMember.batteryLevel <= 50 ? 'battery-half' : 'battery-full'}
+                          size={20}
+                          color={selectedMember.batteryLevel <= 20 ? PREMIUM_COLORS.critical : PREMIUM_COLORS.safe}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.infoCardLabel}>Pil Seviyesi</Text>
+                        <Text
+                          style={[
+                            styles.infoCardValue,
+                            selectedMember.batteryLevel <= 20 && { color: PREMIUM_COLORS.critical },
+                          ]}
+                        >
+                          %{selectedMember.batteryLevel}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Phone */}
+                  {selectedMember.phoneNumber && (
+                    <Pressable
+                      style={styles.infoCard}
+                      onPress={() => {
+                        haptics.impactLight();
+                        Linking.openURL(`tel:${selectedMember.phoneNumber}`).catch(err =>
+                          logger.error('Phone:', err)
+                        );
+                      }}
+                    >
+                      <View style={styles.infoCardIcon}>
+                        <Ionicons name="call-outline" size={20} color={PREMIUM_COLORS.trustBlue} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.infoCardLabel}>Telefon</Text>
+                        <Text style={styles.infoCardValue}>
+                          {selectedMember.phoneNumber}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={PREMIUM_COLORS.textSecondary} />
+                    </Pressable>
+                  )}
+
+                  {/* Last Known Location (when phone was off) */}
+                  {!hasLocation && selectedMember.lastKnownLocation && (
+                    <View style={[styles.infoCard, { borderColor: PREMIUM_COLORS.warning + '40' }]}>
+                      <View style={[styles.infoCardIcon, { backgroundColor: PREMIUM_COLORS.warning + '15' }]}>
+                        <Ionicons name="location-outline" size={20} color={PREMIUM_COLORS.warning} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.infoCardLabel}>Son Bilinen Konum</Text>
+                        <Text style={[styles.infoCardValue, { color: PREMIUM_COLORS.warning }]}>
+                          {selectedMember.lastKnownLocation?.timestamp ? getRelativeTime(selectedMember.lastKnownLocation.timestamp) : 'Bilinmiyor'}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                {/* PREMIUM: Action buttons — 3 buttons */}
+                <View style={styles.actionButtons}>
+                  {/* Yol Tarifi */}
+                  <LinearGradient
+                    colors={hasLocation
+                      ? [PREMIUM_COLORS.trustBlue, PREMIUM_COLORS.trustBlueDark]
+                      : ['#94a3b8', '#64748b']
+                    }
+                    style={[styles.actionBtnPrimary, { flex: 1 }]}
                   >
-                    <Ionicons name="navigate" size={20} color="#fff" />
-                    <Text style={styles.actionBtnPrimaryText}>Yol Tarifi</Text>
-                  </Pressable>
-                </LinearGradient>
+                    <Pressable
+                      style={styles.actionBtnInner}
+                      onPress={() => {
+                        haptics.impactMedium();
+                        const lat = hasLocation ? memberLat : selectedMember.lastKnownLocation?.latitude;
+                        const lng = hasLocation ? memberLng : selectedMember.lastKnownLocation?.longitude;
+                        if (lat && lng) {
+                          const url = Platform.OS === 'ios'
+                            ? `http://maps.apple.com/?daddr=${lat},${lng}`
+                            : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+                          Linking.openURL(url).catch(err => logger.error('Maps:', err));
+                        } else {
+                          Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
+                        }
+                      }}
+                    >
+                      <Ionicons name="navigate" size={18} color="#fff" />
+                      <Text style={styles.actionBtnPrimaryText}>Yol Tarifi</Text>
+                    </Pressable>
+                  </LinearGradient>
 
-                {selectedMember.phoneNumber && (
+                  {/* Mesaj */}
                   <Pressable
                     style={styles.actionBtn}
                     onPress={() => {
                       haptics.impactLight();
-                      if (selectedMember?.phoneNumber) {
-                        Linking.openURL(`tel:${selectedMember.phoneNumber}`).catch(err =>
-                          logger.error('Failed to open phone:', err)
-                        );
-                      }
+                      navigation.navigate('Conversation', {
+                        userId: selectedMember.uid || selectedMember.deviceId,
+                      });
                     }}
                   >
-                    <Ionicons name="call" size={20} color={PREMIUM_COLORS.trustBlue} />
-                    <Text style={styles.actionBtnText}>Ara</Text>
+                    <Ionicons name="chatbubble" size={18} color={PREMIUM_COLORS.trustBlue} />
+                    <Text style={styles.actionBtnText}>Mesaj</Text>
                   </Pressable>
-                )}
+
+                  {/* Ara */}
+                  {selectedMember.phoneNumber && (
+                    <Pressable
+                      style={styles.actionBtn}
+                      onPress={() => {
+                        haptics.impactLight();
+                        Linking.openURL(`tel:${selectedMember.phoneNumber}`).catch(err =>
+                          logger.error('Phone:', err)
+                        );
+                      }}
+                    >
+                      <Ionicons name="call" size={18} color={PREMIUM_COLORS.safe} />
+                      <Text style={[styles.actionBtnText, { color: PREMIUM_COLORS.safe }]}>Ara</Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
-            </View>
-          )}
+            );
+          })()}
 
           {/* Selected Earthquake Detail */}
           {selectedQuake && (
@@ -1147,611 +1414,246 @@ export default function DisasterMapScreen({ navigation }: DisasterMapScreenProps
               </View>
             </View>
           )}
+
+          {/* ========== CRITICAL: SOS KURTARMA PANELİ ========== */}
+          {selectedSOS && (
+            <View style={styles.detailView}>
+              <Pressable
+                style={styles.backBtn}
+                onPress={() => setSelectedSOS(null)}
+              >
+                <Ionicons name="chevron-back" size={20} color={PREMIUM_COLORS.trustBlue} />
+                <Text style={styles.backBtnText}>Geri</Text>
+              </Pressable>
+
+              {/* SOS Header — Red emergency gradient */}
+              <LinearGradient
+                colors={['#DC2626', '#B91C1C']}
+                style={{
+                  borderRadius: 16,
+                  padding: 16,
+                  alignItems: 'center',
+                  marginBottom: 16,
+                }}
+              >
+                <Text style={{ fontSize: 40, marginBottom: 4 }}>
+                  {selectedSOS.trapped ? '🆘' : '⚠️'}
+                </Text>
+                <Text style={{ fontSize: 20, fontWeight: '900', color: '#fff', textAlign: 'center' }}>
+                  {selectedSOS.name || 'Bilinmeyen'}
+                </Text>
+                <View style={{
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  paddingHorizontal: 12,
+                  paddingVertical: 4,
+                  borderRadius: 20,
+                  marginTop: 6,
+                }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 1 }}>
+                    {selectedSOS.trapped ? 'ENKAZ ALTINDA' : 'YARDIM İSTİYOR'}
+                  </Text>
+                </View>
+                {selectedSOS.message && (
+                  <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 8, textAlign: 'center', fontStyle: 'italic' }}>
+                    "{selectedSOS.message}"
+                  </Text>
+                )}
+              </LinearGradient>
+
+              {/* Info Cards */}
+              <View style={styles.infoCards}>
+                {/* Distance + Time */}
+                <View style={styles.infoCard}>
+                  <View style={[styles.infoCardIcon, { backgroundColor: '#DC262615' }]}>
+                    <Ionicons name="location" size={20} color="#DC2626" />
+                  </View>
+                  <View>
+                    <Text style={styles.infoCardLabel}>Mesafe</Text>
+                    <Text style={styles.infoCardValue}>
+                      {userLocation
+                        ? `${calculateDistance(
+                          userLocation.latitude,
+                          userLocation.longitude,
+                          selectedSOS.latitude,
+                          selectedSOS.longitude
+                        ).toFixed(1)} km`
+                        : 'Hesaplanıyor...'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Time since SOS */}
+                <View style={styles.infoCard}>
+                  <View style={styles.infoCardIcon}>
+                    <Ionicons name="time" size={20} color={PREMIUM_COLORS.trustBlue} />
+                  </View>
+                  <View>
+                    <Text style={styles.infoCardLabel}>SOS Zamanı</Text>
+                    <Text style={styles.infoCardValue}>
+                      {selectedSOS?.timestamp ? getRelativeTime(selectedSOS.timestamp) : 'Bilinmiyor'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Battery */}
+                {selectedSOS.battery !== undefined && (
+                  <View style={styles.infoCard}>
+                    <View style={[styles.infoCardIcon, selectedSOS.battery <= 20 && { backgroundColor: '#DC262615' }]}>
+                      <Ionicons
+                        name={selectedSOS.battery <= 20 ? 'battery-dead' : selectedSOS.battery <= 50 ? 'battery-half' : 'battery-full'}
+                        size={20}
+                        color={selectedSOS.battery <= 20 ? '#DC2626' : PREMIUM_COLORS.trustBlue}
+                      />
+                    </View>
+                    <View>
+                      <Text style={styles.infoCardLabel}>Pil</Text>
+                      <Text style={[
+                        styles.infoCardValue,
+                        selectedSOS.battery <= 20 && { color: '#DC2626', fontWeight: '900' },
+                      ]}>
+                        %{selectedSOS.battery}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              {/* Health Info — Life-saving medical data */}
+              {selectedSOS.healthInfo && (
+                <View style={{
+                  backgroundColor: '#EFF6FF',
+                  borderRadius: 12,
+                  padding: 12,
+                  marginBottom: 12,
+                  borderWidth: 1,
+                  borderColor: '#BFDBFE',
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Ionicons name="medical" size={18} color="#1D4ED8" />
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#1D4ED8', marginLeft: 6 }}>
+                      Sağlık Bilgisi
+                    </Text>
+                  </View>
+                  {selectedSOS.healthInfo.bloodType && (
+                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E40AF', width: 100 }}>Kan Grubu:</Text>
+                      <Text style={{ fontSize: 13, color: '#1E3A5F', fontWeight: '800' }}>{selectedSOS.healthInfo.bloodType}</Text>
+                    </View>
+                  )}
+                  {selectedSOS.healthInfo.allergies && (
+                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626', width: 100 }}>Alerji:</Text>
+                      <Text style={{ fontSize: 13, color: '#1E3A5F', flex: 1 }}>{selectedSOS.healthInfo.allergies}</Text>
+                    </View>
+                  )}
+                  {selectedSOS.healthInfo.chronicConditions && (
+                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#B45309', width: 100 }}>Kronik:</Text>
+                      <Text style={{ fontSize: 13, color: '#1E3A5F', flex: 1 }}>{selectedSOS.healthInfo.chronicConditions}</Text>
+                    </View>
+                  )}
+                  {selectedSOS.healthInfo.emergencyNotes && (
+                    <View style={{ flexDirection: 'row' }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#4338CA', width: 100 }}>Not:</Text>
+                      <Text style={{ fontSize: 13, color: '#1E3A5F', flex: 1 }}>{selectedSOS.healthInfo.emergencyNotes}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* ACTION BUTTONS — Life-saving actions */}
+              <View style={styles.actionButtons}>
+
+                {/* 🧭 KONUMA GİT — Turn-by-turn navigation */}
+                <LinearGradient
+                  colors={['#DC2626', '#B91C1C']}
+                  style={styles.actionBtnPrimary}
+                >
+                  <Pressable
+                    style={styles.actionBtnInner}
+                    onPress={() => {
+                      haptics.impactHeavy();
+                      const url = Platform.OS === 'ios'
+                        ? `http://maps.apple.com/?daddr=${selectedSOS.latitude},${selectedSOS.longitude}&dirflg=d`
+                        : `https://www.google.com/maps/dir/?api=1&destination=${selectedSOS.latitude},${selectedSOS.longitude}&travelmode=driving`;
+                      Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
+                    }}
+                  >
+                    <Ionicons name="navigate" size={20} color="#fff" />
+                    <Text style={styles.actionBtnPrimaryText}>Konuma Git</Text>
+                  </Pressable>
+                </LinearGradient>
+
+                {/* 💬 MESAJ GÖNDER — SOS Conversation */}
+                <Pressable
+                  style={[styles.actionBtn, { flex: 1 }]}
+                  onPress={() => {
+                    haptics.impactMedium();
+                    navigation.navigate('SOSConversation', {
+                      sosUserId: selectedSOS.senderUid || selectedSOS.senderDeviceId || selectedSOS.userId,
+                      sosUserAliases: [
+                        selectedSOS.senderUid,
+                        selectedSOS.senderDeviceId,
+                        selectedSOS.userId,
+                      ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+                      sosLocation: {
+                        latitude: selectedSOS.latitude,
+                        longitude: selectedSOS.longitude,
+                      },
+                      sosMessage: selectedSOS.message,
+                      sosBatteryLevel: selectedSOS.battery,
+                      sosTrapped: selectedSOS.trapped,
+                    });
+                  }}
+                >
+                  <Ionicons name="chatbubble-ellipses" size={20} color={PREMIUM_COLORS.trustBlue} />
+                  <Text style={styles.actionBtnText}>Mesaj</Text>
+                </Pressable>
+
+                {/* ✅ YARDIMA GELİYORUM — Send rescue ACK */}
+                <Pressable
+                  style={[styles.actionBtn, { backgroundColor: '#DCFCE7', borderColor: '#16A34A' }]}
+                  onPress={async () => {
+                    haptics.notificationSuccess();
+                    try {
+                      const { sosChannelRouter } = await import('../../services/sos/SOSChannelRouter');
+                      await sosChannelRouter.sendRescueACK(
+                        selectedSOS.signalId || selectedSOS.id,
+                        selectedSOS.senderDeviceId || selectedSOS.id,
+                        { sosSenderUid: selectedSOS.senderUid }
+                      );
+                      // Show confirmation
+                      const { Alert } = await import('react-native');
+                      Alert.alert(
+                        '✅ Bildirim Gönderildi',
+                        'Enkaz altındaki kişi yardıma geldiğinizi görecek.',
+                        [{ text: 'Tamam' }]
+                      );
+                    } catch (err) {
+                      logger.error('ACK failed:', err);
+                    }
+                  }}
+                >
+                  <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+                  <Text style={[styles.actionBtnText, { color: '#16A34A' }]}>Geliyorum</Text>
+                </Pressable>
+              </View>
+
+              {/* Coordinates for emergency services */}
+              <View style={{
+                backgroundColor: '#F8FAFC',
+                borderRadius: 8,
+                padding: 10,
+                marginTop: 8,
+              }}>
+                <Text style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
+                  📍 {selectedSOS.latitude.toFixed(6)}, {selectedSOS.longitude.toFixed(6)}
+                </Text>
+              </View>
+            </View>
+          )}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: PREMIUM_COLORS.cream,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: PREMIUM_COLORS.cream,
-  },
-  loadingIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'center',
-    marginBottom: 16,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: PREMIUM_COLORS.textSecondary,
-    textAlign: 'center',
-  },
-
-  // PREMIUM: Header
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    paddingHorizontal: 16,
-  },
-  headerBlur: {
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  headerGradient: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  viewModeToggle: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(31,78,121,0.08)',
-    borderRadius: 12,
-    padding: 3,
-  },
-  viewModeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    gap: 6,
-  },
-  viewModeBtnActive: {
-    backgroundColor: PREMIUM_COLORS.trustBlue,
-  },
-  viewModeBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textSecondary,
-  },
-  viewModeBtnTextActive: {
-    color: '#fff',
-  },
-
-  // EEW Badge
-  eewBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: PREMIUM_COLORS.safe + '15',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.safe + '30',
-  },
-  eewPulse: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: PREMIUM_COLORS.safe + '10',
-    borderRadius: 12,
-  },
-  eewBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.safe,
-  },
-
-  // PREMIUM: Floating Controls
-  floatingControls: {
-    position: 'absolute',
-    right: 16,
-    gap: 12,
-    alignItems: 'center',
-  },
-  controlBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: PREMIUM_COLORS.glass,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  controlBtnPrimary: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  controlBtnInner: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  zoomControls: {
-    backgroundColor: PREMIUM_COLORS.glass,
-    borderRadius: 14,
-    overflow: 'hidden',
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  zoomBtn: {
-    width: 50,
-    height: 46,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  zoomDivider: {
-    height: 1,
-    backgroundColor: PREMIUM_COLORS.glassBorder,
-  },
-
-  // Pulse Marker
-  pulseContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pulseRing: {
-    position: 'absolute',
-    borderWidth: 2,
-    backgroundColor: 'transparent',
-  },
-  pulseCenter: {
-    borderWidth: 3,
-    borderColor: '#fff',
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-  },
-
-  // PREMIUM: Family Marker
-  familyMarkerContainer: {
-    alignItems: 'center',
-  },
-  familyMarkerOuter: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  familyMarkerInner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PREMIUM_COLORS.glass,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.8)',
-  },
-  familyMarkerInitial: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: PREMIUM_COLORS.textPrimary,
-  },
-  statusDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2.5,
-  },
-  batteryBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-  },
-  nameLabel: {
-    marginTop: 6,
-    backgroundColor: PREMIUM_COLORS.glass,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    maxWidth: 90,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  nameLabelText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textPrimary,
-    textAlign: 'center',
-  },
-
-  // PREMIUM: Bottom Sheet
-  bottomSheetBg: {
-    backgroundColor: PREMIUM_COLORS.ivory,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-  },
-  bottomSheetHandle: {
-    backgroundColor: PREMIUM_COLORS.trustBlue + '40',
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-  },
-  sheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  sheetTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: PREMIUM_COLORS.textPrimary,
-    marginBottom: 20,
-    marginTop: 8,
-  },
-
-  // Empty State
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyStateIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: PREMIUM_COLORS.trustBlue + '10',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  emptyStateText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textPrimary,
-    marginTop: 8,
-  },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: PREMIUM_COLORS.textSecondary,
-    marginTop: 8,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-
-  // PREMIUM: Member Card
-  memberCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: PREMIUM_COLORS.glassBorder,
-  },
-  memberAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  memberAvatarText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  memberInfo: {
-    flex: 1,
-    marginLeft: 14,
-  },
-  memberName: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textPrimary,
-  },
-  memberMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    gap: 10,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 5,
-  },
-  statusDotSmall: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  statusBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  lastSeenText: {
-    fontSize: 12,
-    color: PREMIUM_COLORS.textSecondary,
-  },
-
-  // Detail View
-  detailView: {
-    paddingTop: 8,
-  },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  backBtnText: {
-    fontSize: 17,
-    color: PREMIUM_COLORS.trustBlue,
-    fontWeight: '500',
-  },
-  memberDetail: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  memberDetailAvatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  memberDetailAvatarText: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  memberDetailName: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: PREMIUM_COLORS.textPrimary,
-    marginBottom: 12,
-  },
-  statusBadgeLarge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 14,
-    gap: 8,
-  },
-  statusDotLarge: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  statusBadgeLargeText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  // PREMIUM: Info Cards
-  infoCards: {
-    marginTop: 24,
-    gap: 12,
-  },
-  infoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PREMIUM_COLORS.cream,
-    padding: 16,
-    borderRadius: 16,
-    gap: 14,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  infoCardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: PREMIUM_COLORS.trustBlue + '10',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  infoCardLabel: {
-    fontSize: 13,
-    color: PREMIUM_COLORS.textSecondary,
-    marginBottom: 2,
-  },
-  infoCardValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textPrimary,
-  },
-
-  // PREMIUM: Action Buttons
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 28,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 16,
-    backgroundColor: PREMIUM_COLORS.cream,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: PREMIUM_COLORS.glassBorder,
-  },
-  actionBtnPrimary: {
-    flex: 2,
-    borderRadius: 16,
-    shadowColor: PREMIUM_COLORS.trustBlue,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  actionBtnInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 8,
-  },
-  actionBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.trustBlue,
-  },
-  actionBtnPrimaryText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-
-  // Earthquake
-  quakeInfo: {
-    marginTop: 8,
-  },
-  quakeInfoGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    borderRadius: 16,
-    gap: 14,
-  },
-  quakeInfoText: {
-    fontSize: 16,
-    color: PREMIUM_COLORS.textPrimary,
-    fontWeight: '500',
-    flex: 1,
-  },
-  quakeDetail: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  magnitudeCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  magnitudeText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  quakeLocation: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: PREMIUM_COLORS.textPrimary,
-    textAlign: 'center',
-    marginBottom: 10,
-    paddingHorizontal: 16,
-  },
-  quakeTime: {
-    fontSize: 15,
-    color: PREMIUM_COLORS.textSecondary,
-  },
-
-  // PREMIUM: SOS Signal Markers
-  sosMarkerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sosMarkerPulse: {
-    position: 'absolute',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#dc2626',
-  },
-  sosMarkerMain: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#fff',
-    shadowColor: '#dc2626',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sosMarkerLabel: {
-    backgroundColor: 'rgba(220, 38, 38, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 6,
-    alignItems: 'center',
-    minWidth: 80,
-  },
-  sosMarkerName: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.5,
-  },
-  sosMarkerInfo: {
-    fontSize: 9,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '500',
-  },
-});

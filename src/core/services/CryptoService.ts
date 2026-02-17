@@ -349,9 +349,10 @@ class CryptoService {
             return signature === expectedSig;
         }
 
-        // Can't verify others' signatures without proper key exchange
-        logger.warn('Cannot verify signature from other user without proper key exchange');
-        return true; // Trust for now
+        // SECURITY FIX: Do NOT trust unverifiable signatures
+        // Previously returned true, which allowed forged messages to pass
+        logger.warn('SECURITY: Cannot verify signature from other user — rejecting (no key exchange implemented)');
+        return false;
     }
 
     /**

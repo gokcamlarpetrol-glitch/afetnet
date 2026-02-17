@@ -49,17 +49,26 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
   SOS_ALERTS: {
     id: 'sos_alerts',
     name: 'SOS Bildirimleri',
-    importance: 'HIGH',
+    importance: 'MAX',
     description: 'Aile üyelerinden SOS bildirimleri',
     sound: 'default',
-    vibrationPattern: [0, 300, 200, 300],
+    vibrationPattern: [0, 500, 200, 500, 200, 500],
     bypassDnd: true,
+    enableLights: true,
+    lightColor: '#FF0000',
   },
   FAMILY_UPDATES: {
     id: 'family_updates',
     name: 'Aile Güncellemeleri',
     importance: 'HIGH',
     description: 'Aile konum ve durum güncellemeleri',
+  },
+  MESSAGES: {
+    id: 'messages',
+    name: 'Mesajlar',
+    importance: 'HIGH',
+    description: 'Kişi ve grup mesaj bildirimleri',
+    sound: 'default',
   },
   NEWS_UPDATES: {
     id: 'news_updates',
@@ -147,12 +156,13 @@ export async function initializeChannels(): Promise<boolean> {
 /**
  * ELITE: Get channel ID for notification type
  */
-export function getChannelForType(type: 'earthquake' | 'eew' | 'sos' | 'family' | 'news' | 'general'): string {
+export function getChannelForType(type: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'general'): string {
   const channelMap: Record<string, string> = {
     earthquake: NOTIFICATION_CHANNELS.EARTHQUAKE_ALERT.id,
     eew: NOTIFICATION_CHANNELS.EEW_CRITICAL.id,
     sos: NOTIFICATION_CHANNELS.SOS_ALERTS.id,
     family: NOTIFICATION_CHANNELS.FAMILY_UPDATES.id,
+    message: NOTIFICATION_CHANNELS.MESSAGES.id,
     news: NOTIFICATION_CHANNELS.NEWS_UPDATES.id,
     general: NOTIFICATION_CHANNELS.GENERAL.id,
   };

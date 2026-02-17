@@ -8,8 +8,9 @@ import { ENV } from '../config/env';
 import { sanitizeString } from '../utils/validation';
 
 const API_BASE_URL = ENV.API_BASE_URL;
-// ELITE: Use empty string if no API secret (backend may not require auth)
-const API_SECRET = ENV.FIREBASE_API_KEY || ''; // Using Firebase key as API secret for now
+// SECURITY FIX: API_SECRET deprecated — Firebase API key must NOT be used as HMAC secret
+// Legacy API client is disabled (isDisabled=true), this is defense-in-depth
+const API_SECRET = ''; // Was: ENV.FIREBASE_API_KEY
 
 // ELITE: Custom API Error class for better error handling
 export class APIError extends Error {
@@ -213,7 +214,8 @@ export class APIClient {
   }
 
   private fallbackHash(str: string): string {
-    // ELITE: DJB2 hash - simple but deterministic fallback
+    // SECURITY WARNING: Non-cryptographic DJB2 hash — NOT secure for HMAC
+    // Exists only as crash prevention when SubtleCrypto unavailable
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
       hash = ((hash << 5) + hash) + str.charCodeAt(i);

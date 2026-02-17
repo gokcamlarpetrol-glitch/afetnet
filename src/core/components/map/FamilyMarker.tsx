@@ -21,21 +21,26 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { normalizeTimestampMs } from '../../utils/dateUtils';
 
 interface FamilyMarkerProps {
   name: string;
   avatarUrl?: string;
   status: 'safe' | 'need-help' | 'critical' | 'unknown';
-  lastSeen?: number;
+  lastSeen?: number | string | Date;
   batteryLevel?: number; // 0-100
   isOnline?: boolean;
   isLastKnownLocation?: boolean; // True if showing cached location after battery died
 }
 
 // ELITE: Time-ago helper (Turkish)
-function getTimeAgo(timestamp: number): string {
+function getTimeAgo(timestamp: number | string | Date): string {
+  const normalized = normalizeTimestampMs(timestamp);
+  if (!normalized) return 'Bilinmiyor';
+
   const now = Date.now();
-  const diff = now - timestamp;
+  const safeTimestamp = Math.min(normalized, now);
+  const diff = now - safeTimestamp;
 
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
@@ -73,16 +78,17 @@ export function FamilyMarker({
   isLastKnownLocation = false,
 }: FamilyMarkerProps) {
   const pulse = useSharedValue(1);
+  const normalizedLastSeen = useMemo(() => normalizeTimestampMs(lastSeen), [lastSeen]);
 
   // ELITE: Visual age detection
-  const isStale = lastSeen ? (Date.now() - lastSeen) > (30 * 60 * 1000) : false; // 30 min
-  const isVeryOld = lastSeen ? (Date.now() - lastSeen) > (60 * 60 * 1000) : false; // 1 hour
+  const isStale = normalizedLastSeen ? (Date.now() - normalizedLastSeen) > (30 * 60 * 1000) : false; // 30 min
+  const isVeryOld = normalizedLastSeen ? (Date.now() - normalizedLastSeen) > (60 * 60 * 1000) : false; // 1 hour
 
   // Time-ago display
   const timeAgoText = useMemo(() => {
-    if (!lastSeen) return null;
-    return getTimeAgo(lastSeen);
-  }, [lastSeen]);
+    if (!normalizedLastSeen) return null;
+    return getTimeAgo(normalizedLastSeen);
+  }, [normalizedLastSeen]);
 
   const getStatusColor = (): [string, string] => {
     // Last known location (battery died) - show grey with special treatment

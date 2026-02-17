@@ -43,8 +43,18 @@ jest.mock('expo-apple-authentication', () => ({
   isAvailableAsync: jest.fn().mockResolvedValue(true),
 }));
 
+const mockAuth = {
+  currentUser: {
+    uid: 'user-1',
+    email: 'test@example.com',
+    displayName: 'Test User',
+    emailVerified: true,
+  },
+};
+
 jest.mock('../../../lib/firebase', () => ({
   initializeFirebase: jest.fn(() => ({})),
+  getFirebaseAuth: jest.fn(() => mockAuth),
 }));
 
 jest.mock('../../../lib/device', () => ({

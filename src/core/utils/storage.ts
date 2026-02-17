@@ -38,13 +38,15 @@ class MemoryStorage {
   }
 }
 
-// ELITE: Typed storage instance - either MMKV or MemoryStorage fallback
+// MMKV instance with static encryption key
+// TODO: In a future update, migrate to SecureStore-backed dynamic key
+// with proper testing and gradual rollout
 let storageInstance: MMKV | MemoryStorage;
 
 try {
   storageInstance = new MMKV({
     id: 'afetnet-elite-storage',
-    encryptionKey: 'afetnet-elite-secure-key', // ELITE: Encrypted storage
+    encryptionKey: 'afetnet-elite-secure-key',
   });
   logger.info('✅ MMKV initialized successfully');
 } catch (error) {

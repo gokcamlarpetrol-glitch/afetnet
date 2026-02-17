@@ -190,7 +190,7 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
     // Previous 400 tokens caused truncation for 8-12 action items with complex fields
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 1500, // Fixed: Was 400, too low for 8-12 JSON actions (~150 tokens each)
+      maxTokens: 2500, // Fixed: Was 1500, raised to prevent truncation for 8-12 JSON actions with complex fields
       temperature: 0.5, // Daha tutarlı sonuçlar için düşük temperature
       serviceName: 'PanicAssistantService', // ELITE: For cost tracking
     });
@@ -223,13 +223,14 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private parseAIResponse(response: string): { actions: Record<string, unknown>[] } {
     try {
-      // JSON'u bul — ELITE: Use lazy match to avoid matching past the first complete JSON
-      const jsonMatch = response.match(/\{[\s\S]*?\}/);
-      if (!jsonMatch) {
+      // JSON'u bul — greedy match to capture complete nested JSON object
+      const firstBrace = response.indexOf('{');
+      const lastBrace = response.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
         throw new Error('JSON bulunamadı');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(response.substring(firstBrace, lastBrace + 1));
 
       // Validate
       if (!parsed.actions || !Array.isArray(parsed.actions)) {
@@ -1178,9 +1179,10 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
   }
 
   private getWarningLevel(actionId: string, context?: EmergencyContext): 'info' | 'warning' | 'critical' | 'emergency' {
+    // Emergency check must come before critical to avoid dead code
+    if (actionId === '1' && context?.magnitude && context.magnitude >= 6.0) return 'emergency';
     const criticalActions = ['1', '5', '10', '16', '17', '18'];
     if (criticalActions.includes(actionId)) return 'critical';
-    if (actionId === '1' && context?.magnitude && context.magnitude >= 6.0) return 'emergency';
     return 'warning';
   }
 

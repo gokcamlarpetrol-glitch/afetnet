@@ -12,6 +12,7 @@ import { AllEarthquakesScreen, EarthquakeDetailScreen } from '../screens/earthqu
 import NewMessageScreen from '../screens/messages/NewMessageScreen';
 import ConversationScreen from '../screens/messages/ConversationScreen';
 import SOSConversationScreen from '../screens/messages/SOSConversationScreen';
+import CreateGroupScreen from '../screens/messages/CreateGroupScreen';
 
 // Lazy Load Heavy Screens - CRITICAL: Must have proper default export
 const DisasterMapScreen = React.lazy(() => import('../screens/map/DisasterMapScreen'));
@@ -44,6 +45,7 @@ import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
 // ELITE: Auth screens for in-app registration/password reset navigation
 import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+import SOSHistoryScreen from '../screens/sos/SOSHistoryScreen';
 import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
 import MyQRScreen from '../screens/profile/MyQRScreen';
 
@@ -106,6 +108,8 @@ export default function MainNavigator() {
         <Stack.Screen name="NewMessage" component={NewMessageScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Conversation" component={ConversationScreen} options={{ headerShown: false }} />
         <Stack.Screen name="SOSConversation" component={SOSConversationScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="SOSHistory" component={SOSHistoryScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="NewsDetail" component={NewsDetailScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllNews" component={AllNewsScreen} options={{ headerShown: false }} />

@@ -17,7 +17,9 @@ import {
     EmergencyReason,
     SOSSignal,
     SOSLocation,
+    SOSStatus,
     SOSAck,
+    ChannelStatus,
 } from './SOSStateManager';
 import { sosChannelRouter } from './SOSChannelRouter';
 import { sosBeaconService } from './SOSBeaconService';
@@ -32,9 +34,11 @@ const logger = createLogger('UnifiedSOSController');
 // ============================================================================
 
 const SOS_CONFIG = {
-    COUNTDOWN_SECONDS: 3,
+    COUNTDOWN_SECONDS: 3,  // Default, overridden by user settings
     COUNTDOWN_TICK_MS: 1000,
     AUTO_LOCATION: true,
+    // ELITE V2: Pre-cache location on app start for instant SOS attachment
+    LOCATION_PRECACHE_INTERVAL_MS: 30_000,  // Refresh pre-cached location every 30s
 };
 
 // ============================================================================
@@ -45,6 +49,12 @@ class UnifiedSOSController {
     private isInitialized = false;
     private countdownTimer: NodeJS.Timeout | null = null;
     private deviceId: string = '';
+    private userId: string = ''; // Firebase Auth UID (NOT device ID)
+
+    // ELITE V2: Pre-cached location (Noonlight pattern)
+    // Location is fetched continuously so it's available INSTANTLY when SOS triggers
+    private preCachedLocation: SOSLocation | null = null;
+    private locationPrecacheTimer: NodeJS.Timeout | null = null;
 
     // ============================================================================
     // INITIALIZATION
@@ -57,14 +67,75 @@ class UnifiedSOSController {
             // Get device ID
             this.deviceId = await getDeviceId();
 
+            // Resolve canonical sender UID for SOS attribution
+            this.userId = await this.resolveCurrentUserId();
+
             // Initialize channel router
             await sosChannelRouter.initialize();
+
+            // ELITE V2: Start pre-caching location for instant SOS (Noonlight pattern)
+            this.startLocationPrecache();
 
             this.isInitialized = true;
             logger.info('Unified SOS Controller initialized');
         } catch (error) {
             logger.error('Failed to initialize SOS Controller:', error);
         }
+    }
+
+    // ELITE V2: Continuously pre-cache location so SOS has instant coordinates
+    private startLocationPrecache(): void {
+        // Fetch immediately
+        this.refreshPrecachedLocation();
+
+        // Then refresh periodically
+        this.locationPrecacheTimer = setInterval(() => {
+            this.refreshPrecachedLocation();
+        }, SOS_CONFIG.LOCATION_PRECACHE_INTERVAL_MS);
+    }
+
+    private async refreshPrecachedLocation(): Promise<void> {
+        try {
+            const Location = await import('expo-location');
+            const loc = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            if (loc?.coords) {
+                this.preCachedLocation = {
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude,
+                    accuracy: loc.coords.accuracy || 0,
+                    timestamp: Date.now(),
+                    source: 'gps' as const,
+                };
+            }
+        } catch {
+            // Pre-cache failure is silent — location will be fetched on-demand as fallback
+        }
+    }
+
+    private async resolveCurrentUserId(): Promise<string> {
+        try {
+            const { identityService } = await import('../IdentityService');
+            const identityUid = identityService.getUid();
+            if (identityUid) {
+                return identityUid;
+            }
+        } catch {
+            // best effort
+        }
+
+        try {
+            const { getAuth } = await import('firebase/auth');
+            const authUid = getAuth()?.currentUser?.uid;
+            if (authUid) {
+                return authUid;
+            }
+        } catch {
+            // best effort
+        }
+
+        return this.deviceId;
     }
 
     // ============================================================================
@@ -90,28 +161,29 @@ class UnifiedSOSController {
         }
 
         logger.warn('🆘 SOS TRIGGERED - Starting countdown');
+        this.userId = await this.resolveCurrentUserId();
 
         // Heavy haptic feedback
         haptics.impactHeavy();
         haptics.notificationError();
 
-        // Start countdown
-        store.startCountdown(reason, message);
+        // Start countdown with resolved userId
+        store.startCountdown(reason, this.userId || this.deviceId, message);
 
-        // V5: Safe access to currentSignal with null check
-        const currentSignal = useSOSStore.getState().currentSignal;
-        if (currentSignal) {
-            // Update signal with device ID using immer-style update
+        // ELITE V2: Use pre-cached location INSTANTLY (Noonlight pattern)
+        // No delay — location was already fetched in background
+        if (this.preCachedLocation) {
             useSOSStore.setState(state => ({
                 currentSignal: state.currentSignal ? {
                     ...state.currentSignal,
-                    userId: this.deviceId
+                    location: this.preCachedLocation!
                 } : null
             }));
+            logger.info('📍 Pre-cached location attached to SOS instantly');
         }
 
-        // Get initial location
-        await this.fetchLocation();
+        // Also fetch fresh location in parallel (will update if better)
+        this.fetchLocation();
 
         // Get device status
         await this.updateDeviceStatus();
@@ -134,9 +206,43 @@ class UnifiedSOSController {
         } else if (store.isActive) {
             // Stop active SOS
             sosBeaconService.stop();
+
+            // Stop ACK listener
+            try {
+                const { stopSOSAckListener } = require('./SOSAckListener');
+                stopSOSAckListener();
+            } catch { /* non-critical */ }
+
+            // ELITE V2: Broadcast cancellation to ALL channels (Noonlight pattern)
+            // Responders need to know the SOS was cancelled
+            const signal = store.currentSignal;
+            if (signal) {
+                this.broadcastCancellation(signal).catch(err => {
+                    logger.warn('SOS cancellation broadcast failed:', err);
+                });
+            }
+
             store.stopSOS();
             haptics.notificationSuccess();
-            logger.info('Active SOS stopped');
+            logger.info('Active SOS stopped + cancellation broadcast sent');
+        }
+    }
+
+    // ELITE V2: Broadcast SOS cancellation to all channels
+    private async broadcastCancellation(originalSignal: SOSSignal): Promise<void> {
+        const cancellationSignal: SOSSignal = {
+            ...originalSignal,
+            id: `cancel-${originalSignal.id}`,
+            status: 'cancelled' as SOSStatus,
+            message: `SOS İPTAL EDİLDİ: ${originalSignal.message || 'Acil durum iptal edildi'}`,
+            timestamp: Date.now(),
+        };
+
+        try {
+            await sosChannelRouter.broadcastSOS(cancellationSignal);
+            logger.info('✅ SOS cancellation broadcast sent to all channels');
+        } catch (error) {
+            logger.error('Failed to broadcast SOS cancellation:', error);
         }
     }
 
@@ -149,6 +255,7 @@ class UnifiedSOSController {
         message: string = 'Otomatik algılandı: Acil yardım gerekiyor!'
     ): Promise<void> {
         await this.initialize();
+        this.userId = await this.resolveCurrentUserId();
 
         const store = useSOSStore.getState();
 
@@ -157,17 +264,8 @@ class UnifiedSOSController {
             this.stopCountdownTimer();
         }
 
-        // Create and activate signal immediately
-        store.startCountdown(reason, message);
-
-        // FIX: Immutable state update instead of direct mutation
-        if (store.currentSignal) {
-            useSOSStore.setState(state => ({
-                currentSignal: state.currentSignal
-                    ? { ...state.currentSignal, userId: this.deviceId }
-                    : state.currentSignal,
-            }));
-        }
+        // Create and activate signal immediately with resolved userId
+        store.startCountdown(reason, this.userId || this.deviceId, message);
 
         await this.fetchLocation();
         await this.updateDeviceStatus();
@@ -245,6 +343,14 @@ class UnifiedSOSController {
 
         // Start beacon service
         await sosBeaconService.start();
+
+        // Start ACK listener so we get notified when rescuers respond
+        try {
+            const { startSOSAckListener } = await import('./SOSAckListener');
+            await startSOSAckListener(this.deviceId);
+        } catch (ackErr) {
+            logger.warn('ACK listener start failed (non-critical):', ackErr);
+        }
 
         // Track analytics
         this.trackSOSActivated(signal);

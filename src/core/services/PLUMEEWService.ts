@@ -118,8 +118,8 @@ class PLUMEEWService {
      * Subscribe to nearby intensity observations from Firestore
      */
     private async subscribeToNearbyObservations(): Promise<void> {
-        if (!this.userLocation || !firebaseDataService.isInitialized) {
-            logger.debug('Cannot subscribe: no location or Firebase');
+        if (!this.userLocation) {
+            logger.debug('Cannot subscribe: no location');
             return;
         }
 
@@ -195,8 +195,6 @@ class PLUMEEWService {
      * Share observation to Firebase
      */
     private async shareObservation(obs: PLUMObservation): Promise<void> {
-        if (!firebaseDataService.isInitialized) return;
-
         try {
             const { getFirestore, collection, addDoc, serverTimestamp } = await import('firebase/firestore');
             const db = getFirestore();

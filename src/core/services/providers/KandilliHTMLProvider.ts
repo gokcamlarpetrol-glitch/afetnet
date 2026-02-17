@@ -20,7 +20,6 @@ export class KandilliHTMLProvider {
       // ELITE: Only try 2 URLs with short timeout to prevent blocking main fetch
       const urls = [
         'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // PRIMARY: HTTPS (ATS compliant)
-        'http://www.koeri.boun.edu.tr/scripts/lst0.asp',  // HTTP fallback (ATS exception may be needed)
       ];
 
       let lastError: Error | null = null;

@@ -44,7 +44,7 @@ const FamilyTrailOverlay = memo(({ members, visible, selectedMemberId }: FamilyT
         if (!visible) return [];
         return members
             .filter(m => {
-                if (selectedMemberId) return m.id === selectedMemberId;
+                if (selectedMemberId) return m.uid === selectedMemberId;
                 return true;
             })
             .map((member, index) => {
@@ -78,7 +78,7 @@ const FamilyTrailOverlay = memo(({ members, visible, selectedMemberId }: FamilyT
                 else timeLabel = `${Math.floor(minutesAgo / 1440)}g`;
 
                 return {
-                    memberId: member.id,
+                    memberId: member.uid,
                     memberName: member.name,
                     coordinates,
                     color,

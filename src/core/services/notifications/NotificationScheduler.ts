@@ -12,24 +12,24 @@ const logger = createLogger('NotificationScheduler');
 
 // Types
 export interface NotificationContent {
-    title: string;
-    body: string;
-    data?: Record<string, any>;
-    sound?: boolean | string;
-    badge?: number;
-    priority?: 'default' | 'high' | 'max';
-    categoryIdentifier?: string;
+  title: string;
+  body: string;
+  data?: Record<string, any>;
+  sound?: boolean | string;
+  badge?: number;
+  priority?: 'default' | 'high' | 'max';
+  categoryIdentifier?: string;
 }
 
 export interface ScheduleOptions {
-    delay?: number; // seconds
-    repeats?: boolean;
-    channelType?: 'earthquake' | 'eew' | 'sos' | 'family' | 'news' | 'general';
+  delay?: number; // seconds
+  repeats?: boolean;
+  channelType?: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'general';
 }
 
 // Rate limiting state
 const recentNotifications = new Map<string, number>();
-const RATE_LIMIT_WINDOW = 5000; // 5 seconds
+const RATE_LIMIT_WINDOW = 30_000; // 30 seconds — increased from 5s to prevent flood
 const MAX_NOTIFICATIONS_PER_WINDOW = 3;
 
 /**
@@ -148,11 +148,11 @@ export async function showCriticalNotification(
   title: string,
   body: string,
   options: {
-        sound?: string;
-        vibration?: number[];
-        critical?: boolean;
-        data?: Record<string, any>;
-    } = {},
+    sound?: string;
+    vibration?: number[];
+    critical?: boolean;
+    data?: Record<string, any>;
+  } = {},
 ): Promise<string | null> {
   return scheduleNotification(
     {

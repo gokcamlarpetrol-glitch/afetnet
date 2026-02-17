@@ -41,7 +41,28 @@ class BLEMeshService {
   }
 
   async broadcastMessage(msg: { type: string; content: string; priority?: string; ttl?: number }) {
-    const type = msg.type.toLowerCase() === 'sos' ? MeshMessageType.SOS : MeshMessageType.TEXT;
+    const normalizedType = typeof msg.type === 'string' ? msg.type.trim().toLowerCase() : '';
+    let type: MeshMessageType = MeshMessageType.TEXT;
+    switch (normalizedType) {
+      case 'sos':
+      case 'emergency':
+        type = MeshMessageType.SOS;
+        break;
+      case 'status':
+      case 'status_update':
+      case 'family_status_update':
+      case 'bio':
+        type = MeshMessageType.STATUS;
+        break;
+      case 'location':
+      case 'family_location':
+      case 'family_location_update':
+        type = MeshMessageType.LOCATION;
+        break;
+      default:
+        type = MeshMessageType.TEXT;
+        break;
+    }
     return meshNetworkService.broadcastMessage(msg.content, type, { to: 'broadcast' });
   }
 

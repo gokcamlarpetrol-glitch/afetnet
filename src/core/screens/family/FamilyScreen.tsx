@@ -35,16 +35,50 @@ import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
 import { MeshMessageType } from '../../services/mesh/MeshProtocol';
 import { familyTrackingService } from '../../services/FamilyTrackingService';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
+import { identityService } from '../../services/IdentityService';
 import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
 import { MemberCard } from '../../components/family/MemberCard';
+import { FamilyMapView } from '../../components/family/FamilyMapView';
 import { colors, typography, spacing } from '../../theme';
+import { styles } from './FamilyScreen.styles';
 import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
+import { resolveFamilyMemberLocation } from '../../utils/familyLocation';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import * as SMS from 'expo-sms';
 
 const logger = createLogger('FamilyScreen');
+const FAMILY_TRACKING_CONSUMER_ID = 'family-screen';
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+type FamilyStatusUpdate = Extract<FamilyMember['status'], 'safe' | 'need-help' | 'critical' | 'unknown'>;
+type PendingFamilyUpdate = {
+  status?: FamilyStatusUpdate;
+  location?: { latitude: number; longitude: number };
+};
+
+const VALID_FAMILY_STATUSES: ReadonlySet<FamilyStatusUpdate> = new Set([
+  'safe',
+  'need-help',
+  'critical',
+  'unknown',
+]);
+
+const parseIncomingFamilyStatus = (value: unknown): FamilyStatusUpdate | null => {
+  if (typeof value !== 'string') return null;
+  if (!VALID_FAMILY_STATUSES.has(value as FamilyStatusUpdate)) return null;
+  return value as FamilyStatusUpdate;
+};
+
+const parseIncomingFamilyLocation = (value: unknown): PendingFamilyUpdate['location'] | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { latitude?: unknown; longitude?: unknown };
+  const latitude = typeof candidate.latitude === 'number' ? candidate.latitude : NaN;
+  const longitude = typeof candidate.longitude === 'number' ? candidate.longitude : NaN;
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null;
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+};
 
 // ELITE: Type-safe navigation props
 interface FamilyScreenProps {
@@ -66,6 +100,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const [showIdModal, setShowIdModal] = useState(false);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
+  const [mySharePayload, setMySharePayload] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [editName, setEditName] = useState('');
@@ -77,10 +112,52 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
+  // ELITE V2: Map/List toggle (Life360 pattern)
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
   // Batch update mechanism to prevent subscription loops
-  const pendingUpdatesRef = useRef<Map<string, { status?: string; location?: { latitude: number; longitude: number } }>>(new Map());
+  const pendingUpdatesRef = useRef<Map<string, PendingFamilyUpdate>>(new Map());
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const applyPendingFamilyUpdates = useCallback((source: 'debounce' | 'cleanup') => {
+    if (pendingUpdatesRef.current.size === 0) {
+      return;
+    }
+
+    const latestMembers = useFamilyStore.getState().members;
+    const pendingEntries = Array.from(pendingUpdatesRef.current.entries());
+
+    for (const [memberId, updateData] of pendingEntries) {
+      const member = latestMembers.find((candidate) => candidate.uid === memberId);
+      if (!member) continue;
+
+      if (updateData.status && member.status !== updateData.status) {
+        useFamilyStore.getState().updateMemberStatus(member.uid, updateData.status, 'remote').catch((error) => {
+          logger.error(`Failed to update member status (${source}):`, error);
+        });
+      }
+
+      if (updateData.location) {
+        useFamilyStore.getState().updateMemberLocation(
+          member.uid,
+          updateData.location.latitude,
+          updateData.location.longitude,
+          'remote',
+        ).catch((error) => {
+          logger.error(`Failed to update member location (${source}):`, error);
+        });
+      }
+    }
+
+    pendingUpdatesRef.current.clear();
+  }, []);
+
+  const myStatusSubtitle = useMemo(() => {
+    if (myStatus === 'safe') return 'Güvendesiniz';
+    if (myStatus === 'need-help') return 'Yardım Bildirildi';
+    if (myStatus === 'critical') return 'ACİL Durum Bildirildi';
+    return 'Durum Bekleniyor';
+  }, [myStatus]);
 
   // Initialize on mount
   useEffect(() => {
@@ -118,6 +195,18 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           }
         } else if (mounted) {
           setMyDeviceId(deviceId);
+        }
+
+        try {
+          await identityService.initialize();
+          if (mounted) {
+            const qrPayload = identityService.getQRPayload();
+            if (qrPayload) {
+              setMySharePayload(qrPayload);
+            }
+          }
+        } catch (identityError) {
+          logger.warn('Identity init failed in FamilyScreen (non-critical):', identityError);
         }
       } catch (error) {
         logger.error('Initialization error:', error);
@@ -157,105 +246,107 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
         // Check if this is a family update message
         if (messageData.type === 'family_status_update' || messageData.type === 'family_location_update') {
-          const senderDeviceId = messageData.deviceId;
-          if (!senderDeviceId) return;
+          const normalizedCandidates = [
+            typeof messageData.deviceId === 'string' ? messageData.deviceId.trim() : '',
+            typeof messageData.senderUid === 'string' ? messageData.senderUid.trim() : '',
+            typeof message.senderId === 'string' ? message.senderId.trim() : '',
+          ].filter((value) => value.length > 0);
 
-          // Find the family member by deviceId
+          if (normalizedCandidates.length === 0) return;
+
+          // Resolve family member with UID/deviceId/local-id aliases.
           const members = useFamilyStore.getState().members;
-          const member = members.find(m => m.deviceId === senderDeviceId);
+          const member = members.find((candidate) =>
+            normalizedCandidates.some((value) =>
+              value === candidate.deviceId ||
+              value === candidate.uid
+            )
+          );
 
           if (member) {
             // Batch updates instead of immediate store updates to prevent subscription loops
-            const existing = pendingUpdatesRef.current.get(senderDeviceId) || {};
+            const existing = pendingUpdatesRef.current.get(member.uid) || {};
 
-            if (messageData.type === 'family_status_update' && messageData.status) {
-              // ELITE: Validate status before queuing
-              const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
-              if (validStatuses.includes(messageData.status as FamilyMember['status'])) {
-                existing.status = messageData.status;
+            if (messageData.type === 'family_status_update' && messageData.status !== undefined) {
+              const parsedStatus = parseIncomingFamilyStatus(messageData.status);
+              if (parsedStatus) {
+                existing.status = parsedStatus;
                 if (__DEV__) {
-                  logger.info(`Status update queued from ${member.name}: ${messageData.status}`);
+                  logger.info(`Status update queued from ${member.name}: ${parsedStatus}`);
                 }
               } else {
                 logger.warn('Invalid status received in message:', messageData.status);
               }
             }
 
-            if (messageData.location &&
-              typeof messageData.location.latitude === 'number' &&
-              typeof messageData.location.longitude === 'number' &&
-              !isNaN(messageData.location.latitude) &&
-              !isNaN(messageData.location.longitude) &&
-              messageData.location.latitude >= -90 && messageData.location.latitude <= 90 &&
-              messageData.location.longitude >= -180 && messageData.location.longitude <= 180) {
-              existing.location = {
-                latitude: messageData.location.latitude,
-                longitude: messageData.location.longitude,
-              };
+            const parsedLocation = parseIncomingFamilyLocation(messageData.location);
+            if (parsedLocation) {
+              existing.location = parsedLocation;
               if (__DEV__) {
                 logger.info(`Location update queued from ${member.name}`);
               }
-            } else if (messageData.location) {
+            } else if (messageData.location !== undefined && messageData.location !== null) {
               logger.warn('Invalid location data received:', messageData.location);
             }
 
-            pendingUpdatesRef.current.set(senderDeviceId, existing);
+            pendingUpdatesRef.current.set(member.uid, existing);
 
             // Debounce: Process updates after 100ms (allows batching multiple rapid updates)
             if (updateTimeoutRef.current) {
               clearTimeout(updateTimeoutRef.current);
             }
             updateTimeoutRef.current = setTimeout(() => {
-              // FIXED: Inline processing to avoid dependency issues
-              if (pendingUpdatesRef.current.size === 0) {
-                updateTimeoutRef.current = null;
-                return;
-              }
-
-              const members = useFamilyStore.getState().members;
-              const pendingEntries = Array.from(pendingUpdatesRef.current.entries());
-
-              for (const [deviceId, updateData] of pendingEntries) {
-                const member = members.find(m => m.deviceId === deviceId);
-                if (!member) continue;
-
-                // ELITE: Type-safe status update with validation
-                if (updateData.status && member.status !== updateData.status) {
-                  const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
-                  if (validStatuses.includes(updateData.status as FamilyMember['status'])) {
-                    useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']).catch((error) => {
-                      logger.error('Failed to update member status:', error);
-                    });
-                  } else {
-                    logger.warn('Invalid status received:', updateData.status);
-                  }
-                }
-
-                if (updateData.location &&
-                  typeof updateData.location.latitude === 'number' &&
-                  typeof updateData.location.longitude === 'number' &&
-                  !isNaN(updateData.location.latitude) &&
-                  !isNaN(updateData.location.longitude) &&
-                  updateData.location.latitude >= -90 && updateData.location.latitude <= 90 &&
-                  updateData.location.longitude >= -180 && updateData.location.longitude <= 180) {
-                  useFamilyStore.getState().updateMemberLocation(
-                    member.id,
-                    updateData.location.latitude,
-                    updateData.location.longitude,
-                  ).catch((error) => {
-                    logger.error('Failed to update member location:', error);
-                  });
-                } else if (updateData.location) {
-                  logger.warn('Invalid location data in pending update:', updateData.location);
-                }
-              }
-
-              pendingUpdatesRef.current.clear();
+              applyPendingFamilyUpdates('debounce');
               updateTimeoutRef.current = null;
             }, 100);
           } else if (__DEV__) {
-            logger.warn(`Received family update from unknown deviceId: ${senderDeviceId}`);
+            logger.warn(`Received family update from unknown sender aliases: ${normalizedCandidates.join(', ')}`);
           }
+        }
+
+        // CRITICAL: Handle SOS messages received via BLE Mesh (offline family SOS)
+        if (messageData.type === 'FAMILY_SOS' || messageData.type === 'SOS') {
+          const senderName = messageData.senderName || 'Aile Üyesi';
+          const locationText = messageData.location
+            ? `Konum: ${messageData.location.latitude?.toFixed(4)}, ${messageData.location.longitude?.toFixed(4)}`
+            : 'Konum bilinmiyor';
+          const trappedText = messageData.trapped ? '\n⚠️ ENKAZ ALTINDA' : '';
+
+          Alert.alert(
+            messageData.trapped ? `🚨 ${senderName} ENKAZ ALTINDA!` : `🆘 ${senderName} ACİL YARDIM İSTİYOR!`,
+            `${messageData.message || 'Acil yardım gerekiyor!'}\n${locationText}${trappedText}`,
+            [
+              { text: 'Tamam', style: 'cancel' },
+              {
+                text: 'SOS Görüşmesi',
+                style: 'destructive',
+                onPress: () => {
+                  // CRITICAL FIX: Prefer message.senderId (mesh layer, consistent with identity.id)
+                  // over messageData.senderDeviceId (payload field, could be physical ID mismatch).
+                  // SOSConversationScreen filters msg.senderId === sosUserId.
+                  navigation.navigate('SOSConversation', {
+                    sosUserId:
+                      messageData.senderUid ||
+                      message.senderId ||
+                      messageData.senderDeviceId ||
+                      messageData.fromDeviceId ||
+                      messageData.deviceId,
+                    sosUserAliases: [
+                      messageData.senderUid,
+                      message.senderId,
+                      messageData.senderDeviceId,
+                      messageData.fromDeviceId,
+                      messageData.deviceId,
+                    ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+                    sosUserName: senderName,
+                    sosMessage: messageData.message,
+                    sosLocation: messageData.location,
+                  });
+                },
+              },
+            ],
+          );
+          logger.warn(`🚨 SOS alert received via Mesh from ${senderName}`);
         }
       } catch (error) {
         logger.error('Error processing family message:', error);
@@ -269,61 +360,36 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         clearTimeout(updateTimeoutRef.current);
         updateTimeoutRef.current = null;
       }
-      // Process any remaining updates before unmount
-      // FIXED: processPendingUpdates'i dependency'den çıkardık, direkt kod kullanıyoruz
-      if (pendingUpdatesRef.current.size > 0) {
-        const members = useFamilyStore.getState().members;
-        const pendingEntries = Array.from(pendingUpdatesRef.current.entries());
-
-        for (const [deviceId, updateData] of pendingEntries) {
-          const member = members.find(m => m.deviceId === deviceId);
-          if (!member) continue;
-
-          // ELITE: Type-safe status update with validation
-          if (updateData.status && member.status !== updateData.status) {
-            const validStatuses: Array<FamilyMember['status']> = ['safe', 'need-help', 'critical', 'unknown'];
-            if (validStatuses.includes(updateData.status as FamilyMember['status'])) {
-              useFamilyStore.getState().updateMemberStatus(member.id, updateData.status as FamilyMember['status']).catch((error) => {
-                logger.error('Failed to update member status in cleanup:', error);
-              });
-            } else {
-              logger.warn('Invalid status received in cleanup:', updateData.status);
-            }
-          }
-
-          if (updateData.location &&
-            typeof updateData.location.latitude === 'number' &&
-            typeof updateData.location.longitude === 'number' &&
-            !isNaN(updateData.location.latitude) &&
-            !isNaN(updateData.location.longitude) &&
-            updateData.location.latitude >= -90 && updateData.location.latitude <= 90 &&
-            updateData.location.longitude >= -180 && updateData.location.longitude <= 180) {
-            useFamilyStore.getState().updateMemberLocation(
-              member.id,
-              updateData.location.latitude,
-              updateData.location.longitude,
-            ).catch((error) => {
-              logger.error('Failed to update member location in cleanup:', error);
-            });
-          } else if (updateData.location) {
-            logger.warn('Invalid location data in cleanup:', updateData.location);
-          }
-        }
-
-        pendingUpdatesRef.current.clear();
-      }
+      applyPendingFamilyUpdates('cleanup');
     };
-  }, []); // Empty deps - listener uses refs and store.getState()
+  }, [applyPendingFamilyUpdates]); // Listener uses refs/store + stable apply helper
 
   const startLocationSharing = useCallback(async () => {
-    // ELITE: Check if location is enabled in settings
+    // CRITICAL FIX: If location is disabled in app settings, offer to enable it
+    // instead of silently blocking. Users confuse device GPS with app setting.
     if (!locationEnabled) {
       Alert.alert(
-        'Konum Kapalı',
-        'Konum paylaşımı için Ayarlar > Konum Servisi\'ni aktif edin.',
-        [{ text: 'Tamam' }]
+        'Konum Paylaşımı Kapalı',
+        'Aile üyelerinizle konum paylaşımı için uygulama ayarından konumu aktif etmeniz gerekiyor. Şimdi aktif etmek ister misiniz?',
+        [
+          { text: 'İptal', style: 'cancel', onPress: () => setIsSharingLocation(false) },
+          {
+            text: 'Evet, Aç',
+            style: 'default',
+            onPress: () => {
+              try {
+                const { useSettingsStore } = require('../../stores/settingsStore');
+                useSettingsStore.getState().setLocation(true);
+                // Will re-trigger via useEffect since isSharingLocation is still true
+                logger.info('✅ Location enabled via auto-activate prompt');
+              } catch (e) {
+                logger.error('Failed to auto-enable location:', e);
+                setIsSharingLocation(false);
+              }
+            },
+          },
+        ]
       );
-      setIsSharingLocation(false);
       return;
     }
 
@@ -337,10 +403,12 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
       // Keep a consistent sharing cadence and delegate all transport logic to FamilyTrackingService.
       familyTrackingService.setShareThrottleMs(30 * 1000);
-      await familyTrackingService.startTracking('family-screen');
+      await familyTrackingService.startTracking(FAMILY_TRACKING_CONSUMER_ID);
       await familyTrackingService.shareMyLocation({ force: true, reason: 'family-screen-toggle-on' });
+      logger.info('✅ Location sharing started successfully');
     } catch (error) {
       logger.error('Start location sharing error:', error);
+      Alert.alert('Konum Hatası', 'Konum paylaşımı başlatılamadı. Lütfen konum izinlerini kontrol edin.');
       setIsSharingLocation(false);
     }
   }, [locationEnabled]);
@@ -352,17 +420,17 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         setIsSharingLocation(false);
       });
     } else {
-      familyTrackingService.stopTracking('family-screen');
+      familyTrackingService.stopTracking(FAMILY_TRACKING_CONSUMER_ID);
     }
 
     return () => {
-      familyTrackingService.stopTracking('family-screen');
+      familyTrackingService.stopTracking(FAMILY_TRACKING_CONSUMER_ID);
     };
   }, [isSharingLocation, startLocationSharing]);
 
   const handleStatusUpdate = async (status: 'safe' | 'need-help' | 'critical') => {
     haptics.notificationSuccess();
-    setMyStatus(status);
+    const previousStatus = myStatus;
 
     try {
       // ELITE: Ensure BLE Mesh service is started before sending status update
@@ -414,24 +482,37 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
       let myDeviceId = bleMeshService.getMyDeviceId();
       if (!myDeviceId) {
-        // Fallback: Get device ID from device.ts
         try {
           myDeviceId = await getDeviceIdFromLib();
-          if (!myDeviceId) {
-            throw new Error('Device ID not available');
+          if (myDeviceId) {
+            // Set it in MeshStore for future use
+            useMeshStore.getState().setMyDeviceId(myDeviceId);
           }
-          // Set it in BLEMeshService and MeshStore for future use
-          useMeshStore.getState().setMyDeviceId(myDeviceId);
         } catch (error) {
-          logger.error('Failed to get device ID:', error);
-          throw new Error('Device ID not available');
+          logger.warn('Failed to get device ID from fallback provider:', error);
         }
+      }
+
+      const myIdentity = identityService.getIdentity();
+      const senderRouteId = (
+        myDeviceId ||
+        identityService.getUid() ||
+        myIdentity?.uid ||
+        ''
+      ).trim();
+
+      if (!senderRouteId) {
+        logger.error('Status update aborted: sender identity could not be resolved');
+        haptics.notificationError();
+        Alert.alert('Hata', 'Kimlik bilgisi alınamadı. Lütfen tekrar giriş yapıp yeniden deneyin.');
+        return;
       }
 
       // Create status update message
       const statusMessage = JSON.stringify({
         type: 'family_status_update',
-        deviceId: myDeviceId, // Include deviceId so receiver can match to family member
+        deviceId: senderRouteId, // Include sender routing ID so receiver can match aliases
+        senderUid: identityService.getUid(),
         status,
         location: location ? {
           latitude: location.coords.latitude,
@@ -443,16 +524,33 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
       // Get all family members with deviceIds
       const familyMembers = useFamilyStore.getState().members;
-      const membersWithDeviceId = familyMembers.filter(m => m.deviceId);
+      const selfIds = new Set(
+        [
+          senderRouteId,
+          myDeviceId,
+          identityService.getUid(),
+          myIdentity?.uid,
+          myIdentity?.uid,
+          myIdentity?.uid,
+        ].filter((value): value is string => !!value && value.trim().length > 0),
+      );
+      const reachableMembers = familyMembers.filter((member) => {
+        const targets = [
+          member.uid?.trim(),
+          member.deviceId?.trim(),
+        ].filter((value): value is string => !!value && value.length > 0);
 
-      // ELITE: Broadcast to all nearby devices (family members will filter by deviceId)
-      // Only broadcast if BLE Mesh service is running
+        if (targets.length === 0) return false;
+        return targets.some((target) => !selfIds.has(target));
+      });
+
+      // Broadcast status via dedicated STATUS mesh type so chat UIs don't render raw JSON payloads.
       let broadcastSuccess = false;
       if (bleMeshService.getIsRunning()) {
         try {
-          await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.TEXT, {
+          await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.STATUS, {
             to: 'broadcast',
-            from: myDeviceId,
+            from: senderRouteId,
           });
           broadcastSuccess = true;
           if (__DEV__) {
@@ -469,8 +567,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       // Save to Firebase for cloud sync
       try {
         const { firebaseDataService } = await import('../../services/FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          await firebaseDataService.saveStatusUpdate(myDeviceId, {
+        const cloudTargetId = identityService.getUid() || senderRouteId;
+        if (cloudTargetId) {
+          await firebaseDataService.saveStatusUpdate(cloudTargetId, {
             status,
             location: location ? {
               latitude: location.coords.latitude,
@@ -481,7 +580,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
           // Also save location if available
           if (location) {
-            await firebaseDataService.saveLocationUpdate(myDeviceId, {
+            await firebaseDataService.saveLocationUpdate(cloudTargetId, {
               latitude: location.coords.latitude,
               longitude: location.coords.longitude,
               accuracy: location.coords.accuracy || null,
@@ -514,36 +613,164 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         logger.error('Failed to send status update to backend:', error);
       }
 
-      // Also try to send directly to each family member if their deviceId is known
-      // This ensures message delivery even if they're not in broadcast range
-      for (const member of membersWithDeviceId) {
-        if (member.deviceId && member.deviceId !== myDeviceId) {
+      // Also try direct STATUS routing per known member identity.
+      for (const member of reachableMembers) {
+        const directTargets = Array.from(
+          new Set(
+            [member.uid, member.deviceId]
+              .map((value) => (typeof value === 'string' ? value.trim() : ''))
+              .filter((value) => value.length > 0 && !selfIds.has(value) && !value.startsWith('family-')),
+          ),
+        );
+        for (const directTarget of directTargets) {
           try {
-            // ELITE: Validate deviceId before sending
-            if (typeof member.deviceId !== 'string' || member.deviceId.trim().length === 0) {
-              logger.warn('Invalid deviceId for direct message:', member.deviceId);
-              continue;
-            }
-            await bleMeshService.sendMessage(statusMessage, member.deviceId).catch((error) => {
-              // Silent fail for individual messages - broadcast should still work
-              if (__DEV__) {
-                logger.warn(`Failed to send direct message to ${member.deviceId}:`, error);
-              }
+            await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.STATUS, {
+              to: directTarget,
+              from: senderRouteId,
             });
           } catch (error) {
-            // Silent fail for individual messages - broadcast should still work
             if (__DEV__) {
-              logger.warn(`Failed to send direct message to ${member.deviceId}:`, error);
+              logger.warn(`Failed to send direct status message to ${directTarget}:`, error);
             }
           }
         }
+      }
+
+      // CRITICAL FIX: Write status update to each family member's Firestore path
+      // Without this, family members NEVER receive the status update!
+      try {
+        const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (db) {
+          const { collection, doc, getDocs, limit, query, setDoc, where } = await import('firebase/firestore');
+          const statusPayload = {
+            fromDeviceId: senderRouteId,
+            senderUid: identityService.getUid(),
+            fromName: identityService.getDisplayName() || 'Aile Üyesi',
+            status,
+            location: location ? {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+            } : null,
+            timestamp: Date.now(),
+            type: 'status_update',
+          };
+          const targetUidCache = new Map<string, string | null>();
+          const resolveUidFromAlias = async (rawAlias: string): Promise<string> => {
+            const alias = rawAlias.trim();
+            if (!alias) return '';
+            if (UID_REGEX.test(alias)) return alias;
+
+            const normalizedAlias = alias.toUpperCase();
+            if (targetUidCache.has(normalizedAlias)) {
+              const cached = targetUidCache.get(normalizedAlias);
+              return cached || '';
+            }
+
+            let resolvedUid = '';
+            try {
+              const usersRef = collection(db, 'users');
+              const publicCodeQuery = query(usersRef, where('publicUserCode', '==', normalizedAlias), limit(1));
+              const publicCodeSnap = await getDocs(publicCodeQuery);
+              if (!publicCodeSnap.empty) {
+                resolvedUid = publicCodeSnap.docs[0]?.id || '';
+              }
+
+              if (!resolvedUid) {
+                const legacyCodeQuery = query(usersRef, where('qrId', '==', normalizedAlias), limit(1));
+                const legacyCodeSnap = await getDocs(legacyCodeQuery);
+                if (!legacyCodeSnap.empty) {
+                  resolvedUid = legacyCodeSnap.docs[0]?.id || '';
+                }
+              }
+            } catch (resolveError) {
+              logger.warn(`Failed to resolve family alias "${normalizedAlias}" to uid:`, resolveError);
+            }
+
+            targetUidCache.set(normalizedAlias, resolvedUid || null);
+            return resolvedUid;
+          };
+
+          const writePromises = reachableMembers.map(async (member) => {
+            try {
+              const targetAliases = new Set<string>();
+              const memberDeviceId = member.deviceId?.trim();
+              const memberUid = member.uid?.trim();
+              if (memberDeviceId) targetAliases.add(memberDeviceId);
+              if (memberUid) targetAliases.add(memberUid);
+
+              const nonSelfTargets = Array.from(targetAliases).filter((target) => !selfIds.has(target));
+              if (nonSelfTargets.length === 0) {
+                return;
+              }
+
+              const docIdBase = `${senderRouteId}_${Date.now()}`;
+              await Promise.allSettled(nonSelfTargets.map(async (target) => {
+                const resolvedUid = await resolveUidFromAlias(target);
+                if (resolvedUid) {
+                  // V3 canonical path: users/{uid}/status_updates
+                  const v3StatusRef = doc(db, 'users', resolvedUid, 'status_updates', docIdBase);
+                  await setDoc(v3StatusRef, statusPayload).catch(() => { });
+                  return;
+                }
+
+                // Legacy / device path: devices/{deviceId}/status_updates
+                const statusRef = doc(db, 'devices', target, 'status_updates', docIdBase);
+                await setDoc(statusRef, statusPayload).catch(() => { });
+              }));
+
+              logger.info(`✅ Status update sent to ${member.name} via Firestore`);
+            } catch (err) {
+              logger.warn(`Failed to write status to ${member.name}:`, err);
+            }
+          });
+
+          await Promise.allSettled(writePromises);
+
+          // Also update own device doc with current status (for others who subscribe)
+          try {
+            const ownDeviceDocId = (
+              myDeviceId ||
+              identityService.getMeshDeviceId() ||
+              ''
+            ).trim();
+            if (ownDeviceDocId) {
+              const deviceRef = doc(db, 'devices', ownDeviceDocId);
+              await setDoc(deviceRef, {
+                status: status,
+                statusUpdatedAt: Date.now(),
+                lastSeen: Date.now(),
+              }, { merge: true });
+            }
+          } catch { /* best effort */ }
+
+          // V3: Update users/{uid}/status/current
+          try {
+            const { getAuth } = await import('firebase/auth');
+            const uid = getAuth()?.currentUser?.uid;
+            if (uid) {
+              const v3StatusRef = doc(db, 'users', uid, 'status', 'current');
+              await setDoc(v3StatusRef, {
+                status: status,
+                statusUpdatedAt: Date.now(),
+                lastSeen: Date.now(),
+                location: location ? {
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                } : null,
+              }, { merge: true });
+            }
+          } catch { /* V3 best effort */ }
+        }
+      } catch (fbError) {
+        logger.warn('Firestore status fan-out failed:', fbError);
       }
 
       const statusText = status === 'safe' ? 'Güvendeyim' :
         status === 'need-help' ? 'Yardıma İhtiyacım Var' :
           'ACİL DURUM';
 
-      const memberCount = membersWithDeviceId.length;
+      const memberCount = reachableMembers.length;
       const deliveryMethod = broadcastSuccess
         ? (memberCount > 0 ? `${memberCount} aile üyesine` : 'Yakındaki cihazlara')
         : 'Bulut sunucusuna';
@@ -552,6 +779,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         'Durum Güncellendi',
         `${statusText} - ${deliveryMethod} bildirildi`,
       );
+      setMyStatus(status);
 
       // ELITE: Send critical alert with error handling
       if (status === 'critical') {
@@ -570,7 +798,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
             data: {
               type: 'family_status_update',
               status: 'critical',
-              deviceId: myDeviceId,
+              deviceId: senderRouteId,
             },
           }).catch((alertError) => {
             // Silent fail for alert - status update already succeeded
@@ -583,6 +811,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       }
 
     } catch (error) {
+      setMyStatus(previousStatus);
       logger.error('Status update error:', error);
       haptics.notificationError();
       Alert.alert('Hata', 'Durum güncellenemedi. Lütfen tekrar deneyin.');
@@ -591,17 +820,14 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const handleShareLocation = async () => {
     haptics.impactLight();
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Konum İzni', 'Konum paylaşımı için izin gereklidir');
-      return;
-    }
+    const newSharing = !isSharingLocation;
+    setIsSharingLocation(newSharing);
 
-    setIsSharingLocation(!isSharingLocation);
-    Alert.alert(
-      'Konum Paylaşımı',
-      isSharingLocation ? 'Konum paylaşımı durduruldu' : 'Konum paylaşımı başlatıldı - Aile üyeleriniz konumunuzu görebilir',
-    );
+    if (newSharing) {
+      Alert.alert('Konum Paylaşımı', 'Konum paylaşımı başlatılıyor...');
+    } else {
+      Alert.alert('Konum Paylaşımı', 'Konum paylaşımı durduruldu');
+    }
   };
 
   const handleStatusButtonPress = (status: 'safe' | 'need-help' | 'critical' | 'location') => {
@@ -617,6 +843,25 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       });
     }
   };
+
+  const getMemberConversationTargetId = useCallback((member: Pick<FamilyMember, 'uid' | 'deviceId'>): string => {
+    const selfAliases = new Set<string>(
+      [
+        identityService.getUid(),
+        myDeviceId,
+        identityService.getMyId(),
+        identityService.getIdentity()?.uid,
+      ].filter((value): value is string => !!value && value.trim().length > 0),
+    );
+
+    const uid = member.uid?.trim();
+    if (uid && !selfAliases.has(uid)) return uid;
+
+    const deviceId = member.deviceId?.trim();
+    if (deviceId && !selfAliases.has(deviceId)) return deviceId;
+
+    return '';
+  }, [myDeviceId]);
 
   // ELITE: Memoized callback for performance
   const handleAddMember = useCallback(() => {
@@ -646,21 +891,54 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       }
     }
 
+    if (!mySharePayload) {
+      try {
+        await identityService.initialize();
+        const qrPayload = identityService.getQRPayload();
+        if (qrPayload) {
+          setMySharePayload(qrPayload);
+        }
+      } catch (error) {
+        logger.warn('Failed to refresh share payload (fallback to raw ID):', error);
+      }
+    }
+
     setShowIdModal(true);
   };
 
-  const handleCopyId = async () => {
-    if (!myDeviceId) return;
+  const getShareValue = useCallback((): string => {
+    const payload = mySharePayload.trim();
+    if (payload.length > 0) {
+      return payload;
+    }
+    return myDeviceId || '';
+  }, [myDeviceId, mySharePayload]);
 
-    await Clipboard.setStringAsync(myDeviceId);
+  const shareDisplayId = useMemo(() => {
+    const payload = getShareValue();
+    if (!payload) return '';
+    try {
+      const parsed = JSON.parse(payload) as { code?: string; uid?: string; id?: string; did?: string };
+      return parsed.code || parsed.uid || parsed.id || parsed.did || (myDeviceId || payload);
+    } catch {
+      return myDeviceId || payload;
+    }
+  }, [getShareValue, myDeviceId]);
+
+  const handleCopyId = async () => {
+    const shareValue = getShareValue();
+    if (!shareValue) return;
+
+    await Clipboard.setStringAsync(shareValue);
     haptics.notificationSuccess();
     Alert.alert('Kopyalandı', 'ID panoya kopyalandı');
   };
 
   const handleShareId = async () => {
-    if (!myDeviceId) return;
+    const shareValue = getShareValue();
+    if (!shareValue) return;
 
-    const shareMessage = `AfetNet ID'm: ${myDeviceId}\n\nBeni eklemek için bu ID'yi kullanabilirsiniz. AfetNet uygulamasında "ID ile Ekle" seçeneğini kullanın.`;
+    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
 
     if (Platform.OS === 'ios') {
       // iOS: Show ActionSheet
@@ -670,33 +948,38 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           cancelButtonIndex: 0,
         },
         async (buttonIndex) => {
-          if (buttonIndex === 1) {
-            // WhatsApp
-            const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-            const canOpen = await Linking.canOpenURL(whatsappUrl);
-            if (canOpen) {
-              await Linking.openURL(whatsappUrl);
-              haptics.notificationSuccess();
-            } else {
-              Alert.alert('WhatsApp', 'WhatsApp yüklü değil');
+          try {
+            if (buttonIndex === 1) {
+              // WhatsApp
+              const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
+              const canOpen = await Linking.canOpenURL(whatsappUrl);
+              if (canOpen) {
+                await Linking.openURL(whatsappUrl);
+                haptics.notificationSuccess();
+              } else {
+                Alert.alert('WhatsApp', 'WhatsApp yüklü değil');
+              }
+            } else if (buttonIndex === 2) {
+              // SMS
+              const isAvailable = await SMS.isAvailableAsync();
+              if (isAvailable) {
+                await SMS.sendSMSAsync([], shareMessage);
+                haptics.notificationSuccess();
+              } else {
+                Alert.alert('SMS', 'SMS gönderimi bu cihazda desteklenmiyor');
+              }
+            } else if (buttonIndex === 3) {
+              // Other (System share sheet)
+              const result = await NativeShare.share({ message: shareMessage });
+              if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
+                haptics.notificationSuccess();
+              } else {
+                await handleCopyId();
+              }
             }
-          } else if (buttonIndex === 2) {
-            // SMS
-            const isAvailable = await SMS.isAvailableAsync();
-            if (isAvailable) {
-              await SMS.sendSMSAsync([], shareMessage);
-              haptics.notificationSuccess();
-            } else {
-              Alert.alert('SMS', 'SMS gönderimi bu cihazda desteklenmiyor');
-            }
-          } else if (buttonIndex === 3) {
-            // Other (System share sheet)
-            const result = await NativeShare.share({ message: shareMessage });
-            if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
-              haptics.notificationSuccess();
-            } else {
-              await handleCopyId();
-            }
+          } catch (error) {
+            logger.error('Share ID action failed on iOS action sheet:', error);
+            await handleCopyId();
           }
         },
       );
@@ -736,9 +1019,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdWhatsApp = async () => {
-    if (!myDeviceId) return;
+    const shareValue = getShareValue();
+    if (!shareValue) return;
 
-    const shareMessage = `AfetNet ID'm: ${myDeviceId}\n\nBeni eklemek için bu ID'yi kullanabilirsiniz. AfetNet uygulamasında "ID ile Ekle" seçeneğini kullanın.`;
+    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
 
     try {
@@ -756,9 +1040,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdSMS = async () => {
-    if (!myDeviceId) return;
+    const shareValue = getShareValue();
+    if (!shareValue) return;
 
-    const shareMessage = `AfetNet ID'm: ${myDeviceId}\n\nBeni eklemek için bu ID'yi kullanabilirsiniz. AfetNet uygulamasında "ID ile Ekle" seçeneğini kullanın.`;
+    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
 
     try {
       const isAvailable = await SMS.isAvailableAsync();
@@ -775,9 +1060,10 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdOther = async () => {
-    if (!myDeviceId) return;
+    const shareValue = getShareValue();
+    if (!shareValue) return;
 
-    const shareMessage = `AfetNet ID'm: ${myDeviceId}\n\nBeni eklemek için bu ID'yi kullanabilirsiniz. AfetNet uygulamasında "ID ile Ekle" seçeneğini kullanın.`;
+    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
 
     try {
       const result = await NativeShare.share({ message: shareMessage });
@@ -856,7 +1142,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     }
 
     try {
-      await useFamilyStore.getState().updateMember(editingMember.id, {
+      await useFamilyStore.getState().updateMember(editingMember.uid, {
         name: editName.trim(),
         relationship: editRelationship || undefined,
         phoneNumber: editPhone.trim() || undefined,
@@ -878,7 +1164,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
   const handleDeleteMember = async (memberId: string) => {
     // ELITE: Find member for confirmation message
-    const member = members.find(m => m.id === memberId);
+    const member = members.find(m => m.uid === memberId);
     const memberName = member?.name || 'Üye';
 
     Alert.alert(
@@ -919,34 +1205,6 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     }
   }, [navigation]);
 
-  // ELITE: Memoized render function for performance
-  const renderMember = useCallback(({ item, index }: { item: FamilyMember; index: number }) => {
-    try {
-      return (
-        <MemberCard
-          member={item}
-          index={index}
-          onPress={() => {
-            try {
-              if (!item.id || typeof item.id !== 'string') {
-                logger.warn('Invalid member id:', item);
-                return;
-              }
-              navigation.navigate('Map', { focusOnMember: item.id });
-            } catch (error) {
-              logger.error('Error navigating to Map:', error);
-            }
-          }}
-          onEdit={handleEditMember}
-          onDelete={handleDeleteMember}
-        />
-      );
-    } catch (error) {
-      logger.error('Error rendering member:', error);
-      return null;
-    }
-  }, [navigation, handleEditMember, handleDeleteMember]);
-
   return (
     <ImageBackground
       source={require('../../../../assets/images/premium/family_soft_bg.png')}
@@ -968,7 +1226,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           <View style={styles.titleContainer}>
             <Text style={styles.headerTitle}>Ailem</Text>
             <Text style={styles.headerSubtitle}>
-              {members.length} Üye • {myStatus === 'safe' ? 'Güvendesiniz' : 'Durum Bildirildi'}
+              {members.length} Üye • {myStatusSubtitle}
             </Text>
           </View>
         </View>
@@ -1051,83 +1309,137 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
         {/* Member List */}
         <View style={styles.membersSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Aile Üyeleri</Text>
-            <Text style={styles.sectionSubtitle}>Son Güncelleme</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.sectionTitle}>Aile Üyeleri</Text>
+              <View style={{
+                backgroundColor: '#6366f1',
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{members.length}</Text>
+              </View>
+            </View>
+            {/* Map/List toggle */}
+            <Pressable
+              onPress={() => {
+                haptics.impactLight();
+                setViewMode(prev => prev === 'list' ? 'map' : 'list');
+              }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.7)',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.9)',
+              }}
+            >
+              <Ionicons
+                name={viewMode === 'map' ? 'list' : 'map'}
+                size={15}
+                color={viewMode === 'map' ? '#6366f1' : '#64748b'}
+              />
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '700',
+                color: viewMode === 'map' ? '#6366f1' : '#64748b',
+                letterSpacing: 0.2,
+              }}>
+                {viewMode === 'map' ? 'Liste' : 'Harita'}
+              </Text>
+            </Pressable>
           </View>
 
           {members.length > 0 ? (
-            <View style={styles.memberList}>
-              {members.map((member, index) => (
-                <MemberCard
-                  key={member.id}
-                  member={member}
-                  index={index}
-                  onPress={() => {
+            viewMode === 'map' ? (
+              /* ELITE V2: Interactive Family Map (Life360 pattern) */
+              <View style={{ height: 350, borderRadius: 16, overflow: 'hidden', marginHorizontal: 4 }}>
+                <FamilyMapView
+                  members={members}
+                  onMemberPress={(member) => {
                     haptics.impactLight();
-                    const handleEdit = () => {
-                      setEditingMember(member);
-                      setEditName(member.name);
-                      setShowEditModal(true);
-                    };
+                  }}
+                  onCheckIn={(memberId) => {
+                    haptics.impactMedium();
+                    const member = members.find(
+                      (m) => m.uid === memberId || m.deviceId === memberId,
+                    );
+                    if (member) {
+                      // Send an explicit check-in ping first (cloud + mesh).
+                      familyTrackingService.requestCheckIn(memberId).catch((error) => {
+                        logger.warn('Family check-in request failed from map card:', error);
+                      });
 
-                    const handleDelete = () => {
-                      Alert.alert(
-                        'Üyeyi Sil',
-                        `${member.name} isimli üyeyi silmek istediğinize emin misiniz?`,
-                        [
-                          { text: 'İptal', style: 'cancel' },
-                          {
-                            text: 'Sil',
-                            style: 'destructive',
-                            onPress: () => {
-                              useFamilyStore.getState().removeMember(member.id);
-                              haptics.notificationSuccess();
-                            },
-                          },
-                        ],
-                      );
-                    };
-
-                    const handleViewLocation = () => {
-                      if (member.location) {
+                      const conversationTargetId = getMemberConversationTargetId(member);
+                      if (conversationTargetId) {
+                        navigation.navigate('Conversation', {
+                          userId: conversationTargetId,
+                          userName: member.name,
+                        });
+                      } else {
+                        Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
+                      }
+                    }
+                  }}
+                />
+              </View>
+            ) : (
+              <View style={styles.memberList}>
+                {members.map((member, index) => (
+                  <MemberCard
+                    key={member.uid}
+                    member={member}
+                    index={index}
+                    onPress={() => {
+                      haptics.impactLight();
+                      navigation.navigate('Map', { focusOnMember: member.uid });
+                    }}
+                    onEdit={handleEditMember}
+                    onDelete={(memberId) => handleDeleteMember(memberId)}
+                    onMessage={(m) => {
+                      haptics.impactLight();
+                      const conversationTargetId = getMemberConversationTargetId(m);
+                      if (conversationTargetId) {
+                        navigation.navigate('Conversation', {
+                          userId: conversationTargetId,
+                          userName: m.name,
+                        });
+                      } else {
+                        Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
+                      }
+                    }}
+                    onLocate={(m) => {
+                      const resolvedLocation = resolveFamilyMemberLocation(m);
+                      if (resolvedLocation) {
+                        const lat = resolvedLocation.latitude;
+                        const lng = resolvedLocation.longitude;
                         const url = Platform.select({
-                          ios: `maps:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
-                          android: `geo:0,0?q=${member.location.latitude},${member.location.longitude}(${member.name})`,
+                          ios: `maps:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
+                          android: `geo:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
                         });
                         if (url) {
-                          Linking.openURL(url).catch((err) => logger.error('Error opening maps:', err));
+                          Linking.openURL(url).catch((err) => {
+                            logger.warn('Primary map URL failed in FamilyScreen:', err);
+                            Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch((fallbackError) => {
+                              logger.error('Fallback map URL failed in FamilyScreen:', fallbackError);
+                            });
+                          });
                         }
                       } else {
                         Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
                       }
-                    };
+                    }}
+                  />
+                ))}
 
-                    if (Platform.OS === 'ios') {
-                      ActionSheetIOS.showActionSheetWithOptions(
-                        {
-                          options: ['İptal', 'Düzenle', 'Sil', 'Konumu Gör'],
-                          destructiveButtonIndex: 2,
-                          cancelButtonIndex: 0,
-                          title: member.name,
-                        },
-                        (buttonIndex) => {
-                          if (buttonIndex === 1) handleEdit();
-                          if (buttonIndex === 2) handleDelete();
-                          if (buttonIndex === 3) handleViewLocation();
-                        },
-                      );
-                    } else {
-                      Alert.alert(member.name, 'İşlem seçin', [
-                        { text: 'Düzenle', onPress: handleEdit },
-                        { text: 'Konumu Gör', onPress: handleViewLocation },
-                        { text: 'Sil', style: 'destructive', onPress: handleDelete },
-                        { text: 'İptal', style: 'cancel' },
-                      ]);
-                    }
-                  }}
-                />
-              ))}
-            </View>
+              </View>
+            )
           ) : (
             <View style={styles.emptyState}>
               {/* Icon removed for cleaner look */}
@@ -1170,11 +1482,11 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
               Bu ID'yi başkalarıyla paylaşarak sizi ekleyebilirler
             </Text>
 
-            {myDeviceId ? (
+            {(myDeviceId || mySharePayload) ? (
               <>
                 <View style={styles.qrContainer}>
                   <QRCode
-                    value={myDeviceId}
+                    value={getShareValue() || myDeviceId || ''}
                     size={200}
                     color={colors.text.primary}
                     backgroundColor={colors.background.secondary}
@@ -1183,7 +1495,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
                 <View style={styles.idContainer}>
                   <Text style={styles.idLabel}>ID:</Text>
-                  <Text style={styles.idValue} selectable>{myDeviceId}</Text>
+                  <Text style={styles.idValue} selectable>{shareDisplayId}</Text>
                 </View>
 
                 <View style={styles.modalButtons}>
@@ -1266,14 +1578,14 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                 <Text style={styles.editInputLabel}>İlişki Türü</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                   {[
-                    { id: 'anne', label: 'Anne', icon: 'woman' },
-                    { id: 'baba', label: 'Baba', icon: 'man' },
-                    { id: 'es', label: 'Eş', icon: 'heart' },
-                    { id: 'kardes', label: 'Kardeş', icon: 'people' },
-                    { id: 'cocuk', label: 'Çocuk', icon: 'happy' },
-                    { id: 'akraba', label: 'Akraba', icon: 'home' },
-                    { id: 'arkadas', label: 'Arkadaş', icon: 'person' },
-                    { id: 'diger', label: 'Diğer', icon: 'help-circle' },
+                    { id: 'anne', label: 'Anne', emoji: '👩' },
+                    { id: 'baba', label: 'Baba', emoji: '👨' },
+                    { id: 'es', label: 'Eş', emoji: '💕' },
+                    { id: 'kardes', label: 'Kardeş', emoji: '👫' },
+                    { id: 'cocuk', label: 'Çocuk', emoji: '👶' },
+                    { id: 'akraba', label: 'Akraba', emoji: '👥' },
+                    { id: 'arkadas', label: 'Arkadaş', emoji: '🤝' },
+                    { id: 'diger', label: 'Diğer', emoji: '👤' },
                   ].map((rel) => (
                     <Pressable
                       key={rel.id}
@@ -1286,11 +1598,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
                         setEditRelationship(editRelationship === rel.id ? null : rel.id);
                       }}
                     >
-                      <Ionicons
-                        name={rel.icon as keyof typeof Ionicons.glyphMap}
-                        size={16}
-                        color={editRelationship === rel.id ? '#fff' : '#64748b'}
-                      />
+                      <Text style={{ fontSize: 16 }}>{rel.emoji}</Text>
                       <Text style={[
                         styles.relationshipChipText,
                         editRelationship === rel.id && styles.relationshipChipTextActive
@@ -1364,422 +1672,3 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     </ImageBackground >
   );
 }
-
-const formatLastSeen = (timestamp: number): string => {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-
-  if (minutes < 1) return 'Şimdi';
-  if (minutes < 60) return `${minutes} dk önce`;
-  if (hours < 24) return `${hours} saat önce`;
-  return `${days} gün önce`;
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    // Background color removed to show ImageBackground
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: colors.background.primary,
-    zIndex: 10,
-    elevation: 4,
-  },
-  headerContent: {
-    flex: 1,
-    minHeight: 60, // Ensure minimum height for title visibility
-  },
-  titleContainer: {
-    flexDirection: 'column',
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#334155', // Softened Deep Slate
-    letterSpacing: -0.5,
-    lineHeight: 34,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#64748b', // SoftSlate
-    marginTop: 2,
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.9)',
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.6)', // Glass style
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.9)',
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  statusSection: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#94a3b8',
-  },
-  membersSection: {
-    marginTop: 16,
-  },
-  memberList: {
-    gap: 12,
-  },
-  memberCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  memberHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  memberAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#334155',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  memberInfo: {
-    flex: 1,
-  },
-  memberName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  memberTime: {
-    fontSize: 13,
-    color: '#94a3b8',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 9999,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  locationText: {
-    fontSize: 13,
-    color: colors.text.tertiary,
-  },
-  viewMapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  viewMapText: {
-    fontSize: 14,
-    color: colors.brand.primary,
-    fontWeight: '600',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    backgroundColor: 'rgba(255,255,255,0.4)', // Slightly clearer glass background
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
-    paddingHorizontal: 24,
-  },
-  emptyIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#1e293b',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '700', // Changed from 600 to 700
-    color: '#1e293b', // Dark Slate
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#475569', // Medium Slate
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24, // Changed from 20 to 24
-  },
-  emptyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.brand.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  emptyButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: colors.background.primary,
-    borderRadius: 24,
-    padding: 24,
-    width: '90%',
-    maxWidth: 400,
-    alignItems: 'center',
-  },
-  modalCloseButton: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    padding: 8,
-  },
-  modalTitle: {
-    ...typography.h3,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    ...typography.body,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  qrContainer: {
-    backgroundColor: colors.background.secondary,
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 20,
-  },
-  idContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background.secondary,
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 24,
-    width: '100%',
-  },
-  idLabel: {
-    ...typography.body,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  idValue: {
-    ...typography.body,
-    flex: 1,
-    fontFamily: 'monospace',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 8,
-    width: '100%',
-    flexWrap: 'wrap',
-  },
-  modalButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  modalButtonSmall: {
-    flex: 1,
-    minWidth: '48%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    gap: 6,
-  },
-  modalButtonText: {
-    ...typography.body,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  modalButtonTextSmall: {
-    ...typography.small,
-    fontWeight: '600',
-    color: '#fff',
-    fontSize: 12,
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.status.danger,
-    textAlign: 'center',
-  },
-  groupChatSection: {
-    marginBottom: 20,
-  },
-  groupChatButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  groupChatGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  groupChatText: {
-    ...typography.body,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    flex: 1,
-  },
-  editInputContainer: {
-    width: '100%',
-    marginBottom: 24,
-  },
-  editInputLabel: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.text.secondary,
-    marginBottom: 8,
-  },
-  editInput: {
-    backgroundColor: colors.background.secondary,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    ...typography.body,
-    color: colors.text.primary,
-    borderWidth: 1,
-    borderColor: colors.border.primary,
-  },
-  modalButtonCancel: {
-    backgroundColor: colors.background.secondary,
-    borderWidth: 1,
-    borderColor: colors.border.primary,
-  },
-  modalButtonSave: {
-    backgroundColor: colors.brand.primary,
-  },
-  modalButtonTextCancel: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  modalButtonTextSave: {
-    ...typography.body,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  // ELITE: Relationship Chip Styles
-  relationshipChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderWidth: 1,
-    borderColor: 'rgba(100,116,139,0.2)',
-    marginRight: 8,
-    gap: 6,
-  },
-  relationshipChipActive: {
-    backgroundColor: colors.brand.primary,
-    borderColor: colors.brand.primary,
-  },
-  relationshipChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#64748b',
-  },
-  relationshipChipTextActive: {
-    color: '#fff',
-  },
-});

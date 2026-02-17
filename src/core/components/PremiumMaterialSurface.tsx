@@ -1,14 +1,14 @@
 import React from 'react';
-import { View, StyleSheet, Image, ViewStyle, StyleProp } from 'react-native';
+import { View, StyleSheet, ViewStyle, StyleProp } from 'react-native';
 import { LinearGradient } from './SafeLinearGradient';
 
 export type MaterialVariant = 'A' | 'B'; // A: Aurora Silk (Lux), B: Topographic Porcelain (Technical)
 
 interface Props {
-    variant?: MaterialVariant;
-    style?: StyleProp<ViewStyle>;
-    children?: React.ReactNode;
-    borderRadius?: number;
+  variant?: MaterialVariant;
+  style?: StyleProp<ViewStyle>;
+  children?: React.ReactNode;
+  borderRadius?: number;
 }
 
 export const PremiumMaterialSurface: React.FC<Props> = ({
@@ -22,39 +22,19 @@ export const PremiumMaterialSurface: React.FC<Props> = ({
       {/* 1. Base Gradient & Surface Layer */}
       <View style={[StyleSheet.absoluteFill, styles.baseLayer, { borderRadius }]} />
 
-      {/* 2. Variant-Specific Layers */}
-      {/* 2. Variant-Specific Layers - UNIFIED CERAMIC THEME (Deep Ocean Comp) */}
-      {(variant === 'A' || variant === 'B') && (
-        <>
-          {/* Unified Ceramic White Gradient (High Contrast) */}
-          <LinearGradient
-            colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.85)', 'rgba(255,255,255,0.90)']}
-            locations={[0, 0.7, 1]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={[StyleSheet.absoluteFill, { borderRadius }]}
-          />
-
-          {/* Subtle Topographic Pattern (Darker now to show on white) */}
-          <Image
-            source={require('../../../assets/images/premium/topo_pattern.png')}
-            style={[StyleSheet.absoluteFill, styles.overlayImage, { opacity: 0.05, tintColor: '#334155' }]}
-            resizeMode="repeat"
-          />
-        </>
-      )}
-
-      {/* 3. Common Specular Sheen (6-10%) */}
-      <Image
-        source={require('../../../assets/images/premium/sheen_overlay.png')}
-        style={[StyleSheet.absoluteFill, styles.overlayImage, { opacity: 0.08 }]}
-        resizeMode="cover"
+      {/* 2. Unified Ceramic White Gradient */}
+      <LinearGradient
+        colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.85)', 'rgba(255,255,255,0.90)']}
+        locations={[0, 0.7, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={[StyleSheet.absoluteFill, { borderRadius }]}
       />
 
-      {/* 4. Borders & Inner Highlights (Simulated via nested views) */}
+      {/* 3. Borders & Inner Highlights */}
       <View style={[StyleSheet.absoluteFill, styles.borderLayer, { borderRadius }]} pointerEvents="none" />
 
-      {/* 5. Content */}
+      {/* 4. Content */}
       <View style={styles.content}>
         {children}
       </View>

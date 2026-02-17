@@ -330,7 +330,7 @@ export default function PreparednessPlanScreen() {
 
   return (
     <ImageBackground
-      source={mode === 'kid' ? require('../../../assets/images/premium/green_nature_bg.png') : require('../../../assets/images/premium/green_nature_bg.png')}
+      source={mode === 'kid' ? require('../../../../assets/images/premium/green_nature_bg.png') : require('../../../../assets/images/premium/green_nature_bg.png')}
       style={styles.container}
       resizeMode="cover"
     >

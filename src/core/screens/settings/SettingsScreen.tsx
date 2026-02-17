@@ -19,6 +19,7 @@ import {
   BackHandler,
   Modal,
   ImageBackground,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -47,7 +48,7 @@ interface SettingOption {
   title: string;
   subtitle?: string;
   value?: string | boolean;
-  onPress?: () => void;
+  onPress?: (value?: string | boolean) => void;
   rightComponent?: React.ReactNode;
   type?: 'switch' | 'arrow' | 'text';
 }
@@ -155,51 +156,87 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   };
 
   // ELITE: Şifre Değiştirme
+  const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [passwordStep, setPasswordStep] = useState<'current' | 'new'>('current');
+
   const handleChangePassword = () => {
     haptics.impactMedium();
 
-    Alert.prompt(
-      'Şifre Değiştir',
-      'Mevcut şifrenizi girin:',
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Devam',
-          onPress: (currentPassword) => {
-            if (!currentPassword || currentPassword.length < 8) {
-              Alert.alert('Hata', 'Geçerli bir şifre girin.');
-              return;
-            }
+    if (Platform.OS === 'ios') {
+      // iOS supports Alert.prompt
+      Alert.prompt(
+        'Şifre Değiştir',
+        'Mevcut şifrenizi girin:',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Devam',
+            onPress: (currentPassword) => {
+              if (!currentPassword || currentPassword.length < 8) {
+                Alert.alert('Hata', 'Geçerli bir şifre girin.');
+                return;
+              }
 
-            Alert.prompt(
-              'Yeni Şifre',
-              'Yeni şifrenizi girin (en az 8 karakter):',
-              [
-                { text: 'İptal', style: 'cancel' },
-                {
-                  text: 'Değiştir',
-                  onPress: async (newPassword) => {
-                    if (!newPassword || newPassword.length < 8) {
-                      Alert.alert('Hata', 'Şifre en az 8 karakter olmalıdır.');
-                      return;
-                    }
+              Alert.prompt(
+                'Yeni Şifre',
+                'Yeni şifrenizi girin (en az 8 karakter):',
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  {
+                    text: 'Değiştir',
+                    onPress: async (newPassword) => {
+                      if (!newPassword || newPassword.length < 8) {
+                        Alert.alert('Hata', 'Şifre en az 8 karakter olmalıdır.');
+                        return;
+                      }
 
-                    try {
-                      await EmailAuthService.changePassword(currentPassword!, newPassword);
-                      Alert.alert('Başarılı', 'Şifreniz başarıyla değiştirildi.');
-                    } catch (error: any) {
-                      Alert.alert('Hata', error.message);
-                    }
+                      try {
+                        await EmailAuthService.changePassword(currentPassword!, newPassword);
+                        Alert.alert('Başarılı', 'Şifreniz başarıyla değiştirildi.');
+                      } catch (error: any) {
+                        Alert.alert('Hata', error.message);
+                      }
+                    },
                   },
-                },
-              ],
-              'secure-text',
-            );
+                ],
+                'secure-text',
+              );
+            },
           },
-        },
-      ],
-      'secure-text',
-    );
+        ],
+        'secure-text',
+      );
+    } else {
+      // Android: use modal-based flow
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setPasswordStep('current');
+      setChangePasswordModal(true);
+    }
+  };
+
+  const handlePasswordModalSubmit = async () => {
+    if (passwordStep === 'current') {
+      if (!currentPasswordInput || currentPasswordInput.length < 8) {
+        Alert.alert('Hata', 'Geçerli bir şifre girin.');
+        return;
+      }
+      setPasswordStep('new');
+    } else {
+      if (!newPasswordInput || newPasswordInput.length < 8) {
+        Alert.alert('Hata', 'Şifre en az 8 karakter olmalıdır.');
+        return;
+      }
+      try {
+        await EmailAuthService.changePassword(currentPasswordInput, newPasswordInput);
+        setChangePasswordModal(false);
+        Alert.alert('Başarılı', 'Şifreniz başarıyla değiştirildi.');
+      } catch (error: any) {
+        Alert.alert('Hata', error.message);
+      }
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -320,7 +357,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Deprem uyarıları ve bildirimler',
       type: 'switch',
       value: notificationsEnabled,
-      onPress: () => setNotificationsEnabled(!notificationsEnabled),
+      onPress: (val) => setNotificationsEnabled(typeof val === 'boolean' ? val : !notificationsEnabled),
     },
     {
       icon: 'settings',
@@ -339,7 +376,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Sesli uyarılar',
       type: 'switch',
       value: alarmSoundEnabled,
-      onPress: () => setAlarmSoundEnabled(!alarmSoundEnabled),
+      onPress: (val) => setAlarmSoundEnabled(typeof val === 'boolean' ? val : !alarmSoundEnabled),
     },
     {
       icon: 'phone-portrait',
@@ -347,7 +384,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Vibrasyon uyarıları',
       type: 'switch',
       value: vibrationEnabled,
-      onPress: () => setVibrationEnabled(!vibrationEnabled),
+      onPress: (val) => setVibrationEnabled(typeof val === 'boolean' ? val : !vibrationEnabled),
     },
     {
       icon: 'mic',
@@ -355,7 +392,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Eller serbest acil komut modu',
       type: 'switch',
       value: voiceCommandEnabled,
-      onPress: () => setVoiceCommandEnabled(!voiceCommandEnabled),
+      onPress: (val) => setVoiceCommandEnabled(typeof val === 'boolean' ? val : !voiceCommandEnabled),
     },
     {
       icon: 'flash',
@@ -374,12 +411,12 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     {
       icon: 'location',
       title: 'Konum Servisi',
-      subtitle: 'Konum izleme ve paylaşımı',
+      subtitle: 'Arka planda konum izleme (pil kullanımını artırabilir)',
       type: 'switch',
       value: locationEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !locationEnabled;
+        const newValue = typeof val === 'boolean' ? val : !locationEnabled;
         setLocationEnabled(newValue);
 
         try {
@@ -389,10 +426,10 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
           if (newValue) {
             await locationService.recheckPermission();
             await locationService.initialize();
-            Alert.alert('Konum Servisi', 'Konum servisleri aktif edildi.');
+            Alert.alert('Konum Servisi', 'Konum servisleri aktif edildi. Arka planda konum takibi pil tüketimini artırabilir.');
           } else {
             familyTrackingService.stopTracking('settings-location-toggle');
-            Alert.alert('Konum Servisi', 'Konum servisleri kapatıldı.');
+            Alert.alert('Konum Servisi', 'Konum servisleri ve arka plan takibi kapatıldı.');
           }
         } catch (error) {
           logger.warn('Location toggle side-effect failed:', error);
@@ -404,7 +441,11 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       title: 'Harita Ayarları',
       subtitle: 'Harita görünümü ve filtreler',
       type: 'arrow',
-      onPress: () => navigation.navigate('Map'),
+      onPress: () => {
+        haptics.impactLight();
+        const parentNavigator = navigation.getParent?.() || navigation;
+        parentNavigator.navigate('OfflineMapSettings');
+      },
     },
   ];
 
@@ -416,9 +457,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Deprem ve afet haberleri',
       type: 'switch',
       value: newsEnabled,
-      onPress: () => {
+      onPress: (val) => {
         haptics.impactLight();
-        const newValue = !newsEnabled;
+        const newValue = typeof val === 'boolean' ? val : !newsEnabled;
         setNewsEnabled(newValue);
         Alert.alert(
           'Haber Sistemi',
@@ -471,9 +512,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Bluetooth mesh iletişimi',
       type: 'switch',
       value: bleMeshEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !bleMeshEnabled;
+        const newValue = typeof val === 'boolean' ? val : !bleMeshEnabled;
         setBleMeshEnabled(newValue);
 
         // Start/stop BLE Mesh service based on setting
@@ -507,9 +548,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'GPS olmadan adım sayarak konum belirleme',
       type: 'switch',
       value: pdrEnabled,
-      onPress: () => {
+      onPress: (val) => {
         haptics.impactLight();
-        const newValue = !pdrEnabled;
+        const newValue = typeof val === 'boolean' ? val : !pdrEnabled;
         setPdrEnabled(newValue);
         Alert.alert(
           'PDR Konum Takibi',
@@ -526,9 +567,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Yakındaki acil durumlar için otomatik bildirim',
       type: 'switch',
       value: proximityAlertsEnabled,
-      onPress: () => {
+      onPress: (val) => {
         haptics.impactLight();
-        const newValue = !proximityAlertsEnabled;
+        const newValue = typeof val === 'boolean' ? val : !proximityAlertsEnabled;
         setProximityAlertsEnabled(newValue);
         Alert.alert(
           'Yakınlık Uyarıları',
@@ -545,8 +586,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Enkaz modunda otomatik aktif (ekran parlaklığı %10)',
       type: 'switch',
       value: batterySaverEnabled,
-      onPress: async () => {
-        const newValue = !batterySaverEnabled;
+      onPress: async (val) => {
+        const newValue = typeof val === 'boolean' ? val : !batterySaverEnabled;
         setBatterySaverEnabled(newValue);
         if (newValue) {
           await batterySaverService.enable();
@@ -564,9 +605,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'AFAD, Kandilli ve desteklenen kaynaklar',
       type: 'switch',
       value: earthquakeMonitoringEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !earthquakeMonitoringEnabled;
+        const newValue = typeof val === 'boolean' ? val : !earthquakeMonitoringEnabled;
         setEarthquakeMonitoringEnabled(newValue);
 
         try {
@@ -590,9 +631,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Deprem erken uyarı bildirimleri',
       type: 'switch',
       value: eewEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !eewEnabled;
+        const newValue = typeof val === 'boolean' ? val : !eewEnabled;
         setEewEnabled(newValue);
 
         // Start/stop EEW service based on setting
@@ -612,9 +653,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'Telefon sensörleri ile deprem algılama',
       type: 'switch',
       value: seismicSensorEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !seismicSensorEnabled;
+        const newValue = typeof val === 'boolean' ? val : !seismicSensorEnabled;
         setSeismicSensorEnabled(newValue);
 
         // Start/stop seismic sensor based on setting
@@ -634,9 +675,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'AI ile otomatik tehlike bölgesi tespiti',
       type: 'switch',
       value: aiHazardEnabled,
-      onPress: () => {
+      onPress: (val) => {
         haptics.impactLight();
-        const newValue = !aiHazardEnabled;
+        const newValue = typeof val === 'boolean' ? val : !aiHazardEnabled;
         setAiHazardEnabled(newValue);
         Alert.alert(
           'AI Tehlike Çıkarımı',
@@ -700,9 +741,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       subtitle: 'SOS sırasında kritik sağlık bilgilerinizi paylaş',
       type: 'switch',
       value: healthSharingEnabled,
-      onPress: async () => {
+      onPress: async (val) => {
         haptics.impactLight();
-        const newValue = !healthSharingEnabled;
+        const newValue = typeof val === 'boolean' ? val : !healthSharingEnabled;
         setHealthSharingEnabled(newValue);
 
         // Update the service
@@ -878,9 +919,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         subtitle: 'Görme güçlüğü olanlar için yüksek kontrast modu',
         type: 'switch',
         value: highContrastEnabled,
-        onPress: () => {
+        onPress: (val) => {
           haptics.impactLight();
-          const newValue = !highContrastEnabled;
+          const newValue = typeof val === 'boolean' ? val : !highContrastEnabled;
           setHighContrast(newValue);
           Alert.alert(
             'Yüksek Kontrast',
@@ -969,7 +1010,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   return (
     <ImageBackground
-      source={require('../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
       style={styles.container}
       resizeMode="cover"
     >
@@ -1011,245 +1052,66 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         <Text style={styles.versionText}>v{ENV.APP_VERSION}</Text>
         <Text style={styles.userIdText}>ID: {deviceId}</Text>
       </ScrollView>
+
+      {/* Android Password Change Modal */}
+      {Platform.OS === 'android' && (
+        <Modal
+          visible={changePasswordModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setChangePasswordModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                {passwordStep === 'current' ? 'Şifre Değiştir' : 'Yeni Şifre'}
+              </Text>
+              <Text style={styles.modalStep}>
+                {passwordStep === 'current'
+                  ? 'Mevcut şifrenizi girin:'
+                  : 'Yeni şifrenizi girin (en az 8 karakter):'}
+              </Text>
+              <TextInput
+                style={{
+                  width: '100%',
+                  borderWidth: 1,
+                  borderColor: '#334155',
+                  borderRadius: 8,
+                  padding: 12,
+                  color: '#fff',
+                  fontSize: 16,
+                  marginBottom: 16,
+                }}
+                secureTextEntry
+                placeholder="Şifre"
+                placeholderTextColor="#94a3b8"
+                value={passwordStep === 'current' ? currentPasswordInput : newPasswordInput}
+                onChangeText={passwordStep === 'current' ? setCurrentPasswordInput : setNewPasswordInput}
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Pressable
+                  onPress={() => setChangePasswordModal(false)}
+                  style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#334155', alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>İptal</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handlePasswordModalSubmit}
+                  style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#3b82f6', alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>
+                    {passwordStep === 'current' ? 'Devam' : 'Değiştir'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </ImageBackground>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  headerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    zIndex: 10,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  placeholderButton: {
-    width: 40,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#64748b',
-    marginBottom: 12,
-    marginLeft: 8,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  sectionContent: {
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  premiumBanner: {
-    marginBottom: 24,
-    borderRadius: 24,
-    shadowColor: '#0ea5e9',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  premiumGradient: {
-    borderRadius: 24,
-    padding: 2,
-  },
-  premiumContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'transparent',
-  },
-  premiumIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  premiumTextContainer: {
-    flex: 1,
-  },
-  premiumTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  premiumSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.9)',
-  },
-  versionText: {
-    textAlign: 'center',
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 8,
-  },
-  userIdText: {
-    textAlign: 'center',
-    color: '#cbd5e1',
-    fontSize: 10,
-    marginTop: 4,
-    marginBottom: 20,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  // Saved for complex stats card if needed later, but removing mostly for now
-  statsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 16,
-  },
-  settingIconGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: colors.brand.primary + '30',
-  },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  settingSubtitle: {
-    fontSize: 13,
-    color: '#94a3b8',
-  },
-  settingValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.brand.primary,
-    marginRight: 8,
-  },
-  statRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  statDivider: {
-    height: 1,
-    backgroundColor: '#334155',
-  },
-  statLabel: {
-    flex: 1,
-    fontSize: 15,
-    color: '#94a3b8',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  versionContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    marginTop: 16,
-  },
-  versionSubtext: {
-    fontSize: 13,
-    color: '#94a3b8',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-    lineHeight: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
-    padding: 32,
-    width: '100%',
-    maxWidth: 400,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  modalStep: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    marginTop: 16,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  progressBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#334155',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#3b82f6',
-    borderRadius: 4,
-  },
-  modalProgress: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginBottom: 16,
-  },
-  modalNote: {
-    fontSize: 13,
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-});
+import { styles } from './SettingsScreen.styles';
+

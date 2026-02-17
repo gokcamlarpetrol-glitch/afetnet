@@ -32,7 +32,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useBackgroundSeismicMonitor } from '../../services/BackgroundSeismicMonitor';
 import { onDeviceSeismicDetector } from '../../services/OnDeviceSeismicDetector';
 import { crowdsourcedSeismicNetwork } from '../../services/CrowdsourcedSeismicNetwork';
-import { ultraFastEEWNotification } from '../../services/UltraFastEEWNotification';
+import { notificationCenter } from '../../services/notifications/NotificationCenter';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('EEWSettingsScreen');
@@ -107,14 +107,12 @@ export default function EEWSettingsScreen() {
         Vibration.vibrate([100, 200, 100, 200, 100]);
 
         // Send test notification
-        await ultraFastEEWNotification.sendEEWNotification({
+        await notificationCenter.notify('earthquake', {
             magnitude: 5.2,
             location: 'TEST - Simülasyon',
-            warningSeconds: 10,
-            estimatedIntensity: 5,
-            epicentralDistance: 50,
-            source: 'TEST' as any,
-        });
+            timestamp: Date.now(),
+            isEEW: true,
+        }, 'EEWSettingsScreen-test');
 
         setTimeout(() => {
             setIsTesting(false);
@@ -199,7 +197,7 @@ export default function EEWSettingsScreen() {
                                 key={level}
                                 style={[
                                     styles.optionButton,
-                                    backgroundMonitor.samplingRate === SAMPLING_MAP[level] && styles.optionButtonActive,
+                                    backgroundMonitor.sensitivity === level && styles.optionButtonActive,
                                 ]}
                                 onPress={() => handleSensitivityChange(level)}
                             >
@@ -290,16 +288,6 @@ export default function EEWSettingsScreen() {
         </SafeAreaView>
     );
 }
-
-// ============================================================
-// CONSTANTS
-// ============================================================
-
-const SAMPLING_MAP: Record<SensitivityLevel, number> = {
-    low: 50,
-    medium: 100,
-    high: 100,
-};
 
 // ============================================================
 // STYLES

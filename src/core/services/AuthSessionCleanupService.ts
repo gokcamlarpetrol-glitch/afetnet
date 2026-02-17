@@ -3,6 +3,8 @@ import { clearDeviceId, resetCachedDeviceId } from '../../lib/device';
 import { useMessageStore } from '../stores/messageStore';
 import { useFamilyStore } from '../stores/familyStore';
 import { useHealthProfileStore } from '../stores/healthProfileStore';
+import { useContactStore } from '../stores/contactStore';
+import { contactService } from './ContactService';
 
 const logger = createLogger('AuthSessionCleanupService');
 
@@ -12,6 +14,8 @@ class AuthSessionCleanupService {
       useMessageStore.getState().clear(),
       useFamilyStore.getState().clear(),
       useHealthProfileStore.getState().clearProfile(),
+      useContactStore.getState().clearLocalCache(),
+      contactService.clearAll(),
       clearDeviceId(),
     ];
 

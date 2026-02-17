@@ -159,7 +159,7 @@ class AutoCheckinService {
           message,
           timestamp: Date.now(),
         }),
-        MeshMessageType.TEXT,
+        MeshMessageType.STATUS,
         { to: 'broadcast' },
       );
 
@@ -186,11 +186,6 @@ class AutoCheckinService {
       // The broadcastStatus() call earlier handles mesh/firebase distribution
 
       logger.info(`AutoCheckinService: Status broadcasted to ${members.length} family members via Cloud/Mesh`);
-
-      // Confirm to user that notification was sent
-      import('./NotificationService').then(({ notificationService }) => {
-        // Status confirmation handled silently
-      });
     } catch (error) {
       logger.error('AutoCheckinService notify failed:', error);
     }

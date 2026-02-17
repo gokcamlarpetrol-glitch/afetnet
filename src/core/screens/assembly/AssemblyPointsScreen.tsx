@@ -12,8 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { usePremiumStore } from '../../stores/premiumStore';
-import PremiumGate from '../../components/PremiumGate';
+
 import { calculateDistance, formatDistance } from '../../utils/mapUtils';
 import { createLogger } from '../../utils/logger';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
@@ -66,9 +65,7 @@ const mapLocationToAssemblyPoint = (loc: MapLocation): AssemblyPoint => ({
 
 export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScreenProps) {
   const insets = useSafeAreaInsets();
-  // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
-  const isPremium = usePremiumStore((state) => state.isPremium);
+
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [basePoints, setBasePoints] = useState<AssemblyPoint[]>([]);
   const [points, setPoints] = useState<AssemblyPoint[]>([]);
@@ -298,14 +295,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
     }
   };
 
-  if (!isPremium) {
-    return (
-      <PremiumGate
-        featureName="Toplanma Noktaları Haritası"
 
-      />
-    );
-  }
 
   // ELITE: Handle add button
   const handleAddLocation = useCallback(() => {
@@ -603,7 +593,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
         <View style={styles.emergencyResourcesRow}>
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:112')}
+            onPress={() => Linking.openURL('tel:112').catch(() => { })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fee2e2' }]}>
               <Ionicons name="medical" size={18} color="#ef4444" />
@@ -614,7 +604,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:110')}
+            onPress={() => Linking.openURL('tel:110').catch(() => { })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fef3c7' }]}>
               <Ionicons name="flame" size={18} color="#f59e0b" />
@@ -625,7 +615,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:155')}
+            onPress={() => Linking.openURL('tel:155').catch(() => { })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dbeafe' }]}>
               <Ionicons name="shield" size={18} color="#3b82f6" />
@@ -636,7 +626,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:122')}
+            onPress={() => Linking.openURL('tel:122').catch(() => { })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dcfce7' }]}>
               <Ionicons name="call" size={18} color="#22c55e" />

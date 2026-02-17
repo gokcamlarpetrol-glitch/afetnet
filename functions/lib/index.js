@@ -55,13 +55,162 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendCustomEmail = exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.tokenCleanup = exports.dailyAnalytics = exports.openAIChatProxy = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
-const functions = __importStar(require("firebase-functions"));
+exports.onContactRequest = exports.onFamilyStatusUpdateV3 = exports.onFamilyStatusUpdate = exports.onNewConversationMessageV3 = exports.onNewMessage = exports.sendCustomEmail = exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.onSOSBroadcast = exports.onSOSAlert = exports.tokenCleanup = exports.dailyAnalytics = exports.openAIChatProxy = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
+const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
+// ============================================================
+// EXPO PUSH NOTIFICATION HELPER
+// CRITICAL: App registers Expo Push Tokens (ExponentPushToken[xxx])
+// Firebase Admin's messaging.send() ONLY works with native FCM tokens.
+// We MUST use Expo's Push API for sending to Expo tokens.
+// ============================================================
+const EXPO_PUSH_API = 'https://exp.host/--/api/v2/push/send';
+/**
+ * Map logical push type to Android notification channel ID defined in app.
+ * Keeps backend payloads aligned with NotificationChannelManager channel IDs.
+ */
+function resolveAndroidChannelId(data) {
+    const rawType = ((data === null || data === void 0 ? void 0 : data.type) || '').toLowerCase();
+    if (rawType === 'eew')
+        return 'eew_critical';
+    if (rawType === 'earthquake' || rawType === 'turkey_earthquake_detection' || rawType === 'global_early_warning') {
+        return 'earthquake_alerts';
+    }
+    if (rawType === 'sos' ||
+        rawType === 'sos_family' ||
+        rawType === 'family_sos' ||
+        rawType === 'sos_proximity' ||
+        rawType === 'nearby_sos' ||
+        rawType === 'sos_message') {
+        return 'sos_alerts';
+    }
+    if (rawType === 'family_status_update' || rawType === 'family_location') {
+        return 'family_updates';
+    }
+    if (rawType === 'new_message' || rawType === 'message' || rawType === 'message_received') {
+        return 'messages';
+    }
+    if (rawType === 'news')
+        return 'news_updates';
+    return 'default';
+}
+/**
+ * Send push notification via Expo's Push API
+ * This is the ONLY way to deliver to ExponentPushToken[xxx] tokens
+ */
+async function sendExpoPush(messages) {
+    var _a, _b;
+    if (messages.length === 0)
+        return { successCount: 0, failCount: 0, invalidTokens: [] };
+    try {
+        const response = await fetch(EXPO_PUSH_API, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Accept-encoding': 'gzip, deflate',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(messages),
+        });
+        if (!response.ok) {
+            functions.logger.error(`Expo Push API error: ${response.status} ${response.statusText}`);
+            return { successCount: 0, failCount: messages.length, invalidTokens: [] };
+        }
+        const result = await response.json();
+        const tickets = Array.isArray(result.data)
+            ? result.data
+            : (result.data ? [result.data] : []);
+        let successCount = 0;
+        let failCount = 0;
+        const invalidTokens = [];
+        for (let index = 0; index < tickets.length; index++) {
+            const ticket = tickets[index];
+            if (ticket.status === 'ok') {
+                successCount++;
+            }
+            else {
+                failCount++;
+                functions.logger.warn(`Expo push ticket error: ${ticket.message}`);
+                const expoError = (_a = ticket.details) === null || _a === void 0 ? void 0 : _a.error;
+                if (expoError === 'DeviceNotRegistered') {
+                    const token = (_b = messages[index]) === null || _b === void 0 ? void 0 : _b.to;
+                    if (token)
+                        invalidTokens.push(token);
+                }
+            }
+        }
+        if (invalidTokens.length > 0) {
+            await cleanupInvalidPushTokens(invalidTokens);
+        }
+        return { successCount, failCount, invalidTokens };
+    }
+    catch (error) {
+        functions.logger.error('Expo Push API request failed:', error);
+        return { successCount: 0, failCount: messages.length, invalidTokens: [] };
+    }
+}
+/**
+ * Check if a token is an Expo Push Token
+ */
+function isExpoPushToken(token) {
+    return token.startsWith('ExponentPushToken[') || token.startsWith('ExpoPushToken[');
+}
+/**
+ * Send push notification that works with BOTH Expo and FCM tokens.
+ * Routes to the correct API based on token type.
+ */
+async function sendPushToToken(token, title, body, data) {
+    try {
+        const channelId = resolveAndroidChannelId(data);
+        const rawType = ((data === null || data === void 0 ? void 0 : data.type) || '').toLowerCase();
+        const isEmergencyType = rawType === 'eew' ||
+            rawType === 'sos' ||
+            rawType === 'sos_family' ||
+            rawType === 'family_sos' ||
+            rawType === 'sos_proximity' ||
+            rawType === 'nearby_sos' ||
+            rawType === 'sos_message';
+        const iosInterruptionLevel = isEmergencyType
+            ? 'time-sensitive'
+            : 'active';
+        if (isExpoPushToken(token)) {
+            const result = await sendExpoPush([{
+                    to: token,
+                    title,
+                    body,
+                    data,
+                    sound: 'default',
+                    priority: 'high',
+                    channelId,
+                }]);
+            return result.successCount > 0;
+        }
+        else {
+            // Native FCM token — use Firebase Admin SDK
+            await messaging.send({
+                token,
+                notification: { title, body },
+                data,
+                android: {
+                    priority: 'high',
+                    notification: { sound: 'default', priority: 'max', channelId },
+                },
+                apns: {
+                    payload: { aps: { alert: { title, body }, sound: 'default', badge: 1, 'interruption-level': iosInterruptionLevel } },
+                },
+            });
+            return true;
+        }
+    }
+    catch (error) {
+        functions.logger.debug(`Push to token failed: ${error}`);
+        return false;
+    }
+}
 // ============================================================
 // CONSTANTS - ELITE CONFIGURATION
 // ============================================================
@@ -262,22 +411,32 @@ exports.onPWaveDetection = functions
     const detections = nearbyDetections.docs
         .map(d => d.data())
         .filter(d => Math.abs(d.longitude - detection.longitude) <= 1);
-    // Check consensus
-    if (detections.length >= CONSENSUS_THRESHOLD) {
-        const avgConfidence = detections.reduce((sum, d) => sum + d.confidence, 0) / detections.length;
+    // SECURITY FIX: Deduplicate by userId to prevent Sybil attacks
+    // Each unique user can only contribute one detection to consensus
+    const uniqueUserDetections = new Map();
+    for (const d of detections) {
+        const userId = d.userId || d.deviceId;
+        if (!uniqueUserDetections.has(userId)) {
+            uniqueUserDetections.set(userId, d);
+        }
+    }
+    const uniqueDetections = Array.from(uniqueUserDetections.values());
+    // SECURITY FIX: Raised threshold from 3 to 5 unique users
+    if (uniqueDetections.length >= CONSENSUS_THRESHOLD) {
+        const avgConfidence = uniqueDetections.reduce((sum, d) => sum + d.confidence, 0) / uniqueDetections.length;
         if (avgConfidence >= CONSENSUS_CONFIDENCE) {
-            functions.logger.warn(`🚨 CONSENSUS REACHED: ${detections.length} devices!`);
+            functions.logger.warn(`🚨 CONSENSUS REACHED: ${uniqueDetections.length} unique devices!`);
             // Create crowdsourced alert
             const consensus = {
-                centerLatitude: detections.reduce((sum, d) => sum + d.latitude, 0) / detections.length,
-                centerLongitude: detections.reduce((sum, d) => sum + d.longitude, 0) / detections.length,
+                centerLatitude: uniqueDetections.reduce((sum, d) => sum + d.latitude, 0) / uniqueDetections.length,
+                centerLongitude: uniqueDetections.reduce((sum, d) => sum + d.longitude, 0) / uniqueDetections.length,
                 radiusKm: 100,
-                detectionCount: detections.length,
+                detectionCount: uniqueDetections.length,
                 avgConfidence,
-                avgMagnitude: detections.reduce((sum, d) => sum + d.magnitude, 0) / detections.length,
-                deviceIds: detections.map(d => d.deviceId),
-                firstDetectionAt: Math.min(...detections.map(d => d.timestamp)),
-                lastDetectionAt: Math.max(...detections.map(d => d.timestamp)),
+                avgMagnitude: uniqueDetections.reduce((sum, d) => sum + d.magnitude, 0) / uniqueDetections.length,
+                deviceIds: uniqueDetections.map(d => d.deviceId),
+                firstDetectionAt: Math.min(...uniqueDetections.map(d => d.timestamp)),
+                lastDetectionAt: Math.max(...uniqueDetections.map(d => d.timestamp)),
             };
             await createCrowdsourcedAlert(consensus);
         }
@@ -306,12 +465,16 @@ exports.registerFCMToken = functions
     };
     // FIX #7: Multi-device support — use token hash as doc ID under user subcollection
     // Also keep the legacy top-level doc for backward compatibility with getNearbyTokens
+    // V3: Also write to push_tokens/{uid}/devices/{tokenHash} for V3 CFs
     const tokenHash = token.substring(token.length - 16);
     await Promise.all([
+        // V3 PRIMARY: push_tokens/{uid}/devices/{tokenHash}
+        db.collection('push_tokens').doc(context.auth.uid).collection('devices').doc(tokenHash).set(tokenDoc, { merge: true }),
+        // Legacy: fcm_tokens/{uid} + subcollection
         db.collection('fcm_tokens').doc(context.auth.uid).collection('devices').doc(tokenHash).set(tokenDoc, { merge: true }),
         db.collection('fcm_tokens').doc(context.auth.uid).set(tokenDoc, { merge: true }),
     ]);
-    functions.logger.info(`✅ FCM token registered for user ${context.auth.uid} (device: ${tokenHash})`);
+    functions.logger.info(`✅ FCM token registered for user ${context.auth.uid} (device: ${tokenHash}) — both push_tokens + fcm_tokens`);
     return { success: true };
 });
 // ============================================================
@@ -325,13 +488,26 @@ exports.broadcastEEW = functions
     if (!((_b = (_a = context.auth) === null || _a === void 0 ? void 0 : _a.token) === null || _b === void 0 ? void 0 : _b.admin)) {
         throw new functions.https.HttpsError('permission-denied', 'Admin only');
     }
+    // SECURITY FIX: Validate required fields even for admin endpoints (defense-in-depth)
+    const magnitude = Number(data.magnitude);
+    const latitude = Number(data.latitude);
+    const longitude = Number(data.longitude);
+    if (!Number.isFinite(magnitude) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new functions.https.HttpsError('invalid-argument', 'magnitude, latitude, and longitude must be valid numbers');
+    }
+    if (magnitude < 0 || magnitude > 12) {
+        throw new functions.https.HttpsError('invalid-argument', 'magnitude must be between 0 and 12');
+    }
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        throw new functions.https.HttpsError('invalid-argument', 'Invalid latitude/longitude range');
+    }
     const event = {
         id: `manual-${Date.now()}`,
-        magnitude: data.magnitude,
-        latitude: data.latitude,
-        longitude: data.longitude,
-        depth: data.depth || 10,
-        location: data.location,
+        magnitude,
+        latitude,
+        longitude,
+        depth: Number(data.depth) || 10,
+        location: data.location || 'Unknown',
         source: 'AFAD',
         timestamp: Date.now(),
         issuedAt: Date.now(),
@@ -363,13 +539,29 @@ exports.eewWebhook = functions
         return;
     }
     try {
+        // SECURITY FIX: Validate required numeric fields before constructing event
+        const magnitude = Number(req.body.magnitude);
+        const latitude = Number(req.body.latitude);
+        const longitude = Number(req.body.longitude);
+        if (!Number.isFinite(magnitude) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            res.status(400).json({ error: 'magnitude, latitude, and longitude must be valid numbers' });
+            return;
+        }
+        if (magnitude < 0 || magnitude > 12) {
+            res.status(400).json({ error: 'magnitude must be between 0 and 12' });
+            return;
+        }
+        if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            res.status(400).json({ error: 'Invalid latitude/longitude range' });
+            return;
+        }
         const event = {
             id: req.body.id || `webhook-${Date.now()}`,
-            magnitude: req.body.magnitude,
-            latitude: req.body.latitude,
-            longitude: req.body.longitude,
-            depth: req.body.depth || 10,
-            location: req.body.location,
+            magnitude,
+            latitude,
+            longitude,
+            depth: Number(req.body.depth) || 10,
+            location: req.body.location || 'Unknown',
             source: req.body.source || 'AFAD',
             timestamp: Date.now(),
             issuedAt: Date.now(),
@@ -388,28 +580,53 @@ exports.eewWebhook = functions
 // ============================================================
 // 8. OPENAI CHAT PROXY (Authenticated)
 // ============================================================
-// ELITE: Per-UID rate limiting — prevents abuse (max 30 requests per minute)
+// SECURITY FIX: Per-UID rate limiting with Firestore persistence
+// In-memory cache as primary, with Firestore backup for cross-instance consistency
 const rateLimitMap = new Map();
-const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_MAX = 20; // SECURITY FIX: Reduced from 30 to 20
 const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
-function checkRateLimit(uid) {
+async function checkRateLimitPersistent(uid) {
     const now = Date.now();
+    // Quick in-memory check first
     const entry = rateLimitMap.get(uid);
-    if (!entry || now >= entry.resetAt) {
-        rateLimitMap.set(uid, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return true;
-    }
-    if (entry.count >= RATE_LIMIT_MAX) {
+    if (entry && now < entry.resetAt && entry.count >= RATE_LIMIT_MAX) {
         return false;
     }
-    entry.count++;
+    if (!entry || now >= ((entry === null || entry === void 0 ? void 0 : entry.resetAt) || 0)) {
+        rateLimitMap.set(uid, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    }
+    else {
+        entry.count++;
+    }
+    // Also check Firestore for cross-instance consistency
+    try {
+        const rateLimitRef = db.collection('rate_limits').doc(uid);
+        const rateLimitDoc = await rateLimitRef.get();
+        if (rateLimitDoc.exists) {
+            const data = rateLimitDoc.data();
+            if (data.resetAt > now && data.count >= RATE_LIMIT_MAX) {
+                return false;
+            }
+            if (data.resetAt <= now) {
+                await rateLimitRef.set({ count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+            }
+            else {
+                await rateLimitRef.update({ count: admin.firestore.FieldValue.increment(1) });
+            }
+        }
+        else {
+            await rateLimitRef.set({ count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        }
+    }
+    catch (_a) {
+        // If Firestore check fails, fall back to in-memory only
+    }
     return true;
 }
 function isOpenAIProxyRole(value) {
     return value === 'system' || value === 'user' || value === 'assistant';
 }
 function resolveOpenAIKey() {
-    var _a, _b;
     const envKeys = [
         process.env.OPENAI_API_KEY,
         process.env.OPENAI_KEY,
@@ -419,21 +636,6 @@ function resolveOpenAIKey() {
         if (typeof candidate === 'string' && candidate.trim().length > 0) {
             return candidate.trim();
         }
-    }
-    // Backward compatibility for projects still using functions config.
-    try {
-        const cfg = functions.config();
-        const configKey = typeof ((_a = cfg === null || cfg === void 0 ? void 0 : cfg.openai) === null || _a === void 0 ? void 0 : _a.key) === 'string'
-            ? cfg.openai.key.trim()
-            : typeof ((_b = cfg === null || cfg === void 0 ? void 0 : cfg.openai) === null || _b === void 0 ? void 0 : _b.api_key) === 'string'
-                ? cfg.openai.api_key.trim()
-                : '';
-        if (configKey.length > 0) {
-            return configKey;
-        }
-    }
-    catch (_c) {
-        // functions.config may throw when not configured (e.g. local tooling)
     }
     return '';
 }
@@ -491,8 +693,9 @@ exports.openAIChatProxy = functions
         res.status(401).json({ error: 'Unauthorized' });
         return;
     }
-    // ELITE: Per-UID rate limiting
-    if (!checkRateLimit(uid)) {
+    // SECURITY FIX: Persistent rate limiting (cross-instance)
+    const allowed = await checkRateLimitPersistent(uid);
+    if (!allowed) {
         functions.logger.warn('OpenAI proxy rate limit exceeded', { uid });
         res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
         return;
@@ -529,9 +732,10 @@ exports.openAIChatProxy = functions
         res.status(400).json({ error: 'Invalid messages payload' });
         return;
     }
-    const model = typeof body.model === 'string' && body.model.trim().length > 0
-        ? body.model.trim()
-        : 'gpt-4o-mini';
+    // SECURITY FIX: Lock model to approved whitelist to prevent cost abuse
+    const ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-3.5-turbo'];
+    const requestedModel = typeof body.model === 'string' ? body.model.trim() : '';
+    const model = ALLOWED_MODELS.includes(requestedModel) ? requestedModel : 'gpt-4o-mini';
     const requestedMaxTokens = typeof body.max_tokens === 'number'
         ? body.max_tokens
         : typeof body.maxTokens === 'number'
@@ -540,6 +744,8 @@ exports.openAIChatProxy = functions
     const requestedTemperature = typeof body.temperature === 'number'
         ? body.temperature
         : 0.7;
+    // SECURITY FIX: Cap maxTokens at 4000 to limit cost (gpt-4o-mini is cheap)
+    // Previous cap of 1000 was truncating PreparednessPlanService JSON responses
     const maxTokens = Math.max(16, Math.min(4000, Math.floor(requestedMaxTokens)));
     const temperature = Math.max(0, Math.min(1.5, requestedTemperature));
     try {
@@ -627,17 +833,24 @@ exports.dailyAnalytics = functions
         .where('timestamp', '>=', yesterday.getTime())
         .where('timestamp', '<', today.getTime())
         .get();
-    // Count FCM tokens
+    // Count FCM tokens (legacy + V3)
     const tokensSnapshot = await db.collection('fcm_tokens').count().get();
+    let v3TokenCount = 0;
+    try {
+        const pushTokensSnap = await db.collectionGroup('devices').count().get();
+        v3TokenCount = pushTokensSnap.data().count;
+    }
+    catch ( /* collectionGroup may not exist */_a) { /* collectionGroup may not exist */ }
     // Save analytics
     await db.collection('eew_analytics_daily').add({
         date: yesterday.toISOString().split('T')[0],
         eventCount: eventsSnapshot.size,
         detectionCount: detectionsSnapshot.size,
         activeTokenCount: tokensSnapshot.data().count,
+        v3TokenCount,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    functions.logger.info(`📊 Daily analytics: ${eventsSnapshot.size} events, ${detectionsSnapshot.size} detections, ${tokensSnapshot.data().count} tokens`);
+    functions.logger.info(`📊 Daily analytics: ${eventsSnapshot.size} events, ${detectionsSnapshot.size} detections, ${tokensSnapshot.data().count} legacy tokens, ${v3TokenCount} V3 tokens`);
     return null;
 });
 // ============================================================
@@ -678,7 +891,391 @@ exports.tokenCleanup = functions
             // Subcollection may not exist — safe to ignore
         }
     }
-    functions.logger.info(`🧹 Cleaned up ${deletedCount} old FCM tokens`);
+    // V3: Also cleanup old push_tokens (same 30-day threshold)
+    let v3DeletedCount = 0;
+    try {
+        const oldV3Tokens = await db
+            .collectionGroup('devices')
+            .where('lastUpdated', '<', thirtyDaysAgo)
+            .get();
+        // Filter to only push_tokens subcollections (not fcm_tokens/devices)
+        const v3Docs = oldV3Tokens.docs.filter(d => {
+            var _a, _b;
+            const parentId = (_b = (_a = d.ref.parent.parent) === null || _a === void 0 ? void 0 : _a.parent) === null || _b === void 0 ? void 0 : _b.id;
+            return parentId === 'push_tokens';
+        });
+        for (let i = 0; i < v3Docs.length; i += BATCH_SIZE) {
+            const chunk = v3Docs.slice(i, i + BATCH_SIZE);
+            const v3Batch = db.batch();
+            chunk.forEach(d => v3Batch.delete(d.ref));
+            await v3Batch.commit();
+            v3DeletedCount += chunk.length;
+        }
+    }
+    catch (v3Err) {
+        functions.logger.warn('V3 push_tokens cleanup error (non-critical):', v3Err);
+    }
+    functions.logger.info(`🧹 Cleaned up ${deletedCount} old FCM tokens + ${v3DeletedCount} old V3 push_tokens`);
+    return null;
+});
+// ============================================================
+// 10. SOS ALERT - FCM PUSH TO FAMILY MEMBERS
+// When a family member writes an SOS alert to another device's
+// sos_alerts subcollection, this triggers a push notification
+// to the target device.
+// ============================================================
+exports.onSOSAlert = functions
+    .region(REGION)
+    .firestore.document('devices/{deviceId}/sos_alerts/{alertId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const alert = snap.data();
+    const targetDeviceId = context.params.deviceId;
+    functions.logger.warn(`🚨 SOS Alert received for device ${targetDeviceId}:`, {
+        sender: alert.senderDeviceId,
+        message: alert.message,
+        reason: alert.reason,
+    });
+    try {
+        // CRITICAL FIX: FCM tokens are stored by auth.uid, NOT by deviceId.
+        // So we first need to find the ownerUid from the device document.
+        const deviceDoc = await db.collection('devices').doc(targetDeviceId).get();
+        const ownerUid = deviceDoc.exists ? (_a = deviceDoc.data()) === null || _a === void 0 ? void 0 : _a.ownerUid : null;
+        if (!ownerUid) {
+            functions.logger.warn(`No ownerUid found on device doc ${targetDeviceId} — cannot send push`);
+            return null;
+        }
+        // V3: Collect ALL tokens — push_tokens first, then fcm_tokens fallback
+        const allTokens = [];
+        const seenTokens = new Set();
+        // Step 2a: V3 push_tokens/{uid}/devices (PRIORITY)
+        try {
+            const v3Snap = await db.collection('push_tokens').doc(ownerUid).collection('devices').get();
+            for (const tDoc of v3Snap.docs) {
+                const t = (_b = tDoc.data()) === null || _b === void 0 ? void 0 : _b.token;
+                if (t && !seenTokens.has(t)) {
+                    seenTokens.add(t);
+                    allTokens.push(t);
+                }
+            }
+        }
+        catch ( /* push_tokens may not exist yet */_j) { /* push_tokens may not exist yet */ }
+        // Step 2b: Legacy fcm_tokens/{uid} + subcollection
+        try {
+            const tokenDoc = await db.collection('fcm_tokens').doc(ownerUid).get();
+            if (tokenDoc.exists) {
+                const t = (_c = tokenDoc.data()) === null || _c === void 0 ? void 0 : _c.token;
+                if (t && !seenTokens.has(t)) {
+                    seenTokens.add(t);
+                    allTokens.push(t);
+                }
+                // Multi-device subcollection
+                const devicesSnapshot = await tokenDoc.ref.collection('devices').get();
+                for (const dDoc of devicesSnapshot.docs) {
+                    const dt = (_d = dDoc.data()) === null || _d === void 0 ? void 0 : _d.token;
+                    if (dt && !seenTokens.has(dt)) {
+                        seenTokens.add(dt);
+                        allTokens.push(dt);
+                    }
+                }
+            }
+        }
+        catch ( /* fcm_tokens fallback is best-effort */_k) { /* fcm_tokens fallback is best-effort */ }
+        // Step 2c: Device doc pushToken as final fallback
+        if (allTokens.length === 0) {
+            const fallbackToken = ((_e = deviceDoc.data()) === null || _e === void 0 ? void 0 : _e.pushToken) || ((_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.token);
+            if (fallbackToken && !seenTokens.has(fallbackToken)) {
+                allTokens.push(fallbackToken);
+            }
+        }
+        if (allTokens.length === 0) {
+            functions.logger.warn(`No push tokens found for ownerUid: ${ownerUid} (device: ${targetDeviceId})`);
+            return null;
+        }
+        // Build notification
+        const locationText = alert.location
+            ? `Konum: ${Number(alert.location.latitude).toFixed(4)}, ${Number(alert.location.longitude).toFixed(4)}`
+            : 'Konum bilgisi yok';
+        const isTrapped = alert.trapped === true;
+        const alertSenderName = alert.senderName || 'Aile Üyesi';
+        const title = isTrapped
+            ? `🚨 ENKAZ ALTINDA: ${alertSenderName}`
+            : `🆘 ACİL SOS: ${alertSenderName}`;
+        const body = `${alert.message || 'Acil yardım gerekiyor!'}\n${locationText}`;
+        const senderUid = typeof alert.senderUid === 'string'
+            ? alert.senderUid
+            : (typeof alert.userId === 'string' ? alert.userId : '');
+        // Send push notification via Expo Push API (tokens are ExponentPushToken[xxx])
+        const pushData = {
+            type: 'sos_family',
+            signalId: alert.signalId || context.params.alertId,
+            senderDeviceId: alert.senderDeviceId || '',
+            senderUid,
+            senderName: alert.senderName || 'Aile Üyesi',
+            message: alert.message || '',
+            timestamp: String(alert.timestamp || Date.now()),
+            trapped: String(isTrapped),
+            latitude: ((_g = alert.location) === null || _g === void 0 ? void 0 : _g.latitude) ? String(alert.location.latitude) : '',
+            longitude: ((_h = alert.location) === null || _h === void 0 ? void 0 : _h.longitude) ? String(alert.location.longitude) : '',
+        };
+        // Send to all tokens
+        let sentCount = 0;
+        for (const pushToken of allTokens) {
+            const success = await sendPushToToken(pushToken, title, body, pushData);
+            if (success)
+                sentCount++;
+        }
+        functions.logger.info(`✅ SOS family push sent: ${sentCount}/${allTokens.length} tokens (device: ${targetDeviceId})`);
+    }
+    catch (error) {
+        functions.logger.error('❌ SOS FCM push failed:', error);
+    }
+    return null;
+});
+// ============================================================
+// 11. GLOBAL SOS BROADCAST - PROXIMITY-BASED PUSH TO ALL NEARBY USERS
+// When a user sends a global SOS broadcast, this function finds
+// all users within a configurable radius and sends them critical
+// push notifications. LIFE-SAVING feature.
+// ============================================================
+const SOS_RADIUS_KM = 50; // Alert users within 50km radius
+function haversineDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+exports.onSOSBroadcast = functions
+    .region(REGION)
+    .firestore.document('sos_broadcasts/{broadcastId}')
+    .onCreate(async (snap) => {
+    var _a, _b, _c, _d, _e, _f;
+    const broadcast = snap.data();
+    const sosLat = broadcast.latitude;
+    const sosLon = broadcast.longitude;
+    const senderDeviceId = broadcast.senderDeviceId;
+    const hasLocation = broadcast.hasLocation !== false;
+    functions.logger.warn('🚨 GLOBAL SOS BROADCAST received:', {
+        broadcastId: snap.id,
+        sender: senderDeviceId,
+        hasLocation,
+        location: hasLocation ? `${sosLat}, ${sosLon}` : 'NO LOCATION',
+        message: broadcast.message,
+        trapped: broadcast.trapped,
+    });
+    try {
+        // 1. Get ALL users from BOTH legacy devices AND V3 locations_current
+        const [devicesSnapshot, locationsSnapshot] = await Promise.all([
+            db.collection('devices').select('location', 'ownerUid').get(),
+            db.collection('locations_current').get(),
+        ]);
+        functions.logger.info(`📊 Total device docs: ${devicesSnapshot.size}, V3 location docs: ${locationsSnapshot.size}`);
+        // CRITICAL: Collect ALL ownerUids — never skip devices just because they lack location
+        const targetOwnerUids = new Set();
+        let skippedSender = 0;
+        let devicesWithLocation = 0;
+        let devicesWithoutLocation = 0;
+        let devicesWithOwnerUid = 0;
+        let devicesWithoutOwnerUid = 0;
+        let nearbyCount = 0;
+        // 1a. Legacy devices collection
+        for (const deviceDoc of devicesSnapshot.docs) {
+            const deviceData = deviceDoc.data();
+            const deviceId = deviceDoc.id;
+            // Skip the sender's own device(s)
+            if (deviceId === senderDeviceId) {
+                skippedSender++;
+                continue;
+            }
+            const ownerUid = deviceData === null || deviceData === void 0 ? void 0 : deviceData.ownerUid;
+            if (!ownerUid) {
+                devicesWithoutOwnerUid++;
+                continue; // Can't send push without ownerUid
+            }
+            devicesWithOwnerUid++;
+            const deviceLat = (_a = deviceData === null || deviceData === void 0 ? void 0 : deviceData.location) === null || _a === void 0 ? void 0 : _a.latitude;
+            const deviceLon = (_b = deviceData === null || deviceData === void 0 ? void 0 : deviceData.location) === null || _b === void 0 ? void 0 : _b.longitude;
+            const deviceHasLocation = typeof deviceLat === 'number' && typeof deviceLon === 'number';
+            if (deviceHasLocation) {
+                devicesWithLocation++;
+            }
+            else {
+                devicesWithoutLocation++;
+            }
+            // LIFE-SAVING DECISION: Include device or not?
+            if (hasLocation && deviceHasLocation) {
+                const distance = haversineDistance(sosLat, sosLon, deviceLat, deviceLon);
+                if (distance <= SOS_RADIUS_KM) {
+                    targetOwnerUids.add(ownerUid);
+                    nearbyCount++;
+                }
+            }
+            else {
+                // Either sender or receiver lacks location — ALWAYS include (life-saving)
+                targetOwnerUids.add(ownerUid);
+            }
+        }
+        // 1b. V3 locations_current collection — document ID = user UID
+        for (const locDoc of locationsSnapshot.docs) {
+            const uid = locDoc.id;
+            if (targetOwnerUids.has(uid))
+                continue; // Already included from devices
+            const locData = locDoc.data();
+            const locLat = locData === null || locData === void 0 ? void 0 : locData.latitude;
+            const locLon = locData === null || locData === void 0 ? void 0 : locData.longitude;
+            const locHasLocation = typeof locLat === 'number' && typeof locLon === 'number';
+            if (hasLocation && locHasLocation) {
+                const distance = haversineDistance(sosLat, sosLon, locLat, locLon);
+                if (distance <= SOS_RADIUS_KM) {
+                    targetOwnerUids.add(uid);
+                    nearbyCount++;
+                }
+            }
+            else {
+                targetOwnerUids.add(uid);
+            }
+        }
+        // Remove sender's own uid to prevent self-notification
+        // Find sender's ownerUid from their device doc
+        if (senderDeviceId) {
+            const senderDeviceDoc = await db.collection('devices').doc(senderDeviceId).get();
+            const senderOwnerUid = senderDeviceDoc.exists ? (_c = senderDeviceDoc.data()) === null || _c === void 0 ? void 0 : _c.ownerUid : null;
+            if (senderOwnerUid) {
+                targetOwnerUids.delete(senderOwnerUid);
+                functions.logger.info(`🔇 Excluded sender's ownerUid: ${senderOwnerUid}`);
+            }
+        }
+        functions.logger.info(`📊 Device discovery results:`, {
+            totalDevices: devicesSnapshot.size,
+            skippedSender,
+            devicesWithOwnerUid,
+            devicesWithoutOwnerUid,
+            devicesWithLocation,
+            devicesWithoutLocation,
+            nearbyWithinRadius: nearbyCount,
+            totalTargetUsers: targetOwnerUids.size,
+        });
+        if (targetOwnerUids.size === 0) {
+            functions.logger.warn('⚠️ No target users found for SOS broadcast — nobody to notify');
+            return null;
+        }
+        // 2. Build notification
+        const isTrapped = broadcast.trapped === true;
+        const title = isTrapped
+            ? '🚨 ENKAZ ALTINDA BİRİ VAR!'
+            : '🆘 YAKININDA ACİL SOS ÇAĞRISI!';
+        const locationText = hasLocation
+            ? `Konum: ${Number(sosLat).toFixed(4)}, ${Number(sosLon).toFixed(4)}`
+            : 'Konum bilgisi yok';
+        const body = `${broadcast.message || 'Yakınında biri acil yardım istiyor!'}\n${locationText}`;
+        // 3. Collect ALL push tokens for target users
+        const tokensToSend = [];
+        const seenTokens = new Set();
+        let tokenLookupSuccess = 0;
+        let tokenLookupMiss = 0;
+        for (const uid of targetOwnerUids) {
+            try {
+                const tokenCountBefore = tokensToSend.length;
+                // V3: push_tokens/{uid}/devices (PRIORITY)
+                try {
+                    const v3Snap = await db.collection('push_tokens').doc(uid).collection('devices').get();
+                    for (const tDoc of v3Snap.docs) {
+                        const t = (_d = tDoc.data()) === null || _d === void 0 ? void 0 : _d.token;
+                        if (t && !seenTokens.has(t)) {
+                            seenTokens.add(t);
+                            tokensToSend.push(t);
+                            tokenLookupSuccess++;
+                        }
+                    }
+                }
+                catch ( /* push_tokens may not exist */_g) { /* push_tokens may not exist */ }
+                // Legacy: fcm_tokens/{uid} + subcollection
+                const tokenDoc = await db.collection('fcm_tokens').doc(uid).get();
+                if (tokenDoc.exists && ((_e = tokenDoc.data()) === null || _e === void 0 ? void 0 : _e.token)) {
+                    const token = tokenDoc.data().token;
+                    if (!seenTokens.has(token)) {
+                        seenTokens.add(token);
+                        tokensToSend.push(token);
+                        tokenLookupSuccess++;
+                    }
+                }
+                // Multi-device tokens (legacy subcollection)
+                try {
+                    const devicesSnap = await db.collection('fcm_tokens').doc(uid).collection('devices').get();
+                    for (const deviceDoc of devicesSnap.docs) {
+                        const deviceToken = (_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.token;
+                        if (deviceToken && !seenTokens.has(deviceToken)) {
+                            seenTokens.add(deviceToken);
+                            tokensToSend.push(deviceToken);
+                        }
+                    }
+                }
+                catch ( /* multi-device subcollection may not exist */_h) { /* multi-device subcollection may not exist */ }
+                // Track misses: check if THIS user contributed any new tokens
+                if (tokensToSend.length === tokenCountBefore) {
+                    tokenLookupMiss++;
+                    functions.logger.warn(`⚠️ No push token for user ${uid}`);
+                }
+            }
+            catch (err) {
+                functions.logger.warn(`⚠️ Token lookup failed for user ${uid}: ${err}`);
+            }
+        }
+        functions.logger.info(`📊 Token collection: ${tokenLookupSuccess} found, ${tokenLookupMiss} missing, ${tokensToSend.length} total tokens to send`);
+        if (tokensToSend.length === 0) {
+            functions.logger.warn('⚠️ No push tokens found — cannot send SOS notifications');
+            return null;
+        }
+        // 4. Send push notifications via Expo Push API
+        const pushData = {
+            type: 'sos_proximity',
+            signalId: broadcast.signalId || snap.id,
+            senderDeviceId: senderDeviceId || '',
+            senderUid: typeof broadcast.senderUid === 'string' ? broadcast.senderUid : '',
+            senderName: broadcast.senderName || 'Yakındaki Kullanıcı',
+            message: broadcast.message || '',
+            timestamp: String(broadcast.timestamp || Date.now()),
+            trapped: String(isTrapped),
+            latitude: String(sosLat),
+            longitude: String(sosLon),
+        };
+        let sentCount = 0;
+        const expoTokens = tokensToSend.filter(isExpoPushToken);
+        const nativeTokens = tokensToSend.filter(t => !isExpoPushToken(t));
+        functions.logger.info(`📊 Token types: ${expoTokens.length} Expo, ${nativeTokens.length} native FCM`);
+        if (expoTokens.length > 0) {
+            const expoMessages = expoTokens.map(token => ({
+                to: token,
+                title,
+                body,
+                data: pushData,
+                sound: 'default',
+                priority: 'high',
+                channelId: resolveAndroidChannelId(pushData),
+            }));
+            // Expo API supports batches of up to 100
+            for (let i = 0; i < expoMessages.length; i += 100) {
+                const batch = expoMessages.slice(i, i + 100);
+                const result = await sendExpoPush(batch);
+                sentCount += result.successCount;
+                functions.logger.info(`📤 Expo batch ${Math.floor(i / 100) + 1}: ${result.successCount} success, ${result.failCount} failed`);
+            }
+        }
+        // Send to any native FCM tokens (unlikely but supported)
+        for (const token of nativeTokens) {
+            const success = await sendPushToToken(token, title, body, pushData);
+            if (success)
+                sentCount++;
+        }
+        functions.logger.warn(`✅ GLOBAL SOS BROADCAST COMPLETED: ${sentCount}/${tokensToSend.length} push notifications delivered to ${targetOwnerUids.size} users`);
+    }
+    catch (error) {
+        functions.logger.error('❌ Global SOS broadcast FAILED:', error);
+    }
     return null;
 });
 // ============================================================
@@ -893,50 +1490,138 @@ async function sendEEWPushWithRetry(event) {
     return sendToTokensWithRetry(event, tokens);
 }
 async function getNearbyTokens(lat, lon, radiusKm) {
-    // Get all tokens with location
-    const tokensSnapshot = await db.collection('fcm_tokens')
-        .where('location', '!=', null)
-        .get();
+    var _a;
     const nearbyTokens = [];
-    for (const doc of tokensSnapshot.docs) {
-        const data = doc.data();
-        if (data.location && data.token) {
-            const distance = calculateDistance(lat, lon, data.location.latitude, data.location.longitude);
-            if (distance <= radiusKm) {
-                nearbyTokens.push(data.token);
+    const seenTokens = new Set();
+    // V3: Check locations_current for proximity, then get tokens from push_tokens
+    try {
+        const locationsSnap = await db.collection('locations_current').get();
+        for (const locDoc of locationsSnap.docs) {
+            const locData = locDoc.data();
+            if (typeof locData.latitude === 'number' && typeof locData.longitude === 'number') {
+                const distance = calculateDistance(lat, lon, locData.latitude, locData.longitude);
+                if (distance <= radiusKm) {
+                    // Get tokens for this uid
+                    const uid = locDoc.id;
+                    const v3Snap = await db.collection('push_tokens').doc(uid).collection('devices').get();
+                    for (const tDoc of v3Snap.docs) {
+                        const t = (_a = tDoc.data()) === null || _a === void 0 ? void 0 : _a.token;
+                        if (t && !seenTokens.has(t)) {
+                            seenTokens.add(t);
+                            nearbyTokens.push(t);
+                        }
+                    }
+                }
             }
         }
     }
+    catch ( /* V3 location lookup is best-effort */_b) { /* V3 location lookup is best-effort */ }
+    // Legacy: Get all tokens with location from fcm_tokens
+    try {
+        const tokensSnapshot = await db.collection('fcm_tokens')
+            .where('location', '!=', null)
+            .get();
+        for (const doc of tokensSnapshot.docs) {
+            const data = doc.data();
+            if (data.location && data.token && !seenTokens.has(data.token)) {
+                const distance = calculateDistance(lat, lon, data.location.latitude, data.location.longitude);
+                if (distance <= radiusKm) {
+                    seenTokens.add(data.token);
+                    nearbyTokens.push(data.token);
+                }
+            }
+        }
+    }
+    catch ( /* legacy fallback */_c) { /* legacy fallback */ }
     // If not enough nearby tokens, include all
     if (nearbyTokens.length < 10) {
-        const allTokens = await db.collection('fcm_tokens').get();
-        return allTokens.docs.map(d => d.data().token).filter(Boolean);
+        const allTokens = await getAllTokensMerged();
+        return allTokens;
     }
     return nearbyTokens;
 }
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+// Alias for backward compatibility — uses haversineDistance defined above
+const calculateDistance = haversineDistance;
+// V3: Merge tokens from both push_tokens and fcm_tokens collections
+async function getAllTokensMerged() {
+    var _a, _b, _c;
+    const allTokens = [];
+    const seenTokens = new Set();
+    // V3: push_tokens/{uid}/devices
+    try {
+        const v3Snap = await db.collectionGroup('devices').get();
+        for (const tDoc of v3Snap.docs) {
+            // Only include docs under push_tokens (not fcm_tokens/devices)
+            if (((_a = tDoc.ref.parent.parent) === null || _a === void 0 ? void 0 : _a.parent.id) === 'push_tokens') {
+                const t = (_b = tDoc.data()) === null || _b === void 0 ? void 0 : _b.token;
+                if (t && !seenTokens.has(t)) {
+                    seenTokens.add(t);
+                    allTokens.push(t);
+                }
+            }
+        }
+    }
+    catch ( /* collectionGroup may fail if no composite index */_d) { /* collectionGroup may fail if no composite index */ }
+    // Legacy: fcm_tokens
+    const tokensSnapshot = await db.collection('fcm_tokens').get();
+    for (const d of tokensSnapshot.docs) {
+        const t = (_c = d.data()) === null || _c === void 0 ? void 0 : _c.token;
+        if (t && !seenTokens.has(t)) {
+            seenTokens.add(t);
+            allTokens.push(t);
+        }
+    }
+    return allTokens;
 }
 async function sendToAllTokens(event) {
-    const tokensSnapshot = await db.collection('fcm_tokens').get();
-    const tokens = tokensSnapshot.docs.map(d => d.data().token).filter(Boolean);
+    const tokens = await getAllTokensMerged();
     return sendToTokensWithRetry(event, tokens);
 }
 async function sendToTokensWithRetry(event, tokens) {
     if (tokens.length === 0) {
-        functions.logger.warn('No FCM tokens found');
+        functions.logger.warn('No push tokens found');
         return { sent: 0, failed: 0 };
     }
     const isCritical = event.magnitude >= MIN_MAGNITUDE_CRITICAL;
+    const expoTokens = tokens.filter(isExpoPushToken);
+    const nativeTokens = tokens.filter(t => !isExpoPushToken(t));
+    let totalSent = 0;
+    let totalFailed = 0;
+    // 1) Expo tokens (ExponentPushToken / ExpoPushToken)
+    if (expoTokens.length > 0) {
+        const expoChannelId = isCritical ? 'eew_critical' : 'earthquake_alerts';
+        const expoMessages = expoTokens.map((token) => ({
+            to: token,
+            title: isCritical ? '🚨 ACİL DEPREM UYARISI!' : '⚠️ DEPREM UYARISI',
+            body: `M${event.magnitude.toFixed(1)} - ${event.location}${event.verified ? ' ✓' : ''}`,
+            data: {
+                type: 'EEW',
+                eventId: event.id,
+                magnitude: String(event.magnitude),
+                latitude: String(event.latitude),
+                longitude: String(event.longitude),
+                depth: String(event.depth),
+                location: event.location,
+                source: event.source,
+                timestamp: String(event.timestamp),
+                verified: String(event.verified || false),
+            },
+            sound: 'default',
+            priority: 'high',
+            channelId: expoChannelId,
+        }));
+        for (let i = 0; i < expoMessages.length; i += 100) {
+            const batch = expoMessages.slice(i, i + 100);
+            const result = await sendExpoPush(batch);
+            totalSent += result.successCount;
+            totalFailed += result.failCount;
+        }
+    }
+    if (nativeTokens.length === 0) {
+        return { sent: totalSent, failed: totalFailed };
+    }
     const message = {
-        tokens: tokens,
+        tokens: nativeTokens,
         notification: {
             title: isCritical ? '🚨 ACİL DEPREM UYARISI!' : '⚠️ DEPREM UYARISI',
             body: `M${event.magnitude.toFixed(1)} - ${event.location}${event.verified ? ' ✓' : ''}`,
@@ -956,7 +1641,7 @@ async function sendToTokensWithRetry(event, tokens) {
         android: {
             priority: 'high',
             notification: {
-                channelId: isCritical ? 'earthquake-critical' : 'earthquake-normal',
+                channelId: isCritical ? 'eew_critical' : 'earthquake_alerts',
                 priority: 'max',
                 defaultSound: true,
                 defaultVibrateTimings: true,
@@ -965,16 +1650,11 @@ async function sendToTokensWithRetry(event, tokens) {
         apns: {
             payload: {
                 aps: {
-                    sound: isCritical ? {
-                        critical: true, // FIXED: Use boolean for TypeScript compatibility
-                        name: 'emergency_alert.wav',
-                        volume: 1.0,
-                    } : 'default',
+                    sound: 'default',
                     badge: 1,
                     'content-available': 1,
-                    'interruption-level': isCritical ? 'critical' : 'time-sensitive',
-                    // ELITE: Critical alerts bypass Do Not Disturb
-                    'relevance-score': 1.0,
+                    'interruption-level': isCritical ? 'time-sensitive' : 'active',
+                    'relevance-score': isCritical ? 1.0 : 0.7,
                 },
             },
             headers: {
@@ -992,8 +1672,10 @@ async function sendToTokensWithRetry(event, tokens) {
             const response = await messaging.sendEachForMulticast(message);
             functions.logger.info(`✅ FCM sent (attempt ${attempt + 1}): ${response.successCount} success, ${response.failureCount} failed`);
             // Clean up invalid tokens
-            await cleanupInvalidTokens(tokens, response.responses);
-            return { sent: response.successCount, failed: response.failureCount };
+            await cleanupInvalidTokens(nativeTokens, response.responses);
+            totalSent += response.successCount;
+            totalFailed += response.failureCount;
+            return { sent: totalSent, failed: totalFailed };
         }
         catch (error) {
             lastError = error;
@@ -1006,7 +1688,8 @@ async function sendToTokensWithRetry(event, tokens) {
         }
     }
     functions.logger.error(`FCM failed after ${MAX_FCM_RETRIES} attempts:`, lastError);
-    return { sent: 0, failed: tokens.length };
+    totalFailed += nativeTokens.length;
+    return { sent: totalSent, failed: totalFailed };
 }
 async function cleanupInvalidTokens(tokens, responses) {
     const invalidTokens = [];
@@ -1043,6 +1726,48 @@ async function cleanupInvalidTokens(tokens, responses) {
         await batch.commit();
     }
     functions.logger.info(`Cleaned up ${allDocsToDelete.length} invalid token docs (from ${invalidTokens.length} invalid tokens)`);
+}
+async function cleanupInvalidPushTokens(tokens) {
+    const uniqueTokens = Array.from(new Set(tokens));
+    if (uniqueTokens.length === 0)
+        return;
+    const refsToDelete = [];
+    const IN_QUERY_LIMIT = 30;
+    const BATCH_SIZE = 450;
+    for (let i = 0; i < uniqueTokens.length; i += IN_QUERY_LIMIT) {
+        const chunk = uniqueTokens.slice(i, i + IN_QUERY_LIMIT);
+        // Legacy root docs: fcm_tokens/{uid}
+        try {
+            const legacyRootSnap = await db.collection('fcm_tokens').where('token', 'in', chunk).get();
+            legacyRootSnap.docs.forEach(doc => refsToDelete.push(doc.ref));
+        }
+        catch (error) {
+            functions.logger.warn('Invalid Expo token cleanup (fcm_tokens root) query failed:', error);
+        }
+        // Subcollection docs: push_tokens/{uid}/devices/* and fcm_tokens/{uid}/devices/*
+        try {
+            const devicesSnap = await db.collectionGroup('devices').where('token', 'in', chunk).get();
+            devicesSnap.docs.forEach(doc => {
+                var _a, _b;
+                const rootCollection = (_b = (_a = doc.ref.parent.parent) === null || _a === void 0 ? void 0 : _a.parent) === null || _b === void 0 ? void 0 : _b.id;
+                if (rootCollection === 'push_tokens' || rootCollection === 'fcm_tokens') {
+                    refsToDelete.push(doc.ref);
+                }
+            });
+        }
+        catch (error) {
+            functions.logger.warn('Invalid Expo token cleanup (devices collectionGroup) query failed:', error);
+        }
+    }
+    if (refsToDelete.length === 0)
+        return;
+    for (let i = 0; i < refsToDelete.length; i += BATCH_SIZE) {
+        const batch = db.batch();
+        const chunk = refsToDelete.slice(i, i + BATCH_SIZE);
+        chunk.forEach(ref => batch.delete(ref));
+        await batch.commit();
+    }
+    functions.logger.info(`Cleaned up ${refsToDelete.length} invalid Expo push token docs (from ${uniqueTokens.length} unique invalid tokens)`);
 }
 // ============================================================
 // CROWDSOURCED ALERT
@@ -1083,7 +1808,7 @@ exports.onSeismicReportCreated = functions
         return null;
     }
     const { latitude, longitude } = report.location;
-    const { peakAcceleration: _peakAcceleration, confidence, duration: _duration } = report.detection;
+    const { confidence } = report.detection;
     // Skip low confidence reports
     if (confidence < 0.5) {
         functions.logger.debug('Low confidence report, skipping');
@@ -1096,27 +1821,33 @@ exports.onSeismicReportCreated = functions
         .orderByChild('timestamp')
         .startAt(sixtySecondsAgo)
         .once('value');
-    const allReports = [];
+    // SECURITY FIX: Deduplicate reports by userId to prevent Sybil attacks
+    const reportsByUser = new Map();
     nearbyReportsSnapshot.forEach(child => {
         const r = child.val();
         if (r.location && r.detection) {
             const dist = calculateDistance(latitude, longitude, r.location.latitude, r.location.longitude);
             if (dist <= 100) { // 100km radius
-                allReports.push(Object.assign(Object.assign({}, r), { distance: dist }));
+                const userId = r.userId || 'unknown';
+                // Only keep the first report per user
+                if (!reportsByUser.has(userId)) {
+                    reportsByUser.set(userId, Object.assign(Object.assign({}, r), { distance: dist }));
+                }
             }
         }
     });
-    functions.logger.info(`Found ${allReports.length} nearby reports in cluster`);
-    // Check if we have enough reports for consensus
-    const CLUSTER_THRESHOLD = 3;
-    const HIGH_CONFIDENCE_THRESHOLD = 5;
+    const allReports = Array.from(reportsByUser.values());
+    functions.logger.info(`Found ${allReports.length} unique-user nearby reports in cluster`);
+    // SECURITY FIX: Raised thresholds to prevent small-scale attacks
+    const CLUSTER_THRESHOLD = 5; // was 3
+    const HIGH_CONFIDENCE_THRESHOLD = 8; // was 5
     if (allReports.length >= CLUSTER_THRESHOLD) {
         // Calculate cluster metrics
         const avgLat = allReports.reduce((sum, r) => sum + r.location.latitude, 0) / allReports.length;
         const avgLon = allReports.reduce((sum, r) => sum + r.location.longitude, 0) / allReports.length;
         const avgConfidence = allReports.reduce((sum, r) => sum + r.detection.confidence, 0) / allReports.length;
         const maxAccel = Math.max(...allReports.map(r => r.detection.peakAcceleration));
-        functions.logger.warn(`🚨 CROWDSOURCED CLUSTER DETECTED: ${allReports.length} devices, ${(avgConfidence * 100).toFixed(1)}% confidence`);
+        functions.logger.warn(`🚨 CROWDSOURCED CLUSTER DETECTED: ${allReports.length} unique devices, ${(avgConfidence * 100).toFixed(1)}% confidence`);
         // Create active event in Realtime Database
         const activeEventRef = admin.database().ref('active_events').push();
         await activeEventRef.set({
@@ -1127,10 +1858,10 @@ exports.onSeismicReportCreated = functions
             confidence: avgConfidence,
             firstReportTime: Math.min(...allReports.map(r => r.timestamp)),
             lastUpdateTime: Date.now(),
-            status: avgConfidence >= 0.7 ? 'confirmed' : 'pending',
+            status: avgConfidence >= 0.8 ? 'confirmed' : 'pending', // SECURITY FIX: Raised from 0.7 to 0.8
         });
         // If high confidence and enough reports, send FCM
-        if (allReports.length >= HIGH_CONFIDENCE_THRESHOLD && avgConfidence >= 0.7) {
+        if (allReports.length >= HIGH_CONFIDENCE_THRESHOLD && avgConfidence >= 0.8) { // SECURITY FIX: Raised from 0.7
             const estimatedMag = estimateMagnitudeFromAccel(maxAccel);
             if (estimatedMag >= MIN_MAGNITUDE_ALERT) {
                 const event = {
@@ -1278,6 +2009,10 @@ exports.sendCustomEmail = functions
     if (!email) {
         throw new functions.https.HttpsError('failed-precondition', 'Kullanıcının e-posta adresi bulunamadı.');
     }
+    // Validate SMTP credentials before attempting to send
+    if (!SMTP_EMAIL || !SMTP_PASSWORD) {
+        throw new functions.https.HttpsError('failed-precondition', 'SMTP kimlik bilgileri yapılandırılmamış. Lütfen yöneticiyle iletişime geçin.');
+    }
     // Create Nodemailer transporter
     const transporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
@@ -1345,6 +2080,428 @@ exports.sendCustomEmail = functions
             error: String(error),
         });
         throw new functions.https.HttpsError('internal', 'E-posta gönderilemedi. Lütfen tekrar deneyin.');
+    }
+});
+// ============================================================
+// NEW: ON NEW MESSAGE — Push Notification for Incoming Messages
+// Trigger: devices/{deviceId}/messages/{messageId} → onCreate
+// Flow: Get device ownerUid → look up fcm_tokens/{ownerUid} → push
+// ============================================================
+exports.onNewMessage = functions
+    .region(REGION)
+    .firestore.document('devices/{deviceId}/messages/{messageId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c, _d, _e, _f;
+    const { deviceId } = context.params;
+    const messageData = snap.data();
+    if (!messageData) {
+        functions.logger.warn('onNewMessage: empty message data');
+        return;
+    }
+    const senderDeviceId = messageData.fromDeviceId || '';
+    const senderUid = typeof messageData.senderUid === 'string' ? messageData.senderUid : '';
+    const content = messageData.content || '';
+    const senderName = messageData.senderName || ((_a = messageData.metadata) === null || _a === void 0 ? void 0 : _a.senderName) || messageData.fromName || 'Yeni Mesaj';
+    // Don't notify sender about their own message copy
+    // (dual-write creates a copy in both sender and recipient inboxes)
+    if (senderDeviceId === deviceId) {
+        functions.logger.debug(`onNewMessage: Skipping self-notification for ${deviceId}`);
+        return;
+    }
+    try {
+        // Step 1: Get the ownerUid of the device receiving the message
+        const deviceDoc = await db.collection('devices').doc(deviceId).get();
+        if (!deviceDoc.exists) {
+            functions.logger.warn(`onNewMessage: device ${deviceId} not found`);
+            return;
+        }
+        const ownerUid = (_b = deviceDoc.data()) === null || _b === void 0 ? void 0 : _b.ownerUid;
+        if (!ownerUid) {
+            functions.logger.warn(`onNewMessage: device ${deviceId} has no ownerUid`);
+            return;
+        }
+        // Step 2: Get push tokens — V3 push_tokens first, then fcm_tokens, then device doc
+        const allTokens = [];
+        const seenTokens = new Set();
+        // V3: push_tokens/{uid}/devices — ALL devices (PRIORITY)
+        try {
+            const v3Snap = await db.collection('push_tokens').doc(ownerUid).collection('devices').get();
+            for (const tDoc of v3Snap.docs) {
+                const t = (_c = tDoc.data()) === null || _c === void 0 ? void 0 : _c.token;
+                if (t && !seenTokens.has(t)) {
+                    seenTokens.add(t);
+                    allTokens.push(t);
+                }
+            }
+        }
+        catch ( /* push_tokens may not exist */_g) { /* push_tokens may not exist */ }
+        // Legacy: fcm_tokens/{uid}
+        if (allTokens.length === 0) {
+            const tokenDoc = await db.collection('fcm_tokens').doc(ownerUid).get();
+            const legacyToken = tokenDoc.exists ? (_d = tokenDoc.data()) === null || _d === void 0 ? void 0 : _d.token : null;
+            if (legacyToken && !seenTokens.has(legacyToken)) {
+                seenTokens.add(legacyToken);
+                allTokens.push(legacyToken);
+            }
+        }
+        // Final fallback: device doc pushToken
+        if (allTokens.length === 0) {
+            const fallbackToken = ((_e = deviceDoc.data()) === null || _e === void 0 ? void 0 : _e.pushToken) || ((_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.token);
+            if (fallbackToken && !seenTokens.has(fallbackToken)) {
+                allTokens.push(fallbackToken);
+                functions.logger.info(`onNewMessage: using fallback pushToken from devices/${deviceId}`);
+            }
+        }
+        if (allTokens.length === 0) {
+            functions.logger.debug(`onNewMessage: no push token for user ${ownerUid} (checked push_tokens + fcm_tokens + devices/${deviceId})`);
+            return;
+        }
+        // Step 3: Send push notification to ALL devices
+        const truncatedContent = content.length > 100 ? content.substring(0, 100) + '...' : content;
+        let totalSent = 0;
+        for (const pushToken of allTokens) {
+            const success = await sendPushToToken(pushToken, `💬 ${senderName}`, truncatedContent || 'Yeni mesaj', {
+                type: 'new_message',
+                messageId: context.params.messageId,
+                senderDeviceId,
+                senderUid,
+                senderName,
+                deviceId,
+                userId: senderUid || senderDeviceId,
+            });
+            if (success)
+                totalSent++;
+        }
+        if (totalSent > 0) {
+            functions.logger.info(`✅ Message push sent to ${totalSent}/${allTokens.length} devices for ${ownerUid} from ${senderName}`);
+        }
+        else {
+            functions.logger.warn(`⚠️ Message push failed for ALL ${allTokens.length} devices of ${ownerUid}`);
+        }
+    }
+    catch (error) {
+        functions.logger.error('onNewMessage error:', error);
+    }
+});
+// ============================================================
+// V3: ON NEW CONVERSATION MESSAGE — UID-Centric Push
+// Trigger: conversations/{conversationId}/messages/{messageId} → onCreate
+// Flow: senderUid → participants → push_tokens/{uid}/devices → push
+// NO MORE ownerUid intermediate lookup!
+// ============================================================
+exports.onNewConversationMessageV3 = functions
+    .region(REGION)
+    .firestore.document('conversations/{conversationId}/messages/{messageId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c, _d;
+    const { conversationId, messageId } = context.params;
+    const messageData = snap.data();
+    if (!messageData) {
+        functions.logger.warn('onNewConversationMessageV3: empty data');
+        return;
+    }
+    const senderUid = messageData.senderUid || '';
+    const content = messageData.content || '';
+    const senderName = messageData.senderName || 'Yeni Mesaj';
+    const messageType = messageData.type || 'text';
+    if (!senderUid) {
+        functions.logger.warn('onNewConversationMessageV3: no senderUid');
+        return;
+    }
+    try {
+        // Step 1: Get conversation participants
+        const convDoc = await db.collection('conversations').doc(conversationId).get();
+        if (!convDoc.exists) {
+            functions.logger.warn(`V3: conversation ${conversationId} not found`);
+            return;
+        }
+        const conversationType = String(((_a = convDoc.data()) === null || _a === void 0 ? void 0 : _a.type) || 'direct');
+        const isGroupConversation = conversationType === 'group' || conversationId.startsWith('grp_');
+        const participants = ((_b = convDoc.data()) === null || _b === void 0 ? void 0 : _b.participants) || [];
+        const recipientUids = participants.filter(uid => uid !== senderUid);
+        if (recipientUids.length === 0)
+            return;
+        // Step 2: Send push to each recipient's devices
+        const truncatedContent = content.length > 100
+            ? content.substring(0, 100) + '...' : content;
+        let totalSent = 0;
+        for (const recipientUid of recipientUids) {
+            // V3: Read from push_tokens/{uid}/devices
+            const devicesSnap = await db
+                .collection('push_tokens')
+                .doc(recipientUid)
+                .collection('devices')
+                .get();
+            if (devicesSnap.empty) {
+                // Fallback: try legacy fcm_tokens/{uid}
+                const legacyDoc = await db.collection('fcm_tokens').doc(recipientUid).get();
+                if (legacyDoc.exists && ((_c = legacyDoc.data()) === null || _c === void 0 ? void 0 : _c.token)) {
+                    const success = await sendPushToToken(legacyDoc.data().token, `💬 ${senderName}`, truncatedContent || 'Yeni mesaj', {
+                        type: messageType === 'sos' ? 'sos_message' : 'new_message',
+                        messageId,
+                        conversationId,
+                        conversationType,
+                        isGroup: String(isGroupConversation),
+                        senderUid,
+                        senderName,
+                    });
+                    if (success)
+                        totalSent++;
+                }
+                continue;
+            }
+            // Multi-device: send to ALL installations
+            for (const deviceDoc of devicesSnap.docs) {
+                const token = (_d = deviceDoc.data()) === null || _d === void 0 ? void 0 : _d.token;
+                if (!token)
+                    continue;
+                const success = await sendPushToToken(token, `💬 ${senderName}`, truncatedContent || 'Yeni mesaj', {
+                    type: messageType === 'sos' ? 'sos_message' : 'new_message',
+                    messageId,
+                    conversationId,
+                    conversationType,
+                    isGroup: String(isGroupConversation),
+                    senderUid,
+                    senderName,
+                });
+                if (success)
+                    totalSent++;
+            }
+        }
+        functions.logger.info(`✅ V3 push: ${totalSent} sent (conv: ${conversationId}, from: ${senderName})`);
+    }
+    catch (error) {
+        functions.logger.error('onNewConversationMessageV3 error:', error);
+    }
+});
+// ============================================================
+// NEW: ON FAMILY STATUS UPDATE — Push Notification for Family Alerts
+// Trigger: devices/{deviceId}/status_updates/{updateId} → onCreate
+// Flow: Get device ownerUid → look up fcm_tokens/{ownerUid} → push
+// ============================================================
+const FIREBASE_UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+function normalizeUid(value) {
+    if (typeof value !== 'string')
+        return '';
+    const trimmed = value.trim();
+    if (!trimmed)
+        return '';
+    return FIREBASE_UID_REGEX.test(trimmed) ? trimmed : '';
+}
+function normalizeFamilyStatus(value) {
+    if (value === 'safe' || value === 'need-help' || value === 'critical')
+        return value;
+    return 'unknown';
+}
+function isFamilyStatusFanoutPayload(updateData) {
+    const senderUid = normalizeUid(updateData === null || updateData === void 0 ? void 0 : updateData.senderUid) || normalizeUid(updateData === null || updateData === void 0 ? void 0 : updateData.fromUid);
+    const senderDeviceId = typeof (updateData === null || updateData === void 0 ? void 0 : updateData.fromDeviceId) === 'string' ? updateData.fromDeviceId.trim() : '';
+    return Boolean(senderUid || senderDeviceId);
+}
+async function collectPushTokensForUid(ownerUid, fallbackToken) {
+    var _a, _b, _c;
+    const allTokens = [];
+    const seenTokens = new Set();
+    // V3: push_tokens/{uid}/devices — ALL devices (PRIORITY)
+    try {
+        const v3Snap = await db.collection('push_tokens').doc(ownerUid).collection('devices').get();
+        for (const tDoc of v3Snap.docs) {
+            const t = (_a = tDoc.data()) === null || _a === void 0 ? void 0 : _a.token;
+            if (t && !seenTokens.has(t)) {
+                seenTokens.add(t);
+                allTokens.push(t);
+            }
+        }
+    }
+    catch ( /* push_tokens may not exist */_d) { /* push_tokens may not exist */ }
+    // Legacy: fcm_tokens/{uid} root token
+    try {
+        const tokenDoc = await db.collection('fcm_tokens').doc(ownerUid).get();
+        const legacyToken = tokenDoc.exists ? (_b = tokenDoc.data()) === null || _b === void 0 ? void 0 : _b.token : null;
+        if (legacyToken && !seenTokens.has(legacyToken)) {
+            seenTokens.add(legacyToken);
+            allTokens.push(legacyToken);
+        }
+        // Legacy: fcm_tokens/{uid}/devices
+        const devicesSnap = await db.collection('fcm_tokens').doc(ownerUid).collection('devices').get();
+        for (const dDoc of devicesSnap.docs) {
+            const dt = (_c = dDoc.data()) === null || _c === void 0 ? void 0 : _c.token;
+            if (dt && !seenTokens.has(dt)) {
+                seenTokens.add(dt);
+                allTokens.push(dt);
+            }
+        }
+    }
+    catch ( /* legacy fallback is best effort */_e) { /* legacy fallback is best effort */ }
+    // Final fallback: caller-provided token
+    if (fallbackToken && !seenTokens.has(fallbackToken)) {
+        allTokens.push(fallbackToken);
+    }
+    return allTokens;
+}
+async function dispatchFamilyStatusPush(ownerUid, updateData, payloadDeviceId, fallbackToken) {
+    const senderDeviceId = typeof updateData.fromDeviceId === 'string' ? updateData.fromDeviceId : '';
+    const senderUid = typeof updateData.senderUid === 'string'
+        ? updateData.senderUid
+        : (typeof updateData.fromUid === 'string' ? updateData.fromUid : '');
+    const senderName = typeof updateData.fromName === 'string' && updateData.fromName.trim().length > 0
+        ? updateData.fromName
+        : 'Aile Üyesi';
+    const status = normalizeFamilyStatus(updateData.status);
+    // Prevent self-notification loops for status writes on sender's own path.
+    if ((senderUid && senderUid === ownerUid) || (senderDeviceId && senderDeviceId === payloadDeviceId)) {
+        functions.logger.debug(`onFamilyStatusUpdate: skipping self-notification for ${ownerUid}`);
+        return;
+    }
+    const allTokens = await collectPushTokensForUid(ownerUid, fallbackToken);
+    if (allTokens.length === 0) {
+        functions.logger.debug(`onFamilyStatusUpdate: no push token for user ${ownerUid}`);
+        return;
+    }
+    const isCritical = status === 'critical';
+    const statusEmoji = status === 'safe' ? '✅' : status === 'need-help' ? '🆘' : '🚨';
+    const statusText = status === 'safe' ? 'Güvendeyim' :
+        status === 'need-help' ? 'Yardıma İhtiyacım Var' :
+            status === 'critical' ? 'ACİL DURUM' : 'Durum Güncellemesi';
+    const title = isCritical ? `🚨 ACİL: ${senderName}` : `${statusEmoji} ${senderName}`;
+    const body = isCritical
+        ? `${senderName} acil durum bildirdi! Hemen kontrol edin.`
+        : `${senderName}: ${statusText}`;
+    const pushData = {
+        type: 'family_status_update',
+        status,
+        senderDeviceId,
+        senderUid,
+        senderName,
+        deviceId: payloadDeviceId,
+        memberName: senderName,
+    };
+    const location = updateData.location;
+    const latitude = Number(location === null || location === void 0 ? void 0 : location.latitude);
+    const longitude = Number(location === null || location === void 0 ? void 0 : location.longitude);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        pushData.latitude = String(latitude);
+        pushData.longitude = String(longitude);
+    }
+    let totalSent = 0;
+    for (const pushToken of allTokens) {
+        const success = await sendPushToToken(pushToken, title, body, pushData);
+        if (success)
+            totalSent++;
+    }
+    if (totalSent > 0) {
+        functions.logger.info(`✅ Family status push sent to ${totalSent}/${allTokens.length} devices: ${senderName} → ${ownerUid} (${status})`);
+    }
+    else {
+        functions.logger.warn(`⚠️ Family status push failed for ALL ${allTokens.length} devices of ${ownerUid}`);
+    }
+}
+exports.onFamilyStatusUpdate = functions
+    .region(REGION)
+    .firestore.document('devices/{deviceId}/status_updates/{updateId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c;
+    const { deviceId } = context.params;
+    const updateData = snap.data();
+    if (!updateData) {
+        functions.logger.warn('onFamilyStatusUpdate: empty update data');
+        return;
+    }
+    try {
+        // Step 1: Get the ownerUid of the device receiving the status
+        const deviceDoc = await db.collection('devices').doc(deviceId).get();
+        const fallbackToken = deviceDoc.exists
+            ? (((_a = deviceDoc.data()) === null || _a === void 0 ? void 0 : _a.pushToken) || ((_b = deviceDoc.data()) === null || _b === void 0 ? void 0 : _b.token) || '')
+            : '';
+        const deviceOwnerUid = deviceDoc.exists ? normalizeUid((_c = deviceDoc.data()) === null || _c === void 0 ? void 0 : _c.ownerUid) : '';
+        const recipientUid = deviceOwnerUid || normalizeUid(deviceId) || normalizeUid(updateData.targetUid) || normalizeUid(updateData.uid);
+        if (!recipientUid) {
+            functions.logger.warn(`onFamilyStatusUpdate: could not resolve recipient uid for devices/${deviceId}/status_updates/${context.params.updateId}`);
+            return;
+        }
+        await dispatchFamilyStatusPush(recipientUid, updateData, deviceId, fallbackToken);
+    }
+    catch (error) {
+        functions.logger.error('onFamilyStatusUpdate error:', error);
+    }
+});
+// ============================================================
+// V3: ON FAMILY STATUS UPDATE (UID PATH)
+// Trigger: users/{uid}/status_updates/{updateId} → onCreate
+// ============================================================
+exports.onFamilyStatusUpdateV3 = functions
+    .region(REGION)
+    .firestore.document('users/{uid}/status_updates/{updateId}')
+    .onCreate(async (snap, context) => {
+    const recipientUid = normalizeUid(context.params.uid);
+    const updateData = snap.data();
+    if (!updateData) {
+        functions.logger.warn('onFamilyStatusUpdateV3: empty update data');
+        return;
+    }
+    // Skip user-owned status history records that are not family fan-out payloads.
+    // Those docs are written for self history (saveStatusUpdateV3) and should not trigger pushes.
+    if (!isFamilyStatusFanoutPayload(updateData)) {
+        functions.logger.debug(`onFamilyStatusUpdateV3: skipped non-fanout payload users/${context.params.uid}/status_updates/${context.params.updateId}`);
+        return;
+    }
+    if (!recipientUid) {
+        functions.logger.warn(`onFamilyStatusUpdateV3: invalid uid in path users/${context.params.uid}/status_updates/${context.params.updateId}`);
+        return;
+    }
+    try {
+        await dispatchFamilyStatusPush(recipientUid, updateData, recipientUid);
+    }
+    catch (error) {
+        functions.logger.error('onFamilyStatusUpdateV3 error:', error);
+    }
+});
+// ============================================================
+// ON CONTACT REQUEST — Push notification when someone sends a contact request
+// Trigger: users/{uid}/contactRequests/{requestId} → onCreate
+// ============================================================
+exports.onContactRequest = functions
+    .region(REGION)
+    .firestore.document('users/{uid}/contactRequests/{requestId}')
+    .onCreate(async (snap, context) => {
+    const recipientUid = context.params.uid;
+    const requestData = snap.data();
+    if (!requestData) {
+        functions.logger.warn('onContactRequest: empty request data');
+        return;
+    }
+    // Only notify for pending requests
+    if (requestData.status !== 'pending')
+        return;
+    const senderName = requestData.fromName || 'Bilinmeyen';
+    try {
+        const allTokens = await collectPushTokensForUid(recipientUid);
+        if (allTokens.length === 0) {
+            functions.logger.debug(`onContactRequest: no push token for user ${recipientUid}`);
+            return;
+        }
+        const title = `👋 ${senderName}`;
+        const body = requestData.message
+            ? `Kişi ekleme isteği: "${requestData.message}"`
+            : `${senderName} sizi kişi olarak eklemek istiyor`;
+        const pushData = {
+            type: 'contact_request',
+            fromUserId: requestData.fromUserId || '',
+            fromName: senderName,
+            requestId: context.params.requestId,
+        };
+        let totalSent = 0;
+        for (const pushToken of allTokens) {
+            const success = await sendPushToToken(pushToken, title, body, pushData);
+            if (success)
+                totalSent++;
+        }
+        if (totalSent > 0) {
+            functions.logger.info(`✅ Contact request push sent to ${totalSent} devices: ${senderName} → ${recipientUid}`);
+        }
+    }
+    catch (error) {
+        functions.logger.error('onContactRequest error:', error);
     }
 });
 //# sourceMappingURL=index.js.map

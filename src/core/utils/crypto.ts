@@ -47,7 +47,6 @@ export async function secureEncrypt(data: Uint8Array, key: string): Promise<Uint
     await sodium.ready;
 
     // Derive proper key from input (32 bytes for secretbox)
-    const keyBytes = new TextEncoder().encode(key);
     const derivedKey = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       key,

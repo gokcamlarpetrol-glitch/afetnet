@@ -10,6 +10,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef, setCurrentRouteName } from './navigation/navigationRef';
 import { createStackNavigator } from '@react-navigation/stack';
 import { initializeApp, shutdownApp } from './init';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -159,7 +160,17 @@ export default function CoreApp() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FDFBF7' }}>
       <SafeAreaProvider>
         <ErrorBoundary>
-          <NavigationContainer>
+          <NavigationContainer
+            ref={navigationRef}
+            onReady={() => {
+              const routeName = navigationRef.getCurrentRoute()?.name;
+              setCurrentRouteName(routeName);
+            }}
+            onStateChange={() => {
+              const routeName = navigationRef.getCurrentRoute()?.name;
+              setCurrentRouteName(routeName);
+            }}
+          >
             {/* Global Overlays */}
             <PermissionGuard>
               <Stack.Navigator id={undefined} screenOptions={{ headerShown: false }}>

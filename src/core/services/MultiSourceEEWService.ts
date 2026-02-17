@@ -79,7 +79,7 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true,
         priority: 1,
         apiUrl: 'https://deprem.afad.gov.tr/apiv2/event/filter',
-        pollInterval: 5000, // 5 seconds
+        pollInterval: 10000, // 10 seconds — fast polling for primary Turkish source
         minMagnitude: 1.0,
         region: 'turkey',
     },
@@ -88,7 +88,7 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true,
         priority: 2,
         apiUrl: 'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTML scraping needed
-        pollInterval: 10000, // 10 seconds
+        pollInterval: 15000, // 15 seconds — fast polling for secondary Turkish source
         minMagnitude: 1.0,
         region: 'turkey',
     },
@@ -97,16 +97,16 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true,
         priority: 3,
         apiUrl: 'https://earthquake.usgs.gov/fdsnws/event/1/query',
-        pollInterval: 30000, // 30 seconds
+        pollInterval: 30000, // 30 seconds for global coverage
         minMagnitude: 4.0, // Only significant earthquakes globally
         region: 'global',
     },
     EMSC: {
         name: 'EMSC',
-        enabled: false, // Optional
+        enabled: true, // Activated for European coverage
         priority: 4,
         apiUrl: 'https://www.seismicportal.eu/fdsnws/event/1/query',
-        pollInterval: 60000, // 1 minute
+        pollInterval: 60000, // 60 seconds for European source
         minMagnitude: 4.0,
         region: 'europe',
     },
@@ -122,6 +122,8 @@ class MultiSourceEEWService {
     private seenEventIds = new Set<string>();
     private onEventCallbacks: ((event: EarthquakeEvent) => void)[] = [];
     private isRunning = false;
+    // CRITICAL: Track first poll per source to avoid notification flood on startup
+    private isFirstPollCompleted: Map<string, boolean> = new Map();
 
     // ==================== LIFECYCLE ====================
 
@@ -238,12 +240,26 @@ class MultiSourceEEWService {
             }
 
             // Process new events
+            const ONE_HOUR = 60 * 60 * 1000;
             for (const event of events) {
+                // CRITICAL: Skip earthquakes older than 1 hour to prevent old notification flood
+                if (Date.now() - event.originTime > ONE_HOUR) continue;
+
                 const eventKey = this.getEventKey(event);
                 if (!this.seenEventIds.has(eventKey)) {
                     this.seenEventIds.add(eventKey);
-                    this.processNewEvent(event);
+                    // CRITICAL: Only notify after first poll completes per source
+                    // First poll silently indexes existing earthquakes
+                    if (this.isFirstPollCompleted.get(sourceKey)) {
+                        this.processNewEvent(event);
+                    }
                 }
+            }
+
+            // Mark first poll as complete for this source
+            if (!this.isFirstPollCompleted.get(sourceKey)) {
+                this.isFirstPollCompleted.set(sourceKey, true);
+                logger.info(`📡 ${sourceKey}: Initial poll complete, ${events.length} events indexed silently`);
             }
 
             // Cleanup old event IDs (keep last 1000)
@@ -263,17 +279,17 @@ class MultiSourceEEWService {
      * Fetch from AFAD API
      */
     private async fetchAFAD(config: DataSourceConfig): Promise<EarthquakeEvent[]> {
-        const oneDayAgo = new Date();
-        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-        const startDate = oneDayAgo.toISOString().split('T')[0];
-        const endDate = new Date().toISOString().split('T')[0];
+        // OOM prevention: Only fetch last 10 minutes, limit to 10 results
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const startDate = tenMinutesAgo.toISOString();
+        const endDate = new Date().toISOString();
 
-        const url = `${config.apiUrl}?start=${startDate}&end=${endDate}&minmag=${config.minMagnitude}`;
+        const url = `${config.apiUrl}?start=${startDate}&end=${endDate}&minmag=${config.minMagnitude}&limit=10&orderby=timedesc`;
         const data = await this.fetchJsonWithTimeout(url, 10000);
         if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
-        const items = Array.isArray(data) ? data : [];
+        const items = Array.isArray(data) ? data.slice(0, 10) : [];
         for (const item of items) {
             try {
                 events.push({
@@ -315,7 +331,8 @@ class MultiSourceEEWService {
             if (!data) return [];
             const events: EarthquakeEvent[] = [];
 
-            const items = data?.result || [];
+            // OOM prevention: limit to 10 most recent results
+            const items = (data?.result || []).slice(0, 10);
             for (const item of items) {
                 try {
                     const mag = parseFloat(item.mag || item.ml || '0');
@@ -352,15 +369,15 @@ class MultiSourceEEWService {
      * Fetch from USGS API
      */
     private async fetchUSGS(config: DataSourceConfig): Promise<EarthquakeEvent[]> {
-        const oneDayAgo = new Date();
-        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        // OOM prevention: Only fetch last 10 minutes, limit to 10 results
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-        const url = `${config.apiUrl}?format=geojson&starttime=${oneDayAgo.toISOString()}&minmagnitude=${config.minMagnitude}`;
+        const url = `${config.apiUrl}?format=geojson&starttime=${tenMinutesAgo.toISOString()}&minmagnitude=${config.minMagnitude}&limit=10&orderby=time`;
         const data = await this.fetchJsonWithTimeout(url, 15000);
         if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
-        const features = data?.features || [];
+        const features = (data?.features || []).slice(0, 10);
         for (const feature of features) {
             try {
                 const props = feature.properties || {};
@@ -394,15 +411,15 @@ class MultiSourceEEWService {
      * Fetch from EMSC API
      */
     private async fetchEMSC(config: DataSourceConfig): Promise<EarthquakeEvent[]> {
-        const oneDayAgo = new Date();
-        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        // OOM prevention: Only fetch last 10 minutes, limit to 10 results
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-        const url = `${config.apiUrl}?format=json&start=${oneDayAgo.toISOString()}&minmag=${config.minMagnitude}`;
+        const url = `${config.apiUrl}?format=json&start=${tenMinutesAgo.toISOString()}&minmag=${config.minMagnitude}&limit=10&orderby=time`;
         const data = await this.fetchJsonWithTimeout(url, 15000);
         if (!data) return [];
         const events: EarthquakeEvent[] = [];
 
-        const features = data?.features || [];
+        const features = (data?.features || []).slice(0, 10);
         for (const feature of features) {
             try {
                 const props = feature.properties || {};
@@ -441,7 +458,10 @@ class MultiSourceEEWService {
     }
 
     private async processNewEvent(event: EarthquakeEvent): Promise<void> {
-        logger.info(`📍 New earthquake from ${event.source}: M${event.magnitude.toFixed(1)} ${event.location}`);
+        // ELITE: Only log significant earthquakes at info level to prevent log spam
+        if (event.magnitude >= 3.0) {
+            logger.info(`📍 New earthquake from ${event.source}: M${event.magnitude.toFixed(1)} ${event.location}`);
+        }
 
         // Notify callbacks
         for (const callback of this.onEventCallbacks) {
@@ -498,63 +518,53 @@ class MultiSourceEEWService {
 
             if (shouldNotify) {
                 try {
-                    const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
-                    await showMagnitudeBasedNotification(
-                        event.magnitude,
-                        event.location,
-                        true, // Is EEW
-                        undefined, // Time advance (will be calculated based on distance)
-                        event.originTime,
-                    );
+                    const { notificationCenter } = await import('./notifications/NotificationCenter');
+                    await notificationCenter.notify('earthquake', {
+                        magnitude: event.magnitude,
+                        location: event.location,
+                        isEEW: true,
+                        timestamp: event.originTime,
+                        depth: event.depth,
+                        source: event.source,
+                        latitude: event.latitude,
+                        longitude: event.longitude,
+                    }, 'MultiSourceEEWService');
                     wasNotified = true;
                     logger.info(`🚨 EEW NOTIFICATION TRIGGERED: M${event.magnitude.toFixed(1)} ${event.location} from ${event.source}`);
 
-                    // ELITE: Trigger emergency mode for 5.0+ earthquakes (with distance awareness)
-                    if (event.magnitude >= 5.0) {
-                        try {
-                            const { emergencyModeService } = await import('./EmergencyModeService');
-                            const earthquake = {
-                                id: event.id,
-                                magnitude: event.magnitude,
-                                location: event.location,
-                                depth: event.depth,
-                                time: event.originTime,
-                                latitude: event.latitude,
-                                longitude: event.longitude,
-                                source: event.source,
-                            };
-                            if (emergencyModeService.shouldTriggerEmergencyMode(earthquake, distanceKm)) {
-                                await emergencyModeService.activateEmergencyMode(earthquake);
-                                logger.info(`🚨 EMERGENCY MODE ACTIVATED: M${event.magnitude.toFixed(1)}`);
-                            }
-                        } catch (emergencyError) {
-                            logger.error('Emergency mode activation failed:', emergencyError);
-                        }
-                    }
+                    // CRITICAL FIX: Emergency mode is NOW handled internally by
+                    // MagnitudeBasedNotificationService.triggerEmergencyMode() for M5.0+.
+                    // Do NOT call activateEmergencyMode here — it was causing double-triggering:
+                    //   showMagnitudeBasedNotification → triggerEmergencyMode (internal)
+                    //   + activateEmergencyMode here (DUPLICATE!)
+                    // Emergency mode activation for significant earthquakes is fully automatic.
                 } catch (notifError) {
                     logger.error('EEW notification failed:', notifError);
                 }
             }
         }
 
-        // Add to history store
-        const historyEvent: Omit<EEWHistoryEvent, 'id'> = {
-            timestamp: Date.now(),
-            magnitude: event.magnitude,
-            location: event.location,
-            depth: event.depth,
-            latitude: event.latitude,
-            longitude: event.longitude,
-            warningTime: 0, // Will be calculated if EEW triggers
-            estimatedIntensity: 0,
-            epicentralDistance: 0,
-            source: event.source,
-            wasNotified,
-            confidence: event.quality === 'reviewed' ? 95 : 80,
-            certainty: event.magnitude >= 5 ? 'high' : event.magnitude >= 4 ? 'medium' : 'low',
-        };
+        // ELITE: Only add significant earthquakes (M3.0+) to history store
+        // This prevents AsyncStorage I/O storm from 100+ micro-earthquakes per cycle → OOM fix
+        if (event.magnitude >= 3.0) {
+            const historyEvent: Omit<EEWHistoryEvent, 'id'> = {
+                timestamp: Date.now(),
+                magnitude: event.magnitude,
+                location: event.location,
+                depth: event.depth,
+                latitude: event.latitude,
+                longitude: event.longitude,
+                warningTime: 0, // Will be calculated if EEW triggers
+                estimatedIntensity: 0,
+                epicentralDistance: 0,
+                source: event.source,
+                wasNotified,
+                confidence: event.quality === 'reviewed' ? 95 : 80,
+                certainty: event.magnitude >= 5 ? 'high' : event.magnitude >= 4 ? 'medium' : 'low',
+            };
 
-        useEEWHistoryStore.getState().addEvent(historyEvent);
+            useEEWHistoryStore.getState().addEvent(historyEvent);
+        }
     }
 
     // ==================== UTILITIES ====================

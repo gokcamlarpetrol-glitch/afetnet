@@ -1,54 +1,87 @@
 /**
- * IDENTITY SERVICE - ELITE FIREBASE EDITION
- * Single source of truth for "Who am I?"
+ * IDENTITY SERVICE — SINGLE-UID ARCHITECTURE v4.0
  * 
- * Now fully integrated with Firebase Auth for persistent identity.
- * Manages the unified identity across Cloud (Firebase) and Mesh (Device ID).
+ * THE GOLDEN RULE: Firebase Auth UID is the SINGLE PRIMARY KEY.
  * 
- * @author AfetNet Elite Messaging System
- * @version 2.0.0 - Firebase Integration
+ *   uid              → Primary key for ALL operations (Firestore, messages, contacts, family)
+ *   publicUserCode   → Human-readable sharing code (QR, invite links)
+ * 
+ * Firestore paths use uid:
+ *   users/{uid}, locations_current/{uid}, push_tokens/{uid},
+ *   conversations/{convId}, families/{familyId}/members/{uid}
+ * 
+ * @version 4.0.0 — Single-UID Clean Architecture
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAuth, User } from 'firebase/auth';
+import { User } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDeviceId } from '../../lib/device';
-import { initializeFirebase } from '../../lib/firebase';
+import { getDeviceId as getHardwareDeviceId } from '../../lib/device';
+import { getInstallationId } from '../../lib/installationId';
+import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('IdentityService');
 
-// Storage keys
-const IDENTITY_CACHE_KEY = '@afetnet:identity_cache_v2';
+const IDENTITY_CACHE_KEY = '@afetnet:identity_cache_v4';
 
 /**
- * User Identity Interface - The Golden Record
+ * User Identity — Clean Single-UID Model
+ * 
+ * uid = the ONLY key used everywhere.
+ * publicUserCode = human-readable sharing code (QR, invite links).
  */
 export interface UserIdentity {
-  id: string;              // The QR ID (AFN-XXXXXXXX format)
-  deviceId: string;        // Physical device ID for mesh routing
-  cloudUid?: string;       // Firebase Auth UID (if logged in)
-  displayName: string;     // User display name
-  email?: string;          // User email
-  photoURL?: string;       // Profile photo URL
-  publicKey?: string;      // For future E2E encryption
-  isVerified: boolean;     // True if cloud authenticated
-  type: 'CLOUD' | 'MESH_ONLY';
-  createdAt?: number;      // When identity was created
-  lastSyncAt?: number;     // Last Firebase sync time
+  /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR */
+  uid: string;
+  /** Random, rotatable sharing code (e.g. "AFN-A3F9B2C1") */
+  publicUserCode: string;
+  /** User display name */
+  displayName: string;
+  /** User email */
+  email?: string;
+  /** Profile photo URL */
+  photoURL?: string;
+  /** True if cloud authenticated */
+  isVerified: boolean;
+  /** When identity was created */
+  createdAt: number;
+  /** Last Firebase sync time */
+  lastSyncAt: number;
 }
 
 /**
- * QR Payload Interface
+ * QR Payload v4 — Minimal & Clean
+ * Only uid + name required. Everything else derived from Firestore.
  */
 export interface QRPayload {
-  v: number;               // Version
-  id: string;              // QR ID (AFN-XXXXXXXX)
-  uid: string;             // Firebase UID
-  did: string;             // Device ID for mesh routing
-  name: string;            // Display name
-  type: 'CLOUD' | 'MESH_ONLY' | 'LEGACY';
-  pk?: string;             // Public key (optional)
+  /** Payload version */
+  v: number;
+  /** Firebase Auth UID */
+  uid: string;
+  /** Display name */
+  name: string;
+}
+
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+
+/**
+ * Generate a random, collision-resistant public user code.
+ * Format: AFN-XXXXXXXX (8 random hex chars = 4 bytes = ~4 billion combos)
+ */
+async function generatePublicUserCode(): Promise<string> {
+  try {
+    const { default: Crypto } = await import('expo-crypto');
+    const bytes = await Crypto.getRandomBytesAsync(4);
+    const hex = Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `AFN-${hex}`.toUpperCase();
+  } catch {
+    const ts = Date.now().toString(16).slice(-4);
+    const rand = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
+    return `AFN-${ts}${rand}`.toUpperCase();
+  }
 }
 
 class IdentityService {
@@ -58,10 +91,9 @@ class IdentityService {
 
   /**
    * Initialize the identity service.
-   * Priority: Firebase Auth > Cached Identity > Device ID fallback
+   * Priority: Firebase Auth > Cached Identity > No identity (must login)
    */
   async initialize(): Promise<void> {
-    // Prevent multiple simultaneous initializations
     if (this.initPromise) return this.initPromise;
     if (this.isInitialized) return;
 
@@ -71,53 +103,38 @@ class IdentityService {
 
   private async _doInitialize(): Promise<void> {
     try {
-      logger.info('🔐 Initializing IdentityService...');
+      logger.info('🔐 Initializing IdentityService v4 (Single-UID)...');
 
-      const deviceId = await getDeviceId();
-      if (!deviceId) {
-        throw new Error('Cannot get device ID');
-      }
-
-      // Step 1: Try Firebase Auth
-      const app = initializeFirebase();
-      if (app) {
-        const auth = getAuth(app);
-        const currentUser = auth.currentUser;
-
-        if (currentUser) {
-          await this.syncFromFirebase(currentUser, deviceId);
-          this.isInitialized = true;
-          logger.info(`✅ Identity initialized from Firebase: ${this.identity?.id}`);
-          return;
-        }
-      }
-
-      // Step 2: Try cached identity (only if verified/CLOUD type)
-      const cached = await this.loadCachedIdentity();
-      if (cached && cached.type === 'CLOUD' && cached.isVerified) {
-        this.identity = cached;
+      const auth = getFirebaseAuth();
+      if (auth?.currentUser) {
+        await this.syncFromFirebase(auth.currentUser);
         this.isInitialized = true;
-        logger.info(`✅ Identity loaded from cache: ${this.identity.id}`);
+        logger.info(`✅ Identity from Firebase: uid=${this.identity?.uid}`);
         return;
       }
 
-      // ELITE: No MESH_ONLY fallback - auth is mandatory
-      // If we reach here, user needs to authenticate
-      this.isInitialized = true;
-      logger.warn('⚠️ No authenticated identity found - user must login');
+      const cached = await this.loadCachedIdentity();
+      if (cached?.isVerified && cached.uid) {
+        this.identity = cached;
+        this.isInitialized = true;
+        logger.info(`✅ Identity from cache: uid=${this.identity.uid}`);
+        return;
+      }
 
+      this.isInitialized = true;
+      logger.warn('⚠️ No identity — user must login');
     } catch (error) {
-      logger.error('❌ Failed to init Identity:', error);
-      this.isInitialized = true; // Prevent retry loops
+      logger.error('❌ Identity init failed:', error);
+      this.isInitialized = true;
     } finally {
       this.initPromise = null;
     }
   }
 
   /**
-   * Sync identity from Firebase Auth user
+   * Sync identity from Firebase Auth user.
    */
-  async syncFromFirebase(user: User, deviceId?: string): Promise<void> {
+  async syncFromFirebase(user: User): Promise<void> {
     try {
       const app = initializeFirebase();
       if (!app) return;
@@ -126,229 +143,230 @@ class IdentityService {
       const userRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userRef);
 
-      // Generate consistent QR ID from UID
-      const qrId = `AFN-${user.uid.substring(0, 8).toUpperCase()}`;
-      const currentDeviceId = deviceId || await getDeviceId() || qrId;
-
       if (userDoc.exists()) {
         const data = userDoc.data();
+
+        let publicUserCode = data.publicUserCode;
+        if (!publicUserCode) {
+          publicUserCode = await generatePublicUserCode();
+        }
+
         this.identity = {
-          id: data.qrId || qrId,
-          deviceId: currentDeviceId,
-          cloudUid: user.uid,
+          uid: user.uid,
+          publicUserCode,
           displayName: data.displayName || user.displayName || 'İsimsiz Kahraman',
           email: data.email || user.email || undefined,
           photoURL: data.photoURL || user.photoURL || undefined,
           isVerified: true,
-          type: 'CLOUD',
           createdAt: data.createdAt?.toMillis?.() || Date.now(),
           lastSyncAt: Date.now(),
         };
+
+        // Ensure user doc has publicUserCode
+        if (!data.publicUserCode) {
+          await setDoc(userRef, { publicUserCode, lastLoginAt: new Date() }, { merge: true });
+          logger.info(`✅ User doc updated: users/${user.uid}`);
+        } else {
+          await setDoc(userRef, { lastLoginAt: new Date() }, { merge: true });
+        }
+
       } else {
-        // New user - create profile
+        // New user
+        const publicUserCode = await generatePublicUserCode();
+
         this.identity = {
-          id: qrId,
-          deviceId: currentDeviceId,
-          cloudUid: user.uid,
+          uid: user.uid,
+          publicUserCode,
           displayName: user.displayName || 'İsimsiz Kahraman',
           email: user.email || undefined,
           photoURL: user.photoURL || undefined,
           isVerified: true,
-          type: 'CLOUD',
           createdAt: Date.now(),
           lastSyncAt: Date.now(),
         };
 
-        // Save to Firestore - ELITE V2: Filter out undefined values to prevent Firebase errors
         const userData: Record<string, any> = {
-          qrId: qrId,
-          deviceId: currentDeviceId,
+          publicUserCode,
           displayName: this.identity.displayName,
           createdAt: new Date(),
           lastLoginAt: new Date(),
         };
-        // Only add optional fields if they have values
         if (this.identity.email) userData.email = this.identity.email;
         if (this.identity.photoURL) userData.photoURL = this.identity.photoURL;
 
         await setDoc(userRef, userData, { merge: true });
+        logger.info(`✅ New user: users/${user.uid}`);
       }
 
-      // Cache locally
       await this.cacheIdentity();
-      logger.info(`🔄 Identity synced from Firebase: ${this.identity.id}`);
-
+      logger.info(`🔄 Identity synced: uid=${user.uid}, code=${this.identity!.publicUserCode}`);
     } catch (error) {
       logger.error('Failed to sync from Firebase:', error);
     }
   }
 
-  /**
-   * Cache identity locally for offline access
-   */
-  private async cacheIdentity(): Promise<void> {
-    if (!this.identity) return;
-    try {
-      await AsyncStorage.setItem(IDENTITY_CACHE_KEY, JSON.stringify(this.identity));
-    } catch (error) {
-      logger.error('Failed to cache identity:', error);
-    }
-  }
+  // ─── ACCESSORS ──────────────────────────────────────
 
-  /**
-   * Load cached identity
-   */
-  private async loadCachedIdentity(): Promise<UserIdentity | null> {
-    try {
-      const cached = await AsyncStorage.getItem(IDENTITY_CACHE_KEY);
-      if (cached) {
-        return JSON.parse(cached) as UserIdentity;
-      }
-    } catch (error) {
-      logger.error('Failed to load cached identity:', error);
-    }
-    return null;
-  }
-
-  /**
-   * Get the current unified identity
-   */
+  /** Get the full identity object */
   getIdentity(): UserIdentity | null {
     return this.identity;
   }
 
-  /**
-   * Returns the QR ID that should be used for messaging.
-   * Format: AFN-XXXXXXXX
-   */
-  getMyId(): string {
-    return this.identity?.id || 'unknown';
+  /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR */
+  getUid(): string {
+    return this.identity?.uid || '';
   }
 
-  /**
-   * Get the Firebase UID
-   */
-  getCloudUid(): string | undefined {
-    return this.identity?.cloudUid;
+  /** Public sharing code for QR display and friend-add */
+  getPublicUserCode(): string {
+    return this.identity?.publicUserCode || '';
   }
 
-  /**
-   * Get the device ID for mesh routing
-   */
-  getDeviceId(): string {
-    return this.identity?.deviceId || 'unknown';
-  }
-
-  /**
-   * Get the current display name
-   */
+  /** Display name */
   getDisplayName(): string {
     return this.identity?.displayName || 'İsimsiz Kahraman';
   }
 
-  /**
-   * Get the user's email
-   */
   getEmail(): string | undefined {
     return this.identity?.email;
   }
 
-  /**
-   * Get the user's photo URL
-   */
   getPhotoURL(): string | undefined {
     return this.identity?.photoURL;
   }
 
-  /**
-   * Check if user is authenticated with cloud
-   */
   isCloudAuthenticated(): boolean {
-    return this.identity?.type === 'CLOUD' && !!this.identity?.cloudUid;
+    return !!this.identity?.uid && this.identity.isVerified;
   }
 
-  /**
-   * Generate the QR Code Payload
-   * Contains enough info for another user to add us securely.
-   */
+  // ─── BACKWARD COMPAT ALIASES (tüm eski çağrıları uid'ye yönlendir) ──
+
+  /** @deprecated Use getUid() */
+  getMyId(): string { return this.getUid(); }
+  /** @deprecated Use getUid() */
+  getCloudUid(): string | undefined { return this.identity?.uid; }
+  /** @deprecated Use getUid() — deviceId artık identity katmanında yok */
+  getDeviceId(): string { return this.getUid(); }
+  /** @deprecated Use getUid() */
+  getMeshDeviceId(): string { return this.getUid(); }
+  /** @deprecated Not needed */
+  getInstallationId(): string { return this.getUid(); }
+
+  // ─── QR CODE ──────────────────────────────────────
+
+  /** Generate QR Code Payload v4 — minimal */
   getQRPayload(): string {
     if (!this.identity) return '';
 
     const payload: QRPayload = {
-      v: 2, // Version 2 with Firebase integration
-      id: this.identity.id,
-      uid: this.identity.cloudUid || '',
-      did: this.identity.deviceId,
+      v: 4,
+      uid: this.identity.uid,
       name: this.identity.displayName,
-      type: this.identity.type,
     };
 
     return JSON.stringify(payload);
   }
 
   /**
-   * Parse a scanned QR payload
+   * Parse a scanned QR payload.
+   * Supports v4 (clean), v3/v2/v1 (legacy), plain UID, and AFN codes.
    */
-  parseQRPayload(data: string): QRPayload | null {
+  async parseQRPayload(data: string): Promise<QRPayload | null> {
+    const trim = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    const raw = trim(data);
+    if (!raw) return null;
+
+    // Try JSON parse
     try {
-      const parsed = JSON.parse(data);
-
-      // Version 2 format
-      if (parsed.v === 2) {
-        if (!parsed.id || !parsed.uid) {
-          throw new Error('Invalid V2 QR Data');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const uid = trim(parsed.uid || parsed.cloudUid || parsed.userUid || parsed.id || parsed.code);
+        const name = trim(parsed.name) || 'Bilinmeyen Kullanıcı';
+        if (uid && UID_REGEX.test(uid)) {
+          return { v: parsed.v || 4, uid, name };
         }
-        return parsed as QRPayload;
+        // Legacy: code might be AFN- format, try to extract uid
+        const legacyUid = trim(parsed.uid || parsed.cloudUid || parsed.userUid);
+        if (legacyUid && UID_REGEX.test(legacyUid)) {
+          return { v: parsed.v || 4, uid: legacyUid, name };
+        }
       }
+    } catch {
+      // Not JSON
+    }
 
-      // Version 1 format (legacy)
-      if (parsed.v === 1) {
-        return {
-          v: 1,
-          id: parsed.id,
-          uid: parsed.id, // V1 didn't have separate UID
-          did: parsed.did || parsed.id,
-          name: parsed.name || 'Unknown User',
-          type: parsed.type || 'LEGACY',
-        };
+    // URL payload support
+    try {
+      const url = new URL(raw);
+      for (const param of ['payload', 'data', 'qr', 'uid', 'id']) {
+        const val = trim(url.searchParams.get(param));
+        if (val) {
+          const result = this.parseQRPayload(val);
+          if (result) return result;
+        }
       }
+    } catch {
+      // Not a URL
+    }
 
-      throw new Error('Unknown QR version');
-    } catch (e) {
-      logger.warn('Failed to parse QR:', e);
+    // Plain UID
+    if (UID_REGEX.test(raw)) {
+      return { v: 0, uid: raw, name: 'Bilinmeyen Kullanıcı' };
+    }
 
-      // Fallback for legacy QR codes (plain text IDs)
-      if (data.startsWith('AFN-') || data.startsWith('afn-')) {
-        return {
-          v: 0,
-          id: data.toUpperCase(),
-          uid: data.toUpperCase(),
-          did: data.toUpperCase(),
-          name: 'Bilinmeyen Kullanıcı',
-          type: 'LEGACY',
-        };
+    // AFN code — resolve via Firestore lookup (publicUserCode or qrId)
+    if (raw.toUpperCase().startsWith('AFN-')) {
+      try {
+        const app = initializeFirebase();
+        if (app) {
+          const db = getFirestore(app);
+          const { collection, getDocs, query, where, limit } = require('firebase/firestore');
+          const usersRef = collection(db, 'users');
+          const code = raw.toUpperCase();
+
+          // Try publicUserCode first
+          const byPublicCode = query(usersRef, where('publicUserCode', '==', code), limit(1));
+          const publicSnap = await getDocs(byPublicCode);
+          if (!publicSnap.empty) {
+            const docData = publicSnap.docs[0];
+            return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
+          }
+
+          // Fallback to qrId
+          const byQrId = query(usersRef, where('qrId', '==', code), limit(1));
+          const qrSnap = await getDocs(byQrId);
+          if (!qrSnap.empty) {
+            const docData = qrSnap.docs[0];
+            return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
+          }
+        }
+      } catch (error) {
+        logger.warn('AFN code Firestore resolution failed:', error);
       }
+      // If resolution fails, return null so caller knows it's unresolvable
       return null;
     }
+
+    logger.warn('Failed to parse QR payload');
+    return null;
   }
 
-  /**
-   * Update display name (syncs to Firebase)
-   */
+  // ─── PROFILE UPDATES ──────────────────────────────
+
   async updateDisplayName(name: string): Promise<void> {
     if (!this.identity) return;
 
     this.identity.displayName = name;
     await this.cacheIdentity();
 
-    // Sync to Firebase if authenticated
-    if (this.identity.cloudUid) {
+    if (this.identity.uid) {
       try {
         const app = initializeFirebase();
         if (app) {
           const db = getFirestore(app);
           await setDoc(
-            doc(db, 'users', this.identity.cloudUid),
+            doc(db, 'users', this.identity.uid),
             { displayName: name, updatedAt: new Date() },
             { merge: true }
           );
@@ -359,24 +377,20 @@ class IdentityService {
     }
   }
 
-  /**
-   * Update profile photo (syncs to Firebase)
-   */
   async updatePhotoURL(photoURL: string): Promise<void> {
     if (!this.identity) return;
 
     this.identity.photoURL = photoURL;
     await this.cacheIdentity();
 
-    // Sync to Firebase if authenticated
-    if (this.identity.cloudUid) {
+    if (this.identity.uid) {
       try {
         const app = initializeFirebase();
         if (app) {
           const db = getFirestore(app);
           await setDoc(
-            doc(db, 'users', this.identity.cloudUid),
-            { photoURL: photoURL, updatedAt: new Date() },
+            doc(db, 'users', this.identity.uid),
+            { photoURL, updatedAt: new Date() },
             { merge: true }
           );
         }
@@ -386,9 +400,35 @@ class IdentityService {
     }
   }
 
-  /**
-   * Clear identity (for logout)
-   */
+  /** Rotate the public user code (spam/abuse prevention) */
+  async rotatePublicUserCode(): Promise<string | null> {
+    if (!this.identity?.uid) return null;
+
+    try {
+      const newCode = await generatePublicUserCode();
+      const app = initializeFirebase();
+      if (!app) return null;
+
+      const db = getFirestore(app);
+      await setDoc(
+        doc(db, 'users', this.identity.uid),
+        { publicUserCode: newCode, updatedAt: new Date() },
+        { merge: true }
+      );
+
+      this.identity.publicUserCode = newCode;
+      await this.cacheIdentity();
+
+      logger.info(`🔄 Public user code rotated: ${newCode}`);
+      return newCode;
+    } catch (error) {
+      logger.error('Failed to rotate public user code:', error);
+      return null;
+    }
+  }
+
+  // ─── LIFECYCLE ──────────────────────────────────────
+
   async clearIdentity(): Promise<void> {
     this.identity = null;
     this.isInitialized = false;
@@ -396,20 +436,32 @@ class IdentityService {
     logger.info('🗑️ Identity cleared');
   }
 
-  /**
-   * Force re-sync from Firebase
-   */
   async forceSync(): Promise<void> {
-    const app = initializeFirebase();
-    if (!app) return;
+    const auth = getFirebaseAuth();
+    if (!auth?.currentUser) return;
+    await this.syncFromFirebase(auth.currentUser);
+    logger.info('🔄 Force sync completed');
+  }
 
-    const auth = getAuth(app);
-    const user = auth.currentUser;
+  // ─── INTERNAL ──────────────────────────────────────
 
-    if (user) {
-      await this.syncFromFirebase(user);
-      logger.info('🔄 Force sync completed');
+  private async cacheIdentity(): Promise<void> {
+    if (!this.identity) return;
+    try {
+      await AsyncStorage.setItem(IDENTITY_CACHE_KEY, JSON.stringify(this.identity));
+    } catch (error) {
+      logger.error('Failed to cache identity:', error);
     }
+  }
+
+  private async loadCachedIdentity(): Promise<UserIdentity | null> {
+    try {
+      const cached = await AsyncStorage.getItem(IDENTITY_CACHE_KEY);
+      if (cached) return JSON.parse(cached) as UserIdentity;
+    } catch (error) {
+      logger.error('Failed to load cached identity:', error);
+    }
+    return null;
   }
 }
 

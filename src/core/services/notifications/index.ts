@@ -34,6 +34,21 @@ export {
   type ScheduleOptions,
 } from './NotificationScheduler';
 
+// NotificationCenter (Unified Gateway — ALL notifications MUST go through this)
+export {
+  notificationCenter,
+  type NotifyResult,
+  type NotifyDataMap,
+  type EarthquakeNotifyData,
+  type SOSNotifyData,
+  type MessageNotifyData,
+  type FamilyNotifyData,
+  type NewsNotifyData,
+  type SystemNotifyData,
+  type RescueNotifyData,
+  type DrillNotifyData,
+} from './NotificationCenter';
+
 // Permissions
 export {
   getPermissionStatus,

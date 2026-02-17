@@ -62,10 +62,10 @@ export default function CommunicationScreen({ navigation }: CommunicationScreenP
   const handleSend = async () => {
     if (!inputText.trim()) return;
 
-    const success = await hybridMessageService.sendMessage(inputText);
-    if (success) {
+    try {
+      await hybridMessageService.sendMessage(inputText);
       setInputText('');
-    } else {
+    } catch {
       Alert.alert('Hata', 'Mesaj gönderilemedi.');
     }
   };

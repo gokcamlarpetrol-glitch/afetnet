@@ -1,6 +1,13 @@
 /**
- * FIREBASE HEALTH OPERATIONS - ELITE MODULAR
- * Handles health profile and ICE data Firestore operations
+ * FIREBASE HEALTH OPERATIONS — UID-CENTRIC v3.0
+ * 
+ * PATH ARCHITECTURE:
+ *   users/{uid}/health/current    — Health profile
+ *   users/{uid}/ice/current       — ICE (In Case of Emergency) contacts
+ * 
+ * Moved from devices/{id}/health to users/{uid}/health for UID-centric model.
+ * 
+ * @version 3.0.0
  */
 
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -8,12 +15,9 @@ import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 import type { HealthProfileData, ICEData } from '../../types/firebase';
 
-const logger = createLogger('FirebaseHealthOperations');
-const TIMEOUT_MS = 10000; // 10 seconds
+const logger = createLogger('FirebaseHealthOps');
+const TIMEOUT_MS = 10000;
 
-/**
- * Execute Firestore operation with timeout protection
- */
 async function withTimeout<T>(
   operation: () => Promise<T>,
   operationName: string,
@@ -21,20 +25,19 @@ async function withTimeout<T>(
   const timeoutPromise = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
   );
-  
   return Promise.race([operation(), timeoutPromise]);
 }
 
 /**
- * Save health profile to Firestore
+ * Save health profile to Firestore.
+ * Path: users/{uid}/health/current
  */
 export async function saveHealthProfile(
-  userDeviceId: string,
+  uid: string,
   profile: HealthProfileData,
-  isInitialized: boolean,
 ): Promise<boolean> {
-  if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, skipping saveHealthProfile');
+  if (!uid) {
+    logger.warn('saveHealthProfile: uid is empty');
     return false;
   }
 
@@ -46,75 +49,54 @@ export async function saveHealthProfile(
     }
 
     await withTimeout(
-      () => setDoc(doc(db, 'devices', userDeviceId, 'healthProfile', 'current'), {
+      () => setDoc(doc(db, 'users', uid, 'health', 'current'), {
         ...profile,
+        userId: uid,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
       'Health profile save',
     );
 
     if (__DEV__) {
-      logger.info('Health profile saved to Firestore');
+      logger.info(`✅ Health profile saved: users/${uid}/health/current`);
     }
     return true;
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
-    const errorMessage = errorObj?.message || String(error);
-    
-    // ELITE: Handle permission errors gracefully
-    if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
+    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission')) {
       if (__DEV__) {
-        logger.debug('Health profile save skipped (permission denied - this is OK)');
+        logger.debug('Health profile save skipped (permission denied)');
       }
       return false;
     }
-    
     logger.error('Failed to save health profile:', error);
     return false;
   }
 }
 
 /**
- * Load health profile from Firestore
+ * Load health profile from Firestore.
+ * Path: users/{uid}/health/current
  */
 export async function loadHealthProfile(
-  userDeviceId: string,
-  isInitialized: boolean,
+  uid: string,
 ): Promise<HealthProfileData | null> {
-  if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, cannot load health profile');
-    return null;
-  }
+  if (!uid) return null;
 
   try {
     const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available');
-      return null;
-    }
+    if (!db) return null;
 
-    const profileRef = doc(db, 'devices', userDeviceId, 'healthProfile', 'current');
-    
-    const snapshot = await withTimeout(
-      () => getDoc(profileRef),
-      'Health profile load',
-    );
-    
-    if (!snapshot.exists()) {
-      return null;
-    }
+    const profileRef = doc(db, 'users', uid, 'health', 'current');
+    const snapshot = await withTimeout(() => getDoc(profileRef), 'Health profile load');
 
-    const data = snapshot.data();
-    // ELITE: Type-safe data mapping - add userId if missing
-    return {
-      ...data,
-      userId: userDeviceId,
-    } as HealthProfileData;
+    if (!snapshot.exists()) return null;
+    return { ...snapshot.data(), userId: uid } as HealthProfileData;
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
-    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission') || errorObj?.message?.includes('Missing or insufficient permissions')) {
+    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission')) {
       if (__DEV__) {
-        logger.debug('Health profile load skipped (permission denied - this is OK)');
+        logger.debug('Health profile load skipped (permission denied)');
       }
     } else {
       logger.warn('Failed to load health profile:', error);
@@ -124,96 +106,75 @@ export async function loadHealthProfile(
 }
 
 /**
- * Save ICE (In Case of Emergency) data to Firestore
+ * Save ICE (In Case of Emergency) data.
+ * Path: users/{uid}/ice/current
  */
 export async function saveICE(
-  userDeviceId: string,
+  uid: string,
   iceData: ICEData,
-  isInitialized: boolean,
 ): Promise<boolean> {
-  if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, skipping saveICE');
+  if (!uid) {
+    logger.warn('saveICE: uid is empty');
     return false;
   }
 
   try {
     const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available');
-      return false;
-    }
+    if (!db) return false;
 
     await withTimeout(
-      () => setDoc(doc(db, 'devices', userDeviceId, 'ice', 'current'), {
+      () => setDoc(doc(db, 'users', uid, 'ice', 'current'), {
         ...iceData,
+        userId: uid,
         updatedAt: new Date().toISOString(),
       }, { merge: true }),
       'ICE data save',
     );
 
     if (__DEV__) {
-      logger.info('ICE data saved to Firestore');
+      logger.info(`✅ ICE data saved: users/${uid}/ice/current`);
     }
     return true;
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
-    const errorMessage = errorObj?.message || String(error);
-    
-    // ELITE: Handle permission errors gracefully
-    if (errorObj?.code === 'permission-denied' || errorMessage.includes('permission') || errorMessage.includes('Missing or insufficient permissions')) {
+    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission')) {
       if (__DEV__) {
-        logger.debug('ICE data save skipped (permission denied - this is OK)');
+        logger.debug('ICE data save skipped (permission denied)');
       }
       return false;
     }
-    
     logger.error('Failed to save ICE data:', error);
     return false;
   }
 }
 
 /**
- * Load ICE (In Case of Emergency) data from Firestore
+ * Load ICE data.
+ * Path: users/{uid}/ice/current
  */
 export async function loadICE(
-  userDeviceId: string,
-  isInitialized: boolean,
+  uid: string,
 ): Promise<ICEData | null> {
-  if (!isInitialized) {
-    logger.warn('FirebaseDataService not initialized, cannot load ICE');
-    return null;
-  }
+  if (!uid) return null;
 
   try {
     const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available');
-      return null;
-    }
+    if (!db) return null;
 
-    const iceRef = doc(db, 'devices', userDeviceId, 'ice', 'current');
-    
-    const snapshot = await withTimeout(
-      () => getDoc(iceRef),
-      'ICE data load',
-    );
-    
-    if (!snapshot.exists()) {
-      return null;
-    }
+    const iceRef = doc(db, 'users', uid, 'ice', 'current');
+    const snapshot = await withTimeout(() => getDoc(iceRef), 'ICE data load');
 
-    const data = snapshot.data();
-    // ELITE: Type-safe data mapping - ensure required fields
+    if (!snapshot.exists()) return null;
     return {
-      ...data,
-      userId: userDeviceId,
-      contacts: data.contacts || [],
+      ...snapshot.data(),
+      userId: uid,
+      contacts: snapshot.data().contacts || [],
     } as ICEData;
   } catch (error: unknown) {
     const errorObj = error as { code?: string; message?: string };
-    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission') || errorObj?.message?.includes('Missing or insufficient permissions')) {
+    if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission')) {
       if (__DEV__) {
-        logger.debug('ICE data load skipped (permission denied - this is OK)');
+        logger.debug('ICE data load skipped (permission denied)');
       }
     } else {
       logger.warn('Failed to load ICE data:', error);
@@ -221,4 +182,3 @@ export async function loadICE(
     return null;
   }
 }
-

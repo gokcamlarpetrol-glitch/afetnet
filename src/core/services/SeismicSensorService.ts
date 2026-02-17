@@ -8,7 +8,6 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { seismicEngine, DetectionEvent } from './seismic/AdvancedSeismicEngine';
 import { createLogger } from '../utils/logger';
-import { notificationService } from './NotificationService';
 import { meshNetworkService } from './mesh/MeshNetworkService';
 import { MeshMessageType } from './mesh/MeshProtocol';
 import { onDeviceEEWService } from './seismic/OnDeviceEEWService';
@@ -33,22 +32,25 @@ interface LocationTaskData {
 
 // Background Task Definition - The "Heartbeat"
 // This keeps the JS thread alive by receiving location updates
-TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-  if (error) {
-    logger.warn('Location Heartbeat Error:', error);
-    return;
-  }
-
-  if (data) {
-    // We don't necessarily need the location here for seismic detection,
-    // but the act of receiving it keeps the app alive.
-    // However, we CAN use it to update the mesh network position silently!
-    const taskData = data as LocationTaskData;
-    if (taskData.locations && taskData.locations.length > 0) {
-      // logger.debug('Heartbeat Pulse (Location)'); 
+// CRITICAL FIX: Guard against double-define crash on iOS production
+if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
+  TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+    if (error) {
+      logger.warn('Location Heartbeat Error:', error);
+      return;
     }
-  }
-});
+
+    if (data) {
+      // We don't necessarily need the location here for seismic detection,
+      // but the act of receiving it keeps the app alive.
+      // However, we CAN use it to update the mesh network position silently!
+      const taskData = data as LocationTaskData;
+      if (taskData.locations && taskData.locations.length > 0) {
+        // logger.debug('Heartbeat Pulse (Location)'); 
+      }
+    }
+  });
+}
 
 class SeismicSensorService {
   private isServiceRunning = false;
@@ -144,24 +146,17 @@ class SeismicSensorService {
     logger.info(`SEISMIC DETECTED: ${event.type} (${event.magnitude.toFixed(2)}g)`);
 
     // ELITE: Route to On-Device EEW Service for potential immediate alert
+    // OnDeviceEEWService handles threshold checks AND notification sending.
+    // DO NOT send a separate notification here — that was causing duplicate spam.
     onDeviceEEWService.handleDetection(event);
 
-    // 1. Local Notification (Critical Alert)
-    const now = Date.now();
-    if (event.confidence > 70 && now - this.lastLocalAlertAt >= this.localAlertCooldownMs) {
-      this.lastLocalAlertAt = now;
-      const estimatedMagnitude =
-        (typeof event.estimatedMagnitude === 'number' && Number.isFinite(event.estimatedMagnitude) && event.estimatedMagnitude > 0)
-          ? event.estimatedMagnitude
-          : this.estimateMagnitudeFromAcceleration(event.magnitude, event.confidence);
-
-      notificationService.showEarthquakeNotification(
-        estimatedMagnitude,
-        event.type === 'P-WAVE' ? 'Yerel Algılama - Erken Uyarı' : 'Yerel Algılama - Sarsıntı',
-        new Date(event.timestamp),
-        event.type === 'P-WAVE', // isEEW
-        event.type === 'P-WAVE' ? 5 : 0, // timeAdvance for P-wave
-      );
+    // PRODUCTION FIX: REMOVED duplicate local notification.
+    // Previously, this method ALSO called notificationService.showEarthquakeNotification()
+    // independently with a 5s cooldown and confidence > 70 threshold.
+    // This meant EVERY detection triggered TWO independent notification paths.
+    // OnDeviceEEWService already handles notification with proper thresholds (85% conf, 120s cooldown).
+    if (__DEV__ && event.confidence > 85) {
+      logger.debug(`📊 High-confidence detection: conf=${event.confidence}%, mag=${event.magnitude.toFixed(3)}g (notification via EEWService)`);
     }
 
     // 2. Broadcast to Mesh

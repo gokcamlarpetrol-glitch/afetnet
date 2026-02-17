@@ -11,16 +11,16 @@ import { colors, typography, shadow } from '../../theme';
 import Card from '../Card';
 
 interface MemberStatus {
-    id: string;
-    name: string;
-    status: 'safe' | 'warning' | 'danger' | 'unknown';
-    lastSeen: string;
-    avatarUrl?: string;
-    isOnline: boolean;
+  uid: string;
+  name: string;
+  status: 'safe' | 'warning' | 'danger' | 'unknown';
+  lastSeen: string;
+  avatarUrl?: string;
+  isOnline: boolean;
 }
 
 interface FamilyCheckInModuleProps {
-    members: MemberStatus[];
+  members: MemberStatus[];
 }
 
 export const FamilyCheckInModule = ({ members }: FamilyCheckInModuleProps) => {
@@ -45,7 +45,7 @@ export const FamilyCheckInModule = ({ members }: FamilyCheckInModuleProps) => {
         style={styles.scrollView}
       >
         {members.map((member) => (
-          <View key={member.id} style={styles.memberBadge}>
+          <View key={member.uid} style={styles.memberBadge}>
             {/* Avatar Circle with Ring */}
             <View style={[
               styles.avatarRing,
@@ -96,19 +96,19 @@ export const FamilyCheckInModule = ({ members }: FamilyCheckInModuleProps) => {
 
 const getStatusColor = (status: string) => {
   switch (status) {
-  case 'safe': return colors.status.safe;
-  case 'warning': return colors.status.warning;
-  case 'danger': return colors.status.danger;
-  default: return colors.status.offline;
+    case 'safe': return colors.status.safe;
+    case 'warning': return colors.status.warning;
+    case 'danger': return colors.status.danger;
+    default: return colors.status.offline;
   }
 };
 
 const getStatusText = (status: string) => {
   switch (status) {
-  case 'safe': return 'Güvende';
-  case 'warning': return 'Riskli';
-  case 'danger': return 'Tehlike';
-  default: return 'Bilinmiyor';
+    case 'safe': return 'Güvende';
+    case 'warning': return 'Riskli';
+    case 'danger': return 'Tehlike';
+    default: return 'Bilinmiyor';
   }
 };
 

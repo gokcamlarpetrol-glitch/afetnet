@@ -24,10 +24,12 @@
  */
 
 import { Platform, Vibration, AppState } from 'react-native';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync, createAudioPlayer } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { createLogger } from '../utils/logger';
+import { shouldDeliverNotification } from './NotificationService';
 import { useSettingsStore } from '../stores/settingsStore';
 import { SeismicWaveCalculator } from '../utils/SeismicWaveCalculator';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
@@ -106,10 +108,24 @@ const MESSAGES_TR = {
 class UltraFastEEWNotificationService {
     private isInitialized = false;
     private notifModule: typeof import('expo-notifications') | null = null;
-    private activeSound: Audio.Sound | null = null;
+    private activeSound: AudioPlayer | null = null;
     private vibrationActive = false;
     private deliveryStartTime = 0;
     private ttsWarmedUp = false;
+
+    // PRODUCTION FIX: Global rate limiter — the final defense against notification spam.
+    // ALL notification callers (10+ services) flow through sendEEWNotification(),
+    // so rate-limiting here catches everything regardless of source.
+    private static readonly GLOBAL_ALERT_COOLDOWN_MS = 30000;   // 30s between any alerts
+    private static readonly MAX_ALERTS_PER_WINDOW = 6;          // Max 6 alerts per 5 min
+    private static readonly RATE_WINDOW_MS = 5 * 60 * 1000;     // 5 minute window
+    private static readonly CRITICAL_MAG_BYPASS = 5.0;           // M5.0+ bypasses all limits
+    private static readonly SAME_LOCATION_COOLDOWN_MS = 30000;   // 30s cooldown for same location
+    private static readonly DIFF_LOCATION_COOLDOWN_MS = 15000;   // 15s cooldown for different location
+    private static readonly SAME_LOCATION_RADIUS_KM = 50;        // 50km = "same location"
+    private lastAlertTime = 0;
+    private lastAlertEpicenter: { latitude: number; longitude: number } | null = null;
+    private alertTimestamps: number[] = [];
 
     // ==================== INITIALIZATION ====================
 
@@ -129,11 +145,9 @@ class UltraFastEEWNotificationService {
             this.notifModule = await import('expo-notifications');
 
             // Pre-configure audio
-            await Audio.setAudioModeAsync({
-                playsInSilentModeIOS: true,
-                staysActiveInBackground: true,
-                shouldDuckAndroid: false,
-                playThroughEarpieceAndroid: false,
+            await setAudioModeAsync({
+                playsInSilentMode: true,
+                shouldPlayInBackground: true,
             });
 
             // Apple-review safe: do not trigger permission prompt during warmup.
@@ -187,6 +201,37 @@ class UltraFastEEWNotificationService {
      */
     async sendEEWNotification(config: EEWNotificationConfig): Promise<NotificationResult> {
         this.deliveryStartTime = Date.now();
+        const now = this.deliveryStartTime;
+
+        // ==================== CROSS-SYSTEM DEDUP ====================
+        // CRITICAL: Prevents double-delivery when both UltraFast and MBN
+        // are triggered for the same earthquake by different services.
+        if (!shouldDeliverNotification(config.magnitude, config.location, undefined, 'UltraFast')) {
+            return { delivered: false, deliveryTimeMs: 0, channels: { push: false, sound: false, vibration: false, tts: false, fullscreen: false } };
+        }
+
+        // ==================== SERVICE-LEVEL RATE LIMITER ====================
+        const isCritical = config.magnitude >= UltraFastEEWNotificationService.CRITICAL_MAG_BYPASS;
+
+        if (!isCritical) {
+            // Check cooldown (2 min between alerts)
+            if (now - this.lastAlertTime < UltraFastEEWNotificationService.GLOBAL_ALERT_COOLDOWN_MS) {
+                logger.info(`⏭️ GLOBAL RATE LIMIT: Alert suppressed (${Math.round((now - this.lastAlertTime) / 1000)}s since last, need ${UltraFastEEWNotificationService.GLOBAL_ALERT_COOLDOWN_MS / 1000}s). M${config.magnitude.toFixed(1)} ${config.source}`);
+                return { delivered: false, deliveryTimeMs: 0, channels: { push: false, sound: false, vibration: false, tts: false, fullscreen: false } };
+            }
+
+            // Check window rate limit (max 3 per 5 min)
+            const windowStart = now - UltraFastEEWNotificationService.RATE_WINDOW_MS;
+            this.alertTimestamps = this.alertTimestamps.filter(t => t > windowStart);
+            if (this.alertTimestamps.length >= UltraFastEEWNotificationService.MAX_ALERTS_PER_WINDOW) {
+                logger.info(`⏭️ GLOBAL RATE LIMIT: ${this.alertTimestamps.length}/${UltraFastEEWNotificationService.MAX_ALERTS_PER_WINDOW} alerts in 5 min window — skipping M${config.magnitude.toFixed(1)}`);
+                return { delivered: false, deliveryTimeMs: 0, channels: { push: false, sound: false, vibration: false, tts: false, fullscreen: false } };
+            }
+        }
+
+        // Record this alert
+        this.lastAlertTime = now;
+        this.alertTimestamps.push(now);
 
         // Determine urgency level
         const urgency = this.calculateUrgency(config);
@@ -228,8 +273,8 @@ class UltraFastEEWNotificationService {
         try {
             // Stop sound
             if (this.activeSound) {
-                await this.activeSound.stopAsync();
-                await this.activeSound.unloadAsync();
+                this.activeSound.pause();
+                this.activeSound.remove();
                 this.activeSound = null;
             }
 
@@ -258,25 +303,11 @@ class UltraFastEEWNotificationService {
         urgency: 'critical' | 'high' | 'medium' | 'low'
     ): Promise<boolean> {
         try {
-            if (!this.notifModule) {
-                this.notifModule = await import('expo-notifications');
-            }
+            // NOTIFICATION GATEWAY FIX: Route through central NotificationScheduler
+            // instead of calling scheduleNotificationAsync directly.
+            // This ensures all push notifications go through a single rate-limited pipeline.
+            const { scheduleNotification } = await import('./notifications/NotificationScheduler');
 
-            const Notifications = this.notifModule;
-
-            // Set notification handler to show immediately
-            Notifications.setNotificationHandler({
-                handleNotification: async () => ({
-                    shouldShowAlert: true,
-                    shouldPlaySound: true,
-                    shouldSetBadge: true,
-                    shouldShowBanner: true,
-                    shouldShowList: true,
-                    priority: Notifications.AndroidNotificationPriority.MAX,
-                }),
-            });
-
-            // Create notification content
             const title = urgency === 'critical'
                 ? '🚨 ACİL DEPREM UYARISI!'
                 : urgency === 'high'
@@ -285,9 +316,8 @@ class UltraFastEEWNotificationService {
 
             const body = this.getNotificationBody(config, urgency);
 
-            // Schedule immediate notification
-            await Notifications.scheduleNotificationAsync({
-                content: {
+            await scheduleNotification(
+                {
                     title,
                     body,
                     data: {
@@ -299,15 +329,10 @@ class UltraFastEEWNotificationService {
                     },
                     sound: 'default',
                     priority: 'max',
-                    // Android specific
-                    ...(Platform.OS === 'android' && {
-                        channelId: urgency === 'critical' || urgency === 'high'
-                            ? 'earthquake-critical'
-                            : 'earthquake-normal',
-                    }),
+                    categoryIdentifier: 'earthquake',
                 },
-                trigger: null, // Immediate
-            });
+                { channelType: 'eew' },
+            );
 
             return true;
         } catch (error) {
@@ -337,8 +362,8 @@ class UltraFastEEWNotificationService {
             // Stop any existing sound
             if (this.activeSound) {
                 try {
-                    await this.activeSound.stopAsync();
-                    await this.activeSound.unloadAsync();
+                    this.activeSound.pause();
+                    this.activeSound.remove();
                 } catch (e) {
                     logger.debug('Sound cleanup error:', e);
                 }
@@ -350,24 +375,20 @@ class UltraFastEEWNotificationService {
 
             // PREMIUM: Load and play the actual emergency alert sound file
             try {
-                const { sound } = await Audio.Sound.createAsync(
+                const sound = createAudioPlayer(
                     require('../../../assets/emergency-alert.wav'),
-                    {
-                        shouldPlay: true,
-                        isLooping: config.loop,
-                        volume: config.volume,
-                        rate: config.rate,
-                        shouldCorrectPitch: true,
-                    },
                 );
+                sound.loop = config.loop;
+                sound.volume = config.volume;
+                sound.play();
                 this.activeSound = sound;
 
                 // Auto-stop after 30 seconds for safety (prevent infinite loop)
                 setTimeout(async () => {
                     if (this.activeSound === sound) {
                         try {
-                            await sound.stopAsync();
-                            await sound.unloadAsync();
+                            sound.pause();
+                            sound.remove();
                             this.activeSound = null;
                         } catch (e) {
                             // Already cleaned up

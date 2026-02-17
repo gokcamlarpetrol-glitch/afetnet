@@ -854,14 +854,18 @@ class EEWService {
     let magnitudeNotificationSent = false;
     if (settings.notificationPush) {
       try {
-        const { showMagnitudeBasedNotification } = await import('./MagnitudeBasedNotificationService');
-        await showMagnitudeBasedNotification(
+        const { notificationCenter } = await import('./notifications/NotificationCenter');
+        await notificationCenter.notify('earthquake', {
           magnitude,
-          event.region || 'Bilinmeyen bölge',
-          true, // Is EEW
-          Math.round(guaranteedWarningTime), // Time advance
-          event.issuedAt, // Timestamp
-        );
+          location: event.region || 'Bilinmeyen bölge',
+          isEEW: true,
+          timeAdvance: Math.round(guaranteedWarningTime),
+          timestamp: event.issuedAt,
+          depth: event.depth,
+          source: event.source,
+          latitude: event.latitude,
+          longitude: event.longitude,
+        }, 'EEWService');
         magnitudeNotificationSent = true;
 
         if (__DEV__) {

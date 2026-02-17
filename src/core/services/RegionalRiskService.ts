@@ -16,10 +16,10 @@ export interface RegionalRisk {
   landslideRisk: number; // 0-100
   fireRisk: number; // 0-100
   overallRisk: number; // 0-100 (weighted average)
-  
+
   factors: RiskFactor[];
   recommendations: string[];
-  
+
   soilType?: 'Z1' | 'Z2' | 'Z3' | 'Z4'; // Z4 = worst
   buildingAge?: number; // Year built
   buildingFloor?: number; // Floor number
@@ -77,7 +77,7 @@ const RISK_DATABASE: Record<string, Partial<RegionalRisk>> = {
     distanceToSea: 2,
     distanceToFault: 12,
   },
-  
+
   // Ankara (lower risk)
   'ankara_cankaya': {
     earthquakeRisk: 45,
@@ -89,7 +89,7 @@ const RISK_DATABASE: Record<string, Partial<RegionalRisk>> = {
     distanceToSea: 400,
     distanceToFault: 50,
   },
-  
+
   // Izmir (moderate-high risk)
   'izmir_konak': {
     earthquakeRisk: 75,
@@ -123,10 +123,10 @@ class RegionalRiskService {
     try {
       // Get city/district name (reverse geocoding)
       const cityDistrict = await this.getCityDistrict(latitude, longitude);
-      
+
       // Get base risk data
       const baseRisk = RISK_DATABASE[cityDistrict] || this.getDefaultRisk(latitude, longitude);
-      
+
       // Calculate individual risks
       const earthquakeRisk = this.calculateEarthquakeRisk(
         baseRisk,
@@ -135,31 +135,31 @@ class RegionalRiskService {
         userBuildingAge,
         userBuildingFloor,
       );
-      
+
       const tsunamiRisk = this.calculateTsunamiRisk(
         baseRisk,
         latitude,
         longitude,
       );
-      
+
       const floodRisk = this.calculateFloodRisk(
         baseRisk,
         latitude,
         longitude,
       );
-      
+
       const landslideRisk = this.calculateLandslideRisk(
         baseRisk,
         latitude,
         longitude,
       );
-      
+
       const fireRisk = this.calculateFireRisk(
         baseRisk,
         latitude,
         longitude,
       );
-      
+
       // Calculate overall risk (weighted)
       const overallRisk = this.calculateOverallRisk({
         earthquakeRisk,
@@ -168,7 +168,7 @@ class RegionalRiskService {
         landslideRisk,
         fireRisk,
       });
-      
+
       // Generate factors
       const factors = this.generateRiskFactors({
         earthquakeRisk,
@@ -182,7 +182,7 @@ class RegionalRiskService {
         userBuildingAge,
         userBuildingFloor,
       });
-      
+
       // Generate recommendations
       const recommendations = this.generateRecommendations({
         earthquakeRisk,
@@ -194,7 +194,7 @@ class RegionalRiskService {
         userBuildingAge,
         userBuildingFloor,
       });
-      
+
       const risk: RegionalRisk = {
         earthquakeRisk,
         tsunamiRisk,
@@ -214,10 +214,10 @@ class RegionalRiskService {
         populationDensity: baseRisk.populationDensity,
         oldBuildingsRatio: baseRisk.oldBuildingsRatio,
       };
-      
+
       this.currentRisk = risk;
       this.notifyCallbacks(risk);
-      
+
       return risk;
     } catch (error) {
       logger.error('Risk calculation error:', error);
@@ -287,7 +287,7 @@ class RegionalRiskService {
   private async getCityDistrict(lat: number, lng: number): Promise<string> {
     // Simplified reverse geocoding
     // In production, use a proper geocoding service
-    
+
     // Turkey bounding box check
     if (lat >= 41.0 && lat <= 41.3 && lng >= 28.6 && lng <= 29.3) {
       // Istanbul area
@@ -305,15 +305,15 @@ class RegionalRiskService {
       }
       return 'istanbul_default';
     }
-    
+
     if (lat >= 39.8 && lat <= 40.0 && lng >= 32.7 && lng <= 33.0) {
       return 'ankara_cankaya';
     }
-    
+
     if (lat >= 38.35 && lat <= 38.5 && lng >= 27.0 && lng <= 27.2) {
       return 'izmir_konak';
     }
-    
+
     return 'unknown';
   }
 
@@ -339,33 +339,33 @@ class RegionalRiskService {
     buildingFloor?: number,
   ): number {
     let risk = baseRisk.earthquakeRisk || 50;
-    
+
     // Soil type multiplier
     if (baseRisk.soilType === 'Z4') risk += 20;
     else if (baseRisk.soilType === 'Z3') risk += 10;
     else if (baseRisk.soilType === 'Z2') risk += 5;
-    
+
     // Building age factor
     if (buildingAge && buildingAge < 2000) {
       risk += 15; // Old buildings are more vulnerable
     }
-    
+
     // Floor factor (higher floors shake more)
     if (buildingFloor && buildingFloor > 5) {
       risk += 10;
     }
-    
+
     // Distance to fault
     if (baseRisk.distanceToFault) {
       if (baseRisk.distanceToFault < 10) risk += 20;
       else if (baseRisk.distanceToFault < 20) risk += 10;
     }
-    
+
     // Population density (more people = higher impact)
     if (baseRisk.populationDensity && baseRisk.populationDensity > 300000) {
       risk += 5;
     }
-    
+
     return Math.min(100, Math.max(0, risk));
   }
 
@@ -375,7 +375,7 @@ class RegionalRiskService {
     lng: number,
   ): number {
     let risk = baseRisk.tsunamiRisk || 0;
-    
+
     // Distance to sea
     if (baseRisk.distanceToSea !== undefined) {
       if (baseRisk.distanceToSea < 1) risk = 90;
@@ -384,12 +384,12 @@ class RegionalRiskService {
       else if (baseRisk.distanceToSea < 10) risk = 30;
       else risk = 0;
     }
-    
+
     // Elevation (lower = higher risk)
     if (baseRisk.elevation !== undefined && baseRisk.elevation < 10) {
       risk += 10;
     }
-    
+
     return Math.min(100, Math.max(0, risk));
   }
 
@@ -399,7 +399,7 @@ class RegionalRiskService {
     lng: number,
   ): number {
     let risk = baseRisk.floodRisk || 20;
-    
+
     // Elevation (lower = higher flood risk)
     if (baseRisk.elevation !== undefined) {
       if (baseRisk.elevation < 5) risk = 80;
@@ -407,12 +407,12 @@ class RegionalRiskService {
       else if (baseRisk.elevation < 100) risk = 30;
       else risk = 10;
     }
-    
+
     // Distance to sea (coastal areas)
     if (baseRisk.distanceToSea !== undefined && baseRisk.distanceToSea < 10) {
       risk += 10;
     }
-    
+
     return Math.min(100, Math.max(0, risk));
   }
 
@@ -422,7 +422,7 @@ class RegionalRiskService {
     lng: number,
   ): number {
     let risk = baseRisk.landslideRisk || 10;
-    
+
     // Slope factor
     if (baseRisk.slope !== undefined) {
       if (baseRisk.slope > 30) risk = 80;
@@ -430,11 +430,11 @@ class RegionalRiskService {
       else if (baseRisk.slope > 10) risk = 30;
       else risk = 10;
     }
-    
+
     // Soil type (soft soil = higher landslide risk)
     if (baseRisk.soilType === 'Z4') risk += 20;
     else if (baseRisk.soilType === 'Z3') risk += 10;
-    
+
     return Math.min(100, Math.max(0, risk));
   }
 
@@ -444,19 +444,19 @@ class RegionalRiskService {
     lng: number,
   ): number {
     let risk = baseRisk.fireRisk || 20;
-    
+
     // Population density (more people = more fire risk)
     if (baseRisk.populationDensity) {
       if (baseRisk.populationDensity > 500000) risk += 20;
       else if (baseRisk.populationDensity > 300000) risk += 10;
     }
-    
+
     // Old buildings (more fire risk)
     if (baseRisk.oldBuildingsRatio) {
       if (baseRisk.oldBuildingsRatio > 0.6) risk += 15;
       else if (baseRisk.oldBuildingsRatio > 0.4) risk += 10;
     }
-    
+
     return Math.min(100, Math.max(0, risk));
   }
 
@@ -475,15 +475,15 @@ class RegionalRiskService {
       landslide: 0.15,
       fire: 0.10,
     };
-    
-    const overall = 
+
+    const overall =
       risks.earthquakeRisk * weights.earthquake +
       risks.tsunamiRisk * weights.tsunami +
       risks.floodRisk * weights.flood +
       risks.landslideRisk * weights.landslide +
       risks.fireRisk * weights.fire;
-    
-    return Math.round(overall);
+
+    return Math.min(100, Math.max(0, Math.round(overall)));
   }
 
   private generateRiskFactors(params: {
@@ -499,7 +499,7 @@ class RegionalRiskService {
     userBuildingFloor?: number;
   }): RiskFactor[] {
     const factors: RiskFactor[] = [];
-    
+
     // Earthquake factors
     if (params.earthquakeRisk >= 80) {
       factors.push({
@@ -509,7 +509,7 @@ class RegionalRiskService {
         impact: `Senin bulunduğun bölge için şiddet ${params.earthquakeRisk >= 90 ? '7.5+' : '6.5+'} bekleniyor`,
       });
     }
-    
+
     if (params.baseRisk.soilType === 'Z4') {
       factors.push({
         type: 'earthquake',
@@ -518,7 +518,7 @@ class RegionalRiskService {
         impact: 'Z4 zemin sınıfı: Depremde şiddet 3 katına çıkar',
       });
     }
-    
+
     if (params.userBuildingAge && params.userBuildingAge < 2000) {
       factors.push({
         type: 'earthquake',
@@ -527,7 +527,7 @@ class RegionalRiskService {
         impact: '1980 öncesi bina: Deprem yönetmeliği öncesi yapı',
       });
     }
-    
+
     if (params.baseRisk.distanceToFault && params.baseRisk.distanceToFault < 10) {
       factors.push({
         type: 'earthquake',
@@ -536,31 +536,31 @@ class RegionalRiskService {
         impact: 'Yakın fay hattı: Deprem merkez üssü olabilir',
       });
     }
-    
+
     // Tsunami factors
     if (params.tsunamiRisk >= 70) {
       factors.push({
         type: 'tsunami',
         severity: params.tsunamiRisk >= 80 ? 'critical' : 'high',
         description: 'Sahil yakını - tsunami riski',
-        impact: params.baseRisk.distanceToSea 
+        impact: params.baseRisk.distanceToSea
           ? `Denize ${params.baseRisk.distanceToSea}km mesafe - tsunami riski yüksek`
           : 'Sahil yakını - tsunami riski',
       });
     }
-    
+
     // Flood factors
     if (params.floodRisk >= 60) {
       factors.push({
         type: 'flood',
         severity: 'high',
         description: 'Düşük rakım - sel riski',
-        impact: params.baseRisk.elevation 
+        impact: params.baseRisk.elevation
           ? `${params.baseRisk.elevation}m rakım - sel riski yüksek`
           : 'Düşük rakım - sel riski',
       });
     }
-    
+
     // Landslide factors
     if (params.landslideRisk >= 60) {
       factors.push({
@@ -572,7 +572,7 @@ class RegionalRiskService {
           : 'Eğimli zemin - heyelan riski',
       });
     }
-    
+
     return factors;
   }
 
@@ -587,44 +587,44 @@ class RegionalRiskService {
     userBuildingFloor?: number;
   }): string[] {
     const recommendations: string[] = [];
-    
+
     if (params.earthquakeRisk >= 80) {
       recommendations.push('Deprem sigortası yaptırın (DASK)');
       recommendations.push('Mobilyaları duvara sabitleyin');
       recommendations.push('Acil çıkış planı yapın ve ailenizle paylaşın');
       recommendations.push('Acil durum çantası hazırlayın');
     }
-    
+
     if (params.baseRisk.soilType === 'Z4') {
       recommendations.push('Z4 zemin sınıfı: Bina güçlendirme çalışması yapın');
       recommendations.push('Sismik izolatör kullanımını değerlendirin');
     }
-    
+
     if (params.userBuildingAge && params.userBuildingAge < 2000) {
       recommendations.push('Bina güçlendirme veya yenileme yapın');
       recommendations.push('Deprem testi yaptırın');
     }
-    
+
     if (params.tsunamiRisk >= 70) {
       recommendations.push('Tsunami kaçış rotası belirleyin (yüksekliğe veya içeriye)');
       recommendations.push('Toplanma noktasını yüksek rakımlı yerde seçin');
     }
-    
+
     if (params.floodRisk >= 60) {
       recommendations.push('Sel riski: Değerli eşyaları yüksek yerde saklayın');
       recommendations.push('Su geçirmez çanta kullanın');
     }
-    
+
     if (params.landslideRisk >= 60) {
       recommendations.push('Heyelan riski: Eğimli bölgeden uzaklaşın');
       recommendations.push('Ağaçlandırma yapın');
     }
-    
+
     if (params.userBuildingFloor && params.userBuildingFloor > 5) {
       recommendations.push('Yüksek kat: Asansör kullanmayın, merdiven kullanın');
       recommendations.push('Deprem anında pencere ve balkondan uzak durun');
     }
-    
+
     return recommendations;
   }
 

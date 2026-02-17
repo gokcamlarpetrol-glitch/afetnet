@@ -15,13 +15,12 @@ describe('Notification startup prompt safety', () => {
     expect(initializeBlock).toContain('deferred');
   });
 
-  it('ComprehensiveNotificationService initialize never prompts on app start', () => {
-    const source = readServiceFile('ComprehensiveNotificationService');
-    const initializeBlock = source.match(/async initialize\(\): Promise<void> \{[\s\S]*?this\.isInitialized = true/s)?.[0] || '';
+  it('NotificationService initialize never prompts on app start', () => {
+    const source = readServiceFile('NotificationService');
+    const initializeBlock = source.match(/async initialize\(\): Promise<void> \{[\s\S]*?this\.isInitialized = true;/s)?.[0] || '';
 
-    expect(initializeBlock).toContain('getPermissionsAsync');
+    expect(initializeBlock).toContain('initializeChannels');
     expect(initializeBlock).not.toContain('requestPermissionsAsync');
-    expect(initializeBlock).toContain('deferred');
   });
 
   it('UltraFastEEWNotification warmup checks status but does not open prompt', () => {

@@ -1,7 +1,6 @@
 /**
  * useMapVoiceGuidance — FAZ 6
- * 
- * Integrates VoiceEvacuationService with map events.
+ *
  * Announces EEW warnings, safe zone directions, and family status changes via TTS.
  */
 
@@ -9,19 +8,6 @@ import { useCallback, useRef, useEffect } from 'react';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('MapVoiceGuidance');
-
-// Lazy import to avoid circular deps
-let voiceService: any = null;
-const getVoiceService = () => {
-    if (!voiceService) {
-        try {
-            voiceService = require('../services/VoiceEvacuationService');
-        } catch {
-            logger.warn('VoiceEvacuationService not available');
-        }
-    }
-    return voiceService;
-};
 
 // Lazy import expo-speech
 let Speech: any = null;

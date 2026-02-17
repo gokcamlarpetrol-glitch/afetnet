@@ -26,11 +26,12 @@
 import { Platform } from 'react-native';
 import { getDatabase, ref, push, onValue, serverTimestamp, query, orderByChild, limitToLast, off } from 'firebase/database';
 import { getApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
-import { ultraFastEEWNotification } from './UltraFastEEWNotification';
+// NotificationCenter handles all notifications now
 import { SeismicWaveCalculator } from '../utils/SeismicWaveCalculator';
 
 const logger = createLogger('CrowdsourcedSeismicNetwork');
@@ -91,14 +92,14 @@ interface NetworkConfig {
 // CONSTANTS
 // ============================================================
 
-// ELITE: Optimized for Deprem Ağı-level speed!
-// Lower thresholds = faster alerts = more lives saved
+// PRODUCTION: Balanced for accuracy + speed
+// Higher thresholds = fewer false positives = no notification spam
 const DEFAULT_CONFIG: NetworkConfig = {
-    minReportsForCluster: 2,       // ELITE: Need only 2 phones to confirm (was 3)
+    minReportsForCluster: 3,       // PRODUCTION: Need 3 phones minimum to confirm a cluster
     maxClusterRadius: 150,         // 150km radius (wider for rural areas)
-    clusterTimeWindow: 30000,      // ELITE: 30 second window (was 60s) - faster detection!
-    minReportConfidence: 0.4,      // ELITE: 40% to report (was 50%) - catch more events
-    minAlertConfidence: 0.6,       // ELITE: 60% to alert users (was 70%) - faster alerts!
+    clusterTimeWindow: 30000,      // 30 second window - fast detection
+    minReportConfidence: 0.6,      // PRODUCTION: 60% confidence to include a report
+    minAlertConfidence: 0.8,       // PRODUCTION: 80% cluster confidence to alert users
 };
 
 const STORAGE_KEYS = {
@@ -318,16 +319,17 @@ class CrowdsourcedSeismicNetworkService {
             warningSeconds = Math.max(0, Math.round((distance / 3.5) - elapsed));
         }
 
-        // Send notification
-        await ultraFastEEWNotification.sendEEWNotification({
+        // Send notification through unified center
+        const { notificationCenter } = await import('./notifications/NotificationCenter');
+        await notificationCenter.notify('earthquake', {
             magnitude: event.estimatedMagnitude,
             location: `Crowdsourced (${event.reports.length} rapor)`,
-            warningSeconds,
-            estimatedIntensity: SeismicWaveCalculator.calculateIntensity(event.estimatedMagnitude, distance),
-            epicentralDistance: distance,
-            source: 'CROWDSOURCED' as any,
-            epicenter: event.epicenter,
-        });
+            timestamp: event.firstReportTime,
+            latitude: event.epicenter.latitude,
+            longitude: event.epicenter.longitude,
+            isEEW: true,
+            source: 'Crowdsourced',
+        }, 'CrowdsourcedSeismicNetwork');
 
         firebaseAnalyticsService.logEvent('crowdsourced_alert_triggered', {
             event_id: event.id,
@@ -415,12 +417,21 @@ class CrowdsourcedSeismicNetworkService {
 
     private async ensureUserId(): Promise<void> {
         try {
+            // CRITICAL: Use Firebase Auth uid to match RTDB rules
+            // Rules require: auth.uid === $userId — random IDs will be rejected
+            const currentUser = getAuth().currentUser;
+            if (currentUser) {
+                this.userId = currentUser.uid;
+                return;
+            }
+            // Fallback: AsyncStorage ID (writes will fail with RTDB rules but reads still work)
             let saved = await AsyncStorage.getItem(STORAGE_KEYS.USER_ID);
             if (!saved) {
                 saved = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
                 await AsyncStorage.setItem(STORAGE_KEYS.USER_ID, saved);
             }
             this.userId = saved;
+            logger.warn('No auth user, using fallback userId — seismic reports will be rejected by RTDB rules');
         } catch (e) {
             this.userId = `temp_${Date.now()}`;
         }

@@ -2,13 +2,15 @@
  * PREMIUM EARTHQUAKE CARD - WORLD-CLASS DESIGN
  * Ultra-premium earthquake display with all details
  * Inspired by Apple Weather and premium news apps
+ * 
+ * Real MapView preview (non-interactive) showing epicenter
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
 import Animated, {
     FadeInDown,
     useSharedValue,
@@ -33,6 +35,111 @@ interface PremiumEarthquakeCardProps {
     onMapPress?: () => void;
 }
 
+/**
+ * Real MapView preview — non-interactive to work safely inside ScrollView
+ */
+const EpicenterMapPreview = ({ latitude, longitude, severityColor, magnitude }: {
+    latitude: number;
+    longitude: number;
+    severityColor: string;
+    magnitude: number;
+}) => {
+    const [mapReady, setMapReady] = useState(false);
+
+    return (
+        <View style={[styles.map, { height: MAP_HEIGHT }]}>
+            {/* Loading fallback shown until map renders */}
+            {!mapReady && (
+                <LinearGradient
+                    colors={['#1a2332', '#0d1b2a', '#1b2838']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                >
+                    <View style={styles.mapLoadingContainer}>
+                        <Ionicons name="map-outline" size={28} color="rgba(255,255,255,0.3)" />
+                        <Text style={styles.mapLoadingText}>Harita yükleniyor...</Text>
+                    </View>
+                </LinearGradient>
+            )}
+
+            {/* Real non-interactive MapView — zoomed out for geographic context */}
+            <MapView
+                provider={PROVIDER_DEFAULT}
+                style={StyleSheet.absoluteFill}
+                initialRegion={{
+                    latitude,
+                    longitude,
+                    latitudeDelta: 2.5,
+                    longitudeDelta: 2.5,
+                }}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass={false}
+                showsScale={false}
+                showsTraffic={false}
+                showsBuildings={false}
+                showsIndoors={false}
+                showsPointsOfInterest={true}
+                toolbarEnabled={false}
+                moveOnMarkerPress={false}
+                pointerEvents="none"
+                onMapReady={() => setMapReady(true)}
+                mapType="standard"
+                liteMode={Platform.OS === 'android'}
+            >
+                {/* Seismic impact — 3 concentric circles */}
+                <Circle
+                    center={{ latitude, longitude }}
+                    radius={60000}
+                    strokeColor={`${severityColor}30`}
+                    fillColor={`${severityColor}08`}
+                    strokeWidth={1}
+                />
+                <Circle
+                    center={{ latitude, longitude }}
+                    radius={35000}
+                    strokeColor={`${severityColor}55`}
+                    fillColor={`${severityColor}12`}
+                    strokeWidth={1.5}
+                />
+                <Circle
+                    center={{ latitude, longitude }}
+                    radius={12000}
+                    strokeColor={`${severityColor}AA`}
+                    fillColor={`${severityColor}25`}
+                    strokeWidth={2}
+                />
+
+                {/* Epicenter — native red pin (always large & visible on iOS/Android) */}
+                <Marker
+                    coordinate={{ latitude, longitude }}
+                    pinColor={severityColor}
+                    title={`M${magnitude.toFixed(1)} Deprem`}
+                />
+            </MapView>
+        </View>
+    );
+};
+
+/** Dark map style for premium look */
+const darkMapStyle = [
+    { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
+    { featureType: 'administrative.country', elementType: 'geometry.stroke', stylers: [{ color: '#4b6878' }] },
+    { featureType: 'land', elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#304a7d' }] },
+    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#255763' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] },
+    { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+    { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
+
 export const PremiumEarthquakeCardComponent = ({
     magnitude,
     location,
@@ -43,7 +150,6 @@ export const PremiumEarthquakeCardComponent = ({
     onPress,
     onMapPress,
 }: PremiumEarthquakeCardProps) => {
-    const mapRef = useRef<MapView>(null);
 
     // Severity classification
     const isCritical = magnitude >= 6.0;
@@ -105,25 +211,29 @@ export const PremiumEarthquakeCardComponent = ({
 
     // Time calculation
     const getTimeAgo = (timeStr: string) => {
-        const now = new Date();
-        const parts = timeStr.split(':');
-        if (parts.length >= 2) {
-            const hours = parseInt(parts[0], 10);
-            const minutes = parseInt(parts[1], 10);
-            const earthquakeTime = new Date();
-            earthquakeTime.setHours(hours, minutes, 0, 0);
+        try {
+            const now = new Date();
+            const parts = timeStr.split(':');
+            if (parts.length >= 2) {
+                const hours = parseInt(parts[0], 10);
+                const minutes = parseInt(parts[1], 10);
+                const earthquakeTime = new Date();
+                earthquakeTime.setHours(hours, minutes, 0, 0);
 
-            const diffMs = now.getTime() - earthquakeTime.getTime();
-            const diffMins = Math.floor(diffMs / 60000);
+                const diffMs = now.getTime() - earthquakeTime.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
 
-            if (diffMins < 0) return 'az önce';
-            if (diffMins < 1) return 'az önce';
-            if (diffMins < 60) return `${diffMins} dk önce`;
-            const diffHours = Math.floor(diffMins / 60);
-            if (diffHours < 24) return `${diffHours} saat önce`;
+                if (diffMins < 0) return 'az önce';
+                if (diffMins < 1) return 'az önce';
+                if (diffMins < 60) return `${diffMins} dk önce`;
+                const diffHours = Math.floor(diffMins / 60);
+                if (diffHours < 24) return `${diffHours} saat önce`;
+                return timeStr;
+            }
             return timeStr;
+        } catch {
+            return timeStr || '—';
         }
-        return timeStr;
     };
 
     // Intensity based on magnitude (Mercalli scale approximation)
@@ -142,12 +252,16 @@ export const PremiumEarthquakeCardComponent = ({
 
     // Get formatted date
     const getFormattedDate = () => {
-        const now = new Date();
-        return now.toLocaleDateString('tr-TR', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-        });
+        try {
+            const now = new Date();
+            return now.toLocaleDateString('tr-TR', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+            });
+        } catch {
+            return '';
+        }
     };
 
     const severityColor = getSeverityColor();
@@ -172,38 +286,14 @@ export const PremiumEarthquakeCardComponent = ({
 
                 {/* Main Card */}
                 <View style={styles.card}>
-                    {/* Map Section */}
+                    {/* Real MapView Preview */}
                     <Pressable onPress={onMapPress} style={styles.mapContainer}>
-                        <MapView
-                            ref={mapRef}
-                            provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-                            style={styles.map}
-                            mapType="standard"
-                            initialRegion={{
-                                latitude,
-                                longitude,
-                                latitudeDelta: 0.4,
-                                longitudeDelta: 0.4,
-                            }}
-                            scrollEnabled={false}
-                            zoomEnabled={false}
-                            rotateEnabled={false}
-                            pitchEnabled={false}
-                            pointerEvents="none"
-                            showsCompass={false}
-                            showsScale={false}
-                            showsBuildings={false}
-                            showsTraffic={false}
-                            showsIndoors={false}
-                        >
-                            {/* Single clear epicenter marker */}
-                            <Marker coordinate={{ latitude, longitude }} anchor={{ x: 0.5, y: 0.5 }}>
-                                <View style={styles.epicenterContainer}>
-                                    <Animated.View style={[styles.pulseRing, { borderColor: severityColor }, pulseRingStyle]} />
-                                    <View style={[styles.epicenterDot, { backgroundColor: severityColor }]} />
-                                </View>
-                            </Marker>
-                        </MapView>
+                        <EpicenterMapPreview
+                            latitude={latitude}
+                            longitude={longitude}
+                            severityColor={severityColor}
+                            magnitude={magnitude}
+                        />
 
                         {/* Gradient Overlay */}
                         <LinearGradient
@@ -219,7 +309,7 @@ export const PremiumEarthquakeCardComponent = ({
                         </View>
 
                         {/* Location Name */}
-                        <Text style={styles.locationText}>{location}</Text>
+                        <Text style={styles.locationText}>{location || 'Bilinmiyor'}</Text>
 
                         {/* Severity Badge */}
                         <LinearGradient
@@ -244,7 +334,7 @@ export const PremiumEarthquakeCardComponent = ({
                         <View style={styles.magnitudeRow}>
                             <View style={styles.magnitudeContainer}>
                                 <Text style={[styles.magnitudeValue, { color: severityColor }]}>
-                                    {magnitude.toFixed(1)}
+                                    {(magnitude ?? 0).toFixed(1)}
                                 </Text>
                                 <View style={styles.magnitudeLabels}>
                                     <Text style={styles.magnitudeLabel}>Büyüklük</Text>
@@ -267,7 +357,7 @@ export const PremiumEarthquakeCardComponent = ({
                                 <Ionicons name="layers-outline" size={16} color="rgba(255,255,255,0.5)" />
                                 <View style={styles.statContent}>
                                     <Text style={styles.statLabel}>DERİNLİK</Text>
-                                    <Text style={styles.statValue}>{depth.toFixed(2)} km</Text>
+                                    <Text style={styles.statValue}>{(depth ?? 0).toFixed(2)} km</Text>
                                 </View>
                             </View>
 
@@ -358,41 +448,26 @@ const styles = StyleSheet.create({
     },
     map: {
         ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
     },
+    mapLoadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+    },
+    mapLoadingText: {
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.4)',
+        fontWeight: '500',
+    },
+
     mapGradient: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
         height: 80,
-    },
-    epicenterContainer: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    pulseRing: {
-        position: 'absolute',
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        borderWidth: 2,
-    },
-    epicenterDot: {
-        width: 18,
-        height: 18,
-        borderRadius: 9,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: '#fff',
-    },
-    epicenterInner: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#fff',
     },
     epicenterLabel: {
         position: 'absolute',

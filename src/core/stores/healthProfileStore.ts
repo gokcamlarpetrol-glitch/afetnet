@@ -93,6 +93,10 @@ const DEFAULT_PROFILE: HealthProfile = {
 const STORAGE_KEY_BASE = '@afetnet:health_profile';
 const STORAGE_GUEST_SCOPE = 'guest';
 
+// Debounce saveProfile to prevent burst Firebase writes during rapid form edits
+let saveDebounceTimer: NodeJS.Timeout | null = null;
+const SAVE_DEBOUNCE_MS = 300;
+
 const getScopedStorageKey = (): string => {
   try {
     const app = initializeFirebase();
@@ -102,6 +106,15 @@ const getScopedStorageKey = (): string => {
   } catch {
     return `${STORAGE_KEY_BASE}:${STORAGE_GUEST_SCOPE}`;
   }
+};
+
+// Debounced save helper to coalesce rapid mutations into a single Firebase write
+const debouncedSave = (get: () => HealthProfileState) => {
+  if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+  saveDebounceTimer = setTimeout(() => {
+    saveDebounceTimer = null;
+    get().saveProfile();
+  }, SAVE_DEBOUNCE_MS);
 };
 
 export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
@@ -116,18 +129,23 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   addAllergy: (allergy) => {
-    set((state) => ({
-      profile: {
-        ...state.profile,
-        allergies: [...state.profile.allergies, allergy],
-        lastUpdated: Date.now(),
-      },
-    }));
-    get().saveProfile();
+    const trimmed = allergy.trim();
+    if (!trimmed) return;
+    set((state) => {
+      if (state.profile.allergies.includes(trimmed)) return state;
+      return {
+        profile: {
+          ...state.profile,
+          allergies: [...state.profile.allergies, trimmed],
+          lastUpdated: Date.now(),
+        },
+      };
+    });
+    debouncedSave(get);
   },
 
   removeAllergy: (allergy) => {
@@ -138,18 +156,23 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   addCondition: (condition) => {
-    set((state) => ({
-      profile: {
-        ...state.profile,
-        chronicConditions: [...state.profile.chronicConditions, condition],
-        lastUpdated: Date.now(),
-      },
-    }));
-    get().saveProfile();
+    const trimmed = condition.trim();
+    if (!trimmed) return;
+    set((state) => {
+      if (state.profile.chronicConditions.includes(trimmed)) return state;
+      return {
+        profile: {
+          ...state.profile,
+          chronicConditions: [...state.profile.chronicConditions, trimmed],
+          lastUpdated: Date.now(),
+        },
+      };
+    });
+    debouncedSave(get);
   },
 
   removeCondition: (condition) => {
@@ -160,18 +183,23 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   addMedication: (medication) => {
-    set((state) => ({
-      profile: {
-        ...state.profile,
-        medications: [...state.profile.medications, medication],
-        lastUpdated: Date.now(),
-      },
-    }));
-    get().saveProfile();
+    const trimmed = medication.trim();
+    if (!trimmed) return;
+    set((state) => {
+      if (state.profile.medications.includes(trimmed)) return state;
+      return {
+        profile: {
+          ...state.profile,
+          medications: [...state.profile.medications, trimmed],
+          lastUpdated: Date.now(),
+        },
+      };
+    });
+    debouncedSave(get);
   },
 
   removeMedication: (medication) => {
@@ -182,7 +210,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   addEmergencyContact: (contact) => {
@@ -193,7 +221,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   removeEmergencyContact: (contactId) => {
@@ -204,7 +232,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   updateEmergencyContact: (contactId, updates) => {
@@ -217,7 +245,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   setNotes: (notes) => {
@@ -228,7 +256,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         lastUpdated: Date.now(),
       },
     }));
-    get().saveProfile();
+    debouncedSave(get);
   },
 
   updateProfile: (updates) => {
@@ -277,14 +305,13 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         const deviceId = await getDeviceId();
         if (deviceId) {
           const { firebaseDataService } = await import('../services/FirebaseDataService');
-          if (firebaseDataService.isInitialized) {
-            const cloudProfile = await firebaseDataService.loadHealthProfile(deviceId);
-            if (cloudProfile) {
-              // Merge: Firebase takes precedence
-              set({ profile: cloudProfile, isLoaded: true });
-              await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(cloudProfile));
-              logger.info('HealthProfile loaded from Firebase');
-            }
+          try { await firebaseDataService.initialize(); } catch { /* best effort */ }
+          const cloudProfile = await firebaseDataService.loadHealthProfile(deviceId);
+          if (cloudProfile) {
+            // Merge: Firebase takes precedence
+            set({ profile: cloudProfile, isLoaded: true });
+            await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(cloudProfile));
+            logger.info('HealthProfile loaded from Firebase');
           }
         }
       } catch (error) {
@@ -307,9 +334,8 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
         const deviceId = await getDeviceId();
         if (deviceId) {
           const { firebaseDataService } = await import('../services/FirebaseDataService');
-          if (firebaseDataService.isInitialized) {
-            await firebaseDataService.saveHealthProfile(deviceId, profile);
-          }
+          try { await firebaseDataService.initialize(); } catch { /* best effort */ }
+          await firebaseDataService.saveHealthProfile(deviceId, profile);
         }
       } catch (error) {
         logger.error('Failed to save health profile to Firebase:', error);

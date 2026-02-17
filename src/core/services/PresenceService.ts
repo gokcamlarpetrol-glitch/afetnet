@@ -33,6 +33,7 @@ export type PresenceCallback = (userId: string, status: PresenceStatus) => void;
 
 class PresenceService {
     private isInitialized = false;
+    private activeUid: string | null = null;
     private myStatusRef: any = null;
     private listeners: Map<string, PresenceCallback[]> = new Map();
     private unsubscribers: Map<string, () => void> = new Map();
@@ -43,8 +44,6 @@ class PresenceService {
      * Initialize presence tracking
      */
     async initialize(): Promise<void> {
-        if (this.isInitialized) return;
-
         try {
             await identityService.initialize();
             const cloudUid = identityService.getCloudUid();
@@ -52,6 +51,14 @@ class PresenceService {
             if (!cloudUid) {
                 logger.warn('Cannot init presence: not authenticated');
                 return;
+            }
+
+            if (this.isInitialized && this.activeUid === cloudUid) {
+                return;
+            }
+
+            if (this.isInitialized && this.activeUid && this.activeUid !== cloudUid) {
+                await this.cleanup();
             }
 
             const app = initializeFirebase();
@@ -77,6 +84,7 @@ class PresenceService {
                 lastSeen: serverTimestamp(),
             });
 
+            this.activeUid = cloudUid;
             this.isInitialized = true;
             logger.info('✅ PresenceService initialized');
 
@@ -169,10 +177,12 @@ class PresenceService {
             const statusRef = ref(db, `presence/${userId}`);
 
             // Add to listeners
-            if (!this.listeners.has(userId)) {
-                this.listeners.set(userId, []);
+            let callbacksForUser = this.listeners.get(userId);
+            if (!callbacksForUser) {
+                callbacksForUser = [];
+                this.listeners.set(userId, callbacksForUser);
             }
-            this.listeners.get(userId)!.push(callback);
+            callbacksForUser.push(callback);
 
             // If first listener for this user, set up Firebase listener
             if (!this.unsubscribers.has(userId)) {
@@ -266,6 +276,7 @@ class PresenceService {
 
         this.myStatusRef = null;
         this.isInitialized = false;
+        this.activeUid = null;
 
         logger.info('🗑️ PresenceService cleaned up');
     }

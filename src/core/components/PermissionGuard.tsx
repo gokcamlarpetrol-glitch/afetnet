@@ -11,7 +11,7 @@ import { View, Text, StyleSheet, Alert, Pressable, ActivityIndicator, Linking } 
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { Camera } from 'expo-camera';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync } from 'expo-audio';
 import { colors } from '../theme';
 import { createLogger } from '../utils/logger';
 
@@ -100,7 +100,7 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
     // 4. Microphone Permission
     try {
       logger.info('Requesting microphone permission...');
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status } = await requestRecordingPermissionsAsync();
       statuses.microphone = status === 'granted';
       if (status === 'granted') {
         logger.info('Microphone permission: GRANTED');

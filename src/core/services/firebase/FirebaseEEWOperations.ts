@@ -38,6 +38,7 @@ import {
     deleteDoc,
     type Unsubscribe,
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 
@@ -228,11 +229,20 @@ export async function savePWaveDetection(
         const db = await getFirestoreInstanceAsync();
         if (!db) return null;
 
+        // CRITICAL: Firestore rules require userId == auth.uid
+        // Without this, all P-wave writes will be rejected with permission-denied
+        const currentUser = getAuth().currentUser;
+        if (!currentUser) {
+            logger.debug('No authenticated user, skipping P-wave save');
+            return null;
+        }
+
         // Set expiration (5 minutes from now)
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
         const docData = {
             ...detection,
+            userId: currentUser.uid, // CRITICAL: Required by Firestore rules
             createdAt: serverTimestamp(),
             expiresAt: Timestamp.fromDate(expiresAt),
         };
@@ -376,6 +386,9 @@ export function subscribeToPWaveDetections(
 
 /**
  * Create a new EEW broadcast
+ * SECURITY NOTE: Client-side writes to eew_broadcasts are now blocked by Firestore rules.
+ * This function will fail gracefully. Broadcasts are created only via Cloud Functions.
+ * @deprecated Use Cloud Functions to create broadcasts
  */
 export async function createEEWBroadcast(
     broadcast: Omit<EEWBroadcast, 'id' | 'createdAt' | 'updatedAt'>,
@@ -389,6 +402,10 @@ export async function createEEWBroadcast(
     try {
         const db = await getFirestoreInstanceAsync();
         if (!db) return null;
+
+        // SECURITY NOTE: This will be rejected by Firestore rules (allow create: if false)
+        // Keeping for backward compatibility - error is handled gracefully below
+        logger.warn('⚠️ createEEWBroadcast called from client — will be rejected by rules. Use Cloud Functions.');
 
         const docData = {
             ...broadcast,
@@ -500,6 +517,8 @@ export function subscribeToEEWBroadcasts(
 
 /**
  * Deactivate an EEW broadcast
+ * SECURITY NOTE: Client-side updates to eew_broadcasts are now blocked by Firestore rules.
+ * @deprecated Use Cloud Functions to manage broadcasts
  */
 export async function deactivateEEWBroadcast(
     broadcastId: string,
@@ -642,6 +661,9 @@ export async function syncEEWHistory(
 
 /**
  * Create or update P-wave consensus
+ * SECURITY NOTE: Client-side writes to eew_consensus are now blocked by Firestore rules.
+ * Consensus is computed only by Cloud Functions onPWaveDetection trigger.
+ * @deprecated Use Cloud Functions for consensus
  */
 export async function updatePWaveConsensus(
     consensus: Omit<PWaveConsensus, 'id' | 'createdAt' | 'updatedAt'>,

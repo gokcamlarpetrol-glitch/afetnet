@@ -20,7 +20,8 @@
  */
 
 import { Platform, Vibration, AppState } from 'react-native';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 // expo-screen-orientation removed - not needed for core functionality
@@ -128,8 +129,8 @@ class EEWCountdownEngine {
     private currentConfig: CountdownConfig | null = null;
     private currentState: CountdownState | null = null;
     private listeners: Set<CountdownCallback> = new Set();
-    private alarmSound: Audio.Sound | null = null;
-    private sirenSound: Audio.Sound | null = null;
+    private alarmSound: AudioPlayer | null = null;
+    private sirenSound: AudioPlayer | null = null;
     private startTime: number = 0;
     private currentLanguage: 'tr' | 'en' | 'ar' = 'tr';
 
@@ -143,11 +144,9 @@ class EEWCountdownEngine {
             logger.info('🚨 Initializing EEWCountdownEngine...');
 
             // Setup audio
-            await Audio.setAudioModeAsync({
-                playsInSilentModeIOS: true,
-                staysActiveInBackground: true,
-                shouldDuckAndroid: false,
-                playThroughEarpieceAndroid: false,
+            await setAudioModeAsync({
+                playsInSilentMode: true,
+                shouldPlayInBackground: true,
             });
 
             logger.info('✅ EEWCountdownEngine initialized');
@@ -398,14 +397,14 @@ class EEWCountdownEngine {
             }
 
             if (this.alarmSound) {
-                await this.alarmSound.stopAsync();
-                await this.alarmSound.unloadAsync();
+                this.alarmSound.pause();
+                this.alarmSound.remove();
                 this.alarmSound = null;
             }
 
             if (this.sirenSound) {
-                await this.sirenSound.stopAsync();
-                await this.sirenSound.unloadAsync();
+                this.sirenSound.pause();
+                this.sirenSound.remove();
                 this.sirenSound = null;
             }
         } catch (error) {

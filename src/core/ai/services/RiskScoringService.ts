@@ -1392,13 +1392,14 @@ Yapısal Not: ${context.building.description}`;
         serviceName: 'RiskScoringService', // ELITE: For cost tracking
       });
 
-      // ELITE: Use lazy match to avoid matching past the first complete JSON
-      let jsonMatch = aiResponse.match(/\{[\s\S]*?\}/);
-      if (!jsonMatch) {
+      // Greedy match to capture complete nested JSON object
+      const firstBrace = aiResponse.indexOf('{');
+      const lastBrace = aiResponse.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
         throw new Error('AI enrichment JSON not found');
       }
 
-      let jsonStr = jsonMatch[0];
+      let jsonStr = aiResponse.substring(firstBrace, lastBrace + 1);
 
       // ELITE: Fix common JSON parsing issues
       // 1. Remove trailing commas before } or ]

@@ -89,9 +89,6 @@ class FirebaseCrashlyticsService {
         await this.loadStoredCrashes();
       }
 
-      // Setup global error handlers
-      this.setupGlobalErrorHandlers();
-
       this.isInitialized = true;
 
       if (__DEV__) {
@@ -198,46 +195,6 @@ class FirebaseCrashlyticsService {
     } catch (crashError) {
       logger.error('Crashlytics recordError failed:', crashError);
       // Don't throw - crashlytics failures shouldn't break the app
-    }
-  }
-
-  /**
-   * ELITE: Setup global error handlers
-   */
-  private setupGlobalErrorHandlers() {
-    // Handle unhandled promise rejections
-    const originalHandler = global.ErrorUtils?.getGlobalHandler?.();
-
-    if (global.ErrorUtils) {
-      global.ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
-        this.recordError(error, {
-          isFatal: String(isFatal ?? false),
-          source: 'global_error_handler',
-        });
-
-        // Call original handler if exists
-        if (originalHandler) {
-          originalHandler(error, isFatal);
-        }
-      });
-    }
-
-    // Handle unhandled promise rejections
-    if (typeof global !== 'undefined') {
-      const originalRejectionHandler = (global as any).onunhandledrejection;
-      (global as any).onunhandledrejection = (event: PromiseRejectionEvent) => {
-        const error = event.reason instanceof Error
-          ? event.reason
-          : new Error(String(event.reason));
-
-        this.recordError(error, {
-          source: 'unhandled_promise_rejection',
-        });
-
-        if (originalRejectionHandler) {
-          originalRejectionHandler(event);
-        }
-      };
     }
   }
 

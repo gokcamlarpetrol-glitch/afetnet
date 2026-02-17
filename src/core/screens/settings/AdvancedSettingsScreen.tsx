@@ -123,7 +123,7 @@ export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsS
 
   return (
     <ImageBackground
-      source={require('../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.png')}
       style={styles.container}
       resizeMode="cover"
     >

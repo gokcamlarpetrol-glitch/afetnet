@@ -28,6 +28,18 @@ class ConnectionManager {
   }
 
   private startMonitoring() {
+    // CRITICAL FIX: Eagerly fetch initial network state.
+    // Without this, _isConnected and _isInternetReachable start as false,
+    // and any code that checks isOnline before the first listener callback
+    // (e.g., ensureCloudSubscriptions in init.ts) incorrectly thinks we're offline.
+    NetInfo.fetch().then((state: NetInfoState) => {
+      this._isConnected = state.isConnected ?? false;
+      this._isInternetReachable = state.isInternetReachable ?? false;
+      this._connectionType = state.type;
+    }).catch(() => {
+      // Ignore — listener will pick up the state eventually
+    });
+
     this.netInfoSubscription = NetInfo.addEventListener((state: NetInfoState) => {
       const prevMode = this.getConnectionMode();
 
@@ -40,9 +52,6 @@ class ConnectionManager {
       if (prevMode !== newMode) {
         logger.info(`Connection Mode Changed: ${prevMode} -> ${newMode} (${state.type})`);
         this.notifyListeners(newMode);
-
-        // Auto-manage Mesh Service based on connectivity?
-        // Strategy: Always keep Mesh ready, but prioritize Internet for heavy tasks.
       }
     });
   }

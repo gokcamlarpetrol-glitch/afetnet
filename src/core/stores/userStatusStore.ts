@@ -14,12 +14,12 @@ export type UserStatus = 'safe' | 'needs_help' | 'trapped' | 'sos' | 'offline';
 type BackendStatus = 'safe' | 'need-help' | 'unknown' | 'critical' | 'trapped';
 const mapStatusForBackend = (status: UserStatus): BackendStatus => {
   switch (status) {
-  case 'safe': return 'safe';
-  case 'needs_help': return 'need-help';
-  case 'trapped': return 'trapped';
-  case 'sos': return 'critical';
-  case 'offline': return 'unknown';
-  default: return 'unknown';
+    case 'safe': return 'safe';
+    case 'needs_help': return 'need-help';
+    case 'trapped': return 'trapped';
+    case 'sos': return 'critical';
+    case 'offline': return 'unknown';
+    default: return 'unknown';
   }
 };
 
@@ -66,14 +66,12 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          const { location } = get();
-          await firebaseDataService.saveStatusUpdate(deviceId, {
-            status,
-            location: location || null,
-            timestamp: Date.now(),
-          });
-        }
+        const { location } = get();
+        await firebaseDataService.saveStatusUpdate(deviceId, {
+          status,
+          location: location || null,
+          timestamp: Date.now(),
+        });
       }
     } catch (error) {
       logger.error('Failed to save status to Firebase:', error);
@@ -110,14 +108,12 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          await firebaseDataService.saveLocationUpdate(deviceId, {
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracy: null,
-            timestamp: Date.now(),
-          });
-        }
+        await firebaseDataService.saveLocationUpdate(deviceId, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: null,
+          timestamp: Date.now(),
+        });
       }
     } catch (error) {
       logger.error('Failed to save location to Firebase:', error);
@@ -137,13 +133,11 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
       const deviceId = await getDeviceId();
       if (deviceId) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          await firebaseDataService.saveStatusUpdate(deviceId, {
-            status,
-            location: location || null,
-            timestamp: Date.now(),
-          });
-        }
+        await firebaseDataService.saveStatusUpdate(deviceId, {
+          status,
+          location: location || null,
+          timestamp: Date.now(),
+        });
       }
     } catch (error) {
       logger.error('Failed to save status to Firebase:', error);

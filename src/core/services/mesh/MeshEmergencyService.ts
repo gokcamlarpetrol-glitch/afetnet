@@ -47,7 +47,7 @@ export enum EmergencyReasonCode {
 
 // Family member info
 export interface FamilyMember {
-    id: string;
+    uid: string;
     name: string;
     deviceIdHash?: string;
     lastKnownLocation?: { lat: number; lng: number };
@@ -376,7 +376,7 @@ class MeshEmergencyService {
      * Add family member to track
      */
     async addFamilyMember(member: FamilyMember): Promise<void> {
-        const exists = this.familyMembers.find(m => m.id === member.id);
+        const exists = this.familyMembers.find(m => m.uid === member.uid);
         if (!exists) {
             this.familyMembers.push(member);
             await this.saveFamilyMembers();
@@ -387,7 +387,7 @@ class MeshEmergencyService {
      * Remove family member
      */
     async removeFamilyMember(memberId: string): Promise<void> {
-        this.familyMembers = this.familyMembers.filter(m => m.id !== memberId);
+        this.familyMembers = this.familyMembers.filter(m => m.uid !== memberId);
         await this.saveFamilyMembers();
     }
 
@@ -395,7 +395,7 @@ class MeshEmergencyService {
      * Broadcast search for family member
      */
     async searchForFamilyMember(memberId: string): Promise<void> {
-        const member = this.familyMembers.find(m => m.id === memberId);
+        const member = this.familyMembers.find(m => m.uid === memberId);
         if (!member) {
             logger.warn(`Family member ${memberId} not found`);
             return;
@@ -436,7 +436,7 @@ class MeshEmergencyService {
         await this.updateCurrentLocation();
 
         const response: FamilyMember = {
-            id: this.myDeviceId,
+            uid: this.myDeviceId,
             name: this.myName,
             deviceIdHash: myDeviceHash,
             lastKnownLocation: this.lastLocation || undefined,

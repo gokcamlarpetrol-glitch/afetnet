@@ -47,6 +47,20 @@ service cloud.firestore {
       return isDeviceOwner(deviceId) || isLinkedFamilyMember(deviceId);
     }
 
+    // V3: Check if two users share a family group
+    // Uses denormalized mapping: users/{uid}/familyMembers/{otherUid}
+    // This mapping is created by FirebaseFamilyOperations.saveFamilyMember()
+    // Falls back to isAuthenticated() during migration (mapping may not exist for all users)
+    function sharesFamilyWith(targetUid) {
+      return isAuthenticated()
+             && (
+               // Check denormalized familyMembers mapping
+               exists(/databases/$(database)/documents/users/$(request.auth.uid)/familyMembers/$(targetUid))
+               // Fallback: target shares a familyId with requester (either direction)
+               || exists(/databases/$(database)/documents/users/$(targetUid)/familyMembers/$(request.auth.uid))
+             );
+    }
+
     function isSenderOwned(senderDeviceId) {
       return isAuthenticated()
              && exists(/databases/$(database)/documents/devices/$(senderDeviceId))
@@ -61,35 +75,19 @@ service cloud.firestore {
       return status == 'accepted' || status == 'declined' || status == 'expired';
     }
 
-    function isNewsSummaryJobOwner(articleId) {
-      return isAuthenticated()
-             && exists(/databases/$(database)/documents/news_summary_jobs/$(articleId))
-             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.ownerUid == request.auth.uid
-             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.status == 'processing'
-             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.leaseUntil is number
-             && get(/databases/$(database)/documents/news_summary_jobs/$(articleId)).data.leaseUntil >= request.time.toMillis() - 1000;
-    }
-    
-    function hasAppCheck() {
-      return request.app != null;
-    }
-    
-    // Rate limiting helper (approximate - check timestamp)
-    function isNotSpamming() {
-      return request.time > resource.data.createdAt + duration.value(1, 's');
-    }
+    // NOTE: isNewsSummaryJobOwner, hasAppCheck, isNotSpamming removed — unused
     
     // ============================================================
     // EEW COLLECTIONS - Elite Security
     // ============================================================
     
     // P-wave crowdsourced detections
-    // - Anyone can write (for crowdsourcing)
-    // - Rate limited (1 per second per device)
-    // - Auto-expires after 5 minutes
+    // SECURITY FIX: userId must match auth.uid to prevent spoofing
+    // Rate limited, auto-expires after 5 minutes
     match /eew_pwave_detections/{detectionId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
                     && request.resource.data.deviceId is string
                     && request.resource.data.timestamp is number
                     && request.resource.data.latitude is number
@@ -97,23 +95,17 @@ service cloud.firestore {
                     && request.resource.data.confidence is number
                     && request.resource.data.confidence >= 0
                     && request.resource.data.confidence <= 100;
-      allow update: if false; // No updates allowed
-      allow delete: if false; // Cleanup via Cloud Functions
+      allow update: if false;
+      allow delete: if false;
     }
     
     // EEW broadcasts (official or crowdsourced)
-    // - Public read
-    // - Only authenticated users can create
-    // - Only creator or admin can update/delete
+    // SECURITY FIX: Only Cloud Functions (admin SDK) can create broadcasts
+    // Prevents any authenticated user from creating fake earthquake alerts
     match /eew_broadcasts/{broadcastId} {
       allow read: if true;
-      allow create: if isAuthenticated()
-                    && request.resource.data.magnitude is number
-                    && request.resource.data.latitude is number
-                    && request.resource.data.longitude is number
-                    && request.resource.data.source is string;
-      allow update: if isAuthenticated()
-                    && (resource.data.source == 'CROWDSOURCED' || isAdmin());
+      allow create: if false; // Only via Cloud Functions with admin SDK
+      allow update: if false; // Only via Cloud Functions with admin SDK
       allow delete: if isAdmin();
     }
     
@@ -129,16 +121,13 @@ service cloud.firestore {
     }
     
     // P-wave consensus (aggregated data)
-    // - Public read
-    // - Only authenticated users can create/update
+    // SECURITY FIX: Only Cloud Functions can write consensus data
+    // Prevents manipulation of consensus thresholds from client
     match /eew_consensus/{consensusId} {
       allow read: if true;
-      allow create: if isAuthenticated()
-                    && request.resource.data.detectionCount is number
-                    && request.resource.data.centerLatitude is number
-                    && request.resource.data.centerLongitude is number;
-      allow update: if isAuthenticated();
-      allow delete: if isAdmin();
+      allow create: if false; // Only via Cloud Functions with admin SDK
+      allow update: if false; // Only via Cloud Functions with admin SDK
+      allow delete: if false; // Only via Cloud Functions with admin SDK
     }
     
     // EEW analytics (write-only for tracking)
@@ -183,13 +172,21 @@ service cloud.firestore {
       
       // Family members subcollection
       // - Each device can have its own family members list
+      // CRITICAL FIX: Allow any authenticated user to CREATE family member entries.
+      // This enables reciprocal linking: when User A adds User B, the app writes
+      // a link-back doc at devices/{B}/familyMembers/{A} so that isLinkedFamilyMember()
+      // succeeds in BOTH directions (required for location/status/message reads).
       match /familyMembers/{memberId} {
         allow read: if isDeviceReadable(deviceId);
-        allow create: if isDeviceOwner(deviceId)
-                      && request.resource.data.name is string
+        allow create: if isAuthenticated()
                       && request.resource.data.id is string;
         allow update: if isDeviceOwner(deviceId);
-        allow delete: if isDeviceOwner(deviceId);
+        // Allow device owner to delete any member, OR allow a user to delete
+        // their own reciprocal doc (memberId matches their uid or qrId).
+        // This enables clean reciprocal cleanup when unfriending.
+        allow delete: if isDeviceOwner(deviceId)
+                      || request.auth.uid == memberId
+                      || requesterQrId() == memberId;
       }
       
       // Location history subcollection
@@ -211,6 +208,18 @@ service cloud.firestore {
         allow update: if isDeviceOwner(deviceId);
         allow delete: if false;
       }
+
+      // Status updates from family members (fan-out writes)
+      // Any authenticated family member can write status updates to notify device owner
+      match /status_updates/{updateId} {
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isAuthenticated()
+                      && request.resource.data.fromDeviceId is string
+                      && request.resource.data.status is string
+                      && request.resource.data.timestamp is number;
+        allow update: if false;
+        allow delete: if isDeviceOwner(deviceId);
+      }
       
       // Health profile subcollection
       match /health/{healthId} {
@@ -230,23 +239,65 @@ service cloud.firestore {
       
       // Messages subcollection  
       match /messages/{messageId} {
-        allow read: if isDeviceOwner(deviceId);
+        // CRITICAL FIX: Allow family members to read messages (not just device owner)
+        // Without this, messages sent via cloud fan-out cannot be read by recipients
+        allow read: if isDeviceReadable(deviceId);
+        // SECURITY: Any authenticated user can create messages in any device inbox
+        // (fan-out write pattern: sender writes to recipient's inbox)
+        // Validation: fromDeviceId and toDeviceId must be strings, content must exist
         allow create: if isAuthenticated()
-                      && exists(/databases/$(database)/documents/devices/$(deviceId))
                       && request.resource.data.fromDeviceId is string
                       && request.resource.data.toDeviceId is string
-                      && isSenderOwned(request.resource.data.fromDeviceId)
-                      && (isDeviceOwner(deviceId) || request.resource.data.toDeviceId == deviceId);
-        allow update: if false;
-        allow delete: if false;
+                      && request.resource.data.content is string;
+        // CRITICAL FIX: Allow owner OR message sender to update messages.
+        // Owner: for read receipts, status updates on own inbox.
+        // Sender (isSenderOwned): for retries — setDoc({merge:true}) on an
+        // existing doc triggers UPDATE, not CREATE. Without this, all
+        // retries to recipient inboxes silently fail with permission-denied.
+        allow update: if isDeviceOwner(deviceId)
+                      || (isAuthenticated()
+                          && resource.data.fromDeviceId is string
+                          && isSenderOwned(resource.data.fromDeviceId));
+        // Device owner can delete messages from their inbox (cleanup)
+        allow delete: if isDeviceOwner(deviceId);
       }
       
       // Conversations subcollection
       match /conversations/{conversationId} {
         allow read: if isDeviceOwner(deviceId);
-        allow create: if isDeviceOwner(deviceId);
+        // CRITICAL FIX: Allow any authenticated user to create conversations
+        // (fan-out: sender creates conversation metadata in recipient's device)
+        allow create: if isAuthenticated();
         allow update: if isDeviceOwner(deviceId);
         allow delete: if isDeviceOwner(deviceId);
+      }
+
+      // NOTE: status_updates rules are defined above (lines 206-216) — no duplicate needed
+
+      // SOS Alerts subcollection (CRITICAL: Life-saving)
+      // - Any authenticated user can CREATE an SOS alert for any device
+      //   (family member sends SOS to your device path)
+      // - Device owner + linked family can READ alerts
+      match /sos_alerts/{alertId} {
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isAuthenticated()
+                      && request.resource.data.signalId is string
+                      && request.resource.data.timestamp is number;
+        allow update: if isDeviceOwner(deviceId);
+        allow delete: if isDeviceOwner(deviceId);
+      }
+
+      // SOS Rescue ACKs subcollection (CRITICAL: Life-saving)
+      // When rescuer taps "Geliyorum", an ACK is written here.
+      // The SOS sender's SOSAckListener watches this path.
+      // - Any authenticated user can CREATE (rescuers may not be in family)
+      // - Device owner + family can READ (SOS sender sees help coming)
+      match /sos_acks/{ackId} {
+        allow read: if isDeviceReadable(deviceId);
+        allow create: if isAuthenticated()
+                      && request.resource.data.timestamp is number;
+        allow update: if false; // ACKs are immutable
+        allow delete: if isDeviceOwner(deviceId); // Cleanup only
       }
     }
     
@@ -320,6 +371,24 @@ service cloud.firestore {
     }
     
     // ============================================================
+    // PREPAREDNESS PLANS - User-Owned Plans
+    // ============================================================
+    
+    // Preparedness plans generated by AI or rule-based fallback
+    // - Only the plan owner can read/write
+    // - Plans contain personalized disaster preparation checklists
+    match /preparedness_plans/{planId} {
+      allow read: if isAuthenticated()
+                  && resource.data.ownerUid == request.auth.uid;
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAuthenticated()
+                    && resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false; // Plans should be preserved
+    }
+    
+    // ============================================================
     // NEW: DAILY ANALYTICS (Aggregated)
     // ============================================================
     
@@ -336,30 +405,12 @@ service cloud.firestore {
     // ============================================================
     
     // News summaries (shared across ALL users for cost optimization)
-    // - Public read: All users can read cached summaries
-    // - Write: only active summary job owner can create/update
-    // - Summaries are shared by articleId, not userId
-    // - This reduces OpenAI API costs significantly
+    // SECURITY FIX: Only Cloud Functions can write summaries
+    // Prevents poisoning of shared AI summaries consumed by all users
+    // Client creates summary jobs, Cloud Function generates and writes the summary
     match /news_summaries/{summaryId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-                    && request.resource.data.articleId is string
-                    && request.resource.data.summary is string
-                    && request.resource.data.title is string
-                    && request.resource.data.articleId == summaryId
-                    && request.resource.data.createdBy == request.auth.uid
-                    && isNewsSummaryJobOwner(summaryId);
-      allow update: if isAuthenticated()
-                    && request.resource.data.articleId is string
-                    && request.resource.data.summary is string
-                    && request.resource.data.articleId == summaryId
-                    && request.resource.data.createdBy == request.auth.uid
-                    && (
-                      !(resource.data.createdBy is string)
-                      || resource.data.createdBy == request.auth.uid
-                    )
-                    && isNewsSummaryJobOwner(summaryId);
-      allow delete: if false; // Cleanup via Cloud Functions/TTL
+      allow write: if false; // Only via Cloud Functions with admin SDK
     }
 
     // Summary generation leases (single-writer lock per article)
@@ -394,7 +445,8 @@ service cloud.firestore {
     
     // Users collection
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      // V3: Allow any authenticated user to read basic profile (needed for messaging)
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isOwner(userId);
       allow delete: if false;
@@ -415,7 +467,6 @@ service cloud.firestore {
       }
 
       // Contact requests inbox.
-      // Sender can create a pending request in recipient inbox; recipient can read/update/delete.
       match /contactRequests/{requestId} {
         allow read: if isOwner(userId);
         allow create: if isAuthenticated()
@@ -444,13 +495,63 @@ service cloud.firestore {
       }
 
       // Per-user notifications inbox.
-      // Owner can manage; authenticated users can create notifications addressed to owner.
       match /notifications/{notificationId} {
         allow read, update, delete: if isOwner(userId);
         allow create: if isAuthenticated()
                       && request.resource.data.type is string
                       && request.resource.data.fromUserId is string
                       && request.resource.data.fromUserId == request.auth.uid;
+      }
+
+      // V3: Health profile subcollection (moved from devices/{id}/health)
+      match /health/{healthId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId);
+        allow delete: if false;
+      }
+
+      // V3: ICE data subcollection (moved from devices/{id}/ice)
+      match /ice/{iceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId);
+        allow delete: if false;
+      }
+
+      // V3: Status subcollection
+      match /status/{statusId} {
+        allow read: if isAuthenticated(); // Family members need to read status
+        allow create, update: if isOwner(userId);
+        allow delete: if false;
+      }
+
+      // V3: Status updates history
+      // NOTE: Family members write status updates to EACH OTHER's subcollections
+      // (FamilyScreen.handleStatusUpdate fans out to all members' paths)
+      match /status_updates/{updateId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.timestamp is number;
+        allow update, delete: if false;
+      }
+
+      // V3: Bidirectional family member mapping (used by sharesFamilyWith() rule function)
+      // Written by: saveFamilyMember (both directions), deleted by: deleteFamilyMember
+      // Read by: sharesFamilyWith() via exists() check
+      match /familyMembers/{otherUid} {
+        allow read: if isAuthenticated(); // Any authenticated user can check family membership
+        allow create: if isAuthenticated(); // saveFamilyMember writes to BOTH users' subcollections
+        allow update: if isOwner(userId); // Only the doc owner can update
+        allow delete: if isOwner(userId)
+                      || request.auth.uid == otherUid; // Either side can remove mapping
+      }
+
+      // V3: UID → familyId mapping (for security rule lookups)
+      // SECURITY FIX: Only owner can write their own familyId mappings
+      // (saveFamilyMember writes to users/{myUid}/familyIds, not other users')
+      match /familyIds/{familyId} {
+        allow read: if isAuthenticated(); // Need to check family membership
+        allow create, update: if isOwner(userId);
+        allow delete: if isOwner(userId);
       }
     }
     
@@ -462,14 +563,21 @@ service cloud.firestore {
     }
     
     // Felt earthquakes reports
+    // SECURITY FIX: userId must match auth.uid to prevent spoofing
     match /feltEarthquakes/{reportId} {
       allow read: if true;
       allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
                     && request.resource.data.earthquakeId is string
-                    && request.resource.data.userId is string
                     && request.resource.data.timestamp is number;
       allow update: if false;
       allow delete: if false;
+    }
+    
+    // Global earthquakes (read-only for users, write via Cloud Functions)
+    match /global_earthquakes/{earthquakeId} {
+      allow read: if true;
+      allow write: if false;
     }
     
     // Family members (top-level collection)
@@ -501,6 +609,276 @@ service cloud.firestore {
       allow delete: if false;
     }
     
+    // ============================================================
+    // GLOBAL SOS SIGNALS (Firebase SOS backup record)
+    // Life-saving: Any authenticated user can create their own SOS signal
+    // Any authenticated user can read (for global SOS awareness)
+    // ============================================================
+
+    match /sos_signals/{signalId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && request.resource.data.id is string
+                    && request.resource.data.timestamp is number
+                    && request.resource.data.status is string
+                    && request.resource.data.creatorUid == request.auth.uid;
+      allow update: if isAuthenticated()
+                    && resource.data.creatorUid == request.auth.uid
+                    && request.resource.data.id == resource.data.id;
+      allow delete: if false; // SOS signals must be preserved
+    }
+
+    // ============================================================
+    // V3: PUSH TOKENS — UID-Centric Push Notification Tokens
+    // Path: push_tokens/{uid}/devices/{installationId}
+    // ============================================================
+
+    match /push_tokens/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+
+      match /devices/{installationId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+                              && request.resource.data.token is string;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ============================================================
+    // V3: LOCATIONS CURRENT — Single Document Per User
+    // Path: locations_current/{uid}
+    // Owner can write, family members can read
+    // ============================================================
+
+    match /locations_current/{userId} {
+      // SECURITY FIX: Only owner or family members can read location
+      // Previously ANY authenticated user could read ANY user's real-time location
+      allow read: if isOwner(userId) || sharesFamilyWith(userId);
+      allow create, update: if isOwner(userId)
+                            && request.resource.data.latitude is number
+                            && request.resource.data.longitude is number;
+      allow delete: if false;
+    }
+
+    // V3: Location history trail
+    match /locations_history/{userId} {
+      allow read: if isOwner(userId);
+
+      match /points/{pointId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+                      && request.resource.data.latitude is number
+                      && request.resource.data.longitude is number;
+        allow update, delete: if false;
+      }
+    }
+
+    // ============================================================
+    // V3: FAMILIES — Family Groups
+    // Path: families/{familyId}/members/{uid}
+    // ============================================================
+
+    match /families/{familyId} {
+      // Any member can read family metadata
+      allow read: if isAuthenticated()
+                  && resource.data.members is list
+                  && request.auth.uid in resource.data.members;
+      // Any authenticated user can create a family (creator becomes admin)
+      allow create: if isAuthenticated()
+                    && request.resource.data.members is list
+                    && request.auth.uid in request.resource.data.members
+                    && request.resource.data.createdBy == request.auth.uid;
+      // Only members can update
+      allow update: if isAuthenticated()
+                    && resource.data.members is list
+                    && request.auth.uid in resource.data.members;
+      allow delete: if false;
+
+      // Family members subcollection
+      match /members/{memberUid} {
+        allow read: if isAuthenticated()
+                    && get(/databases/$(database)/documents/families/$(familyId)).data.members is list
+                    && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members;
+        // Any member can add new members
+        allow create: if isAuthenticated()
+                      && request.resource.data.uid is string;
+        // Only the member themselves or family admin can update
+        allow update: if isAuthenticated()
+                      && (request.auth.uid == memberUid
+                          || get(/databases/$(database)/documents/families/$(familyId)).data.createdBy == request.auth.uid);
+        // Member can leave, or admin can remove
+        allow delete: if isAuthenticated()
+                      && (request.auth.uid == memberUid
+                          || get(/databases/$(database)/documents/families/$(familyId)).data.createdBy == request.auth.uid);
+      }
+    }
+
+    // ============================================================
+    // V3: USER INBOX — Per-User Conversation Thread Metadata
+    // Path: user_inbox/{uid}/threads/{conversationId}
+    // ============================================================
+
+    match /user_inbox/{userId} {
+      allow read: if isOwner(userId);
+
+      match /threads/{threadId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isAuthenticated(); // Participants write inbox entries
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ============================================================
+    // V3: SOS ALERTS — UID-Centric SOS
+    // Path: sos_alerts/{uid}/items/{signalId}
+    // ============================================================
+
+    match /sos_alerts/{userId} {
+      allow read: if isAuthenticated();
+
+      match /items/{signalId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.timestamp is number;
+        // Only the SOS creator can update (cancel, ack)
+        allow update: if isOwner(userId);
+        allow delete: if false; // SOS records are preserved
+      }
+
+      // V3: Rescue ACKs — any authenticated user can ACK (rescuers may not be family)
+      match /acks/{ackId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.timestamp is number;
+        allow update: if false; // ACKs are immutable
+        allow delete: if false;
+      }
+    }
+
+    // ============================================================
+    // V3: CONVERSATIONS — UID-Centric Conversation Threads
+    // Each conversation has a messages subcollection for real-time sync
+    // ============================================================
+
+    match /conversations/{conversationId} {
+      // Participants can read conversation metadata
+      allow read: if isAuthenticated()
+                  && (resource.data.participants is list)
+                  && (request.auth.uid in resource.data.participants);
+      // Any authenticated user can create a conversation (must be participant)
+      allow create: if isAuthenticated()
+                    && request.resource.data.participants is list
+                    && request.auth.uid in request.resource.data.participants;
+      // Only participants can update (typing, last message, etc.)
+      allow update: if isAuthenticated()
+                    && resource.data.participants is list
+                    && request.auth.uid in resource.data.participants;
+      allow delete: if false;
+
+      // Messages subcollection — V3: senderUid validation
+      match /messages/{messageId} {
+        allow read: if isAuthenticated()
+                    && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
+                    && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        // V3: Validate senderUid matches auth.uid AND sender is a participant (prevent spoofing + unauthorized writes)
+        allow create: if isAuthenticated()
+                      && request.resource.data.senderUid == request.auth.uid
+                      && request.resource.data.content is string
+                      && request.resource.data.timestamp is number
+                      && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
+                      && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        // Allow any participant to update (read receipts, status, etc.)
+        allow update: if isAuthenticated()
+                      && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
+                      && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow delete: if false; // Messages are preserved
+      }
+    }
+
+    // ============================================================
+    // NEW: CIRCLES — Family/Friend Circles (Life360 pattern)
+    // Owner manages circle, members can read and post updates
+    // ============================================================
+
+    match /circles/{circleId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.ownerUid == request.auth.uid
+                      || request.auth.uid in resource.data.memberUids);
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.name is string;
+      allow update: if isAuthenticated()
+                    && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isAuthenticated()
+                    && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // ============================================================
+    // NEW: GEOFENCES — Per-User Place Alerts (Life360 pattern)
+    // User can create geofences around places (home, school, work)
+    // ============================================================
+
+    match /geofences/{userId} {
+      allow read: if isOwner(userId);
+
+      match /fences/{fenceId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+                      && request.resource.data.name is string
+                      && request.resource.data.latitude is number
+                      && request.resource.data.longitude is number
+                      && request.resource.data.radius is number
+                      && request.resource.data.radius > 0
+                      && request.resource.data.radius <= 10000;
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ============================================================
+    // GLOBAL SOS BROADCASTS (Proximity-based, ALL users)
+    // Life-saving: Any authenticated user can broadcast SOS
+    // Any authenticated user can read to receive nearby SOS alerts
+    // ============================================================
+
+    match /sos_broadcasts/{broadcastId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && request.resource.data.signalId is string
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number
+                    && request.resource.data.timestamp is number;
+      allow update: if false;
+      allow delete: if false; // Cleanup via TTL or Cloud Functions
+
+      // SOS Acknowledgements — delivery confirmation from recipients
+      match /acks/{ackId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.userId == request.auth.uid
+                      && request.resource.data.timestamp is number;
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    // ============================================================
+    // CLOUD FUNCTIONS-ONLY COLLECTIONS (Admin SDK bypass rules)
+    // Explicit deny for client access — documentation only
+    // ============================================================
+
+    // Email logs (Cloud Functions sendCustomEmail writes here)
+    match /email_logs/{logId} {
+      allow read, write: if false; // Only via Cloud Functions with admin SDK
+    }
+
+    // Rate limits (Cloud Functions openAIChatProxy writes here)
+    match /rate_limits/{userId} {
+      allow read, write: if false; // Only via Cloud Functions with admin SDK
+    }
+
     // Catch-all deny for undefined paths
     match /{document=**} {
       allow read, write: if false;

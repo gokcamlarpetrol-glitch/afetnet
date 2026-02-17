@@ -4,17 +4,20 @@
  * Multi-layer protection against deprecated modules
  */
 
-import { Buffer } from 'buffer';
+// CRITICAL: Buffer polyfill MUST use dynamic require, NOT static import
+// Static import of 'buffer' crashes Hermes on iOS with:
+// "Cannot read property 'prototype' of undefined"
+try {
+  const { Buffer: BufferPolyfill } = require('buffer');
+  if (BufferPolyfill) {
+    (global as any).Buffer = BufferPolyfill;
+  }
+} catch (e) {
+  // Buffer polyfill failed — app continues without it
+}
+
 import 'react-native-gesture-handler';
 import 'react-native-get-random-values';
-
-// CRITICAL: Setup mocks BEFORE any other imports to prevent NativeEventEmitter crashes
-// This must run before any library that uses NativeEventEmitter is imported
-import { setupNativeModuleMocks } from './src/core/utils/mockNativeModules';
-setupNativeModuleMocks();
-
-// Simple global setup
-global.Buffer = Buffer;
 
 // ============================================================================
 // EARLY TASK MANAGER DEFINITIONS (CRITICAL - must be defined before app starts)
@@ -86,6 +89,10 @@ try {
 // ============================================================================
 // ELITE: APP INITIALIZATION
 // ============================================================================
+
+// NOTE: @react-native-firebase/messaging is NOT installed in this project.
+// Push notifications use expo-notifications + Firebase Cloud Functions.
+// Background message handling is done via expo-task-manager tasks above.
 
 // Import CoreApp from src/core/App
 import CoreApp from './src/core/App';

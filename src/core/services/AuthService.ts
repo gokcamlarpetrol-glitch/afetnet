@@ -12,12 +12,23 @@
  * @version 2.0.0 - Integrated Identity/Contact Sync
  */
 
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+// CRITICAL FIX: Lazy import to prevent TurboModule crash when native module not linked
+let GoogleSignin: any = null;
+let statusCodes: any = {};
+
+try {
+  const googleSigninModule = require('@react-native-google-signin/google-signin');
+  GoogleSignin = googleSigninModule.GoogleSignin;
+  statusCodes = googleSigninModule.statusCodes || {};
+} catch (e) {
+  // Native module not available - Google Sign-In will be disabled
+  console.warn('[AuthService] GoogleSignin native module not available:', (e as Error).message);
+}
+
 import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
-  getAuth,
   signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -30,7 +41,7 @@ import {
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 import { createLogger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
-import { initializeFirebase } from '../../lib/firebase';
+import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
 import { clearDeviceId, getDeviceId, setDeviceId } from '../../lib/device';
 import { identityService } from './IdentityService';
 import { contactService } from './ContactService';
@@ -115,6 +126,11 @@ function getRuntimeConfigValue(key: string): string | undefined {
 
 // Initialize Google Sign-In safely
 const initGoogleSignIn = () => {
+  if (!GoogleSignin) {
+    logger.warn('Google Sign-In native module not available. Google sign-in disabled.');
+    googleAuthAvailable = false;
+    return;
+  }
   try {
     const webClientId = getRuntimeConfigValue('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
     const iosClientId = getRuntimeConfigValue('EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID');
@@ -152,9 +168,9 @@ export const AuthService = {
    * Helper to get current Firebase user
    */
   getCurrentUser: (): User | null => {
-    const app = initializeFirebase();
-    if (!app) return null;
-    return getAuth(app).currentUser;
+    const auth = getFirebaseAuth();
+    if (!auth) return null;
+    return auth.currentUser;
   },
 
   /**
@@ -171,10 +187,9 @@ export const AuthService = {
       if (!idToken) throw new Error('Google\'dan ID token alınamadı');
 
       const credential = GoogleAuthProvider.credential(idToken);
-      const app = initializeFirebase();
-      if (!app) throw new Error('Firebase başlatılamadı');
+      const auth = getFirebaseAuth();
+      if (!auth) throw new Error('Firebase başlatılamadı');
 
-      const auth = getAuth(app);
       const userCredential = await signInWithCredential(auth, credential);
 
       // ELITE: Profile sync with retry
@@ -237,10 +252,9 @@ export const AuthService = {
         idToken: identityToken,
       });
 
-      const app = initializeFirebase();
-      if (!app) throw new Error('Firebase başlatılamadı');
+      const auth = getFirebaseAuth();
+      if (!auth) throw new Error('Firebase başlatılamadı');
 
-      const auth = getAuth(app);
       const userCredential = await signInWithCredential(auth, authCredential);
 
       // ELITE: Apple name persistence and profile sync
@@ -325,10 +339,9 @@ export const AuthService = {
    */
   signInWithEmail: async (email: string, password: string): Promise<User | null> => {
     try {
-      const app = initializeFirebase();
-      if (!app) throw new Error('Firebase başlatılamadı');
+      const auth = getFirebaseAuth();
+      if (!auth) throw new Error('Firebase başlatılamadı');
 
-      const auth = getAuth(app);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       await reload(userCredential.user);
 
@@ -385,10 +398,9 @@ export const AuthService = {
    */
   signUpWithEmail: async (email: string, password: string, displayName?: string): Promise<User | null> => {
     try {
-      const app = initializeFirebase();
-      if (!app) throw new Error('Firebase başlatılamadı');
+      const auth = getFirebaseAuth();
+      if (!auth) throw new Error('Firebase başlatılamadı');
 
-      const auth = getAuth(app);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
       // Sync user profile with display name
@@ -435,22 +447,23 @@ export const AuthService = {
    * Sign Out - Clears identity and contacts
    */
   signOut: async (): Promise<void> => {
-    const app = initializeFirebase();
-    if (!app) return;
+    const auth = getFirebaseAuth();
+    if (!auth) return;
 
     try {
       // ELITE: Cleanup all services on logout
       await presenceService.cleanup();
       await contactRequestService.cleanup();
       await authSessionCleanupService.clearLocalSessionData();
-      await contactService.clearAll();
 
       await identityService.clearIdentity();
 
-      await firebaseSignOut(getAuth(app));
+      await firebaseSignOut(auth);
 
       try {
-        await GoogleSignin.signOut();
+        if (GoogleSignin) {
+          await GoogleSignin.signOut();
+        }
       } catch (e) {
         // Ignore if not signed in with Google
       }
@@ -474,6 +487,9 @@ export const AuthService = {
       logger.warn('Firebase başlatılamadı, profil senkronizasyonu atlandı');
       return;
     }
+
+    // Ensure auth is initialized with persistence before any profile sync
+    getFirebaseAuth();
 
     const db = getFirestore(app);
     const userRef = doc(db, 'users', user.uid);
@@ -499,10 +515,12 @@ export const AuthService = {
 
     if (displayName) dataToUpdate.displayName = displayName;
 
-    // Update device ID to match QR ID
+    // FIX: Normalize device ID comparison — always use the same format (qrId)
     const currentDeviceId = await getDeviceId();
+    const normalizedCurrentId = currentDeviceId?.toUpperCase() || '';
+    const normalizedQrId = qrId.toUpperCase();
 
-    if (currentDeviceId !== qrId) {
+    if (normalizedCurrentId !== normalizedQrId) {
       await setDeviceId(qrId);
       logger.info(`Device ID re-linked to Account: ${qrId}`);
     }

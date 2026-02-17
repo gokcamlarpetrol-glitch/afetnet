@@ -155,8 +155,9 @@ class RealTimeEEWConnectionService {
             // Skip if too old
             if (now - event.lastUpdateTime > MAX_EVENT_AGE_MS) continue;
 
-            // Only process confirmed events with sufficient confidence
-            if (event.status === 'confirmed' && event.confidence >= 0.6) {
+            // Only process confirmed events with HIGH confidence (0.8+)
+            // PRODUCTION: 0.6 was too low — triggered on weak/unverified events
+            if (event.status === 'confirmed' && event.confidence >= 0.8) {
                 this.processedEvents.add(event.id);
 
                 logger.info(`🚨 REAL-TIME EEW EVENT: M${event.estimatedMagnitude.toFixed(1)} (${event.reportCount} reports, ${(event.confidence * 100).toFixed(0)}% confidence)`);
@@ -183,16 +184,17 @@ class RealTimeEEWConnectionService {
      */
     private async triggerLocalNotification(event: ActiveEvent): Promise<void> {
         try {
-            const { ultraFastEEWNotification } = await import('./UltraFastEEWNotification');
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
 
-            await ultraFastEEWNotification.sendEEWNotification({
+            await notificationCenter.notify('earthquake', {
                 magnitude: event.estimatedMagnitude,
                 location: `${event.reportCount} cihaz algıladı`,
-                warningSeconds: this.estimateWarningTime(event),
-                source: 'CROWDSOURCED',
-                epicentralDistance: 0,
-                estimatedIntensity: Math.min(7, event.estimatedMagnitude - 1), // Approx intensity
-            });
+                timestamp: event.firstReportTime,
+                latitude: event.epicenter.latitude,
+                longitude: event.epicenter.longitude,
+                isEEW: true,
+                source: 'RealTimeEEW',
+            }, 'RealTimeEEWConnection');
         } catch (error) {
             logger.error('Failed to trigger local notification:', error);
         }

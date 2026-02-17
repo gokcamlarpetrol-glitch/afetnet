@@ -16,7 +16,7 @@ import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEarthquakeStore } from '../stores/earthquakeStore';
-import { ultraFastEEWNotification } from '../services/UltraFastEEWNotification';
+import { notificationCenter } from '../services/notifications/NotificationCenter';
 import { firebaseAnalyticsService } from '../services/FirebaseAnalyticsService';
 import { createLogger } from '../utils/logger';
 
@@ -196,7 +196,7 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
     }, [settings]);
 
     // ELITE: Check earthquake and trigger alert if needed
-    const checkAndTriggerAlert = async (earthquake: { id: string; magnitude: number; latitude: number; longitude: number; location: string; time: string | number }) => {
+    const checkAndTriggerAlert = async (earthquake: { id: string; magnitude: number; latitude: number; longitude: number; location: string; time: string | number; depth?: number; source?: string }) => {
         if (!userLocation) return;
 
         // Calculate distance
@@ -241,16 +241,16 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         setLastAlert(result);
         setAlertCount((prev) => prev + 1);
 
-        // Use UltraFast EEW for life-critical alerts
-        await ultraFastEEWNotification.sendEEWNotification({
+        // Use NotificationCenter for unified alert delivery
+        await notificationCenter.notify('earthquake', {
             magnitude: earthquake.magnitude,
             location: earthquake.location,
-            warningSeconds: Math.max(0, Math.floor(distance / 5)), // Rough S-wave estimate
-            estimatedIntensity: Math.round(earthquake.magnitude * 1.5),
-            epicentralDistance: distance,
-            source: 'AFAD',
-            epicenter: { latitude: earthquake.latitude, longitude: earthquake.longitude },
-        });
+            timestamp: typeof earthquake.time === 'string' ? new Date(earthquake.time).getTime() : earthquake.time,
+            latitude: earthquake.latitude,
+            longitude: earthquake.longitude,
+            depth: earthquake.depth,
+            source: earthquake.source || 'AFAD',
+        }, 'useEarthquakeAlert');
 
         // Track alert
         firebaseAnalyticsService.logEvent('earthquake_alert_triggered', {
@@ -265,15 +265,15 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
 
     // ELITE: Test alert function
     const testAlert = useCallback(async () => {
-        await ultraFastEEWNotification.sendEEWNotification({
+        await notificationCenter.notify('earthquake', {
             magnitude: 5.5,
             location: 'Test Bölgesi',
-            warningSeconds: 10,
-            estimatedIntensity: 6,
-            epicentralDistance: 50,
-            source: 'AFAD',
-            epicenter: { latitude: 41.0, longitude: 29.0 },
-        });
+            timestamp: Date.now(),
+            latitude: 41.0,
+            longitude: 29.0,
+            depth: 10,
+            source: 'Test',
+        }, 'useEarthquakeAlert-test');
 
         setLastAlert({
             triggered: true,

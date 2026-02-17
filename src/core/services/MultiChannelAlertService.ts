@@ -72,11 +72,10 @@ function getNotifications(): any {
 function getAudio() {
   if (!Audio) {
     try {
-      Audio = require('expo-av').Audio;
+      Audio = require('expo-audio');
     } catch (error) {
-      // ELITE: Log notification errors but don't crash the app
       if (__DEV__) {
-        logger.debug('Notification operation failed (non-critical):', error);
+        logger.debug('expo-audio not available (non-critical):', error);
       }
     }
   }
@@ -414,22 +413,7 @@ class MultiChannelAlertService {
         }
       }
 
-      // Set notification handler
-      try {
-        if (typeof Notifications.setNotificationHandler === 'function') {
-          Notifications.setNotificationHandler({
-            handleNotification: async () => ({
-              shouldShowBanner: true,
-              shouldShowList: true,
-              shouldPlaySound: true,
-              shouldSetBadge: true,
-            }),
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to set notification handler:', error);
-        // Continue without notification handler
-      }
+      // Foreground handler is centralized in NotificationCenter.initialize()
 
       if (__DEV__) logger.info('Multi-channel alert service initialized');
     } catch (error) {
@@ -548,8 +532,12 @@ class MultiChannelAlertService {
       // Cancel sound
       if (this.soundInstance) {
         try {
-          await this.soundInstance.stopAsync();
-          await this.soundInstance.unloadAsync();
+          if (typeof this.soundInstance.pause === 'function') {
+            this.soundInstance.pause();
+          }
+          if (typeof this.soundInstance.remove === 'function') {
+            this.soundInstance.remove();
+          }
         } catch (error) {
           logger.error('Sound cleanup error:', error);
         }
@@ -636,99 +624,41 @@ class MultiChannelAlertService {
     });
   }
 
-  private async sendPushNotification(options: AlertOptions, settings: AlertSettingsSnapshot) {
-    // ELITE: Use async getter to ensure notifications module is ready
-    const NotificationsAsync = await getNotificationsAsync();
-    if (!NotificationsAsync || typeof NotificationsAsync.scheduleNotificationAsync !== 'function') {
-      // ELITE: Log as debug - this is expected in some environments
-      logger.debug('Notifications not available for push notification (using fallback channels)');
-      return null;
-    }
-
-    let channelId = 'normal-priority';
-
-    if (options.priority === 'critical') {
-      channelId = 'critical-alerts';
-    } else if (options.priority === 'high') {
-      channelId = 'high-priority';
-    }
-
-    const sound = this.resolveNotificationSound(settings, options.priority, options.sound);
-    const notificationId = await NotificationsAsync.scheduleNotificationAsync({
-      content: {
-        title: options.title,
-        body: options.body,
-        sound: sound || 'default',
-        priority: options.priority === 'critical' ? 'max' :
-          options.priority === 'high' ? 'high' :
-            'default',
-        data: options.data || {},
-        categoryIdentifier: 'alert',
-        sticky: options.priority === 'critical', // Critical alerts stay until dismissed
-        interruptionLevel: settings.notificationShowOnLockScreen
-          ? (options.priority === 'critical' ? 'timeSensitive' : undefined)
-          : 'passive',
-      },
-      trigger: null, // Immediate
-      identifier: `alert-${Date.now()}`,
-      ...(Platform.OS === 'android' && {
-        android: {
-          channelId: channelId,
-          priority: options.priority === 'critical' ? 'high' : options.priority === 'high' ? 'default' : 'low',
-        },
-      }),
-    });
-
-    // For Android, set full-screen intent
-    if (Platform.OS === 'android' && options.priority === 'critical') {
-      // Full-screen intent is handled by Android system when notification is tapped
-      // We'll also show a modal overlay
-    }
-
-    return notificationId;
+  private async sendPushNotification(_options: AlertOptions, _settings: AlertSettingsSnapshot) {
+    // NOTIFICATION GATEWAY FIX: Push notifications are NO LONGER sent here.
+    // The caller (MagnitudeBasedNotificationService or UltraFastEEWNotification)
+    // already sends the push notification via NotificationScheduler.
+    // Sending another one here caused duplicate notifications for every earthquake.
+    //
+    // MultiChannelAlertService is now ONLY responsible for:
+    //   - Alarm sound playback
+    //   - Vibration patterns
+    //   - TTS speech
+    //   - LED flash
+    //   - Full-screen overlay
+    //
+    // Push notification responsibility: NotificationScheduler (single source of truth)
+    logger.debug('Push notification delegated to NotificationScheduler (no duplicate)');
+    return null;
   }
 
   private async showFullScreenAlert(options: AlertOptions, settings: AlertSettingsSnapshot) {
-    // This will be handled by a React component overlay
-    // For now, we'll use a high-priority notification that shows on lock screen
-    // The actual full-screen modal will be shown by the AlertModal component
+    // ==================== FULL-SCREEN OVERLAY ====================
+    // CRITICAL: This method ONLY handles the full-screen UI overlay.
+    // It MUST NOT send another push notification — the caller (MBN)
+    // already sent one via scheduleNotificationAsync. The previous
+    // implementation sent a SECOND push here, causing duplicate alerts
+    // for every critical/high earthquake.
+    //
+    // On iOS, we set the notification handler to show the existing
+    // notification prominently. On Android, the notification channel
+    // handles full-screen intent. No NEW notification needed.
 
-    // ELITE: Use async getter to ensure notifications module is ready
-    const NotificationsAsync = await getNotificationsAsync();
-    if (!NotificationsAsync || typeof NotificationsAsync.scheduleNotificationAsync !== 'function') {
-      // ELITE: Log as debug - this is expected in some environments
-      logger.debug('Notifications not available for full-screen alert (using fallback channels)');
-      return;
-    }
+    // ELITE: Log full-screen alert activation for debugging
+    logger.info(`📺 Full-screen alert shown: ${options.title}`);
 
-    // Schedule a critical notification that shows on lock screen
-    if (Platform.OS === 'ios') {
-      await NotificationsAsync.scheduleNotificationAsync({
-        content: {
-          title: options.title,
-          body: options.body,
-          sound: this.resolveNotificationSound(settings, options.priority, options.sound),
-          priority: 'max',
-          data: { ...options.data, fullScreen: true },
-          interruptionLevel: settings.notificationShowOnLockScreen ? 'timeSensitive' : 'passive',
-        },
-        trigger: null,
-      });
-    } else if (Platform.OS === 'android') {
-      // Android full-screen intent
-      // ELITE: Android-specific options are handled via notification channels
-      // The 'android' property is not part of the standard API - removed for type safety
-      await NotificationsAsync.scheduleNotificationAsync({
-        content: {
-          title: options.title,
-          body: options.body,
-          sound: this.resolveNotificationSound(settings, options.priority, options.sound),
-          priority: 'max',
-          data: { ...options.data, fullScreen: true },
-        },
-        trigger: null,
-      });
-    }
+    // The actual full-screen modal is shown by the AlertModal react component
+    // which listens to the isAlerting state. No push notification needed here.
   }
 
   private async playAlarmSound(
@@ -740,15 +670,9 @@ class MultiChannelAlertService {
       // ELITE: Get Audio module dynamically
       const Audio = getAudio();
       if (!Audio) {
-        logger.warn('Audio module not available - using notification sound instead');
-        // Fallback to notification sound
-        const Notifications = getNotifications();
-        if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
-          await Notifications.scheduleNotificationAsync({
-            content: { sound: 'default' },
-            trigger: null,
-          });
-        }
+        logger.warn('Audio module not available - alarm sound skipped');
+        // NOTIFICATION GATEWAY FIX: No longer sending a duplicate push notification
+        // as fallback. The push was already sent by the gateway.
         return;
       }
 
@@ -768,57 +692,59 @@ class MultiChannelAlertService {
 
       if (soundFile) {
         // Load custom sound
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: soundFile },
-          { shouldPlay: true, isLooping: repeatCount > 1, volume },
-        );
-        this.soundInstance = sound;
-        if (repeatCount > 1) {
-          setTimeout(async () => {
-            if (this.soundInstance === sound) {
-              try {
-                await sound.stopAsync();
-                await sound.unloadAsync();
-                this.soundInstance = null;
-              } catch {
-                // already cleaned up
+        const AudioModule = getAudio();
+        if (AudioModule && AudioModule.createAudioPlayer) {
+          const sound = AudioModule.createAudioPlayer({ uri: soundFile });
+          sound.loop = repeatCount > 1;
+          sound.volume = volume;
+          sound.play();
+          this.soundInstance = sound;
+          if (repeatCount > 1) {
+            setTimeout(() => {
+              if (this.soundInstance === sound) {
+                try {
+                  sound.pause();
+                  sound.remove();
+                  this.soundInstance = null;
+                } catch {
+                  // already cleaned up
+                }
               }
-            }
-          }, repeatWindowMs);
+            }, repeatWindowMs);
+          }
         }
       } else {
         // PREMIUM: Load the actual emergency alert sound file
         try {
-          const { sound } = await Audio.Sound.createAsync(
-            require('../../../assets/emergency-alert.wav'),
-            { shouldPlay: true, isLooping: repeatCount > 1, volume },
-          );
-          this.soundInstance = sound;
+          const AudioModule = getAudio();
+          if (AudioModule && AudioModule.createAudioPlayer) {
+            const sound = AudioModule.createAudioPlayer(
+              require('../../../assets/emergency-alert.wav'),
+            );
+            sound.loop = repeatCount > 1;
+            sound.volume = volume;
+            sound.play();
+            this.soundInstance = sound;
 
-          // Auto-stop after configured repeat window (bounded for safety)
-          setTimeout(async () => {
-            if (this.soundInstance === sound) {
-              try {
-                await sound.stopAsync();
-                await sound.unloadAsync();
-                this.soundInstance = null;
-              } catch (e) {
-                // Already cleaned up
+            // Auto-stop after configured repeat window (bounded for safety)
+            setTimeout(() => {
+              if (this.soundInstance === sound) {
+                try {
+                  sound.pause();
+                  sound.remove();
+                  this.soundInstance = null;
+                } catch (e) {
+                  // Already cleaned up
+                }
               }
-            }
-          }, Math.max(5000, Math.min(90000, repeatWindowMs)));
+            }, Math.max(5000, Math.min(90000, repeatWindowMs)));
 
-          logger.info('🔊 Emergency alert sound playing via MultiChannelAlertService');
-        } catch (soundError) {
-          logger.warn('Emergency sound file failed, using system notification fallback:', soundError);
-          // Last resort fallback to system notification sound
-          const Notifications = getNotifications();
-          if (Notifications && typeof Notifications.scheduleNotificationAsync === 'function') {
-            await Notifications.scheduleNotificationAsync({
-              content: { sound: 'default' },
-              trigger: null,
-            });
+            logger.info('🔊 Emergency alert sound playing via MultiChannelAlertService');
           }
+        } catch (soundError) {
+          logger.warn('Emergency sound file failed:', soundError);
+          // NOTIFICATION GATEWAY FIX: No longer sending a duplicate push notification
+          // as fallback. The push was already sent by the gateway.
         }
       }
     } catch (error) {

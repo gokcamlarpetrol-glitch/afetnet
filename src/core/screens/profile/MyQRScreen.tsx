@@ -60,7 +60,7 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
             await identityService.initialize();
             const payload = identityService.getQRPayload();
             const name = identityService.getDisplayName();
-            const id = identityService.getMyId();
+            const id = identityService.getUid() || identityService.getMyId();
 
             setQrPayload(payload);
             setUserName(name || 'AfetNet Kullanıcısı');

@@ -215,8 +215,17 @@ export class PreparednessPlanService {
       const sanitizedPlan = deepSanitize(plan) as PreparednessPlan;
       const sanitizedParams = deepSanitize(params);
 
+      // SECURITY: Get current user for ownerUid enforcement
+      const { getAuth } = await import('firebase/auth');
+      const currentUser = getAuth()?.currentUser;
+      if (!currentUser) {
+        logger.debug('Skipping Firestore save: no authenticated user');
+        return;
+      }
+
       await setDoc(doc(db, 'preparedness_plans', plan.id), {
         ...sanitizedPlan,
+        ownerUid: currentUser.uid,
         params: sanitizedParams,
         updatedAt: Date.now(),
       }, { merge: true });
@@ -337,14 +346,11 @@ JSON formatında döndür (sadece JSON):
 
     const systemPrompt = `Sen bir AFAD afet hazırlık uzmanısın. Türkiye'deki deprem gerçeklerine göre, aile profiline özel, uygulanabilir hazırlık planları oluşturuyorsun. Planlar AFAD standartlarına uygun, net, anlaşılır ve adım adım olmalı. Sadece JSON formatında yanıt ver.`;
 
-    // ELITE: Increase maxTokens significantly to ensure complete JSON response
-    // Preparedness plan JSON can be large (5+ sections with multiple items each)
-    // ELITE: Cost & Speed optimization - reduced maxTokens from 2000 to 1200
-    // Rule-based plan is already comprehensive, AI is just enrichment
-    // Smaller maxTokens = faster responses, less timeout risk
+    // ELITE: maxTokens must be large enough for full JSON with 5 sections × 4-5 items
+    // Previous value of 1500 was causing JSON Parse Error from truncated responses
     const aiResponse = await openAIService.generateText(prompt, {
       systemPrompt,
-      maxTokens: 1500, // ELITE: Raised from 1200 to reduce truncation for complex JSON plans
+      maxTokens: 3000, // ELITE: Raised from 1500 — truncation caused JSON Parse errors
       temperature: 0.7,
       serviceName: 'PreparednessPlanService', // ELITE: For cost tracking
     });
@@ -461,16 +467,12 @@ JSON formatında döndür (sadece JSON):
       cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
       cleanedResponse = cleanedResponse.replace(/```\s*/g, '');
 
-      // ELITE: Find JSON object — use lazy match for initial attempt
-      let jsonMatch = cleanedResponse.match(/\{[\s\S]*?\}/);
-
-      // If no match, try to find JSON after "{" or before "}"
-      if (!jsonMatch) {
-        const firstBrace = cleanedResponse.indexOf('{');
-        const lastBrace = cleanedResponse.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonMatch = [cleanedResponse.substring(firstBrace, lastBrace + 1)];
-        }
+      // Find JSON object — greedy match to capture complete nested JSON
+      const firstBrace = cleanedResponse.indexOf('{');
+      const lastBrace = cleanedResponse.lastIndexOf('}');
+      let jsonMatch: string[] | null = null;
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        jsonMatch = [cleanedResponse.substring(firstBrace, lastBrace + 1)];
       }
 
       if (!jsonMatch || jsonMatch[0].length < 10) {

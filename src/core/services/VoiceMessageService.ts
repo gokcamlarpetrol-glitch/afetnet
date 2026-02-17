@@ -3,7 +3,7 @@
  * Walkie-Talkie functionality with cloud backup.
  *
  * Features:
- * - Audio Recording (expo-av)
+ * - Audio Recording (expo-audio)
  * - Compression for BLE transmission
  * - Playback with visual waveform
  * - Auto-stop on silence detection
@@ -12,33 +12,31 @@
  * - Offline-first with background sync
  */
 
-import { Audio } from 'expo-av';
+import { setAudioModeAsync, requestRecordingPermissionsAsync, createAudioPlayer, IOSOutputFormat, AudioQuality } from 'expo-audio';
+import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 import { createLogger } from '../utils/logger';
 import { bleMeshService } from './BLEMeshService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { identityService } from './IdentityService';
 import { firebaseStorageService } from './FirebaseStorageService';
+import { Buffer } from 'buffer';
 
 const logger = createLogger('VoiceMessageService');
 
 // Recording Config (Optimized for BLE transmission)
-const RECORDING_OPTIONS: Audio.RecordingOptions = {
+const RECORDING_OPTIONS: RecordingOptions = {
+  extension: '.m4a',
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 32000,
   android: {
-    extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 16000, // Lower for smaller file size
-    numberOfChannels: 1, // Mono
-    bitRate: 32000, // 32kbps compressed
+    outputFormat: 'mpeg4',
+    audioEncoder: 'aac',
   },
   ios: {
-    extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.LOW,
-    sampleRate: 16000,
-    numberOfChannels: 1,
-    bitRate: 32000,
+    outputFormat: IOSOutputFormat.MPEG4AAC,
+    audioQuality: AudioQuality.LOW,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
     linearPCMIsFloat: false,
@@ -69,8 +67,8 @@ export interface VoiceMessage {
 }
 
 class VoiceMessageService {
-  private recording: Audio.Recording | null = null;
-  private sound: Audio.Sound | null = null;
+  private recording: AudioRecorder | null = null;
+  private sound: AudioPlayer | null = null;
   private isRecording = false;
   private isPlaying = false;
   private recordingStartTime = 0;
@@ -82,27 +80,99 @@ class VoiceMessageService {
      */
   async initialize(): Promise<boolean> {
     try {
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status } = await requestRecordingPermissionsAsync();
       if (status !== 'granted') {
         logger.warn('Audio permission not granted');
         return false;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
       });
 
       // Load saved messages
       await this.loadMessages();
+
+      // ELITE: Cloud Hydration
+      // Restore voice messages from Firebase Storage/Firestore
+      this.syncVoiceMessagesFromCloud().catch(err => {
+        logger.warn('Voice cloud hydration failed:', err);
+      });
 
       logger.info('Voice Message Service initialized');
       return true;
     } catch (e) {
       logger.error('Failed to initialize voice service', e);
       return false;
+    }
+  }
+
+  /**
+   * ELITE: Restore voice messages from Cloud
+   * Queries Firestore for voice messages where I am the sender or recipient
+   */
+  async syncVoiceMessagesFromCloud(): Promise<void> {
+    try {
+      const identity = identityService.getIdentity();
+      const myUid = identity?.uid;
+
+      if (!myUid) {
+        logger.debug('Skipping voice sync: No cloud identity');
+        return;
+      }
+
+      const { firebaseDataService } = await import('./FirebaseDataService');
+      await firebaseDataService.initialize();
+
+      // 1. Fetch voice metadata from Firestore (using specific query)
+      // We look for messages of type 'voice' where user is participant
+      const voiceMessages = await firebaseDataService.loadVoiceMessagesForUser(myUid);
+
+      if (!voiceMessages || voiceMessages.length === 0) return;
+
+      let newCount = 0;
+      const existingIds = new Set(this.voiceMessages.map(m => m.id));
+
+      for (const msg of voiceMessages) {
+        if (existingIds.has(msg.id)) continue;
+
+        // MessageData uses senderUid, not senderId
+        // Cast to any to access potential extra fields safely if type definition is partial
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawMsg = msg as any;
+        const senderId = rawMsg.senderUid || rawMsg.senderId || 'unknown';
+        const recipientId = rawMsg.recipientId || rawMsg.to || 'broadcast';
+
+        // 2. Add to local store (without downloading audio yet - save bandwidth)
+        // Audio will be streamed/downloaded on demand when user plays it
+        const newVoiceMsg: VoiceMessage = {
+          id: msg.id,
+          uri: '', // Empty URI indicates content is in cloud
+          durationMs: rawMsg.mediaDuration || rawMsg.duration || 0,
+          timestamp: msg.timestamp,
+          from: senderId,
+          to: recipientId,
+          delivered: true,
+          played: senderId === myUid, // Played if sent by me
+          firebaseUrl: rawMsg.mediaUrl || rawMsg.url, // Critical: this enables streaming
+          syncedToCloud: true,
+          syncedAt: Date.now(),
+          base64Data: undefined // Don't cache heavy base64 for history
+        };
+
+        this.voiceMessages.push(newVoiceMsg);
+        newCount++;
+      }
+
+      if (newCount > 0) {
+        this.voiceMessages.sort((a, b) => a.timestamp - b.timestamp);
+        await this.saveMessages();
+        logger.info(`✅ Hydrated ${newCount} voice messages from cloud`);
+      }
+    } catch (error) {
+      logger.error('Error syncing voice messages:', error);
     }
   }
 
@@ -115,16 +185,16 @@ class VoiceMessageService {
     try {
       // Stop any playing audio
       if (this.sound) {
-        await this.sound.stopAsync();
-        await this.sound.unloadAsync();
+        this.sound.pause();
+        this.sound.remove();
         this.sound = null;
       }
 
-      const { recording } = await Audio.Recording.createAsync(
-        RECORDING_OPTIONS,
-      );
-
-      this.recording = recording;
+      // Create recorder using expo-audio API
+      const { AudioRecorder: NativeAudioRecorder } = require('expo-audio');
+      this.recording = new NativeAudioRecorder();
+      await this.recording!.prepareToRecordAsync(RECORDING_OPTIONS);
+      this.recording!.record();
       this.isRecording = true;
       this.recordingStartTime = Date.now();
 
@@ -155,8 +225,8 @@ class VoiceMessageService {
         this.autoStopTimer = null;
       }
 
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
+      await this.recording.stop();
+      const uri = this.recording.uri;
       const duration = Date.now() - this.recordingStartTime;
 
       this.isRecording = false;
@@ -211,8 +281,8 @@ class VoiceMessageService {
         this.autoStopTimer = null;
       }
 
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
+      await this.recording.stop();
+      const uri = this.recording.uri;
       if (uri) {
         await FileSystem.deleteAsync(uri, { idempotent: true });
       }
@@ -234,10 +304,10 @@ class VoiceMessageService {
     }
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
+      const sound = createAudioPlayer(
         { uri: message.uri },
-        { shouldPlay: true },
       );
+      sound.play();
 
       this.sound = sound;
       this.isPlaying = true;
@@ -246,8 +316,9 @@ class VoiceMessageService {
       message.played = true;
       await this.saveMessages();
 
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
+      // Listen for playback completion
+      sound.addListener('playbackStatusUpdate', (status: any) => {
+        if (status.playing === false && status.currentTime >= status.duration) {
           this.isPlaying = false;
         }
       });
@@ -264,8 +335,8 @@ class VoiceMessageService {
   async stop(): Promise<void> {
     if (this.sound) {
       try {
-        await this.sound.stopAsync();
-        await this.sound.unloadAsync();
+        this.sound.pause();
+        this.sound.remove();
       } catch (e) {
         // Ignore errors during stop
       }
@@ -375,7 +446,7 @@ class VoiceMessageService {
 
     try {
       const identity = identityService.getIdentity();
-      const userId = identity?.cloudUid;
+      const userId = identity?.uid;
       if (!userId) {
         logger.warn('Skipping Firebase backup: cloud identity unavailable');
         return null;
@@ -383,11 +454,7 @@ class VoiceMessageService {
       const storagePath = `voice/${userId}/${message.id}.m4a`;
 
       // Convert base64 to Blob for upload
-      const binaryString = atob(message.base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      const bytes = Uint8Array.from(Buffer.from(message.base64Data, 'base64'));
 
       const downloadUrl = await firebaseStorageService.uploadFile(
         storagePath,

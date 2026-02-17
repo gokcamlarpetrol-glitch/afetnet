@@ -132,8 +132,16 @@ class MeshMediaService {
         options: {
             thumbnail?: string;
             caption?: string;
+            transferId?: string;
+            timestamp?: number;
+            senderName?: string;
+            senderId?: string;
         } = {}
     ): Promise<string> {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
         logger.info(`Sending image to ${recipientId || 'broadcast'}`);
 
         // Read image data
@@ -152,7 +160,11 @@ class MeshMediaService {
         const transfer = await this.createTransfer('image', recipientId, buffer, {
             thumbnail: options.thumbnail,
             caption: options.caption,
-        });
+            ...(typeof options.timestamp === 'number' && Number.isFinite(options.timestamp) ? { timestamp: options.timestamp } : {}),
+            ...(typeof options.senderName === 'string' && options.senderName.trim().length > 0
+                ? { senderName: options.senderName.trim() }
+                : {}),
+        }, options.transferId, options.senderId);
 
         // Start chunked transfer
         await this.sendChunks(transfer, buffer);
@@ -167,8 +179,18 @@ class MeshMediaService {
     async sendVoice(
         recipientId: string | undefined,
         audioUri: string,
-        duration: number
+        duration: number,
+        options: {
+            transferId?: string;
+            timestamp?: number;
+            senderName?: string;
+            senderId?: string;
+        } = {}
     ): Promise<string> {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
         logger.info(`Sending voice (${duration}s) to ${recipientId || 'broadcast'}`);
 
         // Check duration limit
@@ -186,7 +208,11 @@ class MeshMediaService {
         // Create transfer
         const transfer = await this.createTransfer('voice', recipientId, buffer, {
             duration,
-        });
+            ...(typeof options.timestamp === 'number' && Number.isFinite(options.timestamp) ? { timestamp: options.timestamp } : {}),
+            ...(typeof options.senderName === 'string' && options.senderName.trim().length > 0
+                ? { senderName: options.senderName.trim() }
+                : {}),
+        }, options.transferId, options.senderId);
 
         // Start chunked transfer
         await this.sendChunks(transfer, buffer);
@@ -200,15 +226,29 @@ class MeshMediaService {
 
     async sendLocation(
         recipientId: string | undefined,
-        location: LocationPayload
+        location: LocationPayload,
+        options: {
+            transferId?: string;
+            senderName?: string;
+            senderId?: string;
+        } = {}
     ): Promise<string> {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
         logger.info(`Sending location to ${recipientId || 'broadcast'}`);
 
         const payload = JSON.stringify(location);
         const buffer = Buffer.from(payload, 'utf-8');
 
         // Location is small, send as single packet
-        const transfer = await this.createTransfer('location', recipientId, buffer, location);
+        const transfer = await this.createTransfer('location', recipientId, buffer, {
+            ...location,
+            ...(typeof options.senderName === 'string' && options.senderName.trim().length > 0
+                ? { senderName: options.senderName.trim() }
+                : {}),
+        }, options.transferId, options.senderId);
 
         // For location, use direct send
         const { meshNetworkService } = await import('./index');
@@ -217,10 +257,19 @@ class MeshMediaService {
             JSON.stringify({
                 type: 'LOCATION',
                 mediaId: transfer.id,
-                senderId: this.myDeviceId,
+                senderId: transfer.senderId,
+                recipientId: recipientId || 'broadcast',
                 data: location,
+                fromDeviceId: this.myDeviceId,
+                ...(typeof options.senderName === 'string' && options.senderName.trim().length > 0
+                    ? { senderName: options.senderName.trim() }
+                    : {}),
             }),
-            MeshMessageType.STATUS
+            MeshMessageType.TEXT,
+            {
+                to: recipientId || 'broadcast',
+                from: this.myDeviceId,
+            },
         );
 
         transfer.status = 'complete';
@@ -246,14 +295,19 @@ class MeshMediaService {
                 type: 'MEDIA_START',
                 mediaId: transfer.id,
                 mediaType: transfer.type,
-                senderId: this.myDeviceId,
+                senderId: transfer.senderId,
                 recipientId: transfer.recipientId,
                 totalSize: data.length,
                 totalChunks: transfer.totalChunks,
                 thumbnail: transfer.thumbnail,
                 metadata: transfer.metadata,
+                fromDeviceId: this.myDeviceId,
             }),
-            MeshMessageType.TEXT
+            MeshMessageType.TEXT,
+            {
+                to: transfer.recipientId || 'broadcast',
+                from: this.myDeviceId,
+            },
         );
 
         // Send chunks
@@ -279,7 +333,11 @@ class MeshMediaService {
                     data: chunkData.toString('base64'),
                     checksum: chunk.checksum,
                 }),
-                MeshMessageType.TEXT
+                MeshMessageType.TEXT,
+                {
+                    to: transfer.recipientId || 'broadcast',
+                    from: this.myDeviceId,
+                },
             );
 
             // Update progress
@@ -298,7 +356,11 @@ class MeshMediaService {
                 mediaId: transfer.id,
                 checksum: this.calculateChecksum(data),
             }),
-            MeshMessageType.TEXT
+            MeshMessageType.TEXT,
+            {
+                to: transfer.recipientId || 'broadcast',
+                from: this.myDeviceId,
+            },
         );
 
         transfer.status = 'complete';
@@ -333,7 +395,7 @@ class MeshMediaService {
     private async handleMediaStart(message: any): Promise<void> {
         const transfer: MediaTransfer = {
             id: message.mediaId,
-            type: message.mediaType,
+            type: this.normalizeTransferType(message.mediaType),
             senderId: message.senderId,
             recipientId: message.recipientId,
             totalSize: message.totalSize,
@@ -434,14 +496,21 @@ class MeshMediaService {
 
     private async handleLocation(message: any): Promise<void> {
         const location = message.data as LocationPayload;
+        const senderName = typeof message.senderName === 'string' && message.senderName.trim().length > 0
+            ? message.senderName.trim()
+            : undefined;
+        const recipientId = typeof message.recipientId === 'string' && message.recipientId.trim().length > 0
+            ? message.recipientId.trim()
+            : 'broadcast';
 
         // Add to mesh store as location message
         const meshMessage: MeshMessage = {
             id: message.mediaId,
             senderId: message.senderId,
-            to: 'broadcast',
+            ...(senderName ? { senderName } : {}),
+            to: recipientId,
             type: 'LOCATION',
-            content: JSON.stringify(location),
+            content: '📍 Konum',
             timestamp: location.timestamp,
             hops: 0,
             status: 'delivered',
@@ -449,6 +518,7 @@ class MeshMediaService {
             priority: 'normal',
             acks: [],
             retryCount: 0,
+            mediaType: 'location',
             location: {
                 lat: location.latitude,
                 lng: location.longitude,
@@ -468,15 +538,22 @@ class MeshMediaService {
         type: MediaType,
         recipientId: string | undefined,
         data: Buffer,
-        metadata?: Record<string, any>
+        metadata?: Record<string, any>,
+        transferId?: string,
+        senderId?: string
     ): Promise<MediaTransfer> {
-        const id = `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const id = typeof transferId === 'string' && transferId.trim().length > 0
+            ? transferId.trim()
+            : `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const normalizedSenderId = typeof senderId === 'string' && senderId.trim().length > 0
+            ? senderId.trim()
+            : this.myDeviceId;
         const totalChunks = Math.ceil(data.length / MEDIA_CONFIG.MAX_CHUNK_SIZE);
 
         const transfer: MediaTransfer = {
             id,
             type,
-            senderId: this.myDeviceId,
+            senderId: normalizedSenderId,
             recipientId,
             totalSize: data.length,
             totalChunks,
@@ -491,6 +568,20 @@ class MeshMediaService {
         this.activeTransfers.set(id, transfer);
 
         return transfer;
+    }
+
+    private normalizeTransferType(value: unknown): MediaType {
+        if (value === 'image' || value === 'voice' || value === 'location') {
+            return value;
+        }
+        if (typeof value !== 'string') {
+            return 'image';
+        }
+        const normalized = value.toLowerCase();
+        if (normalized === 'voice' || normalized === 'location') {
+            return normalized;
+        }
+        return 'image';
     }
 
     private calculateChecksum(data: Buffer): number {
@@ -513,13 +604,63 @@ class MeshMediaService {
     }
 
     private addMediaMessage(transfer: MediaTransfer, filePath: string): void {
+        const caption = typeof transfer.metadata?.caption === 'string' && transfer.metadata.caption.trim().length > 0
+            ? transfer.metadata.caption.trim()
+            : transfer.type === 'image'
+                ? '📷 Fotoğraf'
+                : transfer.type === 'voice'
+                    ? '🎤 Sesli Mesaj'
+                    : '📍 Konum';
+        const senderName = typeof transfer.metadata?.senderName === 'string' && transfer.metadata.senderName.trim().length > 0
+            ? transfer.metadata.senderName.trim()
+            : undefined;
+        const timestamp = typeof transfer.metadata?.timestamp === 'number' && Number.isFinite(transfer.metadata.timestamp)
+            ? transfer.metadata.timestamp
+            : transfer.startTime;
+        const location = transfer.type === 'location' &&
+            typeof transfer.metadata?.latitude === 'number' &&
+            typeof transfer.metadata?.longitude === 'number'
+            ? {
+                lat: transfer.metadata.latitude,
+                lng: transfer.metadata.longitude,
+                ...(typeof transfer.metadata?.label === 'string' ? { address: transfer.metadata.label } : {}),
+            }
+            : undefined;
+
+        const mediaPatch: Partial<MeshMessage> = {
+            senderId: transfer.senderId,
+            ...(senderName ? { senderName } : {}),
+            to: transfer.recipientId || 'broadcast',
+            type: transfer.type === 'image' ? 'IMAGE' : transfer.type === 'voice' ? 'VOICE' : 'LOCATION',
+            content: caption,
+            timestamp,
+            status: 'delivered',
+            ttl: 5,
+            priority: 'normal',
+            acks: [],
+            retryCount: 0,
+            mediaUrl: filePath,
+            mediaType: transfer.type,
+            mediaThumbnail: transfer.thumbnail,
+            ...(typeof transfer.metadata?.duration === 'number' ? { mediaDuration: transfer.metadata.duration } : {}),
+            ...(location ? { location } : {}),
+        };
+
+        const meshState = useMeshStore.getState();
+        const existing = meshState.messages.find((message) => message.id === transfer.id);
+        if (existing) {
+            const { senderId: _senderId, to: _to, ...patchWithoutRouting } = mediaPatch;
+            meshState.updateMessage(transfer.id, patchWithoutRouting);
+            return;
+        }
+
         const meshMessage: MeshMessage = {
             id: transfer.id,
             senderId: transfer.senderId,
             to: transfer.recipientId || 'broadcast',
-            type: transfer.type === 'image' ? 'IMAGE' : transfer.type === 'voice' ? 'VOICE' : 'CHAT',
-            content: transfer.type === 'image' ? '[Görsel]' : '[Sesli Mesaj]',
-            timestamp: transfer.startTime,
+            type: transfer.type === 'image' ? 'IMAGE' : transfer.type === 'voice' ? 'VOICE' : 'LOCATION',
+            content: caption,
+            timestamp,
             hops: 0,
             status: 'delivered',
             ttl: 5,
@@ -527,10 +668,13 @@ class MeshMediaService {
             acks: [],
             retryCount: 0,
             mediaUrl: filePath,
+            mediaType: transfer.type,
             mediaThumbnail: transfer.thumbnail,
-            mediaDuration: transfer.metadata?.duration,
+            ...(typeof transfer.metadata?.duration === 'number' ? { mediaDuration: transfer.metadata.duration } : {}),
+            ...(location ? { location } : {}),
+            ...(senderName ? { senderName } : {}),
         };
-        useMeshStore.getState().addMessage(meshMessage);
+        meshState.addMessage(meshMessage);
     }
 
     private async loadPendingTransfers(): Promise<void> {

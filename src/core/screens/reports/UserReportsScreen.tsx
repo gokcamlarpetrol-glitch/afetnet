@@ -13,10 +13,10 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { usePremiumStore } from '../../stores/premiumStore';
+
 import { bleMeshService } from '../../services/BLEMeshService';
 import { seismicSensorService } from '../../services/SeismicSensorService';
-import PremiumGate from '../../components/PremiumGate';
+
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('UserReportsScreen');
@@ -52,9 +52,6 @@ const INTENSITY_DESCRIPTIONS = [
 ];
 
 export default function UserReportsScreen({ navigation }: { navigation: UserReportsNavigationProp }) {
-  // CRITICAL: Read premium status from store (includes trial check)
-  // Trial aktifken isPremium otomatik olarak true olur (syncPremiumAccess tarafından)
-  const isPremium = usePremiumStore((state) => state.isPremium);
   const [selectedIntensity, setSelectedIntensity] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -178,21 +175,22 @@ export default function UserReportsScreen({ navigation }: { navigation: UserRepo
       // CRITICAL: Save to Firebase
       try {
         const { firebaseDataService } = await import('../../services/FirebaseDataService');
-        if (firebaseDataService.isInitialized) {
-          // Save as felt earthquake report for consistency
-          await firebaseDataService.saveFeltEarthquakeReport({
-            earthquakeId: `user_report_${report.id}`,
-            userId: deviceId,
-            timestamp: report.timestamp,
-            location: report.location,
-            intensity: report.intensity,
-            feltDuration: 0, // User reports don't have duration
-            effects: [],
-            comments: report.description,
-          }).catch((error) => {
-            logger.error('Failed to save user report to Firebase:', error);
-          });
-        }
+        try {
+          await firebaseDataService.initialize();
+        } catch { /* best effort */ }
+        // Save as felt earthquake report for consistency
+        await firebaseDataService.saveFeltEarthquakeReport({
+          earthquakeId: `user_report_${report.id}`,
+          userId: deviceId,
+          timestamp: report.timestamp,
+          location: report.location,
+          intensity: report.intensity,
+          feltDuration: 0, // User reports don't have duration
+          effects: [],
+          comments: report.description,
+        }).catch((error) => {
+          logger.error('Failed to save user report to Firebase:', error);
+        });
       } catch (error) {
         logger.error('Failed to save user report to Firebase:', error);
       }
@@ -244,14 +242,7 @@ export default function UserReportsScreen({ navigation }: { navigation: UserRepo
     }
   };
 
-  if (!isPremium) {
-    return (
-      <PremiumGate
-        featureName="Kullanıcı Raporları"
 
-      />
-    );
-  }
 
   return (
     <View style={styles.container}>

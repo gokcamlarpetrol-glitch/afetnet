@@ -66,6 +66,20 @@ export type DeliveryStatus = 'pending' | 'sending' | 'sent' | 'delivered' | 'rea
 // ELITE: Message type
 export type MessageType = 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'TYPING' | 'ACK' | 'REACTION' | 'IMAGE' | 'VOICE';
 type CloudMessageType = 'text' | 'sos' | 'location' | 'status' | 'image' | 'voice';
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const isNonRoutableRecipientId = (value: string): boolean =>
+  value === 'me' || value === 'ME' || value.startsWith('group:');
+const SYSTEM_PAYLOAD_TYPES = new Set([
+  'family_status_update',
+  'family_location_update',
+  'family_location',
+  'status_update',
+  'device_status',
+  'presence_update',
+  'typing',
+  'ack',
+  'reaction',
+]);
 
 export interface HybridMessage {
   id: string;
@@ -105,6 +119,7 @@ class HybridMessageService {
   private isInitialized = false;
   private isProcessing = false;
   private isActive = true; // P8: AppState tracking
+  private lastEmittedConnectionState: 'online' | 'mesh' | 'offline' | null = null;
 
   // M1: Store all interval/timer IDs for cleanup
   private processTimer: NodeJS.Timeout | null = null;
@@ -143,23 +158,34 @@ class HybridMessageService {
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
+    // CRITICAL FIX: Verify identity before registering device or setting up message processing
+    const uid = identityService.getUid();
+    if (!uid) {
+      logger.warn('⚠️ HybridMessageService: UID not resolved yet');
+    } else {
+      logger.info(`📨 HybridMessageService initializing with UID: ${uid}`);
+    }
+
     await this.loadQueue();
     await this.loadSeenIds();
 
     // Initialize delivery manager
     await deliveryManager.initialize();
 
-    // Ensure device identity docs exist in Firestore (physical ID + QR alias).
+    // Ensure device identity doc exists in Firestore.
+    // RC-3 FIX: Use identityService.getMyId() instead of getDeviceIdFromLib().
+    // getDeviceIdFromLib() can return a stale hardware ID if the identity cache
+    // hasn't been overwritten yet. identityService.getMyId() returns the correct
+    // AFN-XXXXXXXX ID that matches the Firestore device document path.
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
-      if (!firebaseDataService.isInitialized) {
+      try {
         await firebaseDataService.initialize();
-      }
-      if (firebaseDataService.isInitialized) {
-        const deviceId = await getDeviceIdFromLib();
-        if (deviceId) {
-          await firebaseDataService.saveDeviceId(deviceId);
-        }
+      } catch { /* best effort */ }
+
+      const myUid = identityService.getUid();
+      if (myUid) {
+        await firebaseDataService.saveDeviceId(myUid);
       }
     } catch (error) {
       logger.warn('Firestore device registration skipped:', error);
@@ -175,6 +201,132 @@ class HybridMessageService {
     this.setupAppStateListener();
 
     logger.info('🚀 HybridMessageService V4 initialized');
+
+    // ELITE: Start Cloud Hydration (Background)
+    // This restores message history from Firestore on app launch, correcting "Amnesia".
+    this.syncMessagesWithCloud().catch(err => {
+      logger.warn('Cloud hydration failed (non-fatal):', err);
+    });
+  }
+
+  /**
+   * ELITE: Cloud Hydration
+   * Fetches the last 20 messages for active conversations from Firestore
+   * and silenty imports them into messageStore.
+   */
+  async syncMessagesWithCloud(): Promise<void> {
+    if (!connectionManager.isOnline) {
+      logger.debug('Skipping cloud sync: Offline');
+      return;
+    }
+
+    try {
+      const { firebaseDataService } = await import('./FirebaseDataService');
+      const { useMessageStore } = await import('../stores/messageStore');
+
+      // Initialize Firebase service if needed
+      await firebaseDataService.initialize();
+
+      // 1. Get active conversations (Inbox Threads)
+      const uid = identityService.getUid?.();
+      if (!uid) {
+        logger.debug('Cloud sync: No UID available, skipping.');
+        return;
+      }
+      const threads = await firebaseDataService.loadInboxThreads(uid);
+      if (!threads || threads.length === 0) {
+        logger.debug('Cloud sync: No inbox threads found.');
+        return;
+      }
+
+      logger.info(`Cloud sync: Found ${threads.length} active threads. Hydrating...`);
+
+      // 2. Fetch last 20 messages for each thread
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const messagesToImport: any[] = []; // Using any[] to avoid circular dependency issues
+
+      // Limit parallelism to prevent network flooding
+      const chunks = [];
+      const CHUNK_SIZE = 3;
+      for (let i = 0; i < threads.length; i += CHUNK_SIZE) {
+        chunks.push(threads.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (const chunk of chunks) {
+        await Promise.all(chunk.map(async (thread) => {
+          try {
+            // Fix: loadMessages only accepts conversationId
+            const threadMessages = await firebaseDataService.loadMessages(
+              thread.conversationId
+            );
+
+            // Take recent 20 locally
+            const recentMessages = threadMessages.slice(0, 20);
+
+            if (recentMessages && recentMessages.length > 0) {
+              const selfIds = this.getSelfIdentityIds();
+
+              recentMessages.forEach(msg => {
+                // Convert Firestore data to Store Message format
+                // Handle senderUid (V3) or senderId (legacy)
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const rawMsg = msg as any;
+                const senderId = rawMsg.senderUid || rawMsg.senderId || 'unknown';
+
+                const isFromMe = senderId === identityService.getUid?.() || selfIds.has(senderId);
+
+                // Map media type safely
+                let mediaType: 'image' | 'voice' | 'location' | undefined;
+                if (rawMsg.mediaType === 'image') mediaType = 'image';
+                else if (rawMsg.mediaType === 'voice') mediaType = 'voice';
+                else if (rawMsg.mediaType === 'location') mediaType = 'location';
+
+                // CRITICAL FIX: Use actual UID for from/to fields instead of 'me'/conversationId.
+                // ConversationScreen filters messages by checking selfIds.has(msg.from) and
+                // peerIdCandidates.has(msg.to). Using 'me' and conversationId breaks this filter.
+                const myUid = identityService.getUid?.() || 'me';
+                // For sent messages, derive peer from toDeviceId field; for received, peer is sender
+                const peerUid = isFromMe
+                  ? (rawMsg.toDeviceId || rawMsg.recipientId || senderId)
+                  : senderId;
+
+                messagesToImport.push({
+                  id: msg.id,
+                  from: isFromMe ? myUid : senderId,
+                  to: isFromMe ? peerUid : myUid,
+                  senderId: senderId,
+                  senderName: rawMsg.senderName,
+                  content: rawMsg.content || '',
+                  timestamp: rawMsg.timestamp || Date.now(),
+                  type: this.toMeshStoreType(this.mapCloudTypeToHybridType(rawMsg.type, mediaType)),
+                  status: isFromMe ? 'sent' : 'read', // History is assumed read/sent
+                  delivered: true,
+                  read: true,
+                  priority: this.isMessagePriority(rawMsg.priority) ? rawMsg.priority : 'normal',
+                  hops: 0,
+                  retryCount: 0,
+                  acks: [],
+                  ttl: 3,
+                  mediaUrl: rawMsg.mediaUrl,
+                  mediaType: mediaType,
+                  location: this.normalizeLocationPayload(rawMsg.location)
+                });
+              });
+            }
+          } catch (e) {
+            logger.warn(`Failed to hydrate thread ${thread.conversationId}`, e);
+          }
+        }));
+      }
+
+      // 3. Import into store
+      if (messagesToImport.length > 0) {
+        await useMessageStore.getState().importMessages(messagesToImport);
+        logger.info(`✅ Cloud sync complete: Imported ${messagesToImport.length} messages.`);
+      }
+    } catch (error) {
+      logger.error('Critical error during cloud sync:', error);
+    }
   }
 
   /**
@@ -268,7 +420,14 @@ class HybridMessageService {
         state = 'offline';
       }
 
-      this.connectionCallbacks.forEach(cb => cb(state));
+      // CRITICAL FIX: Only emit when state actually changes.
+      // Without this guard, every tick re-emits the same state, causing
+      // subscribeToMessages → clearCloudSubscriptions + ensureCloudSubscriptions
+      // ping-pong that destroys active Firestore onSnapshot listeners.
+      if (state !== this.lastEmittedConnectionState) {
+        this.lastEmittedConnectionState = state;
+        this.connectionCallbacks.forEach(cb => cb(state));
+      }
     }, CONNECTION_CHECK_INTERVAL_MS);
   }
 
@@ -357,6 +516,55 @@ class HybridMessageService {
     }
   }
 
+  private getEnvelopeTypeFromContent(content: string): string {
+    const trimmed = typeof content === 'string' ? content.trim() : '';
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+      return '';
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as { type?: unknown };
+      if (typeof parsed.type !== 'string') {
+        return '';
+      }
+      return parsed.type.trim().toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+
+  private deriveMessageTypeFromContent(
+    fallbackType: MeshMessage['type'],
+    content: string,
+  ): MessageType {
+    if (fallbackType === 'STATUS') return 'STATUS';
+    if (fallbackType === 'LOCATION') return 'LOCATION';
+
+    const envelopeType = this.getEnvelopeTypeFromContent(content);
+    if (!envelopeType) {
+      return this.toHybridTypeFromMesh(fallbackType);
+    }
+    if (envelopeType === 'family_status_update' || envelopeType === 'status_update') {
+      return 'STATUS';
+    }
+    if (envelopeType === 'family_location_update' || envelopeType === 'family_location') {
+      return 'LOCATION';
+    }
+    return this.toHybridTypeFromMesh(fallbackType);
+  }
+
+  private isSystemPayloadForConversation(message: Pick<HybridMessage, 'type' | 'content'>): boolean {
+    if (message.type === 'STATUS' || message.type === 'TYPING' || message.type === 'ACK' || message.type === 'REACTION') {
+      return true;
+    }
+
+    const envelopeType = this.getEnvelopeTypeFromContent(message.content);
+    if (!envelopeType) {
+      return false;
+    }
+    return SYSTEM_PAYLOAD_TYPES.has(envelopeType);
+  }
+
   private normalizeLocationPayload(raw: unknown): HybridMessage['location'] | undefined {
     if (!raw || typeof raw !== 'object') {
       return undefined;
@@ -401,6 +609,125 @@ class HybridMessageService {
 
   private isMessagePriority(value: unknown): value is MessagePriority {
     return value === 'critical' || value === 'high' || value === 'normal' || value === 'low';
+  }
+
+  private getSelfIdentityIds(): Set<string> {
+    const ids = new Set<string>(['ME', 'me']);
+    const uid = identityService.getUid();
+    if (uid) ids.add(uid);
+    return ids;
+  }
+
+  private resolveRecipientId(recipientId?: string): string | undefined {
+    if (!recipientId) return undefined;
+    const trimmed = recipientId.trim();
+    if (!trimmed || trimmed === 'broadcast') return 'broadcast';
+    if (isNonRoutableRecipientId(trimmed)) return undefined;
+    if (UID_REGEX.test(trimmed)) return trimmed;
+    return undefined; // Only UIDs are routable in v4
+  }
+
+  private async resolveRecipientIdForSend(recipientId?: string): Promise<string | undefined> {
+    const resolved = this.resolveRecipientId(recipientId);
+    logger.info(`🔍 resolveRecipientIdForSend: input="${recipientId}", after resolveRecipientId="${resolved}"`);
+    if (!resolved || resolved === 'broadcast' || UID_REGEX.test(resolved)) {
+      // If alias resolution collapsed to current user's UID, preserve the original
+      // non-UID recipient alias for mesh routing (multi-device/same-account safety).
+      if (resolved && UID_REGEX.test(resolved) && recipientId) {
+        const rawRecipient = recipientId.trim();
+        const selfIds = this.getSelfIdentityIds();
+        if (
+          rawRecipient &&
+          !UID_REGEX.test(rawRecipient) &&
+          !isNonRoutableRecipientId(rawRecipient) &&
+          selfIds.has(resolved)
+        ) {
+          logger.info(`🔍 resolveRecipientIdForSend: resolved to self UID, preserving raw alias "${rawRecipient}"`);
+          return rawRecipient;
+        }
+      }
+      return resolved;
+    }
+
+    try {
+      const { firebaseDataService } = await import('./FirebaseDataService');
+      try {
+        await firebaseDataService.initialize();
+      } catch {
+        // best effort
+      }
+      const resolvedUid = await firebaseDataService.resolveRecipientUid(resolved);
+      if (resolvedUid && UID_REGEX.test(resolvedUid)) {
+        logger.info(`🔍 resolveRecipientIdForSend: Firestore resolved "${resolved}" → UID ${resolvedUid}`);
+        return resolvedUid;
+      }
+      logger.warn(`⚠️ resolveRecipientIdForSend: Firestore could NOT resolve "${resolved}" to UID — using raw value`);
+    } catch (error) {
+      logger.debug(`resolveRecipientIdForSend fallback failed for "${resolved}"`, error);
+    }
+
+    return resolved;
+  }
+
+  private normalizeIdentity(value: string | null | undefined): string {
+    if (!value || typeof value !== 'string') return '';
+    return value.trim();
+  }
+
+  private findFamilyMemberByUid(uid: string): { uid: string; name: string } | undefined {
+    const normalized = this.normalizeIdentity(uid);
+    if (!normalized) return undefined;
+    try {
+      const { useFamilyStore } = require('../stores/familyStore');
+      return useFamilyStore.getState().members.find((m: { uid: string }) => m.uid === normalized);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getIdentityAliasCandidates(value: string | null | undefined): Set<string> {
+    const aliases = new Set<string>();
+    const normalized = this.normalizeIdentity(value);
+    if (!normalized) return aliases;
+    aliases.add(normalized);
+    return aliases;
+  }
+
+  private isBlockedSender(senderId: string | null | undefined): boolean {
+    const normalizedSender = this.normalizeIdentity(senderId);
+    if (!normalizedSender) return false;
+
+    try {
+      const { blockedUsers } = require('../stores/settingsStore').useSettingsStore.getState();
+      if (!Array.isArray(blockedUsers) || blockedUsers.length === 0) {
+        return false;
+      }
+
+      const senderAliases = this.getIdentityAliasCandidates(normalizedSender);
+      if (senderAliases.size === 0) {
+        return blockedUsers.includes(normalizedSender);
+      }
+
+      for (const blockedUserId of blockedUsers) {
+        const blockedAliases = this.getIdentityAliasCandidates(blockedUserId);
+        if (blockedAliases.size === 0) {
+          if (senderAliases.has(this.normalizeIdentity(blockedUserId))) {
+            return true;
+          }
+          continue;
+        }
+
+        for (const alias of senderAliases) {
+          if (blockedAliases.has(alias)) {
+            return true;
+          }
+        }
+      }
+    } catch {
+      // best effort
+    }
+
+    return false;
   }
 
   private toMeshStoreType(type: MessageType): MeshMessage['type'] {
@@ -450,6 +777,16 @@ class HybridMessageService {
   }
 
   private pushCloudMessageToMeshStore(message: HybridMessage): void {
+    if (this.isSystemPayloadForConversation(message)) {
+      if (__DEV__) {
+        logger.debug('Skipping system payload bridge push', {
+          id: message.id,
+          type: message.type,
+        });
+      }
+      return;
+    }
+
     const meshMessage: MeshMessage = {
       id: message.id,
       senderId: message.senderId,
@@ -472,6 +809,98 @@ class HybridMessageService {
     };
 
     useMeshStore.getState().addMessage(meshMessage);
+
+    // ELITE V2: Also push to messageStore as SINGLE SOURCE OF TRUTH
+    // This ensures ConversationScreen (which reads from messageStore) can see sent messages
+    try {
+      const { useMessageStore } = require('../stores/messageStore');
+      const selfIds = this.getSelfIdentityIds();
+      const canonicalSelfId = identityService.getUid() || 'me';
+
+      // CRITICAL FIX: Determine if this message is from us or from another user.
+      // Previously, `from` was always set to 'me', which made incoming messages
+      // appear as outgoing — corrupting the conversation index and hiding them.
+      const isFromMe = selfIds.has(message.senderId);
+
+      const fromField = isFromMe ? 'me' : message.senderId;
+      const toField = isFromMe
+        ? (message.recipientId || 'broadcast')
+        : canonicalSelfId;
+
+      useMessageStore.getState().addMessage({
+        id: message.id,
+        localId: message.localId,
+        from: fromField,
+        fromName: message.senderName,
+        to: toField,
+        content: message.content,
+        timestamp: message.timestamp,
+        delivered: !isFromMe, // Incoming messages are already delivered
+        read: false,
+        type: message.type as 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'VOICE',
+        priority: message.priority,
+        status: isFromMe ? 'sending' : 'delivered',
+        replyTo: message.replyTo,
+        replyPreview: message.replyPreview,
+        // CRITICAL FIX: Pass media fields to messageStore
+        // Without these, ConversationScreen can't display media content
+        // for messages that come from messageStore (cloud path)
+        ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
+        ...(message.mediaType ? { mediaType: message.mediaType } : {}),
+        ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
+        ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
+        ...(message.location ? { location: message.location } : {}),
+      });
+
+      // CRITICAL FIX: Auto-create conversation for incoming messages from unknown senders.
+      // Without this, messages arrive in the stores but don't appear in the Messages screen
+      // because no conversation entry exists for the sender.
+      if (!isFromMe && message.senderId && message.senderId !== 'unknown') {
+        const conversations = useMessageStore.getState().conversations;
+        if (!conversations.some(c => c.userId === message.senderId)) {
+          // ELITE FIX: Look up contact display name before falling back to generic name
+          let displayName = message.senderName || '';
+          if (!displayName) {
+            try {
+              const { contactService } = require('./ContactService');
+              const contact = contactService.getContact?.(message.senderId);
+              displayName = contact?.displayName || contact?.nickname || '';
+            } catch {
+              // ContactService not available — use fallback
+            }
+          }
+          useMessageStore.getState().addConversation({
+            userId: message.senderId,
+            userName: displayName || `Cihaz ${message.senderId.slice(0, 8)}...`,
+            lastMessage: (message.content || '').substring(0, 100),
+            lastMessageTime: message.timestamp,
+            unreadCount: 1,
+          });
+        }
+
+        // RC-1 FIX: Trigger notification for incoming messages.
+        // This was COMPLETELY MISSING — no code path ever called notificationCenter
+        // for cloud messages, so users never received any message notifications.
+        try {
+          const { notificationCenter } = require('./notifications/NotificationCenter');
+          notificationCenter.notify('message', {
+            from: message.senderId,
+            senderName: message.senderName || message.senderId,
+            message: message.content || '',
+            messageId: message.id,
+            senderId: message.senderId,
+            conversationId: message.senderId,
+            isSOS: message.type === 'SOS',
+            isCritical: message.priority === 'critical',
+          }, 'HybridMessageService').catch(() => { /* best-effort */ });
+        } catch {
+          // NotificationCenter not available — silent fail
+        }
+      }
+    } catch (error) {
+      // messageStore push is best-effort — MeshStore is still the backup display
+      logger.warn('Failed to push message to messageStore:', error);
+    }
   }
 
   /**
@@ -490,9 +919,20 @@ class HybridMessageService {
   ): Promise<HybridMessage> {
     if (!this.isInitialized) await this.initialize();
 
-    const myIdentity = identityService.getIdentity();
-    if (!myIdentity) {
-      throw new Error('Identity not initialized');
+    // CRITICAL FIX: Gracefully handle identity not yet loaded (race condition).
+    // Previously threw immediately → crash. Now retry identity init first.
+    let myIdentity = identityService.getIdentity();
+    if (!myIdentity?.uid) {
+      logger.warn('⚠️ Identity not ready in sendMessage, attempting re-init...');
+      try {
+        await identityService.initialize();
+        myIdentity = identityService.getIdentity();
+      } catch (initError) {
+        logger.error('Identity re-init failed:', initError);
+      }
+    }
+    if (!myIdentity?.uid) {
+      throw new Error('Kimlik bilgisi yüklenemedi. Lütfen yeniden giriş yapın.');
     }
 
     // C4: Validate and sanitize message
@@ -504,13 +944,24 @@ class HybridMessageService {
     const messageId = await this.generateId();
     const localId = await this.generateId();
 
+    const senderUid = identityService.getUid();
+    const requestedRecipientId = typeof recipientId === 'string' ? recipientId.trim() : '';
+    const resolvedRecipientId = await this.resolveRecipientIdForSend(recipientId);
+    if (
+      requestedRecipientId &&
+      requestedRecipientId !== 'broadcast' &&
+      !resolvedRecipientId
+    ) {
+      throw new Error('Alıcı kimliği çözümlenemedi. Lütfen kişiyi tekrar ekleyin.');
+    }
+
     const message: HybridMessage = {
       id: messageId,
       localId,
       content: validation.sanitized,
-      senderId: myIdentity.id,
+      senderId: senderUid,
       senderName: myIdentity.displayName,
-      recipientId,
+      recipientId: resolvedRecipientId,
       timestamp: Date.now(),
       source: 'HYBRID',
       status: 'pending',
@@ -538,9 +989,20 @@ class HybridMessageService {
     });
 
     // M6: Track with DeliveryManager
-    if (recipientId) {
-      deliveryManager.trackMessage(messageId, recipientId);
+    if (resolvedRecipientId && resolvedRecipientId !== 'broadcast') {
+      deliveryManager.trackMessage(messageId, resolvedRecipientId);
     }
+
+    // CRITICAL FIX: Register message as "seen" BEFORE cloud write.
+    // Without this, the Firestore subscription callback calls recordSeenMessage(msg.id),
+    // sees it as "new" (returns true), and reprocesses it → duplicate in messageStore.
+    // By recording here first, the subscription callback's recordSeenMessage returns false → skip.
+    this.recordSeenMessage(messageId);
+
+    // CRITICAL FIX: Push sent message to MeshStore immediately for UI display.
+    // Without this, the sender never sees their own message in ConversationScreen
+    // (which reads from useMeshStore.messages).
+    this.pushCloudMessageToMeshStore(message);
 
     // Attempt immediate send
     this.processMessageImmediate(message);
@@ -565,22 +1027,47 @@ class HybridMessageService {
   ): Promise<HybridMessage> {
     if (!this.isInitialized) await this.initialize();
 
-    const myIdentity = identityService.getIdentity();
-    if (!myIdentity) {
-      throw new Error('Identity not initialized');
+    // CRITICAL FIX: Same graceful identity handling as sendMessage
+    let myIdentity = identityService.getIdentity();
+    if (!myIdentity?.uid) {
+      logger.warn('⚠️ Identity not ready in sendMediaMessage, attempting re-init...');
+      try {
+        await identityService.initialize();
+        myIdentity = identityService.getIdentity();
+      } catch (initError) {
+        logger.error('Identity re-init failed:', initError);
+      }
+    }
+    if (!myIdentity?.uid) {
+      throw new Error('Kimlik bilgisi yüklenemedi. Lütfen yeniden giriş yapın.');
+    }
+
+    const messageId = await this.generateId();
+    const localId = await this.generateId();
+    const timestamp = Date.now();
+    const messageType = mediaType === 'image' ? 'IMAGE' : mediaType === 'voice' ? 'VOICE' : 'LOCATION';
+    const requestedRecipientId = typeof recipientId === 'string' ? recipientId.trim() : '';
+    const resolvedRecipientId = await this.resolveRecipientIdForSend(recipientId);
+    if (
+      requestedRecipientId &&
+      requestedRecipientId !== 'broadcast' &&
+      !resolvedRecipientId
+    ) {
+      throw new Error('Alıcı kimliği çözümlenemedi. Lütfen kişiyi tekrar ekleyin.');
     }
 
     let mediaUrl = options.mediaUrl;
+    let meshBinaryFallbackStarted = false;
 
     // Upload to Firebase Storage if local URI provided
     if (options.mediaLocalUri && !mediaUrl) {
       try {
         const { firebaseStorageService } = await import('./FirebaseStorageService');
         const extension = mediaType === 'image' ? 'jpg' : 'm4a';
-        const storageOwnerId = myIdentity.cloudUid;
+        const storageOwnerId = myIdentity.uid;
         if (!storageOwnerId) {
-          logger.warn('Skipping media upload: cloud identity unavailable');
-          throw new Error('cloud-identity-unavailable');
+          logger.warn('Skipping media upload: UID unavailable');
+          throw new Error('uid-unavailable');
         }
         const storagePath = `chat/${storageOwnerId}/${Date.now()}.${extension}`;
 
@@ -589,8 +1076,8 @@ class HybridMessageService {
         const base64Data = await FileSystem.readAsStringAsync(options.mediaLocalUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-
-        const bytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+        const { Buffer } = await import('buffer');
+        const bytes = Uint8Array.from(Buffer.from(base64Data, 'base64'));
         mediaUrl = await firebaseStorageService.uploadFile(storagePath, bytes, {
           contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
           customMetadata: {
@@ -599,13 +1086,45 @@ class HybridMessageService {
         }) ?? undefined;
       } catch (error) {
         logger.error('Media upload failed:', error);
-        // Continue without URL - mesh will still work
+        // Continue without URL - binary mesh fallback below can still deliver media.
       }
     }
 
-    const messageId = await this.generateId();
-    const localId = await this.generateId();
-    const messageType = mediaType === 'image' ? 'IMAGE' : mediaType === 'voice' ? 'VOICE' : 'LOCATION';
+    // Offline-proof fallback: if cloud media URL is unavailable, push raw media over mesh chunks.
+    // Transfer ID is pinned to messageId so receiver can merge/update the same chat bubble.
+    if ((mediaType === 'image' || mediaType === 'voice') && options.mediaLocalUri && !mediaUrl) {
+      try {
+        const { meshMediaService } = await import('./mesh/MeshMediaService');
+        await meshMediaService.initialize();
+
+        if (mediaType === 'image') {
+          await meshMediaService.sendImage(resolvedRecipientId || 'broadcast', options.mediaLocalUri, {
+            transferId: messageId,
+            caption: options.caption,
+            timestamp,
+            senderName: myIdentity.displayName,
+            senderId: identityService.getUid() || 'unknown',
+          });
+        } else {
+          await meshMediaService.sendVoice(
+            resolvedRecipientId || 'broadcast',
+            options.mediaLocalUri,
+            typeof options.mediaDuration === 'number' ? options.mediaDuration : 0,
+            {
+              transferId: messageId,
+              timestamp,
+              senderName: myIdentity.displayName,
+              senderId: identityService.getUid() || 'unknown',
+            },
+          );
+        }
+        meshBinaryFallbackStarted = true;
+      } catch (meshFallbackError) {
+        logger.warn('Binary mesh media fallback failed:', meshFallbackError);
+      }
+    }
+
+    const senderUid = identityService.getUid();
 
     // Content is caption or type description
     const content = options.caption ||
@@ -613,14 +1132,21 @@ class HybridMessageService {
         mediaType === 'voice' ? '🎤 Sesli Mesaj' :
           '📍 Konum');
 
+    // FIX: Validate mediaDuration — must be a positive finite number (seconds)
+    const validatedDuration = typeof options.mediaDuration === 'number'
+      && Number.isFinite(options.mediaDuration)
+      && options.mediaDuration > 0
+      ? Math.floor(options.mediaDuration)
+      : undefined;
+
     const message: HybridMessage = {
       id: messageId,
       localId,
       content,
-      senderId: myIdentity.id,
+      senderId: senderUid,
       senderName: myIdentity.displayName,
-      recipientId,
-      timestamp: Date.now(),
+      recipientId: resolvedRecipientId,
+      timestamp,
       source: 'HYBRID',
       status: 'pending',
       priority: 'normal',
@@ -629,7 +1155,7 @@ class HybridMessageService {
       // Media fields
       mediaUrl,
       mediaType,
-      mediaDuration: options.mediaDuration,
+      mediaDuration: validatedDuration,
       mediaThumbnail: options.mediaThumbnail,
       location: options.location,
     };
@@ -647,7 +1173,25 @@ class HybridMessageService {
     });
 
     // Track delivery
-    deliveryManager.trackMessage(messageId, recipientId);
+    if (resolvedRecipientId && resolvedRecipientId !== 'broadcast') {
+      deliveryManager.trackMessage(messageId, resolvedRecipientId);
+    }
+
+    // CRITICAL FIX: Register message as "seen" BEFORE cloud write (same as sendMessage).
+    // Without this, the Firestore subscription reprocesses the sender's own media message.
+    this.recordSeenMessage(messageId);
+
+    // CRITICAL FIX: Push sent media message to MeshStore immediately for UI display.
+    // Without this, the sender never sees their own media message in ConversationScreen
+    // (which reads from useMeshStore.messages). Same fix as sendMessage line 589.
+    this.pushCloudMessageToMeshStore(message);
+    if (meshBinaryFallbackStarted && options.mediaLocalUri) {
+      // Local preview for sender; receiver gets real media through chunk transfer.
+      useMeshStore.getState().updateMessage(messageId, {
+        mediaType,
+        mediaUrl: options.mediaLocalUri,
+      });
+    }
 
     // Attempt immediate send
     this.processMessageImmediate(message);
@@ -696,12 +1240,30 @@ class HybridMessageService {
     await this.queueMutex.withLock(async () => {
       if (success) {
         this.updateMessageStatus(message.id, 'sent');
+        // ELITE V2: Sync delivery status to messageStore (WhatsApp 3-tick: ✓ sent)
+        try {
+          const { useMessageStore } = require('../stores/messageStore');
+          useMessageStore.getState().updateMessageStatus(message.id, 'sent');
+        } catch { /* best-effort */ }
+        // CRITICAL: Update MeshStore too — ConversationScreen reads from here
+        try {
+          useMeshStore.getState().updateMessage(message.id, { status: 'sent' });
+        } catch { /* best-effort */ }
       } else {
         message.retryCount++;
         message.lastRetryAt = Date.now();
         message.nextRetryAt = Date.now() + this.calculateNextRetryDelay(message.retryCount);
         message.status = 'pending';
         this.saveQueueDebounced();
+        // ELITE V2: Mark as pending in messageStore too
+        try {
+          const { useMessageStore } = require('../stores/messageStore');
+          useMessageStore.getState().updateMessageStatus(message.id, 'pending');
+        } catch { /* best-effort */ }
+        // Update MeshStore visual status
+        try {
+          useMeshStore.getState().updateMessage(message.id, { status: 'pending' });
+        } catch { /* best-effort */ }
       }
     });
   }
@@ -717,7 +1279,19 @@ class HybridMessageService {
     let meshSuccess = false;
     let cloudSuccess = false;
 
+    // PRODUCTION LOGGING: Always log send attempts for delivery debugging
+    logger.info(`📤 attemptSend: id=${message.id}, to=${message.recipientId || 'broadcast'}, from=${message.senderId}, type=${message.type}, online=${isOnline}`);
+
     try {
+      // Ensure mesh is active before offline-first send attempt.
+      if (!meshNetworkService.getIsRunning()) {
+        try {
+          await meshNetworkService.start();
+        } catch (meshStartError) {
+          logger.warn('Mesh auto-start failed during send attempt:', meshStartError);
+        }
+      }
+
       // 1. MESH LAYER: Always try (offline-first priority)
       try {
         const meshType = message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT;
@@ -729,6 +1303,8 @@ class HybridMessageService {
           content: message.content,
           timestamp: message.timestamp,
           senderName: message.senderName,
+          ...(message.replyTo && { replyTo: message.replyTo }),
+          ...(message.replyPreview && { replyPreview: message.replyPreview }),
           ...(message.mediaType && { mediaType: message.mediaType }),
           ...(message.mediaUrl && { mediaUrl: message.mediaUrl }),
           ...(typeof message.mediaDuration === 'number' && { mediaDuration: message.mediaDuration }),
@@ -762,72 +1338,75 @@ class HybridMessageService {
         logger.warn('Mesh broadcast failed:', meshError);
       }
 
-      // 2. CLOUD LAYER: Try if online
+      // 2. CLOUD LAYER: Try if online — V3 Conversation Model
       if (isOnline) {
         try {
           const { firebaseDataService } = await import('./FirebaseDataService');
 
           // V5: Auto-initialize if not ready
-          if (!firebaseDataService.isInitialized) {
-            logger.info('FirebaseDataService not initialized, attempting auto-init...');
+          try {
             await firebaseDataService.initialize();
-          }
+          } catch { /* best effort */ }
 
-          if (firebaseDataService.isInitialized) {
-            const metadata: Record<string, unknown> = {
-              ...(message.senderName ? { senderName: message.senderName } : {}),
-              ...(message.mediaType ? { mediaType: message.mediaType } : {}),
-              ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
-              ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
-              ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
-            };
+          const metadata: Record<string, unknown> = {
+            ...(message.senderName ? { senderName: message.senderName } : {}),
+            ...(message.mediaType ? { mediaType: message.mediaType } : {}),
+            ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
+            ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
+            ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
+          };
 
-            const messageData = {
-              id: message.id,
-              fromDeviceId: message.senderId,
-              toDeviceId: message.recipientId || 'broadcast',
-              content: message.content,
-              timestamp: message.timestamp,
-              type: this.mapHybridTypeToCloudType(message.type),
-              status: 'sent' as const,
-              priority: message.priority,
-              // V5: Include structured location/media payload
-              ...(message.location && { location: message.location }),
-              ...(Object.keys(metadata).length > 0 && { metadata }),
-            };
+          const senderDeviceRouteId = (
+            identityService.getUid() ||
+            message.senderId
+          ).toString().trim();
 
-            const writeTargets = message.recipientId
-              ? [message.senderId, message.recipientId]
-              : [message.senderId];
+          // V3: Build message data with senderUid — always prefer Firebase Auth UID
+          const authUid = identityService.getUid();
+          const messageData = {
+            id: message.id,
+            senderUid: authUid || message.senderId,
+            senderName: message.senderName || '',
+            content: message.content,
+            timestamp: message.timestamp,
+            type: this.mapHybridTypeToCloudType(message.type),
+            status: 'sent' as const,
+            priority: message.priority,
+            ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+            ...(message.replyPreview ? { replyPreview: message.replyPreview } : {}),
+            // V3: Include structured location/media payload
+            ...(message.location && { location: message.location }),
+            ...(Object.keys(metadata).length > 0 && { metadata }),
+            // Legacy compat fields
+            fromDeviceId: senderDeviceRouteId,
+            toDeviceId: message.recipientId || 'broadcast',
+          };
 
-            const writeResults = await Promise.all(
-              writeTargets.map((targetDeviceId) =>
-                firebaseDataService.saveMessage(targetDeviceId, messageData),
-              ),
-            );
+          // V3: Use conversation model via FirebaseDataService facade
+          const recipientId = message.recipientId && message.recipientId !== 'broadcast'
+            ? message.recipientId
+            : null;
 
-            const senderWriteOk = !!writeResults[0];
-            const inboxWriteIndex = message.recipientId ? 1 : 0;
-            const inboxWriteOk = !!writeResults[inboxWriteIndex];
-            cloudSuccess = message.recipientId ? inboxWriteOk : writeResults.some(Boolean);
+          // PRODUCTION LOGGING
+          logger.info(`☁️ V3 Cloud write: msg ${message.id} → ${recipientId || 'broadcast'} from ${message.senderId}`);
 
-            if (message.recipientId && senderWriteOk && !inboxWriteOk) {
-              logger.warn('Cloud sender copy saved but recipient inbox write failed');
-            }
+          const legacyFallbackTarget =
+            message.recipientId && message.recipientId !== 'broadcast'
+              ? message.recipientId
+              : message.senderId;
+          const result = await firebaseDataService.saveMessage(legacyFallbackTarget, messageData);
+          cloudSuccess = result;
 
-            if (cloudSuccess) {
-              logger.debug(
-                `Cloud send successful (senderCopy=${Boolean(writeResults[0])}, inboxCopy=${inboxWriteOk})`,
-              );
-            } else {
-              logger.warn('Cloud save returned false for all targets');
-            }
+          if (cloudSuccess) {
+            logger.info(`✅ V3 Cloud send successful: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}`);
           } else {
-            logger.warn('FirebaseDataService still not initialized after auto-init attempt');
+            logger.warn(`❌ V3 Cloud save FAILED: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId} — recipient UID may not be resolvable`);
           }
         } catch (cloudError) {
-          logger.warn('Cloud send failed:', cloudError);
+          logger.warn('❌ Cloud send failed:', cloudError);
         }
+      } else {
+        logger.info(`📡 Device offline — cloud layer skipped for msg ${message.id}`);
       }
 
       // V5: SOS Special Handling - must succeed on at least one channel
@@ -835,6 +1414,18 @@ class HybridMessageService {
         logger.error('🚨 SOS MESSAGE FAILED ON ALL CHANNELS!');
         // Queue for aggressive retry
         message.priority = 'critical';
+        message.retryCount = (message.retryCount || 0) + 1;
+
+        // CRITICAL FIX: Immediate retry — don't wait for 10s queue cycle
+        // SOS is life-critical; 10s delay is unacceptable
+        if (message.retryCount <= 5) {
+          logger.warn(`🔄 SOS immediate retry ${message.retryCount}/5 in 500ms`);
+          setTimeout(() => this.processQueue(), 500);
+        } else {
+          logger.error('🚨 SOS EXHAUSTED ALL RETRIES (5/5) — falling back to normal queue');
+          // After 5 fast retries, fall back to normal 10s queue cycle
+          // The message stays in queue with critical priority
+        }
       }
     } catch (error) {
       logger.error('Attempt send failed:', error);
@@ -876,10 +1467,12 @@ class HybridMessageService {
    * Register delivery callback
    */
   onDelivery(messageId: string, callback: DeliveryCallback): () => void {
-    if (!this.deliveryCallbacks.has(messageId)) {
-      this.deliveryCallbacks.set(messageId, []);
+    let callbacks = this.deliveryCallbacks.get(messageId);
+    if (!callbacks) {
+      callbacks = [];
+      this.deliveryCallbacks.set(messageId, callbacks);
     }
-    this.deliveryCallbacks.get(messageId)!.push(callback);
+    callbacks.push(callback);
 
     return () => {
       const callbacks = this.deliveryCallbacks.get(messageId);
@@ -904,7 +1497,7 @@ class HybridMessageService {
           JSON.stringify({
             type: 'TYPING',
             conversationId,
-            userId: myIdentity.id,
+            userId: myIdentity.uid,
             userName: myIdentity.displayName,
           }),
           MeshMessageType.TEXT
@@ -968,9 +1561,19 @@ class HybridMessageService {
         typeof meshMsg.content === 'string'
       ) {
         const msgId = meshMsg.id || Date.now().toString(36);
+        const meshSenderId = typeof meshMsg.senderId === 'string' ? meshMsg.senderId.trim() : '';
+
+        if (this.isBlockedSender(meshSenderId)) {
+          return;
+        }
 
         // Deduplication
         if (!this.recordSeenMessage(msgId)) return;
+
+        const normalizedType = this.deriveMessageTypeFromContent(
+          meshMsg.type,
+          typeof meshMsg.content === 'string' ? meshMsg.content : '',
+        );
 
         const hybridMsg: HybridMessage = {
           id: msgId,
@@ -982,7 +1585,7 @@ class HybridMessageService {
           source: 'MESH',
           status: 'delivered',
           priority: 'normal',
-          type: this.toHybridTypeFromMesh(meshMsg.type),
+          type: normalizedType,
           retryCount: 0,
           ...(meshMsg.mediaUrl ? { mediaUrl: meshMsg.mediaUrl } : {}),
           ...(meshMsg.mediaType ? { mediaType: meshMsg.mediaType } : {}),
@@ -990,151 +1593,185 @@ class HybridMessageService {
           ...(meshMsg.mediaThumbnail ? { mediaThumbnail: meshMsg.mediaThumbnail } : {}),
           ...(meshMsg.location ? { location: meshMsg.location } : {}),
         };
+        if (this.isSystemPayloadForConversation(hybridMsg)) {
+          return;
+        }
         callback(hybridMsg);
       }
     });
 
-    // 2. Subscribe to Cloud messages (QR ID + physical device ID, with online rebind)
-    const cloudUnsubscribers = new Map<string, () => void>();
+    // 2. Subscribe to Cloud messages via V3 inbox model:
+    //    user_inbox/{uid}/threads → discover conversationIds → subscribe to each conversation's messages
+    const conversationUnsubscribers = new Map<string, () => void>();
+    let inboxUnsubscriber: (() => void) | null = null;
     let isDisposed = false;
     let isCloudSyncInProgress = false;
 
     const clearCloudSubscriptions = () => {
-      cloudUnsubscribers.forEach((unsubscribe) => {
-        try {
-          unsubscribe();
-        } catch {
-          // no-op
-        }
+      conversationUnsubscribers.forEach((unsubscribe) => {
+        try { unsubscribe(); } catch { /* no-op */ }
       });
-      cloudUnsubscribers.clear();
+      conversationUnsubscribers.clear();
+      if (inboxUnsubscriber) {
+        try { inboxUnsubscriber(); } catch { /* no-op */ }
+        inboxUnsubscriber = null;
+      }
     };
 
-    const getCloudInboxTargets = async (): Promise<string[]> => {
-      const targets = new Set<string>();
-      const identity = identityService.getIdentity();
-      if (identity?.id && identity.id !== 'unknown') {
-        targets.add(identity.id);
-      }
-      if (identity?.deviceId && identity.deviceId !== 'unknown') {
-        targets.add(identity.deviceId);
-      }
-      try {
-        const physicalDeviceId = await getDeviceIdFromLib();
-        if (physicalDeviceId && physicalDeviceId !== 'unknown') {
-          targets.add(physicalDeviceId);
-        }
-      } catch {
-        // Optional source
-      }
-      return Array.from(targets);
+    // Build self-ID set for sender mirror detection
+    const getSelfIds = (): Set<string> => {
+      const selfIds = new Set<string>();
+      const uid = identityService.getUid();
+      if (uid) selfIds.add(uid);
+      return selfIds;
     };
 
-    const ensureCloudSubscriptions = async () => {
-      if (isDisposed || !connectionManager.isOnline || isCloudSyncInProgress) {
+    const processCloudMessage = (msg: any) => {
+      const selfIds = getSelfIds();
+      const fromDeviceId = typeof msg.fromDeviceId === 'string' ? msg.fromDeviceId.trim() : '';
+      const senderUid = typeof msg.senderUid === 'string' ? msg.senderUid.trim() : '';
+      const toDeviceId = typeof msg.toDeviceId === 'string' ? msg.toDeviceId.trim() : '';
+      const senderUidIsSelf = !!senderUid && selfIds.has(senderUid);
+      const senderDeviceIdIsSelf = !!fromDeviceId && selfIds.has(fromDeviceId);
+      const senderId = (senderUidIsSelf && fromDeviceId) ? fromDeviceId : (senderUid || fromDeviceId);
+
+      if (this.isBlockedSender(senderId)) {
         return;
       }
 
+      // Skip our own sent messages (we already have them locally)
+      // Exception: if senderUid is ours but sender device alias is different,
+      // keep the message for multi-device/same-account continuity.
+      if (
+        senderUidIsSelf &&
+        (!fromDeviceId || senderDeviceIdIsSelf)
+      ) {
+        return;
+      }
+      if (!senderUidIsSelf && senderId && selfIds.has(senderId)) {
+        return;
+      }
+
+      if (!this.recordSeenMessage(msg.id)) return;
+
+      const rawMsg = msg as unknown as Record<string, unknown>;
+      const metadata = msg.metadata && typeof msg.metadata === 'object'
+        ? msg.metadata as Record<string, unknown>
+        : undefined;
+      const mediaType = this.normalizeMediaType(rawMsg.mediaType ?? metadata?.mediaType);
+      const location = this.normalizeLocationPayload(rawMsg.location ?? metadata?.location);
+      const mediaUrlSource = rawMsg.mediaUrl ?? metadata?.mediaUrl;
+      const mediaDurationSource = rawMsg.mediaDuration ?? metadata?.mediaDuration;
+      const mediaThumbnailSource = rawMsg.mediaThumbnail ?? metadata?.mediaThumbnail;
+      const senderNameSource = rawMsg.senderName ?? metadata?.senderName;
+      const normalizedType = this.mapCloudTypeToHybridType(msg.type, mediaType, !!location);
+      const finalType = normalizedType === 'CHAT'
+        ? this.deriveMessageTypeFromContent('CHAT', typeof msg.content === 'string' ? msg.content : '')
+        : normalizedType;
+      const normalizedPriority = this.isMessagePriority(msg.priority) ? msg.priority : 'normal';
+
+      const hybridMsg: HybridMessage = {
+        id: msg.id,
+        content: sanitizeMessage(msg.content),
+        senderId: senderId || 'unknown',
+        senderName: typeof senderNameSource === 'string' && senderNameSource.trim().length > 0
+          ? senderNameSource.trim()
+          : 'Cloud User',
+        recipientId: toDeviceId && toDeviceId !== 'broadcast' ? toDeviceId : undefined,
+        timestamp: typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
+          ? msg.timestamp
+          : Date.now(),
+        source: 'CLOUD',
+        status: 'delivered',
+        priority: normalizedPriority,
+        type: finalType,
+        retryCount: 0,
+        ...(typeof mediaUrlSource === 'string' ? { mediaUrl: mediaUrlSource } : {}),
+        ...(mediaType ? { mediaType } : {}),
+        ...(typeof mediaDurationSource === 'number' ? { mediaDuration: mediaDurationSource } : {}),
+        ...(typeof mediaThumbnailSource === 'string' ? { mediaThumbnail: mediaThumbnailSource } : {}),
+        ...(location ? { location } : {}),
+      };
+      if (this.isSystemPayloadForConversation(hybridMsg)) {
+        return;
+      }
+      this.pushCloudMessageToMeshStore(hybridMsg);
+      callback(hybridMsg);
+    };
+
+    const subscribeToConversation = async (
+      conversationId: string,
+      firebaseDataService: any,
+    ): Promise<void> => {
+      if (conversationUnsubscribers.has(conversationId) || isDisposed) return;
+
+      try {
+        const unsubscribe = await firebaseDataService.subscribeToConversationMessages(
+          conversationId,
+          (cloudMsgs: any[]) => {
+            cloudMsgs.forEach(processCloudMessage);
+          },
+        );
+        if (unsubscribe && !isDisposed) {
+          conversationUnsubscribers.set(conversationId, unsubscribe);
+          logger.info(`✅ Subscribed to conversation: ${conversationId}`);
+        }
+      } catch (err) {
+        logger.warn(`Failed to subscribe to conversation ${conversationId}:`, err);
+      }
+    };
+
+    const ensureCloudSubscriptions = async () => {
+      if (isDisposed || isCloudSyncInProgress) return;
       isCloudSyncInProgress = true;
+
       try {
         const { firebaseDataService } = await import('./FirebaseDataService');
-        if (!firebaseDataService.isInitialized) {
-          await firebaseDataService.initialize();
-        }
-        if (!firebaseDataService.isInitialized || isDisposed) {
+        try { await firebaseDataService.initialize(); } catch { /* best effort */ }
+        if (isDisposed) return;
+
+        const uid = identityService.getUid();
+        if (!uid) {
+          logger.warn('📨 Cloud subscription skipped: no UID');
           return;
         }
 
-        const targetIds = await getCloudInboxTargets();
-        const targetSet = new Set(targetIds);
+        logger.info(`📨 Setting up V3 inbox subscription for uid=${uid}`);
 
-        Array.from(cloudUnsubscribers.keys()).forEach((existingTargetId) => {
-          if (targetSet.has(existingTargetId)) {
-            return;
-          }
-          const unsubscribe = cloudUnsubscribers.get(existingTargetId);
-          if (unsubscribe) {
-            unsubscribe();
-          }
-          cloudUnsubscribers.delete(existingTargetId);
-        });
+        // Subscribe to inbox threads → when new threads appear, subscribe to their messages
+        if (inboxUnsubscriber) {
+          try { inboxUnsubscriber(); } catch { /* no-op */ }
+        }
 
-        await Promise.all(
-          targetIds.map(async (targetId) => {
-            if (cloudUnsubscribers.has(targetId) || isDisposed) {
-              return;
+        const inboxUnsub = await firebaseDataService.subscribeToInbox(
+          uid,
+          async (threads: Array<{ conversationId: string }>) => {
+            if (isDisposed) return;
+
+            // Subscribe to any new conversations we haven't subscribed to yet
+            const currentConvIds = new Set(conversationUnsubscribers.keys());
+            const inboxConvIds = new Set(threads.map(t => t.conversationId));
+
+            // Remove subscriptions for conversations no longer in inbox
+            for (const [convId, unsub] of conversationUnsubscribers) {
+              if (!inboxConvIds.has(convId)) {
+                try { unsub(); } catch { /* no-op */ }
+                conversationUnsubscribers.delete(convId);
+              }
             }
 
-            const unsubscribe = await firebaseDataService.subscribeToMessages(targetId, (cloudMsgs) => {
-              const localTargetIds = new Set(targetIds.map((id) => id.trim()));
-              cloudMsgs.forEach(msg => {
-                const fromDeviceId = typeof msg.fromDeviceId === 'string' ? msg.fromDeviceId.trim() : '';
-                const toDeviceId = typeof msg.toDeviceId === 'string' ? msg.toDeviceId.trim() : '';
-
-                // Ignore sender mirror copies of our own outgoing direct messages.
-                const isLocalSenderMirror =
-                  fromDeviceId.length > 0 &&
-                  localTargetIds.has(fromDeviceId) &&
-                  toDeviceId.length > 0 &&
-                  toDeviceId !== 'broadcast' &&
-                  !localTargetIds.has(toDeviceId);
-                if (isLocalSenderMirror) {
-                  return;
-                }
-
-                if (!this.recordSeenMessage(msg.id)) return;
-
-                const rawMsg = msg as unknown as Record<string, unknown>;
-                const metadata = msg.metadata && typeof msg.metadata === 'object'
-                  ? msg.metadata as Record<string, unknown>
-                  : undefined;
-                const mediaType = this.normalizeMediaType(
-                  rawMsg.mediaType ?? metadata?.mediaType,
-                );
-                const location = this.normalizeLocationPayload(
-                  rawMsg.location ?? metadata?.location,
-                );
-                const mediaUrlSource = rawMsg.mediaUrl ?? metadata?.mediaUrl;
-                const mediaDurationSource = rawMsg.mediaDuration ?? metadata?.mediaDuration;
-                const mediaThumbnailSource = rawMsg.mediaThumbnail ?? metadata?.mediaThumbnail;
-                const senderNameSource = rawMsg.senderName ?? metadata?.senderName;
-                const normalizedType = this.mapCloudTypeToHybridType(msg.type, mediaType, !!location);
-                const normalizedPriority = this.isMessagePriority(msg.priority)
-                  ? msg.priority
-                  : 'normal';
-
-                const hybridMsg: HybridMessage = {
-                  id: msg.id,
-                  content: sanitizeMessage(msg.content),
-                  senderId: msg.fromDeviceId,
-                  senderName: typeof senderNameSource === 'string' && senderNameSource.trim().length > 0
-                    ? senderNameSource.trim()
-                    : 'Cloud User',
-                  recipientId: msg.toDeviceId && msg.toDeviceId !== 'broadcast' ? msg.toDeviceId : undefined,
-                  timestamp: typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
-                    ? msg.timestamp
-                    : Date.now(),
-                  source: 'CLOUD',
-                  status: 'delivered',
-                  priority: normalizedPriority,
-                  type: normalizedType,
-                  retryCount: 0,
-                  ...(typeof mediaUrlSource === 'string' ? { mediaUrl: mediaUrlSource } : {}),
-                  ...(mediaType ? { mediaType } : {}),
-                  ...(typeof mediaDurationSource === 'number' ? { mediaDuration: mediaDurationSource } : {}),
-                  ...(typeof mediaThumbnailSource === 'string' ? { mediaThumbnail: mediaThumbnailSource } : {}),
-                  ...(location ? { location } : {}),
-                };
-                this.pushCloudMessageToMeshStore(hybridMsg);
-                callback(hybridMsg);
-              });
-            });
-
-            if (unsubscribe && !isDisposed) {
-              cloudUnsubscribers.set(targetId, unsubscribe);
+            // Subscribe to new conversations
+            for (const thread of threads) {
+              if (!currentConvIds.has(thread.conversationId)) {
+                await subscribeToConversation(thread.conversationId, firebaseDataService);
+              }
             }
-          }),
+          },
         );
+
+        if (inboxUnsub && !isDisposed) {
+          inboxUnsubscriber = inboxUnsub;
+        }
       } catch (error) {
         logger.warn('Cloud subscription failed:', error);
       } finally {
@@ -1146,12 +1783,16 @@ class HybridMessageService {
       if (isDisposed) {
         return;
       }
+      // CRITICAL FIX: Do NOT clear cloud subscriptions when going offline.
+      // Firestore SDK handles offline mode internally via its persistence layer.
+      // Clearing subscriptions on offline would kill the onSnapshot listeners,
+      // preventing message delivery even when connectivity is restored.
+      // We only re-ensure subscriptions on online transition to handle
+      // edge cases like auth token refresh or identity changes.
       if (state === 'online') {
         ensureCloudSubscriptions().catch((error) => {
           logger.warn('Cloud resubscribe failed:', error);
         });
-      } else {
-        clearCloudSubscriptions();
       }
     });
 

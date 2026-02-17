@@ -1,7 +1,7 @@
 /**
- * CORE INITIALIZATION - ELITE PRODUCTION
- * Handles all service startup sequences with dependency management
- * Uses dynamic imports to prevent circular dependencies and improve startup time
+ * Core Initialization
+ * Phase-based service startup with dependency management.
+ * Uses dynamic imports to prevent circular deps and improve startup time.
  */
 
 import { createLogger, setLogLevel } from './utils/logger';
@@ -11,196 +11,129 @@ import { Platform } from 'react-native';
 
 const logger = createLogger('Init');
 
-// ELITE: Type-safe service instance types using typeof imports
-// This provides full type safety while maintaining lazy-loading to avoid circular deps
-type EarthquakeServiceType = typeof import('./services/EarthquakeService')['earthquakeService'];
-type BLEMeshServiceType = typeof import('./services/BLEMeshService')['bleMeshService'];
-type LocationServiceType = typeof import('./services/LocationService')['locationService'];
-type NotificationServiceType = typeof import('./services/NotificationService')['notificationService'];
-type FirebaseServiceType = typeof import('./services/FirebaseService')['firebaseService'];
-type PermissionServiceType = typeof import('./services/PermissionService')['permissionService'];
-type BackgroundTaskServiceType = typeof import('./services/BackgroundTaskService')['backgroundTaskService'];
-type SyncServiceType = typeof import('./services/OfflineSyncService')['offlineSyncService'];
-type OfflineMapServiceType = typeof import('./services/OfflineMapService')['offlineMapService'];
-// ELITE: EEW Advanced Services
-type FCMTokenServiceType = typeof import('./services/FCMTokenService')['fcmTokenService'];
-type BackgroundEEWServiceType = typeof import('./services/BackgroundEEWService')['backgroundEEWService'];
-type PLUMEEWServiceType = typeof import('./services/PLUMEEWService')['plumEEWService'];
-type MLPWaveClassifierType = typeof import('./services/MLPWaveClassifier')['mlPWaveClassifier'];
-// ELITE: Multi-Source, Widget & Watch Services
-type MultiSourceEEWServiceType = typeof import('./services/MultiSourceEEWService')['multiSourceEEWService'];
-type WidgetDataBridgeServiceType = typeof import('./services/WidgetDataBridgeService')['widgetDataBridgeService'];
-type WatchBridgeServiceType = typeof import('./services/WatchBridgeService')['watchBridgeService'];
-// ELITE: Life-Saving Services (2026)
-type TurkeyOfflineDataServiceType = typeof import('./services/TurkeyOfflineDataService')['turkeyOfflineDataService'];
-type TurkeyAssemblyPointsServiceType = typeof import('./services/TurkeyAssemblyPointsService')['turkeyAssemblyPointsService'];
-type ComprehensiveNotificationServiceType = typeof import('./services/ComprehensiveNotificationService')['comprehensiveNotificationService'];
-type VoiceEvacuationServiceType = typeof import('./services/VoiceEvacuationService')['voiceEvacuationService'];
-type NearestSafeZoneServiceType = typeof import('./services/NearestSafeZoneService')['nearestSafeZoneService'];
-type BatterySOSServiceType = typeof import('./services/BatterySOSService')['batterySOSService'];
-type TsunamiRiskServiceType = typeof import('./services/TsunamiRiskService')['tsunamiRiskService'];
-type FirstAidGuideServiceType = typeof import('./services/FirstAidGuideService')['firstAidGuideService'];
-type UltraEliteWaveServiceType = typeof import('./services/UltraEliteWaveService')['ultraEliteWaveService'];
-// ELITE: World-Class EEW System (2026)
-type RealtimeEarthquakeMonitorType = typeof import('./services/RealtimeEarthquakeMonitor')['realtimeEarthquakeMonitor'];
-// ELITE: On-Device P-Wave Detection - WORLD'S FASTEST
-type OnDeviceSeismicDetectorType = typeof import('./services/OnDeviceSeismicDetector')['onDeviceSeismicDetector'];
-// ELITE: Crowdsourced Network - TÜRKIYE ÇAPINDA AĞ
-type CrowdsourcedSeismicNetworkType = typeof import('./services/CrowdsourcedSeismicNetwork')['crowdsourcedSeismicNetwork'];
-
-// Module-level variables with proper types (initialized after dynamic import)
-let earthquakeService: EarthquakeServiceType | undefined;
-let bleMeshService: BLEMeshServiceType | undefined;
-let locationService: LocationServiceType | undefined;
-let notificationService: NotificationServiceType | undefined;
-let firebaseService: FirebaseServiceType | undefined;
-let permissionService: PermissionServiceType | undefined;
-let backgroundTaskService: BackgroundTaskServiceType | undefined;
-let syncService: SyncServiceType | undefined;
-let offlineMapService: OfflineMapServiceType | undefined;
-// ELITE: EEW Advanced Service instances
-let fcmTokenService: FCMTokenServiceType | undefined;
-let backgroundEEWService: BackgroundEEWServiceType | undefined;
-let plumEEWService: PLUMEEWServiceType | undefined;
-let mlPWaveClassifier: MLPWaveClassifierType | undefined;
-// ELITE: Multi-Source, Widget & Watch instances
-let multiSourceEEWService: MultiSourceEEWServiceType | undefined;
-let widgetDataBridgeService: WidgetDataBridgeServiceType | undefined;
-let watchBridgeService: WatchBridgeServiceType | undefined;
-// ELITE: Life-Saving Service instances
-let turkeyOfflineDataService: TurkeyOfflineDataServiceType | undefined;
-let turkeyAssemblyPointsService: TurkeyAssemblyPointsServiceType | undefined;
-let comprehensiveNotificationService: ComprehensiveNotificationServiceType | undefined;
-let voiceEvacuationService: VoiceEvacuationServiceType | undefined;
-let nearestSafeZoneService: NearestSafeZoneServiceType | undefined;
-let batterySOSService: BatterySOSServiceType | undefined;
-let tsunamiRiskService: TsunamiRiskServiceType | undefined;
-let firstAidGuideService: FirstAidGuideServiceType | undefined;
-let ultraEliteWaveService: UltraEliteWaveServiceType | undefined;
-// ELITE: World-Class EEW System
-let realtimeEarthquakeMonitor: RealtimeEarthquakeMonitorType | undefined;
-// ELITE: On-Device P-Wave (World's Fastest)
-let onDeviceSeismicDetector: OnDeviceSeismicDetectorType | undefined;
-// ELITE: Crowdsourced Network (Türkiye Çapında)
-let crowdsourcedSeismicNetwork: CrowdsourcedSeismicNetworkType | undefined;
-// ELITE: Background Seismic Monitor (7/24 Protection)
-type BackgroundSeismicMonitorType = typeof import('./services/BackgroundSeismicMonitor')['backgroundSeismicMonitor'];
-let backgroundSeismicMonitor: BackgroundSeismicMonitorType | undefined;
+// ---------------------------------------------------------------------------
+// Module-level service references (needed by shutdownApp / settings listener)
+// ---------------------------------------------------------------------------
+let earthquakeService: any;
+let bleMeshService: any;
+let locationService: any;
+let plumEEWService: any;
+let multiSourceEEWService: any;
+let realtimeEarthquakeMonitor: any;
+let realTimeEEWConnection: any;
+let onDeviceSeismicDetector: any;
+let crowdsourcedSeismicNetwork: any;
+let backgroundSeismicMonitor: any;
+let widgetDataBridgeService: any;
+let multiSourceWidgetUnsubscribe: (() => void) | null = null;
+let multiSourceBleAutoUnsubscribe: (() => void) | null = null;
 
 let isInitialized = false;
 let isInitializing = false;
 let seismicHealthCheckInterval: NodeJS.Timeout | null = null;
 let settingsSubscription: (() => void) | null = null;
 
-function mapFontScaleToAccessibilitySize(fontScale: number): 'small' | 'normal' | 'large' | 'extraLarge' {
-  if (fontScale <= 0.9) return 'small';
-  if (fontScale < 1.15) return 'normal';
-  if (fontScale < 1.4) return 'large';
-  return 'extraLarge';
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function applyLogLevelFromSettings(debugModeEnabled: boolean, verboseLoggingEnabled: boolean): void {
-  if (verboseLoggingEnabled || debugModeEnabled) {
-    setLogLevel('debug');
-    return;
-  }
+function applyLogLevel(debug: boolean, verbose: boolean): void {
+  if (verbose || debug) { setLogLevel('debug'); return; }
   setLogLevel(__DEV__ ? 'info' : 'warn');
 }
 
-async function applyRuntimeSettingEffects(): Promise<void> {
-  const settings = useSettingsStore.getState();
+function mapFontScale(s: number): 'small' | 'normal' | 'large' | 'extraLarge' {
+  if (s <= 0.9) return 'small';
+  if (s < 1.15) return 'normal';
+  if (s < 1.4) return 'large';
+  return 'extraLarge';
+}
 
-  applyLogLevelFromSettings(settings.debugModeEnabled, settings.verboseLoggingEnabled);
+async function applyRuntimeSettings(): Promise<void> {
+  const s = useSettingsStore.getState();
+  applyLogLevel(s.debugModeEnabled, s.verboseLoggingEnabled);
 
   try {
     const { accessibilityServiceElite } = await import('./services/AccessibilityServiceElite');
     await accessibilityServiceElite.initialize();
     await accessibilityServiceElite.updateSettings({
-      fontSize: mapFontScaleToAccessibilitySize(settings.fontScale),
-      highContrast: settings.highContrastEnabled,
+      fontSize: mapFontScale(s.fontScale),
+      highContrast: s.highContrastEnabled,
     });
-  } catch (error) {
-    logger.debug('Accessibility runtime bridge skipped:', error);
-  }
+  } catch { /* non-critical */ }
 
   try {
     const { voiceCommandService } = await import('./services/VoiceCommandService');
-    if (settings.voiceCommandEnabled) {
+    if (s.voiceCommandEnabled) {
       await voiceCommandService.initialize();
       await voiceCommandService.startListening();
     } else {
       await voiceCommandService.stopListening();
     }
-  } catch (error) {
-    logger.debug('Voice command runtime bridge skipped:', error);
-  }
+  } catch { /* non-critical */ }
 
   try {
     if (multiSourceEEWService) {
-      multiSourceEEWService.setSourceEnabled('AFAD', settings.sourceAFAD);
-      multiSourceEEWService.setSourceEnabled('KANDILLI', settings.sourceKOERI);
-      multiSourceEEWService.setSourceEnabled('USGS', settings.sourceUSGS);
-      multiSourceEEWService.setSourceEnabled('EMSC', settings.sourceEMSC);
+      multiSourceEEWService.setSourceEnabled('AFAD', s.sourceAFAD);
+      multiSourceEEWService.setSourceEnabled('KANDILLI', s.sourceKOERI);
+      multiSourceEEWService.setSourceEnabled('USGS', s.sourceUSGS);
+      multiSourceEEWService.setSourceEnabled('EMSC', s.sourceEMSC);
     }
-  } catch (error) {
-    logger.debug('EEW source runtime bridge skipped:', error);
-  }
+  } catch { /* non-critical */ }
 }
 
-export async function initializeApp(options: { authenticated?: boolean } = {}) {
-  if (isInitialized || isInitializing) {
-    return;
-  }
+// ---------------------------------------------------------------------------
+// Resilient import helper
+// ---------------------------------------------------------------------------
 
+const safeImport = async <T>(fn: () => Promise<T>, name: string): Promise<T | null> => {
+  try { return await fn(); }
+  catch (e) { logger.error(`Failed to import ${name}:`, e); return null; }
+};
+
+// ===========================================================================
+// initializeApp — Phase-based bootstrapper
+// ===========================================================================
+
+export async function initializeApp(options: { authenticated?: boolean } = {}) {
+  if (isInitialized || isInitializing) return;
   isInitializing = true;
   const appStore = useAppStore.getState();
 
   try {
-    logger.info('🚀 Starting AfetNet Elite initialization...');
+    logger.info('🚀 Starting initialization...');
 
-    // 1. Load core services dynamically (Parallel Loading for Speed)
-    // CRITICAL: Use Promise.allSettled so ONE service failure doesn't crash entire app
-    logger.info('📦 Loading services dynamically...');
+    // -----------------------------------------------------------------------
+    // Crash diagnostics baseline (must start before feature modules)
+    // -----------------------------------------------------------------------
+    try {
+      const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
+      await firebaseCrashlyticsService.initialize();
+      logger.info('✅ Crashlytics');
+    } catch (e: unknown) {
+      logger.warn('Crashlytics init failed (non-blocking):', e);
+    }
 
-    // ELITE RESILIENT PATTERN: Load each service with individual try-catch
-    const safeImport = async <T>(importFn: () => Promise<T>, name: string): Promise<T | null> => {
-      try {
-        return await importFn();
-      } catch (error) {
-        logger.error(`Failed to import ${name}:`, error);
-        return null;
-      }
-    };
+    try {
+      const { globalErrorHandlerService } = await import('./services/GlobalErrorHandler');
+      await globalErrorHandlerService.initialize();
+      logger.info('✅ GlobalErrorHandler');
+    } catch (e: unknown) {
+      logger.warn('GlobalErrorHandler init failed (non-blocking):', e);
+    }
 
+    // -----------------------------------------------------------------------
+    // PHASE A: Parallel service loading (no auth required)
+    // -----------------------------------------------------------------------
     const [
-      esModule,
-      bmsModule,
-      lsModule,
-      nsModule,
-      fsModule,
-      psModule,
-      btsModule,
-      ssModule,
-      omsModule,
-      // ELITE: EEW Advanced Services
-      ftsModule,
-      bewsModule,
-      pewsModule,
-      mlcModule,
-      // ELITE: Multi-Source, Widget & Watch Services
-      msewsModule,
-      wdbsModule,
-      wbsModule,
-      // ELITE: Life-Saving Services (2026)
-      todsModule,
-      tapsModule,
-      cnsModule,
-      vesModule,
-      nszsModule,
-      bsosModule,
+      esModule, bmsModule, lsModule, nsModule, fsModule,
+      psModule, btsModule, ssModule, omsModule,
+      // EEW
+      ftsModule, bewsModule, pewsModule, mlcModule,
+      // Multi-source / Widget / Watch
+      msewsModule, wdbsModule, wbsModule,
+      todsModule, tapsModule,
       trsModule,
-      fagsModule,
-      uewsModule,
     ] = await Promise.all([
       safeImport(() => import('./services/EarthquakeService'), 'EarthquakeService'),
       safeImport(() => import('./services/BLEMeshService'), 'BLEMeshService'),
@@ -211,96 +144,68 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       safeImport(() => import('./services/BackgroundTaskService'), 'BackgroundTaskService'),
       safeImport(() => import('./services/OfflineSyncService'), 'OfflineSyncService'),
       safeImport(() => import('./services/OfflineMapService'), 'OfflineMapService'),
-      // ELITE: EEW Advanced Services
       safeImport(() => import('./services/FCMTokenService'), 'FCMTokenService'),
       safeImport(() => import('./services/BackgroundEEWService'), 'BackgroundEEWService'),
       safeImport(() => import('./services/PLUMEEWService'), 'PLUMEEWService'),
       safeImport(() => import('./services/MLPWaveClassifier'), 'MLPWaveClassifier'),
-      // ELITE: Multi-Source, Widget & Watch Services
       safeImport(() => import('./services/MultiSourceEEWService'), 'MultiSourceEEWService'),
       safeImport(() => import('./services/WidgetDataBridgeService'), 'WidgetDataBridgeService'),
       safeImport(() => import('./services/WatchBridgeService'), 'WatchBridgeService'),
-      // ELITE: Life-Saving Services (2026)
       safeImport(() => import('./services/TurkeyOfflineDataService'), 'TurkeyOfflineDataService'),
       safeImport(() => import('./services/TurkeyAssemblyPointsService'), 'TurkeyAssemblyPointsService'),
-      safeImport(() => import('./services/ComprehensiveNotificationService'), 'ComprehensiveNotificationService'),
-      safeImport(() => import('./services/VoiceEvacuationService'), 'VoiceEvacuationService'),
-      safeImport(() => import('./services/NearestSafeZoneService'), 'NearestSafeZoneService'),
-      safeImport(() => import('./services/BatterySOSService'), 'BatterySOSService'),
       safeImport(() => import('./services/TsunamiRiskService'), 'TsunamiRiskService'),
-      safeImport(() => import('./services/FirstAidGuideService'), 'FirstAidGuideService'),
-      safeImport(() => import('./services/UltraEliteWaveService'), 'UltraEliteWaveService'),
     ]);
 
-    // ELITE: Safely extract services with null fallback
+    // Extract service singletons
     earthquakeService = esModule?.earthquakeService;
     bleMeshService = bmsModule?.bleMeshService;
     locationService = lsModule?.locationService;
-    notificationService = nsModule?.notificationService;
-    firebaseService = fsModule?.firebaseService;
-    permissionService = psModule?.permissionService;
-    backgroundTaskService = btsModule?.backgroundTaskService;
-    syncService = ssModule?.offlineSyncService;
-    offlineMapService = omsModule?.offlineMapService;
-    // ELITE: EEW Advanced Services
-    fcmTokenService = ftsModule?.fcmTokenService;
-    backgroundEEWService = bewsModule?.backgroundEEWService;
     plumEEWService = pewsModule?.plumEEWService;
-    mlPWaveClassifier = mlcModule?.mlPWaveClassifier;
-    // ELITE: Multi-Source, Widget & Watch Services
     multiSourceEEWService = msewsModule?.multiSourceEEWService;
     widgetDataBridgeService = wdbsModule?.widgetDataBridgeService;
-    watchBridgeService = wbsModule?.watchBridgeService;
-    // ELITE: Life-Saving Services (2026)
-    turkeyOfflineDataService = todsModule?.turkeyOfflineDataService;
-    turkeyAssemblyPointsService = tapsModule?.turkeyAssemblyPointsService;
-    comprehensiveNotificationService = cnsModule?.comprehensiveNotificationService;
-    voiceEvacuationService = vesModule?.voiceEvacuationService;
-    nearestSafeZoneService = nszsModule?.nearestSafeZoneService;
-    batterySOSService = bsosModule?.batterySOSService;
-    tsunamiRiskService = trsModule?.tsunamiRiskService;
-    firstAidGuideService = fagsModule?.firstAidGuideService;
-    ultraEliteWaveService = uewsModule?.ultraEliteWaveService;
 
-    logger.info('✅ Services loaded (including EEW Elite + Multi-Source + Life-Saving)');
+    // Services used only during init (no module-level ref needed)
+    const notificationService = nsModule?.notificationService;
+    const firebaseService = fsModule?.firebaseService;
+    const backgroundTaskService = btsModule?.backgroundTaskService;
+    const syncService = ssModule?.offlineSyncService;
+    const offlineMapService = omsModule?.offlineMapService;
+    const fcmTokenService = ftsModule?.fcmTokenService;
+    const backgroundEEWService = bewsModule?.backgroundEEWService;
+    const mlPWaveClassifier = mlcModule?.mlPWaveClassifier;
+    const watchBridgeService = wbsModule?.watchBridgeService;
 
-    // 2. Initialize Firebase (Notifications)
-    // Fire and forget - don't block app startup
-    firebaseService?.initialize?.().catch((err: unknown) => {
-      logger.error('Firebase init warning:', err);
-    });
+    logger.info('✅ Services loaded');
 
-    // ============================================================
-    // ELITE AUTH GUARD: Check authentication state for Phase B services
-    // Phase A = public API / local services (no auth needed)
-    // Phase B = Firestore / FCM / Sync services (auth required)
-    // ============================================================
-    let isUserAuthenticated = options.authenticated === true;
-    if (!isUserAuthenticated) {
+    // -----------------------------------------------------------------------
+    // Firebase (fire-and-forget)
+    // -----------------------------------------------------------------------
+    firebaseService?.initialize?.().catch((e: unknown) => logger.error('Firebase init:', e));
+
+    // -----------------------------------------------------------------------
+    // Auth check
+    // -----------------------------------------------------------------------
+    let isAuthed = options.authenticated === true;
+    if (!isAuthed) {
       try {
         const { getAuth } = await import('firebase/auth');
-        const fbModule = await import('../lib/firebase');
-        const firebaseApp = fbModule.getFirebaseAppAsync ? await Promise.race([
-          fbModule.getFirebaseAppAsync(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
-        ]) : null;
-        if (firebaseApp) {
-          isUserAuthenticated = !!getAuth(firebaseApp).currentUser;
-        }
-      } catch (authCheckErr) {
-        logger.debug('Auth check skipped (Firebase not ready):', authCheckErr);
-      }
+        const fbMod = await import('../lib/firebase');
+        const app = fbMod.getFirebaseAppAsync
+          ? await Promise.race([fbMod.getFirebaseAppAsync(), new Promise<null>(r => setTimeout(() => r(null), 3000))])
+          : null;
+        if (app) isAuthed = !!getAuth(app).currentUser;
+      } catch { /* Firebase not ready */ }
     }
 
-    const runtimeSettings = useSettingsStore.getState();
-    await applyRuntimeSettingEffects();
+    const settings = useSettingsStore.getState();
+    await applyRuntimeSettings();
 
-    if (settingsSubscription) {
-      settingsSubscription();
-      settingsSubscription = null;
-    }
+    // -----------------------------------------------------------------------
+    // Settings listener
+    // -----------------------------------------------------------------------
+    if (settingsSubscription) { settingsSubscription(); settingsSubscription = null; }
     settingsSubscription = useSettingsStore.subscribe((state, prev) => {
-      const runtimeBridgeChanged =
+      const bridgeChanged =
         state.fontScale !== prev.fontScale ||
         state.highContrastEnabled !== prev.highContrastEnabled ||
         state.debugModeEnabled !== prev.debugModeEnabled ||
@@ -310,16 +215,11 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         state.sourceKOERI !== prev.sourceKOERI ||
         state.sourceUSGS !== prev.sourceUSGS ||
         state.sourceEMSC !== prev.sourceEMSC;
-
-      if (runtimeBridgeChanged) {
-        void applyRuntimeSettingEffects();
-      }
+      if (bridgeChanged) void applyRuntimeSettings();
 
       if (state.earthquakeMonitoringEnabled !== prev.earthquakeMonitoringEnabled) {
         if (state.earthquakeMonitoringEnabled) {
-          earthquakeService?.start?.().catch((error: unknown) => {
-            logger.error('Failed to start earthquake service after setting change:', error);
-          });
+          earthquakeService?.start?.().catch((e: unknown) => logger.error('EQ restart:', e));
         } else {
           earthquakeService?.stop?.();
         }
@@ -327,422 +227,394 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
 
       if (state.locationEnabled !== prev.locationEnabled) {
         if (state.locationEnabled) {
-          locationService?.initialize?.().catch((error: unknown) => {
-            logger.error('Failed to initialize location service after setting change:', error);
-          });
+          locationService?.initialize?.().catch((e: unknown) => logger.error('Loc restart:', e));
         } else {
-          import('./services/FamilyTrackingService').then(({ familyTrackingService }) => {
-            familyTrackingService.stopTracking('settings-location-disabled');
-          }).catch((error) => {
-            logger.debug('FamilyTrackingService stop skipped:', error);
-          });
+          import('./services/FamilyTrackingService').then(({ familyTrackingService }) =>
+            familyTrackingService.stopTracking('settings-location-disabled'),
+          ).catch(() => { });
         }
       }
 
       if (state.sourceCommunity !== prev.sourceCommunity) {
         if (state.sourceCommunity) {
-          crowdsourcedSeismicNetwork?.initialize?.().catch((error: unknown) => {
-            logger.error('Failed to start community seismic network after setting change:', error);
-          });
+          crowdsourcedSeismicNetwork?.initialize?.().catch((e: unknown) => logger.error('CSN restart:', e));
         } else {
           crowdsourcedSeismicNetwork?.stop?.();
         }
       }
     });
 
-    // 3. CRITICAL: Initialize FirebaseDataService (Messaging & Data)
-    // Bu olmadan mesajlar Cloud'a kaydedilmiyor!
-    // ELITE: Only initialize if user is authenticated (prevents permission-denied errors)
-    if (isUserAuthenticated) {
+    // -----------------------------------------------------------------------
+    // PHASE B: Auth-gated services (Identity, Firebase Data, Messaging)
+    // -----------------------------------------------------------------------
+    if (isAuthed) {
+      try {
+        const { identityService } = await import('./services/IdentityService');
+        await identityService.initialize();
+        logger.info(`✅ IdentityService (id: ${identityService.getMyId()})`);
+      } catch (e: unknown) { logger.error('IdentityService:', e); }
+
       try {
         const { firebaseDataService } = await import('./services/FirebaseDataService');
         await firebaseDataService.initialize();
-        logger.info('✅ FirebaseDataService initialized (messaging enabled)');
-      } catch (err: unknown) {
-        logger.error('FirebaseDataService init warning (app continues with mesh):', err);
+        logger.info('✅ FirebaseDataService');
+      } catch (e: unknown) { logger.error('FirebaseDataService:', e); }
+
+      try {
+        const { hybridMessageService } = await import('./services/HybridMessageService');
+        // BUG 1 FIX: initialize() MUST be called before subscribeToMessages()
+        // Without this, queue processing, connection listener, and device registration never start
+        await hybridMessageService.initialize();
+        await hybridMessageService.subscribeToMessages((msg) => {
+          logger.debug(`Cloud msg: ${msg.id} from ${msg.senderId}`);
+        });
+        logger.info('✅ HybridMessageService initialized + subscriptions');
+      } catch (e: unknown) { logger.error('HybridMessageService:', e); }
+
+      // FIX: Initialize messageStore on boot (was only called lazily in MessagesScreen)
+      // Without this, messages don't load from local storage until user opens Messages tab
+      try {
+        const { useMessageStore } = await import('./stores/messageStore');
+        await useMessageStore.getState().initialize();
+        logger.info('✅ MessageStore');
+      } catch (e: unknown) { logger.error('MessageStore:', e); }
+
+    } else {
+      logger.info('ℹ️ Auth-gated services deferred');
+    }
+
+    // Initialize NotificationCenter regardless of auth state so notification taps
+    // (including cold-start SOS taps) are never dropped before auth resolves.
+    try {
+      const { notificationCenter } = await import('./services/notifications/NotificationCenter');
+      await notificationCenter.initialize();
+      logger.info('✅ NotificationCenter');
+    } catch (e: unknown) { logger.error('NotificationCenter:', e); }
+
+    // FIX: Initialize NotificationService regardless of auth (sets up local notification infra)
+    try {
+      if (notificationService) {
+        await notificationService.initialize();
+        logger.info('✅ NotificationService');
       }
-    } else {
-      logger.info('ℹ️ FirebaseDataService deferred — awaiting user authentication');
+    } catch (e: unknown) { logger.error('NotificationService:', e); }
+
+    // -----------------------------------------------------------------------
+    // PHASE C: Location & Family
+    // BUG 3 FIX: FamilyStore MUST init regardless of locationEnabled
+    // — local cache must load so users can see their family members
+    // — FamilyTrackingService.initialize() sets up Firebase listeners (no GPS needed)
+    // — Only startTracking() actually requires location permission
+    // -----------------------------------------------------------------------
+    if (settings.locationEnabled) {
+      locationService?.initialize?.().catch((e: unknown) => logger.error('Location:', e));
     }
 
-    // 4. Initialize Location (Required for distance calculations)
-    // Global location toggle: do not start location stack when disabled.
-    if (runtimeSettings.locationEnabled) {
-      locationService?.initialize?.().catch((err: unknown) => {
-        logger.error('Location init warning:', err);
-      });
-    } else {
-      logger.info('ℹ️ Location services disabled by user settings');
+    // CRITICAL FIX: FamilyStore MUST init regardless of auth state
+    // — AsyncStorage cache loads locally, enabling UI to show family members
+    // — Firebase sync inside initialize() gracefully fails if not authed
+    try {
+      const { useFamilyStore } = await import('./stores/familyStore');
+      await useFamilyStore.getState().initialize();
+      logger.info('✅ FamilyStore');
+    } catch (e: unknown) { logger.error('FamilyStore:', e); }
+
+    if (isAuthed) {
+      // Initialize FamilyTrackingService — requires auth for Firebase listeners
+      try {
+        const { familyTrackingService } = await import('./services/FamilyTrackingService');
+        await familyTrackingService.initialize();
+        // Only start GPS tracking if location is enabled
+        if (settings.locationEnabled) {
+          await familyTrackingService.startTracking('init');
+        }
+        logger.info(`✅ FamilyTrackingService (tracking: ${settings.locationEnabled})`);
+      } catch (e: unknown) { logger.error('FamilyTracking:', e); }
+
+      // Initialize GroupChatService — subscribes to user's group conversations
+      try {
+        const { groupChatService } = await import('./services/GroupChatService');
+        groupChatService.initialize();
+        logger.info('✅ GroupChatService');
+      } catch (e: unknown) { logger.error('GroupChatService:', e); }
     }
 
-    // 5. Initialize Earthquake Service (Core Feature)
-    // Starts polling for earthquake data
-    if (runtimeSettings.earthquakeMonitoringEnabled) {
+    // -----------------------------------------------------------------------
+    // PHASE D: Earthquake & Background
+    // -----------------------------------------------------------------------
+    if (settings.earthquakeMonitoringEnabled) {
       try {
         await earthquakeService?.start?.();
-        logger.info('✅ Earthquake service started');
-      } catch (error: unknown) {
-        logger.error('❌ Earthquake service start failed:', error);
-      }
-    } else {
-      logger.info('ℹ️ Earthquake service disabled by user settings');
+        logger.info('✅ Earthquake service');
+      } catch (e: unknown) { logger.error('Earthquake:', e); }
     }
 
-    // 6. BLE Mesh startup is deferred.
-    // Apple review compliance: avoid Bluetooth permission prompts at app launch.
-    // Mesh starts when the user explicitly enables the feature in UI/onboarding.
-    logger.info('ℹ️ BLE Mesh auto-start deferred until user action');
+    // BLE Mesh deferred — Apple review compliance (no BT prompt at launch)
+    logger.info('ℹ️ BLE Mesh deferred until user action');
 
-    // 7. Initialize Background Tasks
-    // Registers background fetch/tasks
     try {
       await backgroundTaskService?.registerTasks?.();
-      logger.info('✅ Background tasks registered');
-    } catch (error: unknown) {
-      logger.error('❌ Background task registration failed:', error);
+      logger.info('✅ Background tasks');
+    } catch (e: unknown) { logger.error('Background tasks:', e); }
+
+    if (isAuthed) {
+      syncService?.forceSync?.().catch((e: unknown) => logger.debug('Sync skipped:', e));
     }
 
-    // 8. Initialize Sync Service (AUTH REQUIRED)
-    // Syncs data with backend if online
-    if (isUserAuthenticated) {
-      syncService?.forceSync?.().catch((err: unknown) => {
-        logger.debug('Initial sync skipped:', err);
-      });
+    offlineMapService?.initialize?.().catch((e: unknown) => logger.debug('Offline map:', e));
+
+    // -----------------------------------------------------------------------
+    // PHASE E: EEW Advanced (auth + setting gated)
+    // -----------------------------------------------------------------------
+    if (isAuthed) {
+      try { await fcmTokenService?.initialize?.(); logger.info('✅ FCM Token'); }
+      catch (e: unknown) { logger.error('FCM Token:', e); }
     }
 
-    // 9. Initialize Offline Maps
-    // Checks for downloaded maps
-    offlineMapService?.initialize?.().catch((err: unknown) => {
-      logger.debug('Offline map init skipped:', err);
-    });
-
-    // ============================================================
-    // ELITE: EEW ADVANCED SERVICES INITIALIZATION
-    // ============================================================
-
-    // 10. Initialize FCM Token Service (AUTH REQUIRED — Push Notifications)
-    // Registers device for server-side push notifications
-    if (isUserAuthenticated) {
-      try {
-        await fcmTokenService?.initialize?.();
-        logger.info('✅ FCM Token service initialized');
-      } catch (error: unknown) {
-        logger.error('❌ FCM Token service init failed:', error);
-      }
+    if (isAuthed && settings.eewEnabled) {
+      try { await backgroundEEWService?.initialize?.(); logger.info('✅ Background EEW'); }
+      catch (e: unknown) { logger.error('Background EEW:', e); }
     }
 
-    // 11. Initialize Background EEW Service (AUTH REQUIRED)
-    // Enables earthquake monitoring when app is in background
-    if (isUserAuthenticated && runtimeSettings.eewEnabled) {
-      try {
-        await backgroundEEWService?.initialize?.();
-        logger.info('✅ Background EEW service initialized');
-      } catch (error: unknown) {
-        logger.error('❌ Background EEW service init failed:', error);
-      }
-    } else if (isUserAuthenticated) {
-      logger.info('ℹ️ Background EEW disabled by user settings');
-    }
-
-    // 12. Initialize PLUM EEW Service
-    // JMA-style proximity-based intensity prediction
-    // Note: PLUM uses start() not initialize() - requires user location
-    if (runtimeSettings.locationEnabled && plumEEWService && locationService) {
+    if (settings.locationEnabled && plumEEWService && locationService) {
       const loc = locationService.getCurrentLocation?.();
       if (loc) {
-        plumEEWService.start({ latitude: loc.latitude, longitude: loc.longitude }).catch((err: unknown) => {
-          logger.debug('PLUM EEW start skipped:', err);
-        });
+        plumEEWService.start({ latitude: loc.latitude, longitude: loc.longitude }).catch((e: unknown) =>
+          logger.debug('PLUM:', e),
+        );
       }
     }
 
-    // 13. Initialize ML P-Wave Classifier
-    // Reduces false positives with intelligent classification
-    mlPWaveClassifier?.initialize?.().catch((err: unknown) => {
-      logger.debug('ML Classifier init skipped:', err);
-    });
+    mlPWaveClassifier?.initialize?.().catch((e: unknown) => logger.debug('ML Classifier:', e));
 
-    // ============================================================
-    // ELITE: MULTI-SOURCE, WIDGET & WATCH SERVICES
-    // ============================================================
-
-    // 14. Initialize Multi-Source EEW Service (AUTH REQUIRED)
-    // AFAD, Kandilli, USGS, EMSC - çoklu kaynak desteği
-    if (isUserAuthenticated && runtimeSettings.eewEnabled) {
+    // -----------------------------------------------------------------------
+    // PHASE F: Multi-Source EEW, Widget, Watch
+    // -----------------------------------------------------------------------
+    if (isAuthed && settings.eewEnabled) {
       try {
         multiSourceEEWService?.start?.();
-        logger.info('✅ Multi-Source EEW service started (AFAD, Kandilli, USGS, EMSC)');
-
-        // Subscribe to events and forward to widget
-        multiSourceEEWService?.onEvent?.((event) => {
-          // Update widget with latest earthquake
+        logger.info('✅ Multi-Source EEW (AFAD, Kandilli, USGS, EMSC)');
+        if (multiSourceWidgetUnsubscribe) {
+          multiSourceWidgetUnsubscribe();
+          multiSourceWidgetUnsubscribe = null;
+        }
+        multiSourceWidgetUnsubscribe = multiSourceEEWService?.onEvent?.((event: any) => {
           widgetDataBridgeService?.updateLatestEarthquake?.({
             magnitude: event.magnitude,
             location: event.location,
             depth: event.depth,
             time: new Date(event.originTime),
-          }).catch(() => { /* ignore widget errors */ });
-        });
-      } catch (error: unknown) {
-        logger.error('❌ Multi-Source EEW service start failed:', error);
-      }
-    } else if (isUserAuthenticated) {
-      logger.info('ℹ️ Multi-Source EEW disabled by user settings');
-    } else {
-      logger.info('ℹ️ Multi-Source EEW deferred — awaiting user authentication');
+          }).catch(() => { });
+        }) || null;
+      } catch (e: unknown) { logger.error('Multi-Source EEW:', e); }
     }
 
-    // 15. Initialize Widget Data Bridge
-    // iOS/Android widget veri senkronizasyonu
-    widgetDataBridgeService?.initialize?.().catch((err: unknown) => {
-      logger.debug('Widget bridge init skipped:', err);
-    });
+    widgetDataBridgeService?.initialize?.().catch((e: unknown) => logger.debug('Widget:', e));
+    watchBridgeService?.initialize?.().catch((e: unknown) => logger.debug('Watch:', e));
 
-    // 16. Initialize Watch Bridge Service
-    // Apple Watch / WearOS bağlantısı
-    watchBridgeService?.initialize?.().catch((err: unknown) => {
-      logger.debug('Watch bridge init skipped:', err);
-    });
+    // -----------------------------------------------------------------------
+    // PHASE G: Life-saving services (auth-gated)
+    // SOS Listeners, AI Pre-warmup, NewsAggregator
+    // -----------------------------------------------------------------------
+    if (isAuthed) {
+      // TurkeyOfflineData, Assembly, Tsunami are data-only — no init needed
+      logger.info('✅ Life-saving data services available');
 
-    // ============================================================
-    // ELITE: LIFE-SAVING SERVICES INITIALIZATION (2026)
-    // ============================================================
+      // -- SOS Alert Listeners: Listen for family SOS + nearby broadcasts --
+      try {
+        const { getDeviceId } = await import('./utils/device');
+        const myDeviceId = await getDeviceId();
+        if (myDeviceId) {
+          const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
+          const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
+          await startSOSAlertListener(myDeviceId);
+          await startNearbySOSListener(myDeviceId);
+          logger.info('✅ SOS Alert Listeners (family + nearby)');
+        } else {
+          logger.warn('⚠️ SOS listeners skipped: no deviceId yet');
+        }
+      } catch (e: unknown) { logger.error('SOS Listeners:', e); }
 
-    if (isUserAuthenticated) {
-      // 18. Initialize Comprehensive Notification Service
-      // 12 Android channels, 25+ notification types
-      comprehensiveNotificationService?.initialize?.().catch((err: unknown) => {
-        logger.debug('Comprehensive notification init skipped:', err);
-      });
+      // -- AI Knowledge Base Pre-warmup --
+      try {
+        const { aiAssistantCoordinator } = await import('./ai/services/AIAssistantCoordinator');
+        // Calling getKnowledgeStats triggers lazy-load of the offline KB
+        const stats = aiAssistantCoordinator.getKnowledgeStats();
+        logger.info(`✅ AI Knowledge Base pre-loaded (${stats?.totalEntries || 0} entries)`);
+      } catch (e: unknown) { logger.error('AI Pre-warmup:', e); }
 
-      // 19. Initialize Voice Evacuation Service
-      // TR/EN TTS-based evacuation guidance
-      voiceEvacuationService?.initialize?.().catch((err: unknown) => {
-        logger.debug('Voice evacuation init skipped:', err);
-      });
-
-      // 20. Initialize Battery SOS Service
-      // Auto-SOS at 10% battery
-      batterySOSService?.initialize?.().catch((err: unknown) => {
-        logger.debug('Battery SOS init skipped:', err);
-      });
-
-      // 21. Initialize Nearest Safe Zone Service
-      // Assembly points navigation
-      nearestSafeZoneService?.initialize?.().catch((err: unknown) => {
-        logger.debug('Safe zone service init skipped:', err);
-      });
-
-      // 22. Initialize Ultra Elite Wave Service
-      // World's most advanced P/S wave calculations
-      ultraEliteWaveService?.initialize?.().catch((err: unknown) => {
-        logger.debug('Ultra elite wave service init skipped:', err);
-      });
-
-      // Note: TurkeyOfflineDataService, TurkeyAssemblyPointsService,
-      // TsunamiRiskService, FirstAidGuideService are data-only services
-      // No initialization required - they're ready to use immediately
-      logger.info('✅ Life-Saving services initialized (Notification, Voice, Battery, SafeZone, Wave)');
-    } else {
-      logger.info('ℹ️ Life-Saving realtime services deferred — awaiting user authentication');
+      // -- NewsAggregator: Pre-fetch headlines for home screen --
+      try {
+        const { newsAggregatorService } = await import('./ai/services/NewsAggregatorService');
+        await newsAggregatorService.initialize();
+        logger.info('✅ NewsAggregator initialized');
+      } catch (e: unknown) { logger.error('NewsAggregator:', e); }
     }
 
-    // 24. ELITE: Initialize Realtime Earthquake Monitor (World-Class EEW) (AUTH REQUIRED)
-    // WebSocket + HTTP fallback for EMSC, AFAD, Kandilli
-    if (isUserAuthenticated && runtimeSettings.eewEnabled) {
+    // -----------------------------------------------------------------------
+    // PHASE H: Realtime EEW connections (auth + EEW setting gated)
+    // -----------------------------------------------------------------------
+    if (isAuthed && settings.eewEnabled) {
       try {
         const { realtimeEarthquakeMonitor: rem } = await import('./services/RealtimeEarthquakeMonitor');
         realtimeEarthquakeMonitor = rem;
-
-        // Get user location and set it
         const loc = locationService?.getCurrentLocation?.();
-        if (loc) {
-          realtimeEarthquakeMonitor.setUserLocation(loc.latitude, loc.longitude);
-        }
-
+        if (loc) realtimeEarthquakeMonitor.setUserLocation(loc.latitude, loc.longitude);
         await realtimeEarthquakeMonitor.start();
-        logger.info('✅ RealtimeEarthquakeMonitor started (WebSocket + 3-Source Redundancy)');
-      } catch (error: unknown) {
-        logger.error('❌ RealtimeEarthquakeMonitor start failed:', error);
-      }
+        logger.info('✅ RealtimeEarthquakeMonitor (WebSocket)');
+      } catch (e: unknown) { logger.error('RealtimeEQ:', e); }
     }
 
-    // 25. ELITE: Initialize On-Device Seismic Detector (WORLD'S FASTEST!) (AUTH REQUIRED)
-    // Uses phone's accelerometer for P-wave detection - <1 second alerts!
-    if (isUserAuthenticated && runtimeSettings.seismicSensorEnabled) {
+    if (isAuthed && settings.seismicSensorEnabled) {
       try {
         const { onDeviceSeismicDetector: odsd } = await import('./services/OnDeviceSeismicDetector');
         onDeviceSeismicDetector = odsd;
-
         await onDeviceSeismicDetector.start();
-        logger.info('🚀 OnDeviceSeismicDetector started (P-Wave Detection - <1s Alert!)');
-      } catch (error: unknown) {
-        logger.error('❌ OnDeviceSeismicDetector start failed:', error);
-      }
-    } else if (isUserAuthenticated) {
-      logger.info('ℹ️ OnDeviceSeismicDetector disabled by user settings');
+        logger.info('✅ OnDeviceSeismicDetector (P-Wave)');
+      } catch (e: unknown) { logger.error('OnDeviceSeismic:', e); }
     }
 
-    // 26. ELITE: Initialize Crowdsourced Seismic Network (AUTH REQUIRED)
-    // Connects with other AfetNet users for multi-device verification
-    if (isUserAuthenticated && runtimeSettings.sourceCommunity) {
+    if (isAuthed && settings.sourceCommunity) {
       try {
         const { crowdsourcedSeismicNetwork: csn } = await import('./services/CrowdsourcedSeismicNetwork');
         crowdsourcedSeismicNetwork = csn;
-
-        // Set user location if available
         const loc = locationService?.getCurrentLocation?.();
-        if (loc) {
-          crowdsourcedSeismicNetwork.setUserLocation(loc.latitude, loc.longitude);
-        }
-
+        if (loc) crowdsourcedSeismicNetwork.setUserLocation(loc.latitude, loc.longitude);
         await crowdsourcedSeismicNetwork.initialize();
-        logger.info('🌐 CrowdsourcedSeismicNetwork initialized (Türkiye-wide network)');
-      } catch (error: unknown) {
-        logger.error('❌ CrowdsourcedSeismicNetwork init failed:', error);
-      }
-    } else if (isUserAuthenticated) {
-      logger.info('ℹ️ CrowdsourcedSeismicNetwork disabled by sourceCommunity setting');
+        logger.info('✅ CrowdsourcedSeismicNetwork');
+      } catch (e: unknown) { logger.error('CrowdsourcedSeismic:', e); }
     }
 
-    // 27. ELITE: Initialize Background Seismic Monitor (AUTH REQUIRED)
-    // Provides 24/7 earthquake detection even when app is closed
-    if (isUserAuthenticated && runtimeSettings.seismicSensorEnabled) {
+    if (isAuthed && settings.seismicSensorEnabled) {
       try {
         const { backgroundSeismicMonitor: bsm } = await import('./services/BackgroundSeismicMonitor');
         backgroundSeismicMonitor = bsm;
         await backgroundSeismicMonitor.initialize();
-        logger.info('🌙 BackgroundSeismicMonitor initialized (24/7 protection)');
-      } catch (error: unknown) {
-        logger.error('❌ BackgroundSeismicMonitor init failed:', error);
-      }
+        logger.info('✅ BackgroundSeismicMonitor (24/7)');
+      } catch (e: unknown) { logger.error('BackgroundSeismic:', e); }
     }
 
-    // 28. ELITE: Initialize Real-Time EEW Connection (AUTH REQUIRED — Sub-100ms Delivery!)
-    // WebSocket-like Firebase Realtime DB listener for instant alerts
-    if (isUserAuthenticated && runtimeSettings.eewEnabled) {
+    if (isAuthed && settings.eewEnabled) {
       try {
-        const { realTimeEEWConnection } = await import('./services/RealTimeEEWConnectionService');
+        const { realTimeEEWConnection: realtimeConn } = await import('./services/RealTimeEEWConnectionService');
+        realTimeEEWConnection = realtimeConn;
         await realTimeEEWConnection.start();
-        logger.info('⚡ RealTimeEEWConnection started (Sub-100ms delivery via Realtime DB)');
-      } catch (error: unknown) {
-        logger.error('❌ RealTimeEEWConnection start failed:', error);
-      }
+        logger.info('✅ RealTimeEEWConnection');
+      } catch (e: unknown) { logger.error('RealTimeEEW:', e); }
     }
 
-    // 28b. MultiSourceEEWService already started at step 14.
+    // REMOVED: NotificationCenter was here gated behind eewEnabled.
+    // Moved to Phase B (auth-gated only) so ALL notifications work regardless of EEW setting.
 
-    // 29. ELITE: Warmup UltraFast EEW Notification (AUTH REQUIRED)
-    // Pre-loads TTS engine and sound files for instant alert delivery
-    if (isUserAuthenticated && runtimeSettings.eewEnabled) {
-      try {
-        const { ultraFastEEWNotification } = await import('./services/UltraFastEEWNotification');
-        await ultraFastEEWNotification.warmup();
-        logger.info('🔥 UltraFastEEWNotification warmed up (Zero-latency TTS ready)');
-      } catch (error: unknown) {
-        logger.error('❌ UltraFastEEWNotification warmup failed:', error);
-      }
-    }
-
-    // 30. ELITE: Initialize Elite Notification Handler (Premium UI)
-    // Manages premium animated overlays and adaptive proximity alerts
-    try {
-      const { eliteNotificationHandler } = await import('./services/EliteNotificationHandlerService');
-      await eliteNotificationHandler.initialize();
-      logger.info('🎨 EliteNotificationHandler initialized (Premium UI + Adaptive Proximity)');
-    } catch (error: unknown) {
-      logger.error('❌ EliteNotificationHandler init failed:', error);
-    }
-
-    // 31. ELITE: Initialize iOS Live Activities (Lock-Screen Countdown)
-    // Provides lock-screen EEW countdown on iOS 16.1+
+    // iOS Live Activities
     if (Platform.OS === 'ios') {
       try {
         const { iOSLiveActivities } = await import('./services/iOSLiveActivitiesService');
-        if (iOSLiveActivities.isAvailable()) {
-          logger.info('📱 iOS Live Activities available (Lock-screen countdown ready)');
-        } else {
-          logger.debug('iOS Live Activities not available (iOS 16.1+ required or native module missing)');
-        }
-      } catch (error: unknown) {
-        logger.debug('iOS Live Activities setup skipped:', error);
-      }
+        if (iOSLiveActivities.isAvailable()) logger.info('✅ iOS Live Activities');
+      } catch { /* iOS 16.1+ required */ }
     }
 
-    // 23. Start Seismic Health Check (Periodic)
-    // Ensures earthquake polling is active
+    // -----------------------------------------------------------------------
+    // PHASE I: Auto-start BLE Mesh on EEW alert (background safety net)
+    // -----------------------------------------------------------------------
+    if (isAuthed && settings.eewEnabled && multiSourceEEWService) {
+      try {
+        if (multiSourceBleAutoUnsubscribe) {
+          multiSourceBleAutoUnsubscribe();
+          multiSourceBleAutoUnsubscribe = null;
+        }
+        multiSourceBleAutoUnsubscribe = multiSourceEEWService.onEvent?.((event: any) => {
+          // Auto-start BLE Mesh if M5+ earthquake detected
+          if (event.magnitude >= 5.0 && bleMeshService && !bleMeshService.getIsRunning()) {
+            bleMeshService.initialize().then(() => bleMeshService.start()).catch(() => { });
+            logger.warn(`🚨 BLE Mesh auto-started: M${event.magnitude} detected`);
+          }
+        }) || null;
+      } catch (e: unknown) { logger.debug('BLE Mesh auto-trigger setup:', e); }
+    }
+
+    // Seismic health check (periodic restart if service dies)
     startSeismicHealthCheck();
 
     isInitialized = true;
     isInitializing = false;
     appStore.setReady(true);
-
-    logger.info('✨ AfetNet initialized successfully - 31 Elite Services Active!');
+    logger.info('✨ Initialization complete');
 
   } catch (error: unknown) {
-    logger.error('❌ CRITICAL: Init failed:', error);
+    logger.error('❌ CRITICAL init failure:', error);
     isInitializing = false;
-    // Even if init fails, we set ready to true to allow UI to render (possibly in error state)
-    appStore.setReady(true);
+    appStore.setReady(true); // Allow UI to render in error state
   }
 }
 
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+
 function startSeismicHealthCheck() {
   if (seismicHealthCheckInterval) return;
-
-  // Check every 1 minute
   seismicHealthCheckInterval = setInterval(() => {
-    if (!useSettingsStore.getState().earthquakeMonitoringEnabled) {
-      return;
-    }
+    if (!useSettingsStore.getState().earthquakeMonitoringEnabled) return;
     if (earthquakeService && !earthquakeService.getIsRunning()) {
       logger.warn('⚠️ Seismic service stopped, restarting...');
-      earthquakeService.start?.().catch((err: unknown) => {
-        logger.error('Failed to restart seismic service:', err);
-      });
+      earthquakeService.start?.().catch((e: unknown) => logger.error('Seismic restart:', e));
     }
   }, 60000);
 }
 
+// ---------------------------------------------------------------------------
+// Shutdown
+// ---------------------------------------------------------------------------
+
 export async function shutdownApp() {
   if (!isInitialized) return;
-
   logger.info('Shutting down...');
 
-  if (seismicHealthCheckInterval) {
-    clearInterval(seismicHealthCheckInterval);
-    seismicHealthCheckInterval = null;
+  if (seismicHealthCheckInterval) { clearInterval(seismicHealthCheckInterval); seismicHealthCheckInterval = null; }
+  if (settingsSubscription) { settingsSubscription(); settingsSubscription = null; }
+
+  earthquakeService?.stop?.();
+  bleMeshService?.stop?.();
+  plumEEWService?.stop?.();
+  multiSourceEEWService?.stop?.();
+  realtimeEarthquakeMonitor?.stop?.();
+  realTimeEEWConnection?.stop?.();
+  onDeviceSeismicDetector?.stop?.();
+  crowdsourcedSeismicNetwork?.stop?.();
+  backgroundSeismicMonitor?.stop?.();
+
+  if (multiSourceWidgetUnsubscribe) {
+    multiSourceWidgetUnsubscribe();
+    multiSourceWidgetUnsubscribe = null;
+  }
+  if (multiSourceBleAutoUnsubscribe) {
+    multiSourceBleAutoUnsubscribe();
+    multiSourceBleAutoUnsubscribe = null;
   }
 
-  if (settingsSubscription) {
-    settingsSubscription();
-    settingsSubscription = null;
-  }
+  try {
+    const { hybridMessageService } = await import('./services/HybridMessageService');
+    hybridMessageService.destroy();
+  } catch { /* already stopped */ }
 
-  // Stop services gracefully
-  if (earthquakeService) earthquakeService.stop();
-  if (bleMeshService) bleMeshService.stop();
-
-  // ELITE: Stop EEW Advanced Services
-  if (plumEEWService) plumEEWService.stop();
-  if (realtimeEarthquakeMonitor) realtimeEarthquakeMonitor.stop();
-  if (onDeviceSeismicDetector) onDeviceSeismicDetector.stop();
-  if (crowdsourcedSeismicNetwork) crowdsourcedSeismicNetwork.stop();
-  // backgroundEEWService and fcmTokenService don't have stop methods - they clean up automatically
+  try {
+    const { groupChatService } = await import('./services/GroupChatService');
+    groupChatService.destroy();
+  } catch { /* already stopped */ }
 
   try {
     const { voiceCommandService } = await import('./services/VoiceCommandService');
     await voiceCommandService.stopListening();
-  } catch (error) {
-    logger.debug('Voice command shutdown skipped:', error);
-  }
+  } catch { /* already stopped */ }
 
-  // Cleanup Firebase listeners
+  // Cleanup SOS listeners
   try {
-    firebaseService?.cleanup?.();
-  } catch (error: unknown) {
-    logger.error('Firebase cleanup error:', error);
-  }
+    const { stopSOSAlertListener } = await import('./services/sos/SOSAlertListener');
+    const { stopNearbySOSListener } = await import('./services/sos/NearbySOSListener');
+    stopSOSAlertListener();
+    stopNearbySOSListener();
+  } catch { /* already stopped */ }
 
   isInitialized = false;
   useAppStore.getState().setReady(false);

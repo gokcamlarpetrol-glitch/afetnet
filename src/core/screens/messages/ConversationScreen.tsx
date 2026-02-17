@@ -16,7 +16,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert,
+  Image, Linking, Keyboard,
 } from 'react-native';
+import { styles } from './ConversationScreen.styles';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from '../../components/SafeLinearGradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +29,7 @@ import Animated, { FadeInUp, Layout, FadeIn, FadeOut } from 'react-native-reanim
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Message, useMessageStore } from '../../stores/messageStore';
+import { useFamilyStore } from '../../stores/familyStore';
 import { validateMessage, sanitizeForDisplay } from '../../utils/messageSanitizer';
 import MessageOptionsModal from '../../components/messages/MessageOptionsModal';
 import { AttachmentsModal } from '../../components/messages/AttachmentsModal';
@@ -36,15 +39,57 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
 import { identityService } from '../../services/IdentityService';
+import { contactService } from '../../services/ContactService';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import type { ParamListBase, RouteProp } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import { createLogger } from '../../utils/logger';
+import type { MainStackParamList } from '../../types/navigation';
 
 const logger = createLogger('ConversationScreen');
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const CHAT_RENDERABLE_TYPES = new Set<MeshMessage['type']>(['CHAT', 'SOS', 'IMAGE', 'VOICE', 'LOCATION']);
+const NON_CHAT_SYSTEM_TYPES = new Set([
+  'family_status_update',
+  'family_location_update',
+  'family_location',
+  'status_update',
+  'device_status',
+  'presence_update',
+  'location',
+  'typing',
+  'ack',
+  'reaction',
+]);
+
+const normalizeIdentityValue = (value?: string | null): string => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim();
+};
+
+const getEnvelopeTypeFromContent = (content: string): string => {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: unknown };
+    if (typeof parsed?.type !== 'string') return '';
+    return parsed.type.trim().toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+const isSystemPayloadMessage = (message: Pick<MeshMessage, 'type' | 'content'>): boolean => {
+  if (!CHAT_RENDERABLE_TYPES.has(message.type)) {
+    return true;
+  }
+  const envelopeType = getEnvelopeTypeFromContent(message.content);
+  if (!envelopeType) return false;
+  return NON_CHAT_SYSTEM_TYPES.has(envelopeType);
+};
 
 // ELITE: Type-safe navigation and route props
-type ConversationNavigationProp = StackNavigationProp<ParamListBase>;
-type ConversationRouteProp = RouteProp<{ Conversation: { userId: string } }, 'Conversation'>;
+type ConversationNavigationProp = StackNavigationProp<MainStackParamList, 'Conversation'>;
+type ConversationRouteProp = RouteProp<MainStackParamList, 'Conversation'>;
 
 interface ConversationScreenProps {
   navigation: ConversationNavigationProp;
@@ -101,6 +146,114 @@ const NetworkBanner = ({ status }: { status: 'online' | 'mesh' | 'offline' }) =>
   );
 };
 
+// ELITE: Inline Voice Player for voice messages
+const VoicePlayerInline = ({ message, isMe }: { message: MeshMessage; isMe: boolean }) => {
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const durationSec = message.mediaDuration || 0;
+
+  const handlePlay = async () => {
+    try {
+      if (isPlaying) {
+        await voiceMessageService.stop();
+        setIsPlaying(false);
+      } else {
+        const voiceMsg = {
+          id: message.id,
+          uri: message.mediaUrl || '',
+          durationMs: durationSec * 1000,
+          timestamp: message.timestamp,
+          from: message.senderId,
+          to: message.to,
+          delivered: true,
+          played: false,
+        };
+        setIsPlaying(true);
+        await voiceMessageService.play(voiceMsg);
+        setIsPlaying(false);
+      }
+    } catch {
+      setIsPlaying(false);
+    }
+  };
+
+  return (
+    <Pressable onPress={handlePlay} style={styles.voicePlayer}>
+      <Ionicons
+        name={isPlaying ? 'pause-circle' : 'play-circle'}
+        size={36}
+        color={isMe ? '#1e3a8a' : '#3b82f6'}
+      />
+      <View style={styles.voiceWaveform}>
+        {[0.4, 0.7, 1, 0.6, 0.9, 0.5, 0.8, 0.3, 0.6, 0.9, 0.5, 0.7].map((h, i) => (
+          <View
+            key={i}
+            style={[
+              styles.voiceBar,
+              { height: h * 20, backgroundColor: isMe ? '#1e3a8a50' : '#3b82f650' },
+            ]}
+          />
+        ))}
+      </View>
+      <Text style={[styles.voiceDuration, { color: isMe ? '#1e3a8a' : '#64748b' }]}>
+        {durationSec > 0 ? `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}` : '0:00'}
+      </Text>
+    </Pressable>
+  );
+};
+
+// ELITE: Location Card for location messages
+const LocationCard = ({ location, isMe }: { location: { lat: number; lng: number; address?: string }; isMe: boolean }) => {
+  // Guard: skip interactive render if location coordinates are invalid
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) {
+    return (
+      <View style={styles.locationCard}>
+        <View style={styles.locationIconCircle}>
+          <Ionicons name="location-outline" size={20} color="#94a3b8" />
+        </View>
+        <View style={styles.locationInfo}>
+          <Text style={[styles.locationTitle, { color: '#94a3b8' }]}>📍 Konum verisi geçersiz</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const handleOpen = () => {
+    const url = Platform.select({
+      ios: `maps:0,0?q=${location.lat},${location.lng}`,
+      android: `geo:${location.lat},${location.lng}?q=${location.lat},${location.lng}`,
+      default: `https://maps.google.com/?q=${location.lat},${location.lng}`,
+    });
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://maps.google.com/?q=${location.lat},${location.lng}`).catch((error) => {
+        logger.warn('Failed to open location URL in ConversationScreen:', error);
+      });
+    });
+  };
+
+  return (
+    <Pressable onPress={handleOpen} style={styles.locationCard}>
+      <View style={styles.locationIconCircle}>
+        <Ionicons name="location" size={20} color="#ef4444" />
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={[styles.locationTitle, { color: isMe ? '#1e3a8a' : '#334155' }]}>
+          📍 Paylaşılan Konum
+        </Text>
+        {location.address ? (
+          <Text style={[styles.locationAddress, { color: isMe ? '#3b82f6' : '#64748b' }]} numberOfLines={2}>
+            {location.address}
+          </Text>
+        ) : (
+          <Text style={[styles.locationAddress, { color: isMe ? '#3b82f6' : '#64748b' }]}>
+            {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+          </Text>
+        )}
+        <Text style={styles.locationLink}>Haritada Aç →</Text>
+      </View>
+    </Pressable>
+  );
+};
+
 // Bubble Component
 const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
   // Sanitize content for display
@@ -130,6 +283,62 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
     return '#64748b';
   };
 
+  // ELITE: Render media content based on message type
+  const renderContent = () => {
+    // Image message
+    if (message.mediaType === 'image') {
+      if (message.mediaUrl) {
+        return (
+          <View>
+            <Image
+              source={{ uri: message.mediaUrl }}
+              style={styles.mediaImage}
+              resizeMode="cover"
+            />
+            {displayContent && displayContent !== '📷 Fotoğraf' && (
+              <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther, { marginTop: 6 }]}>
+                {displayContent}
+              </Text>
+            )}
+          </View>
+        );
+      }
+      // Fallback: no URL yet (upload in progress or mesh-only)
+      return (
+        <View style={styles.mediaPlaceholder}>
+          <Ionicons name="image-outline" size={32} color={isMe ? '#1e3a8a' : '#64748b'} />
+          <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>📷 Fotoğraf</Text>
+        </View>
+      );
+    }
+
+    // Voice message
+    if (message.mediaType === 'voice') {
+      if (message.mediaUrl) {
+        return <VoicePlayerInline message={message} isMe={isMe} />;
+      }
+      // Fallback: no URL
+      return (
+        <View style={styles.mediaPlaceholder}>
+          <Ionicons name="mic-outline" size={24} color={isMe ? '#1e3a8a' : '#64748b'} />
+          <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>🎤 Sesli Mesaj</Text>
+        </View>
+      );
+    }
+
+    // Location message
+    if (message.mediaType === 'location' && message.location) {
+      return <LocationCard location={message.location} isMe={isMe} />;
+    }
+
+    // Default: text message
+    return (
+      <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>
+        {displayContent}
+      </Text>
+    );
+  };
+
   return (
     <Animated.View
       entering={FadeInUp.springify()}
@@ -145,10 +354,9 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
         isMe ? styles.bubbleMe : styles.bubbleOther,
         !showTail && (isMe ? styles.noTailMe : styles.noTailOther),
         message.status === 'failed' && styles.bubbleFailed,
+        message.mediaType === 'image' && message.mediaUrl && styles.bubbleImage,
       ]}>
-        <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>
-          {displayContent}
-        </Text>
+        {renderContent()}
 
         <View style={styles.metaRow}>
           <Text style={[styles.timeText, isMe ? styles.timeMe : styles.timeOther]}>
@@ -168,12 +376,17 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
 };
 
 export default function ConversationScreen({ navigation, route }: ConversationScreenProps) {
-  const { userId } = route.params || {};
+  const { userId, userName } = route.params || {};
+
+  // CRITICAL FIX: ALL hooks MUST be declared BEFORE any early return
+  // to comply with React Rules of Hooks (same hook count on every render)
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [connectionState, setConnectionState] = useState<'online' | 'mesh' | 'offline'>('offline');
   const [physicalDeviceId, setPhysicalDeviceId] = useState<string | null>(null);
+  // ELITE FIX: Track identity ID in state so selfIds recalculates when identity loads
+  const [identityId, setIdentityId] = useState<string | null>(identityService.getIdentity()?.uid || null);
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -188,50 +401,232 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const [attachmentsModalVisible, setAttachmentsModalVisible] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ELITE: Use mesh store state for all in-screen mutations
+  // ELITE: InViewPort auto-read receipts — marks messages as read when scrolled into view
+  const selfIdsRef = useRef<Set<string>>(new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: MeshMessage; isViewable: boolean }> }) => {
+    const myUid = identityService.getUid();
+    if (!myUid) return;
+    const currentSelfIds = selfIdsRef.current;
+    for (const { item, isViewable } of viewableItems) {
+      if (!isViewable) continue;
+      if (currentSelfIds.has(item.senderId)) continue;
+      if (item.status === 'read') continue;
+      useMessageStore.getState().syncReadReceipt(item.id, item.senderId);
+      useMeshStore.getState().updateMessage(item.id, { status: 'read' });
+    }
+  }).current;
+
+  // ELITE: Use mesh store state for in-screen mutations
   const updateMeshMessage = useMeshStore(state => state.updateMessage);
 
-  // ELITE: Connect to real store (M7 fix)
-  const allMessages = useMeshStore(state => state.messages);
+  // ELITE V2: DUAL-SOURCE READ — merge MeshStore (rich media) + messageStore (Firebase inbox)
+  // This ensures both BLE mesh messages AND Firebase cloud messages are displayed
+  const meshMessages = useMeshStore(state => state.messages);
   const myDeviceId = useMeshStore(state => state.myDeviceId);
-  const selfIds = useMemo(() => {
-    const ids = new Set<string>(['ME']);
-    if (myDeviceId) {
-      ids.add(myDeviceId);
-    }
-    if (physicalDeviceId) {
-      ids.add(physicalDeviceId);
-    }
+  const familyMembers = useFamilyStore((state) => state.members);
+  const blockedUsers = useSettingsStore((state) => state.blockedUsers);
+  const validUserId = (userId && typeof userId === 'string') ? userId : '';
+  const allStoreMessages = useMessageStore(state => state.messages);
+
+  // ELITE FIX: Ensure identity is captured after async load
+  useEffect(() => {
     const identity = identityService.getIdentity();
-    if (identity?.id) {
-      ids.add(identity.id);
+    if (identity?.uid && identity.uid !== identityId) {
+      setIdentityId(identity.uid);
     }
-    if (identity?.deviceId) {
-      ids.add(identity.deviceId);
-    }
+    const timer = setTimeout(() => {
+      const id = identityService.getIdentity();
+      if (id?.uid && id.uid !== identityId) {
+        setIdentityId(id.uid);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selfIds = useMemo(() => {
+    const ids = new Set<string>(['ME', 'me']);
+    const uid = identityService.getUid();
+    if (uid) ids.add(uid);
+    selfIdsRef.current = ids;
     return ids;
-  }, [myDeviceId, physicalDeviceId]);
+  }, [identityId]);
 
-  // Strictly isolate this one-to-one conversation
+  const resolvedRecipientId = useMemo(() => {
+    const normalizedUserId = validUserId.trim();
+    if (!normalizedUserId) return '';
+    if (UID_REGEX.test(normalizedUserId)) return normalizedUserId;
+
+    const familyMember = familyMembers.find((m) => m.uid === normalizedUserId);
+    if (familyMember?.uid && UID_REGEX.test(familyMember.uid)) return familyMember.uid;
+
+    return '';
+  }, [familyMembers, validUserId]);
+
+  const peerIdCandidates = useMemo(() => {
+    const ids = new Set<string>();
+    if (validUserId && UID_REGEX.test(validUserId)) ids.add(validUserId);
+    if (resolvedRecipientId) ids.add(resolvedRecipientId);
+    ids.delete('');
+    return ids;
+  }, [resolvedRecipientId, validUserId]);
+
+  const activeRecipientId = useMemo(() => {
+    const candidate = (resolvedRecipientId || validUserId || '').trim();
+    if (!candidate || candidate === 'broadcast') return '';
+    if (!UID_REGEX.test(candidate)) {
+      logger.warn(`⚠️ activeRecipientId: "${candidate}" is not a valid UID`);
+      return '';
+    }
+    return candidate;
+  }, [resolvedRecipientId, validUserId]);
+
+  const blockedAliasSet = useMemo(() => {
+    const aliasSet = new Set<string>();
+    if (!Array.isArray(blockedUsers) || blockedUsers.length === 0) {
+      return aliasSet;
+    }
+    blockedUsers.forEach((blockedId) => {
+      const normalized = normalizeIdentityValue(blockedId);
+      if (normalized) aliasSet.add(normalized);
+    });
+    return aliasSet;
+  }, [blockedUsers]);
+
+  const isBlockedIdentity = useCallback((value?: string | null): boolean => {
+    const normalized = normalizeIdentityValue(value);
+    if (!normalized || blockedAliasSet.size === 0) return false;
+    return blockedAliasSet.has(normalized);
+  }, [blockedAliasSet]);
+
+  const storeMessages = useMemo(() => {
+    if (peerIdCandidates.size === 0) return [];
+
+    return allStoreMessages.filter((msg) => {
+      if (isBlockedIdentity(msg.from) || isBlockedIdentity(msg.to)) {
+        return false;
+      }
+      if (isSystemPayloadMessage({
+        type: (msg.type || 'CHAT') as MeshMessage['type'],
+        content: msg.content || '',
+      })) {
+        return false;
+      }
+      if (selfIds.has(msg.from)) {
+        return peerIdCandidates.has(msg.to);
+      }
+      return peerIdCandidates.has(msg.from);
+    });
+  }, [allStoreMessages, isBlockedIdentity, peerIdCandidates, selfIds]);
+
+  // ELITE V2: Merge both sources — MeshStore provides rich media, messageStore provides cloud messages
   const messages = useMemo(() => {
-    if (!userId) return [];
+    if (!validUserId) return [];
 
-    return allMessages
-      .filter((msg) => {
-        const fromMe = selfIds.has(msg.senderId);
-        const toPeer = msg.to === userId;
-        if (fromMe && toPeer) {
-          return true;
+    // 1. Get mesh messages for this conversation
+    const meshFiltered = meshMessages.filter((msg) => {
+      if (isSystemPayloadMessage(msg)) {
+        return false;
+      }
+      if (isBlockedIdentity(msg.senderId) || isBlockedIdentity(msg.to)) {
+        return false;
+      }
+      const fromMe = selfIds.has(msg.senderId);
+      const toPeer = !!msg.to && peerIdCandidates.has(msg.to);
+      if (fromMe && toPeer) return true;
+      const fromPeer = peerIdCandidates.has(msg.senderId);
+      const toMe = !!msg.to && selfIds.has(msg.to);
+      return fromPeer && toMe;
+    });
+
+    // 2. Build map from meshMessages (keyed by ID)
+    const mergedMap = new Map<string, MeshMessage>();
+    for (const msg of meshFiltered) {
+      mergedMap.set(msg.id, msg);
+    }
+
+    // 3. Merge messageStore messages (Firebase cloud) — fill in any missing ones
+    // and update delivery status from messageStore (authoritative source)
+    for (const storeMsg of storeMessages) {
+      const existing = mergedMap.get(storeMsg.id);
+      if (existing) {
+        // Update delivery status and merge media fields from messageStore (authoritative)
+        const updates: Partial<MeshMessage> = {};
+        if (storeMsg.status && storeMsg.status !== existing.status) {
+          updates.status = storeMsg.status;
         }
+        // FIX: Merge media fields from messageStore if MeshStore version is missing them
+        if (storeMsg.mediaUrl && !existing.mediaUrl) updates.mediaUrl = storeMsg.mediaUrl;
+        if (storeMsg.mediaType && !existing.mediaType) updates.mediaType = storeMsg.mediaType;
+        if (typeof storeMsg.mediaDuration === 'number' && !existing.mediaDuration) updates.mediaDuration = storeMsg.mediaDuration;
+        if (storeMsg.mediaThumbnail && !existing.mediaThumbnail) updates.mediaThumbnail = storeMsg.mediaThumbnail;
+        if (storeMsg.location && !existing.location) updates.location = storeMsg.location;
+        if (Object.keys(updates).length > 0) {
+          mergedMap.set(storeMsg.id, { ...existing, ...updates });
+        }
+      } else {
+        // Message exists only in messageStore (came from Firebase) — adapt to MeshMessage shape
+        mergedMap.set(storeMsg.id, {
+          id: storeMsg.id,
+          localId: storeMsg.localId,
+          senderId: selfIds.has(storeMsg.from)
+            ? (identityService.getUid() || 'ME')
+            : storeMsg.from,
+          senderName: storeMsg.fromName,
+          to: storeMsg.to,
+          type: (storeMsg.type || 'CHAT') as MeshMessage['type'],
+          content: storeMsg.content,
+          timestamp: storeMsg.timestamp,
+          ttl: 0,
+          priority: (storeMsg.priority || 'normal') as MeshMessage['priority'],
+          status: storeMsg.status || (storeMsg.delivered ? 'delivered' : storeMsg.read ? 'read' : 'sent'),
+          acks: [],
+          retryCount: storeMsg.retryCount || 0,
+          hops: 0,
+          replyTo: storeMsg.replyTo,
+          replyPreview: storeMsg.replyPreview,
+          // CRITICAL FIX: Propagate media fields from messageStore
+          // Without these, media messages from the cloud path display as text-only
+          ...(storeMsg.mediaUrl ? { mediaUrl: storeMsg.mediaUrl } : {}),
+          ...(storeMsg.mediaType ? { mediaType: storeMsg.mediaType } : {}),
+          ...(typeof storeMsg.mediaDuration === 'number' ? { mediaDuration: storeMsg.mediaDuration } : {}),
+          ...(storeMsg.mediaThumbnail ? { mediaThumbnail: storeMsg.mediaThumbnail } : {}),
+          ...(storeMsg.location ? { location: storeMsg.location } : {}),
+        });
+      }
+    }
 
-        const fromPeer = msg.senderId === userId;
-        const toMe = !!msg.to && selfIds.has(msg.to);
-        return fromPeer && toMe;
+    // Final safety net: catch any system payloads that leaked through individual source filters
+    return Array.from(mergedMap.values())
+      .filter(m => {
+        // Check ALL message types — system payloads can arrive with any type
+        // due to normalization races or legacy data
+        if (isSystemPayloadMessage(m)) return false;
+        return true;
       })
       .sort((a, b) => a.timestamp - b.timestamp);
-  }, [allMessages, selfIds, userId]);
+  }, [isBlockedIdentity, meshMessages, storeMessages, selfIds, validUserId, physicalDeviceId, peerIdCandidates]);
+
+  const conversationTitle = useMemo(() => {
+    const explicitName = typeof userName === 'string' ? userName.trim() : '';
+    if (explicitName) return explicitName;
+
+    const contact = contactService.getContactByAnyId(validUserId);
+    const contactName = contact?.displayName || contact?.nickname || '';
+    if (contactName) return contactName;
+
+    const familyMatch = familyMembers.find((member) => member.uid === validUserId);
+    if (familyMatch?.name) return familyMatch.name;
+
+    const conversation = useMessageStore.getState().conversations.find((c) => c.userId === validUserId);
+    if (conversation?.userName?.trim()) return conversation.userName.trim();
+
+    const previewId = validUserId || userId || '';
+    return previewId ? `Kullanıcı ${previewId.slice(0, 4)}` : 'Kullanıcı';
+  }, [familyMembers, userId, userName, validUserId]);
 
   // Subscribe to connection state
   useEffect(() => {
@@ -256,6 +651,21 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         logger.warn('Failed to resolve physical device ID in ConversationScreen:', error);
       });
   }, []);
+
+  // ELITE V2: Auto-mark as read when conversation opens (WhatsApp pattern)
+  // Sends read receipts to Firebase so sender sees blue ticks (✓✓🔵)
+  useEffect(() => {
+    if (peerIdCandidates.size === 0) return;
+    // Mark unread messages for all known aliases of this peer identity
+    peerIdCandidates.forEach((peerId) => {
+      useMessageStore.getState().markConversationRead(peerId);
+    });
+    // Also update MeshStore message statuses for visual consistency
+    // Without this, merged messages from MeshStore show stale delivery status
+    meshMessages
+      .filter(m => peerIdCandidates.has(m.senderId) && m.status !== 'read')
+      .forEach(m => updateMeshMessage(m.id, { status: 'read' }));
+  }, [messages.length, peerIdCandidates, meshMessages, updateMeshMessage]); // Re-trigger when new messages arrive
 
   // Keep hybrid inbox bridge active while conversation is open (cloud + mesh)
   useEffect(() => {
@@ -288,6 +698,93 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     };
   }, []);
 
+  // CRITICAL FIX: Direct V3 conversation subscription for this specific peer.
+  // HybridMessageService inbox subscription only fires AFTER a thread appears in the inbox.
+  // For new conversations (first message), there's a gap where no subscription is active.
+  // This effect proactively finds/creates the DM conversation and subscribes directly.
+  useEffect(() => {
+    if (!activeRecipientId) return;
+    let unsubConversation: (() => void) | null = null;
+    let disposed = false;
+
+    const setupDirectConversationSubscription = async () => {
+      try {
+        const uid = identityService.getUid();
+        if (!uid || disposed) return;
+
+        const { firebaseDataService } = await import('../../services/FirebaseDataService');
+        try { await firebaseDataService.initialize(); } catch { /* best effort */ }
+        if (disposed) return;
+
+        // Resolve peer UID for V3 conversation lookup
+        const peerUid = await firebaseDataService.resolveRecipientUid(activeRecipientId);
+        if (!peerUid || disposed) return;
+
+        // Find existing DM conversation (don't create one just by opening the screen)
+        const { findOrCreateDMConversation } = await import('../../services/firebase/FirebaseMessageOperations');
+        const conversation = await findOrCreateDMConversation(uid, peerUid);
+        if (!conversation?.id || disposed) return;
+
+        logger.info(`Direct V3 subscription for conversation ${conversation.id}`);
+        const unsub = await firebaseDataService.subscribeToConversationMessages(
+          conversation.id,
+          (msgs: any[]) => {
+            if (disposed) return;
+            // Messages are pushed to stores by HybridMessageService's processCloudMessage.
+            // But if HybridMessageService didn't subscribe to this conversation yet,
+            // we need to push them to messageStore ourselves.
+            const { useMessageStore: getMessageStore } = require('../../stores/messageStore');
+            const selfIds = new Set<string>();
+            const myUid = identityService.getUid();
+            if (myUid) selfIds.add(myUid);
+
+            msgs.forEach((msg: any) => {
+              if (!msg?.id) return;
+              const senderUid = typeof msg.senderUid === 'string' ? msg.senderUid.trim() : '';
+              if (senderUid && selfIds.has(senderUid)) return; // Skip own messages
+
+              // Check if message already exists in store
+              const existing = getMessageStore.getState().messages.find((m: any) => m.id === msg.id);
+              if (existing) return;
+
+              const fromId = senderUid || msg.fromDeviceId || 'unknown';
+              getMessageStore.getState().addMessage({
+                id: msg.id,
+                from: fromId,
+                fromName: msg.senderName || msg.metadata?.senderName || '',
+                to: myUid || 'me',
+                content: msg.content || '',
+                timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : Date.now(),
+                delivered: true,
+                read: false,
+                type: msg.type || 'CHAT',
+                ...(msg.mediaUrl ? { mediaUrl: msg.mediaUrl } : {}),
+                ...(msg.mediaType || msg.metadata?.mediaType ? { mediaType: msg.mediaType || msg.metadata?.mediaType } : {}),
+                ...(msg.location ? { location: msg.location } : {}),
+              });
+            });
+          },
+        );
+        if (unsub && !disposed) {
+          unsubConversation = unsub;
+        }
+      } catch (error) {
+        logger.warn('Direct conversation subscription failed:', error);
+      }
+    };
+
+    setupDirectConversationSubscription().catch((error) => {
+      logger.warn('Direct conversation subscription setup error:', error);
+    });
+
+    return () => {
+      disposed = true;
+      if (unsubConversation) {
+        unsubConversation();
+      }
+    };
+  }, [activeRecipientId]);
+
   // ELITE: Cleanup voice recording interval on unmount
   useEffect(() => {
     return () => {
@@ -295,19 +792,50 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         clearInterval(voiceRecordingIntervalRef.current);
         voiceRecordingIntervalRef.current = null;
       }
+      voiceMessageService.cancelRecording().catch(() => { /* no-op */ });
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    // iOS interactive dismiss may skip "will" callbacks on some builds.
+    const showDidSub = Platform.OS === 'ios'
+      ? Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true))
+      : null;
+    const hideDidSub = Platform.OS === 'ios'
+      ? Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))
+      : null;
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+      showDidSub?.remove();
+      hideDidSub?.remove();
     };
   }, []);
 
   // Subscribe to typing indicators
   useEffect(() => {
     const unsubscribe = hybridMessageService.onTyping((typingUserId, _userName, typing) => {
-      if (typingUserId === userId) {
+      if (peerIdCandidates.has(typingUserId)) {
         setIsTyping(typing);
       }
     });
 
     return () => unsubscribe();
-  }, [userId]);
+  }, [peerIdCandidates]);
 
   // Subscribe to new messages and auto-scroll
   useEffect(() => {
@@ -318,24 +846,51 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     }
   }, [messages.length]);
 
+  // DEFENSIVE: If userId is missing, prevent crash (AFTER all hooks)
+  if (!userId || typeof userId !== 'string') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' }}>
+        <Text style={{ fontSize: 16, color: '#64748b', marginBottom: 16 }}>Konuşma bulunamadı</Text>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{ paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#3b82f6', borderRadius: 12 }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '600' }}>Geri Dön</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   // Handle text change with typing indicator
   const handleTextChange = useCallback((newText: string) => {
     setText(newText);
 
     // Broadcast typing indicator
     if (newText.length > 0) {
-      hybridMessageService.broadcastTyping(userId);
+      const typingConversationId = activeRecipientId || userId;
+      if (typingConversationId) {
+        hybridMessageService.broadcastTyping(typingConversationId);
+      }
     }
 
     // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
-  }, [userId]);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+    }, 1200);
+  }, [activeRecipientId, userId]);
 
   // Send message using HybridMessageService
   const sendMessage = useCallback(async () => {
     if (!text.trim()) return;
+    if (!activeRecipientId) {
+      // PRODUCTION LOG: Critical diagnostics for send failure
+      logger.error(`🚫 sendMessage BLOCKED: no activeRecipientId. userId="${userId}", validUserId="${validUserId}", resolvedRecipientId="${resolvedRecipientId}"`);
+      Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
+      return;
+    }
 
     // Validate message
     const validation = validateMessage(text);
@@ -346,17 +901,29 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
     haptics.impactLight();
 
+    // PRODUCTION LOG: Trace every send attempt for delivery debugging
+    logger.info(`📤 sendMessage: to="${activeRecipientId}", text="${validation.sanitized.slice(0, 30)}...", myUid="${identityService.getUid()}"`);
+
     try {
-      await hybridMessageService.sendMessage(validation.sanitized, userId, {
+      const replyPayload = replyToMessage
+        ? {
+          replyTo: replyToMessage.id,
+          replyPreview: sanitizeForDisplay(replyToMessage.content).slice(0, 140),
+        }
+        : {};
+
+      await hybridMessageService.sendMessage(validation.sanitized, activeRecipientId, {
         priority: 'normal',
         type: 'CHAT',
+        ...replyPayload,
       });
       setText('');
+      setReplyToMessage(null);
     } catch (error) {
       logger.error('Send failed:', error);
       Alert.alert('Hata', 'Mesaj gönderilemedi. Lütfen tekrar deneyin.');
     }
-  }, [text, userId]);
+  }, [activeRecipientId, replyToMessage, text, userId, validUserId, resolvedRecipientId]);
 
   // Retry failed message
   const retryMessage = useCallback(async (messageId: string) => {
@@ -413,15 +980,53 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     setOptionsModalVisible(false);
   }, [updateMeshMessage]);
 
-  // ELITE: Handle forward message
+  // ELITE: Handle forward message — WhatsApp-style contact picker
   const handleForwardMessage = useCallback(async (messageId: string) => {
-    Alert.alert(
-      'Mesajı İlet',
-      'Bu mesaj türü için iletme özelliği şu anda kullanılamıyor.',
-      [{ text: 'Tamam', style: 'default' }]
-    );
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) {
+      setOptionsModalVisible(false);
+      return;
+    }
     setOptionsModalVisible(false);
-  }, []);
+
+    // Build forward targets from recent conversations
+    const conversations = useMessageStore.getState().conversations;
+    const targets = conversations
+      .filter(c => c.userId && !peerIdCandidates.has(c.userId))
+      .slice(0, 5);
+
+    if (targets.length === 0) {
+      Alert.alert('Bilgi', 'İletilecek kişi bulunamadı. Önce yeni bir sohbet başlatın.');
+      return;
+    }
+
+    const buttons = targets.map(conv => ({
+      text: conv.userName || `Kullanıcı ${conv.userId.slice(0, 6)}`,
+      onPress: async () => {
+        try {
+          const forwardContent = msg.mediaType
+            ? msg.content
+            : `↩️ İletilen mesaj:\n${msg.content}`;
+          await hybridMessageService.sendMessage(conv.userId, forwardContent, {
+            ...(msg.mediaType ? { mediaType: msg.mediaType } : {}),
+            ...(msg.mediaUrl ? { mediaUrl: msg.mediaUrl } : {}),
+            ...(typeof msg.mediaDuration === 'number' ? { mediaDuration: msg.mediaDuration } : {}),
+            ...(msg.mediaThumbnail ? { mediaThumbnail: msg.mediaThumbnail } : {}),
+            ...(msg.location ? { location: msg.location } : {}),
+          });
+          haptics.notificationSuccess();
+          Alert.alert('Başarılı', 'Mesaj iletildi.');
+        } catch {
+          Alert.alert('Hata', 'Mesaj iletilemedi.');
+        }
+      },
+    }));
+
+    Alert.alert('Mesajı İlet', 'Kime iletmek istiyorsunuz?', [
+      ...buttons,
+      { text: 'İptal', style: 'cancel' as const },
+    ]);
+  }, [messages, peerIdCandidates]);
 
   // ELITE: Handle reply to message
   const handleReplyToMessage = useCallback((messageId: string) => {
@@ -441,6 +1046,10 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const selectedMessageForModal: Message | null = useMemo(() => {
     if (!selectedMessage) return null;
     const isMe = selfIds.has(selectedMessage.senderId);
+    const selectedWithMeta = selectedMessage as MeshMessage & {
+      isEdited?: boolean;
+      isDeleted?: boolean;
+    };
     return {
       id: selectedMessage.id,
       from: isMe ? 'me' : selectedMessage.senderId,
@@ -450,8 +1059,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       delivered: selectedMessage.status === 'delivered' || selectedMessage.status === 'read',
       read: selectedMessage.status === 'read',
       status: selectedMessage.status,
-      isEdited: (selectedMessage as any).isEdited,
-      isDeleted: (selectedMessage as any).isDeleted,
+      isEdited: selectedWithMeta.isEdited,
+      isDeleted: selectedWithMeta.isDeleted,
     };
   }, [selectedMessage, selfIds, userId]);
 
@@ -482,7 +1091,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Camera error:', error);
       Alert.alert('Hata', 'Fotoğraf çekilemedi.');
     }
-  }, [userId]);
+  }, [activeRecipientId]);
 
   // Open gallery and select photo
   const handleGallerySelect = useCallback(async () => {
@@ -507,13 +1116,18 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Gallery error:', error);
       Alert.alert('Hata', 'Fotoğraf seçilemedi.');
     }
-  }, [userId]);
+  }, [activeRecipientId]);
 
   // Send image message
   const sendImageMessage = useCallback(async (imageUri: string) => {
+    if (!activeRecipientId) {
+      Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
+      return;
+    }
+
     haptics.impactMedium();
     try {
-      await hybridMessageService.sendMediaMessage('image', userId, {
+      await hybridMessageService.sendMediaMessage('image', activeRecipientId, {
         mediaLocalUri: imageUri,
         caption: '',
       });
@@ -522,11 +1136,14 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Send image error:', error);
       Alert.alert('Hata', 'Fotoğraf gönderilemedi.');
     }
-  }, [userId]);
+  }, [activeRecipientId]);
 
   // Start voice recording
   const handleVoiceRecordStart = useCallback(async () => {
     try {
+      if (isRecordingVoice) {
+        return;
+      }
       const success = await voiceMessageService.startRecording();
       if (success) {
         setIsRecordingVoice(true);
@@ -534,6 +1151,9 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         haptics.impactMedium();
 
         // Start duration timer
+        if (voiceRecordingIntervalRef.current) {
+          clearInterval(voiceRecordingIntervalRef.current);
+        }
         voiceRecordingIntervalRef.current = setInterval(() => {
           setVoiceRecordingDuration(prev => prev + 1);
         }, 1000);
@@ -542,7 +1162,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Voice recording error:', error);
       Alert.alert('Hata', 'Ses kaydı başlatılamadı.');
     }
-  }, []);
+  }, [isRecordingVoice]);
 
   // Stop and send voice recording
   const handleVoiceRecordSend = useCallback(async () => {
@@ -557,38 +1177,54 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       setVoiceRecordingDuration(0);
 
       if (voiceMessage) {
-        haptics.notificationSuccess();
+        if (!activeRecipientId) {
+          Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
+          return;
+        }
 
         // Send as media message
-        await hybridMessageService.sendMediaMessage('voice', userId, {
+        await hybridMessageService.sendMediaMessage('voice', activeRecipientId, {
           mediaLocalUri: voiceMessage.uri,
           mediaDuration: Math.floor(voiceMessage.durationMs / 1000),
         });
+        haptics.notificationSuccess();
 
         // Backup to Firebase
-        voiceMessageService.backupToFirebase(voiceMessage);
+        voiceMessageService.backupToFirebase(voiceMessage).catch((backupError) => {
+          logger.warn('Voice backup failed in direct conversation:', backupError);
+        });
       }
     } catch (error) {
       logger.error('Voice send error:', error);
       Alert.alert('Hata', 'Ses mesajı gönderilemedi.');
     }
-  }, [userId]);
+  }, [activeRecipientId]);
 
   // Cancel voice recording
   const handleVoiceRecordCancel = useCallback(async () => {
-    if (voiceRecordingIntervalRef.current) {
-      clearInterval(voiceRecordingIntervalRef.current);
-      voiceRecordingIntervalRef.current = null;
+    try {
+      if (voiceRecordingIntervalRef.current) {
+        clearInterval(voiceRecordingIntervalRef.current);
+        voiceRecordingIntervalRef.current = null;
+      }
+      await voiceMessageService.cancelRecording();
+      haptics.notificationWarning();
+    } catch (error) {
+      logger.warn('Voice cancel error in conversation:', error);
+      Alert.alert('Hata', 'Ses kaydı iptal edilirken bir hata oluştu.');
+    } finally {
+      setIsRecordingVoice(false);
+      setVoiceRecordingDuration(0);
     }
-
-    await voiceMessageService.cancelRecording();
-    setIsRecordingVoice(false);
-    setVoiceRecordingDuration(0);
-    haptics.notificationWarning();
   }, []);
 
   // Share current location
   const handleShareLocation = useCallback(async () => {
+    if (!activeRecipientId) {
+      Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
+      return;
+    }
+
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -597,9 +1233,26 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       }
 
       haptics.impactLight();
-      const location = await Location.getCurrentPositionAsync({
+      let timeoutId: NodeJS.Timeout | null = null;
+      const locationPromise = Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
+      const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), 12000);
+      });
+      const location = await Promise.race([locationPromise, timeoutPromise]);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (
+        !location?.coords ||
+        !Number.isFinite(location.coords.latitude) ||
+        !Number.isFinite(location.coords.longitude)
+      ) {
+        Alert.alert('Konum Alınamadı', 'Cihaz konumu zamanında alınamadı. Lütfen tekrar deneyin.');
+        return;
+      }
 
       // Get address if possible
       let address: string | undefined;
@@ -617,7 +1270,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         // Ignore geocode errors
       }
 
-      await hybridMessageService.sendMediaMessage('location', userId, {
+      await hybridMessageService.sendMediaMessage('location', activeRecipientId, {
         location: {
           lat: location.coords.latitude,
           lng: location.coords.longitude,
@@ -630,7 +1283,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Location share error:', error);
       Alert.alert('Hata', 'Konum paylaşılamadı.');
     }
-  }, [userId]);
+  }, [activeRecipientId]);
 
   return (
     <ImageBackground
@@ -652,7 +1305,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           </Pressable>
 
           <View style={styles.headerInfo}>
-            <Text style={styles.headerName}>Kullanıcı {userId?.slice(0, 4)}</Text>
+            <Text style={styles.headerName}>{conversationTitle}</Text>
             <View style={styles.statusBadge}>
               <NetworkBanner status={connectionState} />
             </View>
@@ -690,8 +1343,21 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                               text: 'Engelle',
                               style: 'destructive',
                               onPress: () => {
-                                useSettingsStore.getState().blockUser(userId);
-                                useMessageStore.getState().deleteConversation(userId);
+                                const settingsState = useSettingsStore.getState();
+                                const deleteTarget = activeRecipientId || userId;
+
+                                if (peerIdCandidates.size > 0) {
+                                  peerIdCandidates.forEach((aliasId) => settingsState.blockUser(aliasId));
+                                } else if (deleteTarget) {
+                                  settingsState.blockUser(deleteTarget);
+                                }
+
+                                if (!deleteTarget) {
+                                  Alert.alert('Hata', 'Bu kişi için geçerli kimlik bulunamadı.');
+                                  return;
+                                }
+
+                                useMessageStore.getState().deleteConversation(deleteTarget);
                                 navigation.goBack();
                                 haptics.notificationSuccess();
                               },
@@ -714,7 +1380,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
       >
         <FlatList
           ref={flatListRef}
@@ -758,6 +1424,10 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           maxToRenderPerBatch={10}
           windowSize={10}
           removeClippedSubviews={true}
+          viewabilityConfig={viewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubbles-outline" size={48} color="#94a3b8" />
@@ -769,7 +1439,14 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         />
 
         {/* Input Area */}
-        <BlurView intensity={50} tint="light" style={[styles.inputContainer, { paddingBottom: insets.bottom + 10 }]}>
+        <BlurView
+          intensity={50}
+          tint="light"
+          style={[
+            styles.inputContainer,
+            { paddingBottom: Platform.OS === 'ios' && keyboardVisible ? 8 : insets.bottom + 10 },
+          ]}
+        >
           {/* ELITE: Reply Preview Banner */}
           {replyToMessage && (
             <View style={styles.replyBanner}>
@@ -877,296 +1554,3 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     </ImageBackground >
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(51, 65, 85, 0.05)',
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    height: 60,
-  },
-  backBtn: {
-    padding: 8,
-  },
-  headerInfo: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  headerName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  callBtn: {
-    padding: 10,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    borderRadius: 20,
-  },
-
-  // Network Banner
-  networkBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    gap: 4,
-  },
-  networkText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // Bubbles
-  bubbleRow: {
-    marginBottom: 8,
-    width: '100%',
-    flexDirection: 'row',
-  },
-  rowMe: {
-    justifyContent: 'flex-end',
-  },
-  rowOther: {
-    justifyContent: 'flex-start',
-  },
-  bubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  bubbleMe: {
-    backgroundColor: '#dbeafe',
-    borderBottomRightRadius: 4,
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
-  },
-  bubbleOther: {
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  bubbleFailed: {
-    borderColor: '#fecaca',
-    backgroundColor: '#fef2f2',
-  },
-  noTailMe: {
-    borderBottomRightRadius: 20,
-  },
-  noTailOther: {
-    borderBottomLeftRadius: 20,
-  },
-  msgText: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  textMe: {
-    color: '#1e3a8a',
-  },
-  textOther: {
-    color: '#334155',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: 4,
-    gap: 4,
-  },
-  timeText: {
-    fontSize: 10,
-    opacity: 0.8,
-  },
-  timeMe: {
-    color: '#60a5fa',
-  },
-  timeOther: {
-    color: '#94a3b8',
-  },
-
-  // Typing Indicator
-  typingContainer: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-    paddingVertical: 8,
-  },
-  typingBubble: {
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  dotContainer: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#94a3b8',
-  },
-
-  // Empty State
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 100,
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#64748b',
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 13,
-    color: '#94a3b8',
-    marginTop: 4,
-  },
-
-  // Input
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(51, 65, 85, 0.05)',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-  },
-  attachBtn: {
-    padding: 10,
-  },
-  input: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginHorizontal: 8,
-    color: '#334155',
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 0,
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sendBtnDisabled: {
-    backgroundColor: '#94a3b8',
-    shadowOpacity: 0,
-  },
-  micBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // ELITE: Reply banner styles
-  replyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(100, 116, 139, 0.1)',
-    borderLeftWidth: 3,
-    borderLeftColor: '#64748b',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 8,
-  },
-  replyContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  replyLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  replyPreview: {
-    flex: 1,
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  replyClose: {
-    padding: 4,
-  },
-  // ELITE: Edit banner styles
-  editBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(14, 165, 233, 0.1)',
-    borderLeftWidth: 3,
-    borderLeftColor: '#0ea5e9',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 8,
-  },
-  editContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  editLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0ea5e9',
-  },
-  editClose: {
-    padding: 4,
-  },
-  // ELITE: Input row wrapper
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-});

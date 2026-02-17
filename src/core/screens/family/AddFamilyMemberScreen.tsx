@@ -9,7 +9,10 @@ import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
 import { colors, typography } from '../../theme';
 import { identityService } from '../../services/IdentityService';
+import { firebaseDataService } from '../../services/FirebaseDataService';
 import GlassButton from '../../components/buttons/GlassButton';
+import { getAuth } from 'firebase/auth';
+import { initializeFirebase } from '../../../lib/firebase';
 
 const logger = createLogger('AddFamilyMemberScreen');
 
@@ -25,7 +28,22 @@ const RELATIONSHIP_TYPES = [
   { id: 'diger', label: 'Diğer', icon: 'help-circle' as const },
 ];
 
-const isValidDeviceId = (id: string) => /^afn-[a-zA-Z0-9]{4,}$/i.test(id);
+const isValidAfnCode = (id: string) => /^afn-[a-zA-Z0-9]{4,}$/i.test(id);
+const isLikelyUid = (id: string) => /^[A-Za-z0-9]{20,40}$/.test(id);
+const isValidPublicCode = (id: string) => /^[A-Za-z0-9-]{4,64}$/.test(id);
+const isValidMemberIdentifier = (id: string) =>
+  isValidAfnCode(id) || isLikelyUid(id) || isValidPublicCode(id);
+const SELF_MEMBER_WARNING =
+  'Aynı Apple/Firebase hesabı ile kendi profilinizi aile üyesi olarak ekleyemezsiniz. ' +
+  'Aile testi için ikinci telefonda farklı bir hesap kullanın.';
+const normalizeId = (value?: string | null): string => {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '';
+  if (isValidAfnCode(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return trimmed;
+};
 
 interface AddFamilyMemberScreenProps {
   navigation: {
@@ -40,24 +58,83 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   const [scanned, setScanned] = useState(false);
   const [manualId, setManualId] = useState('');
   const [targetDeviceId, setTargetDeviceId] = useState(''); // Store actual device ID separate from ID
+  const [targetUid, setTargetUid] = useState(''); // Store canonical Firebase UID when available
   const [memberName, setMemberName] = useState('');
   const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [addMethod, setAddMethod] = useState<'qr' | 'manual'>('qr');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const scannerResetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const members = useFamilyStore((state) => state.members);
 
   // Initialize service
   useEffect(() => {
     identityService.initialize();
+
+    return () => {
+      if (scannerResetTimeoutRef.current) {
+        clearTimeout(scannerResetTimeoutRef.current);
+        scannerResetTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const scheduleScannerReset = useCallback((delayMs: number = 1200) => {
+    if (scannerResetTimeoutRef.current) {
+      clearTimeout(scannerResetTimeoutRef.current);
+    }
+    scannerResetTimeoutRef.current = setTimeout(() => {
+      setScanned(false);
+      scannerResetTimeoutRef.current = null;
+    }, delayMs);
   }, []);
 
   // ELITE: Check for duplicate IDs or Device IDs
   const checkDuplicate = useCallback((id: string): boolean => {
-    return members.some(m => m.id === id || m.deviceId === id);
+    const normalizedCandidate = normalizeId(id);
+    if (!normalizedCandidate) return false;
+
+    return members.some((member) => {
+      const aliases = [
+        normalizeId(member.uid),
+      ].filter((alias) => alias.length > 0);
+
+      return aliases.includes(normalizedCandidate);
+    });
   }, [members]);
+
+  const getSelfIdentityCandidates = useCallback((): Set<string> => {
+    const ids = new Set<string>();
+    const add = (value?: string | null) => {
+      const normalized = normalizeId(value);
+      if (!normalized || normalized === 'unknown') return;
+      ids.add(normalized);
+    };
+
+    add(identityService.getUid());
+
+    const identity = identityService.getIdentity();
+    add(identity?.uid);
+
+    try {
+      const app = initializeFirebase();
+      if (app) {
+        add(getAuth(app).currentUser?.uid || '');
+      }
+    } catch {
+      // best effort
+    }
+
+    return ids;
+  }, []);
+
+  const isSelfIdentifier = useCallback((id: string): boolean => {
+    const normalized = normalizeId(id);
+    if (!normalized) return false;
+    return getSelfIdentityCandidates().has(normalized);
+  }, [getSelfIdentityCandidates]);
 
   // ELITE: Validate phone number format (optional)
   const validatePhoneNumber = useCallback((phone: string): boolean => {
@@ -68,37 +145,104 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   }, []);
 
   // ELITE: Memoized callback with comprehensive error handling
-  const handleBarCodeScanned = useCallback(({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = useCallback(async ({ type, data }: { type: string; data: string }) => {
     try {
       if (scanned || isSubmitting) return;
 
-      const parsedData = identityService.parseQRPayload(data);
+      const rawData = (data || '').trim();
+      const normalizedRawData = normalizeId(rawData);
+      let parsedData = await identityService.parseQRPayload(rawData);
+
+      // Fallback 1: some scanners return URI-encoded payloads
+      if (!parsedData) {
+        try {
+          const decoded = decodeURIComponent(rawData);
+          if (decoded !== rawData) {
+            parsedData = await identityService.parseQRPayload(decoded);
+          }
+        } catch {
+          // decode fallback is best effort
+        }
+      }
+
+      // Fallback 2: accept plain ID/UID/public code QR values
+      if (!parsedData && isValidMemberIdentifier(normalizedRawData)) {
+        parsedData = {
+          v: 0,
+          uid: isLikelyUid(normalizedRawData) ? normalizedRawData : '',
+          name: 'Bilinmeyen Kullanıcı',
+        };
+      }
+
+      // Fallback 3: best-effort raw JSON payload parsing (legacy/debug QR dumps)
+      if (!parsedData && rawData.startsWith('{') && rawData.endsWith('}')) {
+        try {
+          const rawPayload = JSON.parse(rawData) as Record<string, unknown>;
+          const uidCandidate = normalizeId(
+            (typeof rawPayload.uid === 'string' ? rawPayload.uid : '') ||
+            (typeof rawPayload.cloudUid === 'string' ? rawPayload.cloudUid : '') ||
+            (typeof rawPayload.userUid === 'string' ? rawPayload.userUid : '') ||
+            (typeof rawPayload.id === 'string' ? rawPayload.id : '') ||
+            (typeof rawPayload.code === 'string' ? rawPayload.code : ''),
+          );
+          if (uidCandidate) {
+            parsedData = {
+              v: 0,
+              uid: uidCandidate,
+              name: typeof rawPayload.name === 'string' ? rawPayload.name : 'Bilinmeyen Kullanıcı',
+            };
+          }
+        } catch {
+          // best effort JSON fallback
+        }
+      }
 
       if (!parsedData) {
         logger.warn('Invalid QR code data:', data);
         Alert.alert('Hata', 'Geçersiz AfetNet QR Kodu.');
-        // Don't set scanned=true so user can try again immediately? 
-        // Better to wait a bit
         setScanned(true);
-        setTimeout(() => setScanned(false), 2000);
+        scheduleScannerReset(2000);
         return;
       }
 
       setScanned(true);
       haptics.notificationSuccess();
 
-      const { id, did, name } = parsedData;
+      const { name } = parsedData;
+      const memberCode = normalizeId(parsedData.uid || normalizedRawData);
+      const parsedUid = normalizeId(parsedData.uid);
+      const memberUid = parsedUid || (memberCode && isLikelyUid(memberCode) ? memberCode : '');
+      const memberDeviceId = memberCode || '';
+
+      if (!memberCode) {
+        Alert.alert('Hata', 'QR kodunda geçerli kullanıcı bilgisi bulunamadı.');
+        scheduleScannerReset(400);
+        return;
+      }
+
+      const isSelfScan = [memberCode, memberUid, memberDeviceId]
+        .some((candidate) => !!candidate && isSelfIdentifier(candidate));
+      if (isSelfScan) {
+        Alert.alert('Aynı Hesap Tespit Edildi', SELF_MEMBER_WARNING);
+        scheduleScannerReset(800);
+        return;
+      }
 
       // ELITE: Check for duplicates
-      if (checkDuplicate(id) || (did && checkDuplicate(did))) {
+      if (
+        checkDuplicate(memberCode) ||
+        (memberUid && checkDuplicate(memberUid)) ||
+        (memberDeviceId && checkDuplicate(memberDeviceId))
+      ) {
         Alert.alert('Üye Zaten Mevcut', 'Bu kişi zaten listenizde bulunuyor.');
+        scheduleScannerReset(1000);
         return; // Stay on screen
       }
 
       // Auto-fill data from QR
-      setManualId(id);
-      if (did) setTargetDeviceId(did);
-      else setTargetDeviceId(id); // Fallback
+      setManualId(memberCode);
+      setTargetUid(memberUid);
+      setTargetDeviceId(memberDeviceId);
 
       if (name && name !== 'Unknown User') {
         setMemberName(name);
@@ -107,14 +251,14 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       setAddMethod('manual'); // Switch to confirm details
       haptics.impactMedium();
 
-      Alert.alert('Kişi Bulundu', `"${name || id}" bulundu. Lütfen bilgileri onaylayın.`);
+      Alert.alert('Kişi Bulundu', `"${name || memberCode}" bulundu. Lütfen bilgileri onaylayın.`);
 
     } catch (error) {
       logger.error('Error in handleBarCodeScanned:', error);
       Alert.alert('Hata', 'QR kod işlenirken bir hata oluştu.');
-      setScanned(false);
+      scheduleScannerReset(600);
     }
-  }, [scanned, isSubmitting, checkDuplicate]);
+  }, [scanned, isSubmitting, checkDuplicate, isSelfIdentifier, scheduleScannerReset]);
 
   // ELITE: Handle relationship type selection
   const handleRelationshipSelect = useCallback((relationshipId: string) => {
@@ -134,14 +278,25 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   // ELITE: Handle manual ID validation
   const handleManualIdChange = useCallback((text: string) => {
     // Elite Security: Sanitize input - only allow alphanumeric and dash
-    const sanitized = text.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 30);
-    setManualId(sanitized);
+    const sanitized = text.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 64);
+    const normalizedId = normalizeId(sanitized);
+    setManualId(normalizedId);
+    if (!normalizedId) {
+      setTargetUid('');
+      setTargetDeviceId('');
+    } else if (isLikelyUid(normalizedId)) {
+      setTargetUid(normalizedId);
+      setTargetDeviceId('');
+    } else {
+      setTargetUid('');
+      setTargetDeviceId(normalizedId);
+    }
 
     // Auto-check for duplicates as user types
-    if (sanitized.length > 0 && isValidDeviceId(sanitized)) {
-      if (checkDuplicate(sanitized)) {
+    if (normalizedId.length > 0 && isValidMemberIdentifier(normalizedId)) {
+      if (checkDuplicate(normalizedId)) {
         // Show warning but don't block - user can still proceed
-        logger.warn('Duplicate device ID detected:', sanitized);
+        logger.warn('Duplicate device ID detected:', normalizedId);
       }
     }
   }, [checkDuplicate]);
@@ -149,17 +304,31 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
   // ELITE: Comprehensive validation before adding member
   const validateMemberData = useCallback((): { valid: boolean; error?: string } => {
     // Validate device ID
-    if (!manualId || manualId.trim().length === 0) {
+    const normalizedManualId = normalizeId(manualId);
+    const normalizedTargetUid = normalizeId(targetUid);
+    const normalizedTargetDeviceId = normalizeId(targetDeviceId);
+
+    if (!normalizedManualId) {
       return { valid: false, error: 'Lütfen geçerli bir üye ID girin veya QR kod tarayın.' };
     }
 
-    if (!isValidDeviceId(manualId.trim())) {
-      return { valid: false, error: 'Geçersiz ID formatı. ID "AFN-" ile başlamalı ve geçerli formatta olmalıdır.' };
+    if (!isValidMemberIdentifier(normalizedManualId)) {
+      return { valid: false, error: 'Geçersiz ID formatı. AFN kodu, kullanıcı kodu veya UID girin.' };
     }
 
     // Check for duplicates
-    if (checkDuplicate(manualId.trim())) {
+    if (checkDuplicate(normalizedManualId)) {
       return { valid: false, error: 'Bu ID\'ye sahip bir üye zaten listenizde bulunuyor.' };
+    }
+    if (normalizedTargetUid && checkDuplicate(normalizedTargetUid)) {
+      return { valid: false, error: 'Bu kullanıcı zaten aile listenizde bulunuyor.' };
+    }
+    if (
+      isSelfIdentifier(normalizedManualId) ||
+      (normalizedTargetUid && isSelfIdentifier(normalizedTargetUid)) ||
+      (normalizedTargetDeviceId && isSelfIdentifier(normalizedTargetDeviceId))
+    ) {
+      return { valid: false, error: SELF_MEMBER_WARNING };
     }
 
     // Validate name
@@ -188,7 +357,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     }
 
     return { valid: true };
-  }, [manualId, memberName, phoneNumber, notes, checkDuplicate, validatePhoneNumber]);
+  }, [manualId, memberName, phoneNumber, notes, checkDuplicate, targetUid, targetDeviceId, validatePhoneNumber, isSelfIdentifier]);
 
   // ELITE: Handle member addition with comprehensive error handling
   const handleAddMember = useCallback(async () => {
@@ -207,25 +376,63 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       haptics.impactMedium();
 
       // ELITE: Prepare member data
-      const idToSave = manualId.trim();
-      // Use targetDeviceId if available (from QR), otherwise fallback to manual ID as device ID
-      const deviceIdToSave = targetDeviceId || idToSave;
+      const idToSave = normalizeId(manualId);
+      const normalizedTargetUid = normalizeId(targetUid);
+      let uidToSave = normalizedTargetUid || (isLikelyUid(idToSave) ? idToSave : undefined);
+
+      // Canonicalize AFN/public-code inputs to real Firebase UID when possible.
+      if (!uidToSave && idToSave) {
+        try {
+          await firebaseDataService.initialize();
+          const resolvedUid = await firebaseDataService.resolveRecipientUid(idToSave);
+          if (resolvedUid && isLikelyUid(resolvedUid)) {
+            uidToSave = resolvedUid;
+            setTargetUid(resolvedUid);
+          }
+        } catch (resolveError) {
+          logger.debug('Family member UID could not be resolved from manual identifier', resolveError);
+        }
+      }
+      // Keep UID and mesh device ID separated to avoid invalid devices/{uid} routing.
+      const resolvedDeviceId = (() => {
+        const normalizedTargetDeviceId = normalizeId(targetDeviceId);
+        if (normalizedTargetDeviceId && !isLikelyUid(normalizedTargetDeviceId)) {
+          return normalizedTargetDeviceId;
+        }
+        if (!isLikelyUid(idToSave)) {
+          return idToSave;
+        }
+        return undefined;
+      })();
 
       const trimmedName = memberName.trim();
       const trimmedPhone = phoneNumber.trim();
       const trimmedNotes = notes.trim();
 
+      // Require a canonical Firebase UID so membership can sync to all devices/accounts.
+      // Without UID, member remains local-only and messaging/group features break across devices.
+      if (!uidToSave || !isLikelyUid(uidToSave)) {
+        Alert.alert(
+          'Kullanıcı Kimliği Doğrulanamadı',
+          'Bu kişi için Firebase UID çözümlenemedi. Lütfen kişinin güncel AfetNet QR kodunu tekrar tarayın.',
+        );
+        haptics.notificationError();
+        setIsSubmitting(false);
+        return;
+      }
+
       // ELITE: Add member with comprehensive data
       // Do NOT seed new member location with inviter's GPS. Member will publish own location.
       await useFamilyStore.getState().addMember({
-        id: idToSave, // Use Identity ID
+        uid: uidToSave,
         name: trimmedName,
         status: 'unknown',
-        lastSeen: Date.now(),
+        // New member has no confirmed activity yet; avoid false "just now" freshness.
+        lastSeen: 0,
         latitude: 0,
         longitude: 0,
         location: undefined,
-        deviceId: deviceIdToSave, // Use Physical ID for Mesh routing
+        ...(resolvedDeviceId ? { deviceId: resolvedDeviceId } : {}),
         relationship: selectedRelationship || undefined,
         phoneNumber: trimmedPhone || undefined,
         notes: trimmedNotes || undefined,
@@ -234,7 +441,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       });
 
       haptics.notificationSuccess();
-      logger.info('Family member added successfully:', { deviceId: deviceIdToSave, name: trimmedName });
+      logger.info('Family member added successfully:', { uid: uidToSave, deviceId: resolvedDeviceId, name: trimmedName });
 
       // ELITE: Show success message
       Alert.alert(
@@ -255,34 +462,29 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       haptics.notificationError();
       setIsSubmitting(false);
     }
-  }, [isSubmitting, manualId, memberName, phoneNumber, notes, validateMemberData, navigation]);
-
-  // ELITE: Handle manual add button
-  const handleManualAddClick = useCallback(() => {
-    if (!manualId || manualId.trim().length === 0) {
-      Alert.alert('Hata', 'Lütfen geçerli bir üye ID girin.');
-      return;
-    }
-
-    if (!isValidDeviceId(manualId.trim())) {
-      Alert.alert('Hata', 'Geçersiz ID formatı. ID "AFN-" ile başlamalı ve geçerli formatta olmalıdır.');
-      return;
-    }
-
-    if (checkDuplicate(manualId.trim())) {
-      Alert.alert('Üye Zaten Mevcut', 'Bu ID\'ye sahip bir üye zaten listenizde bulunuyor.');
-      return;
-    }
-
-    // Switch to manual mode for name entry
-    setAddMethod('manual');
-    haptics.impactMedium();
-  }, [manualId, checkDuplicate]);
+  }, [
+    isSubmitting,
+    manualId,
+    targetUid,
+    targetDeviceId,
+    memberName,
+    selectedRelationship,
+    phoneNumber,
+    notes,
+    validateMemberData,
+    navigation,
+  ]);
 
   // ELITE: Reset form
   const handleReset = useCallback(() => {
+    if (scannerResetTimeoutRef.current) {
+      clearTimeout(scannerResetTimeoutRef.current);
+      scannerResetTimeoutRef.current = null;
+    }
     setScanned(false);
     setManualId('');
+    setTargetUid('');
+    setTargetDeviceId('');
     setMemberName('');
     setSelectedRelationship(null);
     setPhoneNumber('');
@@ -330,6 +532,11 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
             <Pressable
               style={[styles.methodButton, addMethod === 'qr' && styles.methodButtonActive]}
               onPress={() => {
+                if (scannerResetTimeoutRef.current) {
+                  clearTimeout(scannerResetTimeoutRef.current);
+                  scannerResetTimeoutRef.current = null;
+                }
+                setScanned(false);
                 setAddMethod('qr');
                 haptics.impactLight();
               }}
@@ -413,21 +620,21 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Üye ID'si</Text>
               <Text style={styles.sectionSubtitle}>
-                Üyenin AfetNet ID'sini girin
+                Üyenin AFN kodunu, UID'sini veya kullanıcı kodunu girin
               </Text>
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
-                  placeholder="afn-xxxxxxxx"
+                  placeholder="AFN-XXXXXXXX veya UID"
                   placeholderTextColor="#94a3b8"
                   value={manualId}
                   onChangeText={handleManualIdChange}
-                  maxLength={30}
+                  maxLength={64}
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!isSubmitting}
                 />
-                {manualId.length > 0 && isValidDeviceId(manualId) && (
+                {manualId.length > 0 && isValidMemberIdentifier(manualId) && (
                   <View style={styles.validIndicator}>
                     <Ionicons name="checkmark-circle" size={20} color={colors.status.success} />
                   </View>

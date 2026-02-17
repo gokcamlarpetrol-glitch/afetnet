@@ -144,7 +144,7 @@ class SOSBeaconService {
         const store = useSOSStore.getState();
         const signal = store.currentSignal;
 
-        if (!signal || signal.status !== 'broadcasting') {
+        if (!signal || (signal.status !== 'broadcasting' && signal.status !== 'acknowledged')) {
             return;
         }
 

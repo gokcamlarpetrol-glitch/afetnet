@@ -8,6 +8,12 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { eliteStorage } from '../../utils/storage';
 
+// O(1) dedup lookup — hydrated from persisted seenMessageIds array
+const seenSet = new Set<string>();
+const MAX_MESSAGES = 500;
+const MAX_SEEN_IDS = 1000;
+const MAX_FAILED_QUEUE = 50;
+
 export interface MeshNode {
   id: string;
   name: string;
@@ -209,12 +215,25 @@ export const useMeshStore = create<MeshState>()(
       clearPeers: () => set({ peers: [] }),
 
       addMessage: (msg) => set((state) => {
-        // Check dup
-        if (state.seenMessageIds.includes(msg.id)) return state;
+        // O(1) dedup check
+        if (seenSet.has(msg.id)) return state;
+        seenSet.add(msg.id);
 
-        const newSeen = [...state.seenMessageIds, msg.id].slice(-1000); // Keep last 1000 IDs
+        // Trim seenSet if over capacity
+        const newSeen = [...state.seenMessageIds, msg.id];
+        if (newSeen.length > MAX_SEEN_IDS) {
+          const removed = newSeen.splice(0, newSeen.length - MAX_SEEN_IDS);
+          removed.forEach(id => seenSet.delete(id));
+        }
+
+        // Cap messages to prevent unbounded growth
+        const newMessages = [...state.messages, msg];
+        if (newMessages.length > MAX_MESSAGES) {
+          newMessages.splice(0, newMessages.length - MAX_MESSAGES);
+        }
+
         return {
-          messages: [...state.messages, msg],
+          messages: newMessages,
           seenMessageIds: newSeen,
           stats: { ...state.stats, totalMessages: state.stats.totalMessages + 1 },
         };
@@ -306,13 +325,18 @@ export const useMeshStore = create<MeshState>()(
         };
       }),
 
-      // ELITE: Move to failed queue
+      // ELITE: Move to failed queue (capped)
       moveToFailed: (msgId) => set((state) => {
         const msg = state.outgoingQueue.find(m => m.id === msgId);
         if (!msg) return state;
+        const newFailed = [...state.failedQueue, { ...msg, status: 'failed' as const }];
+        // Cap failed queue — drop oldest if over limit
+        if (newFailed.length > MAX_FAILED_QUEUE) {
+          newFailed.splice(0, newFailed.length - MAX_FAILED_QUEUE);
+        }
         return {
           outgoingQueue: state.outgoingQueue.filter(m => m.id !== msgId),
-          failedQueue: [...state.failedQueue, { ...msg, status: 'failed' as const }],
+          failedQueue: newFailed,
         };
       }),
 
@@ -320,12 +344,17 @@ export const useMeshStore = create<MeshState>()(
       setConnectionQuality: (quality) => set({ connectionQuality: quality }),
 
       recordSeenMessage: (msgId) => {
-        const state = get();
-        if (state.seenMessageIds.includes(msgId)) return false;
+        if (seenSet.has(msgId)) return false;
+        seenSet.add(msgId);
 
-        set(s => ({
-          seenMessageIds: [...s.seenMessageIds, msgId].slice(-1000),
-        }));
+        set(s => {
+          const newSeen = [...s.seenMessageIds, msgId];
+          if (newSeen.length > MAX_SEEN_IDS) {
+            const removed = newSeen.splice(0, newSeen.length - MAX_SEEN_IDS);
+            removed.forEach(id => seenSet.delete(id));
+          }
+          return { seenMessageIds: newSeen };
+        });
         return true;
       },
     }),
@@ -336,9 +365,19 @@ export const useMeshStore = create<MeshState>()(
         messages: state.messages,
         outgoingQueue: state.outgoingQueue,
         stats: state.stats,
-        // Do not persist peers for now to force fresh discovery, or persist if needed
         myDeviceId: state.myDeviceId,
+        seenMessageIds: state.seenMessageIds,
       }),
+      onRehydrateStorage: () => (state) => {
+        // Hydrate seenSet from persisted seenMessageIds (includes pruned message IDs)
+        if (state?.seenMessageIds) {
+          state.seenMessageIds.forEach(id => seenSet.add(id));
+        }
+        // Also add any message IDs not already in seenSet
+        if (state?.messages) {
+          state.messages.forEach(m => seenSet.add(m.id));
+        }
+      },
     },
   ),
 );

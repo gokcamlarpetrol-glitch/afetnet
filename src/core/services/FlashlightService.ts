@@ -14,6 +14,7 @@ interface TorchModule {
   default?: {
     switchState: (on: boolean) => Promise<void>;
   };
+  switchState?: (on: boolean) => Promise<void>;
 }
 
 interface CameraModuleExports {
@@ -142,11 +143,14 @@ class FlashlightService {
     }
 
     try {
-      // Try expo-torch first
-      if (this.torchModule?.default) {
-        await this.torchModule.default.switchState(true);
-        logger.info('✅ Flashlight ON (expo-torch)');
-        return;
+      // Try expo-torch first (supports both .default.switchState and direct .switchState)
+      if (this.torchModule) {
+        const switchFn = this.torchModule.default?.switchState || this.torchModule.switchState;
+        if (switchFn) {
+          await switchFn(true);
+          logger.info('✅ Flashlight ON (expo-torch)');
+          return;
+        }
       }
 
       // Try Camera API - use flash prop instead of setFlashModeAsync
@@ -179,11 +183,14 @@ class FlashlightService {
     }
 
     try {
-      // Try expo-torch first
-      if (this.torchModule?.default) {
-        await this.torchModule.default.switchState(false);
-        logger.info('✅ Flashlight OFF (expo-torch)');
-        return;
+      // Try expo-torch first (supports both .default.switchState and direct .switchState)
+      if (this.torchModule) {
+        const switchFn = this.torchModule.default?.switchState || this.torchModule.switchState;
+        if (switchFn) {
+          await switchFn(false);
+          logger.info('✅ Flashlight OFF (expo-torch)');
+          return;
+        }
       }
 
       // Try Camera API - flash is controlled via props
@@ -260,11 +267,12 @@ class FlashlightService {
     if (!this.isFlashing) return;
 
     try {
-      // Turn on flashlight
-      if (this.torchModule?.default) {
-        await this.torchModule.default.switchState(true);
+      // Turn on flashlight (supports both .default.switchState and direct .switchState)
+      const switchFn = this.torchModule?.default?.switchState || this.torchModule?.switchState;
+      if (switchFn) {
+        await switchFn(true);
         await this.wait(duration);
-        await this.torchModule.default.switchState(false);
+        await switchFn(false);
       } else if (this.cameraRef && this.hasPermission) {
         // Note: CameraView flash is controlled via props, not methods
         // Use screen flashlight as fallback for flashing

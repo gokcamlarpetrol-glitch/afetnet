@@ -237,7 +237,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   useEffect(() => {
     if (route.params?.focusOnMember && familyMembers.length > 0) {
       const memberId = route.params.focusOnMember;
-      const member = familyMembers.find(m => m.id === memberId);
+      const member = familyMembers.find(m => m.uid === memberId);
 
       if (member) {
         const lat = member.location?.latitude ?? member.latitude;
@@ -314,7 +314,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       return isValidLat && isValidLng && isNotNullIsland;
     }).map(member => ({
       ...member,
-      id: `fm-${member.id}`,
+      id: `fm-${member.uid}`,
       latitude: member.location?.latitude ?? member.latitude,
       longitude: member.location?.longitude ?? member.longitude,
     }));

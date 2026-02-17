@@ -56,6 +56,10 @@ export interface NewsSummaryJobClaimResult {
 
 /**
  * Save news summary to Firestore
+ * SECURITY NOTE: Client-side writes to news_summaries are now blocked by Firestore rules.
+ * Summaries must be created via Cloud Functions (openAIChatProxy → server-side write).
+ * This function will fail gracefully due to permission-denied error handling.
+ * @deprecated Use Cloud Functions for news summary creation
  */
 export async function saveNewsSummary(
   summary: NewsSummaryRecord,

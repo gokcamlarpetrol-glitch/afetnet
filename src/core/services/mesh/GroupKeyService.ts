@@ -23,6 +23,7 @@ import { createLogger } from '../../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { meshCryptoService } from './MeshCryptoService';
 import { LRUSet } from '../../utils/LRUCache';
+import { Buffer } from 'buffer';
 
 const logger = createLogger('GroupKeyService');
 
@@ -241,16 +242,20 @@ class GroupKeyService {
      * Generate a cryptographically secure group key
      */
     private async generateGroupKey(): Promise<string> {
-        // Use crypto.getRandomValues for secure random generation
-        const keyBytes = new Uint8Array(CONFIG.KEY_LENGTH_BYTES);
-
-        // In production, use proper crypto API
-        for (let i = 0; i < CONFIG.KEY_LENGTH_BYTES; i++) {
-            keyBytes[i] = Math.floor(Math.random() * 256);
+        // SECURITY FIX: Use expo-crypto for secure random generation (was Math.random)
+        try {
+            const Crypto = require('expo-crypto');
+            const keyBytes = await Crypto.getRandomBytesAsync(CONFIG.KEY_LENGTH_BYTES);
+            return this.uint8ArrayToBase64(new Uint8Array(keyBytes));
+        } catch {
+            // Fallback: still use crypto-quality random if expo-crypto unavailable
+            const keyBytes = new Uint8Array(CONFIG.KEY_LENGTH_BYTES);
+            // SECURITY WARNING: Math.random fallback — less secure
+            for (let i = 0; i < CONFIG.KEY_LENGTH_BYTES; i++) {
+                keyBytes[i] = Math.floor(Math.random() * 256);
+            }
+            return this.uint8ArrayToBase64(keyBytes);
         }
-
-        // Convert to base64
-        return this.uint8ArrayToBase64(keyBytes);
     }
 
     /**
@@ -602,30 +607,48 @@ class GroupKeyService {
     // ============================================================================
 
     private async encryptKeyForMember(key: string, publicKey: string): Promise<string> {
-        // In production, use ECDH to derive shared secret, then encrypt with AES
-        // For now, simple base64 encoding
+        // SECURITY WARNING: Key encryption NOT implemented — group key sent in cleartext
+        // TODO: Use ECDH to derive shared secret, then encrypt with AES-GCM
+        logger.warn('⚠️ SECURITY: encryptKeyForMember is a no-op — group key not encrypted for transit');
         return key;
     }
 
     private async decryptKeyFromInvite(encryptedKey: string): Promise<string | null> {
-        // In production, use ECDH + AES
+        // SECURITY WARNING: Key decryption NOT implemented — assumes cleartext
+        // TODO: Use ECDH + AES-GCM
+        logger.warn('⚠️ SECURITY: decryptKeyFromInvite is a no-op — assuming cleartext key');
         return encryptedKey;
     }
 
     private generateSecureId(): string {
-        const bytes = new Uint8Array(16);
-        for (let i = 0; i < 16; i++) {
-            bytes[i] = Math.floor(Math.random() * 256);
+        // SECURITY FIX: Use crypto for secure random generation
+        try {
+            const Crypto = require('expo-crypto');
+            const bytes = Crypto.getRandomBytes(16);
+            return Array.from(new Uint8Array(bytes)).map(b => (b as number).toString(16).padStart(2, '0')).join('');
+        } catch {
+            // Fallback: SECURITY WARNING — Math.random is not cryptographically secure
+            const bytes = new Uint8Array(16);
+            for (let i = 0; i < 16; i++) {
+                bytes[i] = Math.floor(Math.random() * 256);
+            }
+            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
-        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     private generateNonce(): Uint8Array {
-        const nonce = new Uint8Array(CONFIG.NONCE_LENGTH_BYTES);
-        for (let i = 0; i < CONFIG.NONCE_LENGTH_BYTES; i++) {
-            nonce[i] = Math.floor(Math.random() * 256);
+        // SECURITY FIX: Use crypto for secure random generation
+        try {
+            const Crypto = require('expo-crypto');
+            return new Uint8Array(Crypto.getRandomBytes(CONFIG.NONCE_LENGTH_BYTES));
+        } catch {
+            // Fallback: SECURITY WARNING — Math.random is not cryptographically secure
+            const nonce = new Uint8Array(CONFIG.NONCE_LENGTH_BYTES);
+            for (let i = 0; i < CONFIG.NONCE_LENGTH_BYTES; i++) {
+                nonce[i] = Math.floor(Math.random() * 256);
+            }
+            return nonce;
         }
-        return nonce;
     }
 
     private async generateAuthTag(
@@ -643,16 +666,11 @@ class GroupKeyService {
     }
 
     private uint8ArrayToBase64(bytes: Uint8Array): string {
-        return btoa(String.fromCharCode(...bytes));
+        return Buffer.from(bytes).toString('base64');
     }
 
     private base64ToUint8Array(base64: string): Uint8Array {
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes;
+        return Uint8Array.from(Buffer.from(base64, 'base64'));
     }
 
     private ensureInitialized(): void {

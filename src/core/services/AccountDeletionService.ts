@@ -521,7 +521,8 @@ class AccountDeletionService {
       const db = await getFirestoreInstanceAsync();
       if (!db) return;
 
-      const sosRef = collection(db, 'sos');
+      // FIX: Use correct collection name (was 'sos', should be 'sos_signals')
+      const sosRef = collection(db, 'sos_signals');
       const q = query(sosRef, where('deviceId', '==', deviceId));
       const snapshot = await getDocs(q);
 

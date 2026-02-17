@@ -1,5 +1,23 @@
-import { BleManager, Device } from 'react-native-ble-plx';
-import BlePeripheral from 'react-native-ble-peripheral';
+// CRITICAL: Lazy-load BLE native modules with try-catch to prevent app crash
+// These modules require native code and will crash if unavailable
+let BleManagerClass: any = null;
+let BlePeripheralModule: any = null;
+let BleManagerAvailable = false;
+
+try {
+  const blePlx = require('react-native-ble-plx');
+  BleManagerClass = blePlx.BleManager;
+  BleManagerAvailable = true;
+} catch (e) {
+  // BLE PLX not available — graceful degradation
+}
+
+try {
+  BlePeripheralModule = require('react-native-ble-peripheral').default;
+} catch (e) {
+  // BLE Peripheral not available — graceful degradation
+}
+
 import { Platform, PermissionsAndroid } from 'react-native';
 import { AFETNET_SERVICE_UUID, MANUFACTURER_ID } from './constants';
 import { createLogger } from '../utils/logger';
@@ -15,7 +33,7 @@ export interface BlePeer {
 }
 
 class HighPerformanceBle {
-  private manager: BleManager;
+  private manager: any; // BleManager | null
   private isScanning = false;
   private isAdvertising = false;
   private hasLoggedAdvertiseUnavailable = false;
@@ -23,7 +41,17 @@ class HighPerformanceBle {
   private scanListeners: ((peer: BlePeer) => void)[] = [];
 
   constructor() {
-    this.manager = new BleManager();
+    try {
+      if (BleManagerAvailable && BleManagerClass) {
+        this.manager = new BleManagerClass();
+      } else {
+        logger.warn('BleManager not available — BLE features disabled');
+        this.manager = null;
+      }
+    } catch (error) {
+      logger.warn('BleManager initialization failed — BLE features disabled:', error);
+      this.manager = null;
+    }
   }
 
   /**
@@ -50,7 +78,7 @@ class HighPerformanceBle {
   async startAdvertising(payload: Uint8Array): Promise<void> {
     if (this.isAdvertising) return;
 
-    if (!BlePeripheral || typeof BlePeripheral.startAdvertising !== 'function') {
+    if (!BlePeripheralModule || typeof BlePeripheralModule.startAdvertising !== 'function') {
       if (!this.hasLoggedAdvertiseUnavailable) {
         logger.warn('BLE advertising unavailable: native peripheral module missing');
         this.hasLoggedAdvertiseUnavailable = true;
@@ -61,13 +89,13 @@ class HighPerformanceBle {
 
     try {
       // ELITE: Guard against null BlePeripheral (simulator/no BLE hardware)
-      if (typeof BlePeripheral.isAdvertising === 'function' && await BlePeripheral.isAdvertising()) {
-        await BlePeripheral.stopAdvertising();
+      if (typeof BlePeripheralModule.isAdvertising === 'function' && await BlePeripheralModule.isAdvertising()) {
+        await BlePeripheralModule.stopAdvertising();
       }
 
       const manufacturerData = Buffer.from(payload).toString('hex');
 
-      await BlePeripheral.startAdvertising({
+      await BlePeripheralModule.startAdvertising({
         name: 'AfetNet',
         serviceUuids: [AFETNET_SERVICE_UUID],
         manufacturerData: {
@@ -85,13 +113,13 @@ class HighPerformanceBle {
   }
 
   async stopAdvertising() {
-    if (!BlePeripheral || typeof BlePeripheral.stopAdvertising !== 'function') {
+    if (!BlePeripheralModule || typeof BlePeripheralModule.stopAdvertising !== 'function') {
       this.isAdvertising = false;
       return;
     }
 
     try {
-      await BlePeripheral.stopAdvertising();
+      await BlePeripheralModule.stopAdvertising();
       this.isAdvertising = false;
       logger.info('BLE Advertising Stopped');
     } catch (error) {
@@ -103,7 +131,7 @@ class HighPerformanceBle {
      * Start Scanning using BleManager (ble-plx)
      */
   async startScanning() {
-    if (this.isScanning) return;
+    if (this.isScanning || !this.manager) return;
 
     const state = await this.manager.state();
     if (state !== 'PoweredOn') {
@@ -128,12 +156,14 @@ class HighPerformanceBle {
   }
 
   stopScanning() {
-    this.manager.stopDeviceScan();
+    if (this.manager) {
+      this.manager.stopDeviceScan();
+    }
     this.isScanning = false;
     logger.info('BLE Scanning Stopped');
   }
 
-  private processDiscoveredDevice(device: Device) {
+  private processDiscoveredDevice(device: any) {
     // Extract manufacturer data if available. 
     // Note: ble-plx returns base64 manufacturer data in device.manufacturerData
 

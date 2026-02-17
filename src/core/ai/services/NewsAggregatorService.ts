@@ -119,6 +119,7 @@ const NEWS_SOURCES: NewsSource[] = [
 class NewsAggregatorService {
   private isInitialized = false;
   private summaryCache = new Map<string, { summary: string; timestamp: number }>();
+  private static readonly MAX_CACHE_SIZE = 500;
   private readonly SUMMARY_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 saat
   private readonly SUMMARY_CACHE_KEY_PREFIX = 'news-summary:';
   private readonly FALLBACK_SUMMARY_TTL = 2 * 60 * 60 * 1000; // 2 saat
@@ -137,6 +138,21 @@ class NewsAggregatorService {
   // Aynı haber için eş zamanlı isteklerde yalnızca BİR API çağrısı yapılır
   // Diğer istekler aynı Promise'i bekler - BÜYÜK MALİYET TASARRUFU
   private inFlightRequests = new Map<string, Promise<string>>();
+
+  /** Set a summary cache entry with LRU eviction when cache exceeds MAX_CACHE_SIZE */
+  private setCacheEntry(key: string, value: { summary: string; timestamp: number }): void {
+    // Delete first so re-insertion moves it to the end (Map preserves insertion order)
+    this.summaryCache.delete(key);
+    this.setCacheEntry(key, value);
+
+    // LRU eviction: remove oldest entries when cache exceeds limit
+    if (this.summaryCache.size > NewsAggregatorService.MAX_CACHE_SIZE) {
+      const firstKey = this.summaryCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.summaryCache.delete(firstKey);
+      }
+    }
+  }
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -751,7 +767,7 @@ class NewsAggregatorService {
     // Cache'e kaydet - ELITE FIX: Fallback özetleri cloud'a ASLA kaydetme
     // Sadece lokal cache'e kısa süreli (1dk) kaydet ki kullanıcı tekrar deneyebilsin
     const SHORT_TTL = 60 * 1000; // 1 dakika
-    this.summaryCache.set(cacheKey, { summary: fallback, timestamp: Date.now() });
+    this.setCacheEntry(cacheKey, { summary: fallback, timestamp: Date.now() });
 
     // Sadece lokal cache'e kısa süreli kaydet
     await this.persistSummaryLocally(cacheKey, fallback, SHORT_TTL);
@@ -1045,7 +1061,7 @@ class NewsAggregatorService {
           logger.info('🔄 Cached summary detected as fallback (Explicit: ' + isExplicitFallback + ', RSS: ' + isRSSFallback + ', Structured: ' + isStructuredFallback + '), regenerating with AI...');
           // Devam et ve yeni özet oluştur (return etme)
         } else {
-          this.summaryCache.set(cacheKey, { summary: cleanedPersisted, timestamp: now });
+          this.setCacheEntry(cacheKey, { summary: cleanedPersisted, timestamp: now });
           return cleanedPersisted;
         }
       }
@@ -1063,7 +1079,7 @@ class NewsAggregatorService {
             }
             const cleanedCloud = this.cleanHTML(cloudCheck.summary);
             if (cleanedCloud && cleanedCloud.trim().length > 0) {
-              this.summaryCache.set(cacheKey, { summary: cleanedCloud, timestamp: now });
+              this.setCacheEntry(cacheKey, { summary: cleanedCloud, timestamp: now });
               await this.persistSummaryLocally(cacheKey, cleanedCloud, this.SUMMARY_CACHE_TTL).catch((error) => {
                 logger.warn('Failed to persist cloud summary locally:', error);
               });
@@ -1106,7 +1122,7 @@ class NewsAggregatorService {
             if (claimResult.reason === 'summary_exists' || claimResult.reason === 'lock_held') {
               const waited = await this.waitForSharedSummary(articleId, claimResult.waitMs);
               if (waited && waited.trim().length > 0) {
-                this.summaryCache.set(cacheKey, { summary: waited, timestamp: Date.now() });
+                this.setCacheEntry(cacheKey, { summary: waited, timestamp: Date.now() });
                 await this.persistSummaryLocally(cacheKey, waited, this.SUMMARY_CACHE_TTL).catch(() => undefined);
                 return waited;
               }
@@ -1185,13 +1201,20 @@ class NewsAggregatorService {
       ? articleSummary.substring(0, maxSummaryLength) + '...'
       : (articleSummary || articleTitle);
 
-    const prompt = `Haberi Türkçe ve anlaşılır şekilde özetle.
-Kurallar:
-1) 4-6 cümle yaz.
-2) Yalnızca doğrulanabilir bilgi ver; tahmin ekleme.
-3) Deprem haberinde mutlaka büyüklük, konum, zaman, derinlik bilgilerini dahil et (varsa).
-4) Gereksiz tekrar, emoji ve süslü dil kullanma.
-5) "Özet" başlığı ekleme, sadece metni döndür.
+    const prompt = `Aşağıdaki haberi kapsamlı ve profesyonel şekilde Türkçe özetle.
+
+GÖREV:
+Haberin tamamını okuyan birinin anlayacağı düzeyde, detaylı ve bilgilendirici bir özet oluştur. Okuyucu bu özeti okuduktan sonra haberin orijinalini okumaya gerek duymamalı.
+
+YAPI VE KURALLAR:
+1) İlk paragrafta haberin özünü ver — ne oldu, nerede, ne zaman, hangi kurumlar/kişiler dahil.
+2) İkinci paragrafta detayları aç — arka plan, nedenler, gelişmeler ve bağlam bilgisi.
+3) Üçüncü paragrafta etkileri ve sonuçları belirt — kimi etkiliyor, ne anlama geliyor, sonraki adımlar neler.
+4) Deprem haberi ise: büyüklük, merkez üssü, derinlik, il/ilçe, sarsıntının hissedildiği bölgeler, hasar bilgisi ve artçı şoklar bilgisini mutlaka dahil et.
+5) Yalnızca doğrulanabilir bilgi ver; kendi yorumunu ekleme.
+6) Akıcı, profesyonel ve gazetecilik diline uygun Türkçe kullan.
+7) Gereksiz tekrar yapma, emoji kullanma, "Özet" başlığı ekleme.
+8) Haberin başlığını tekrarlama, doğrudan içeriğe gir.
 
 HABER:
 Başlık: ${articleTitle}
@@ -1200,15 +1223,15 @@ ${articleSource ? `Kaynak: ${articleSource}` : ''}
 ${(article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude)) ? `Deprem Büyüklüğü: ${article.magnitude}` : ''}
 ${(article.location && typeof article.location === 'string') ? `Konum: ${article.location.trim()}` : ''}`;
 
-    const systemPrompt = 'Sen güvenilir bir haber özetleme asistanısın. Kısa, net ve doğrulanabilir bilgi ver.';
+    const systemPrompt = 'Sen deneyimli bir Türk gazetecisin ve haber analisti. Haberleri kapsamlı, doğru ve okuyucunun tam anlamasını sağlayacak derinlikte özetliyorsun. Her özet, haberin tüm kritik detaylarını içermeli ve okuyucunun orijinal haberi okumaya gerek duymamasını sağlamalı.';
 
     let summary: string;
     try {
-      // ELITE: Ultra-kapsamlı rapor için token limitini artırdım
+      // ELITE: Premium kapsamlı özet için token limitini yükselt (240→600)
       const aiResult = await openAIService.generateTextWithMetadata(prompt, {
         systemPrompt,
-        maxTokens: 240,
-        temperature: 0.2,
+        maxTokens: 600,
+        temperature: 0.3,
         serviceName: 'NewsAggregatorService',
       });
       summary = aiResult.text;
@@ -1265,7 +1288,7 @@ ${(article.location && typeof article.location === 'string') ? `Konum: ${article
     }
 
     // CRITICAL: Save to cache and cloud (shared across all users)
-    this.summaryCache.set(cacheKey, { summary, timestamp: now });
+    this.setCacheEntry(cacheKey, { summary, timestamp: now });
 
     // CRITICAL: Persist locally with error handling
     try {

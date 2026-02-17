@@ -1,20 +1,21 @@
 /**
- * CONTACT SERVICE - ELITE FIREBASE EDITION
- * Complete contact management with Firebase Firestore sync
+ * CONTACT SERVICE — SINGLE-UID ARCHITECTURE v4.0
+ * 
+ * Every contact is identified by Firebase Auth UID.
+ * uid is the ONLY primary key — no id, cloudUid, or deviceId confusion.
  * 
  * Features:
  * - Add/Remove/Edit contacts with Firebase persistence
- * - QR code based contact adding
+ * - QR code based contact adding (uid extraction)
  * - Favorite contacts with cloud sync
  * - Block list management
  * - Offline-first with automatic sync
- * - Conflict resolution via timestamps
  * 
- * @author AfetNet Elite Messaging System
- * @version 2.0.0 - Firebase Integration
+ * @version 4.0.0 — Single-UID Clean Architecture
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth } from 'firebase/auth';
 import {
     getFirestore,
     collection,
@@ -25,13 +26,13 @@ import {
     query,
     orderBy,
     Timestamp,
-    writeBatch
 } from 'firebase/firestore';
 import { initializeFirebase } from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
 import { identityService, QRPayload } from './IdentityService';
 
 const logger = createLogger('ContactService');
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 
 // Lazy import to avoid circular dependency
 let contactRequestService: any = null;
@@ -43,41 +44,41 @@ const getContactRequestService = async () => {
     return contactRequestService;
 };
 
-// Storage keys for offline-first
-const CONTACTS_CACHE_KEY = '@afetnet:contacts_cache_v2';
-const BLOCKED_CACHE_KEY = '@afetnet:blocked_cache_v2';
-const PENDING_SYNC_KEY = '@afetnet:contacts_pending_sync';
+// Storage keys (UID-scoped)
+const CONTACTS_CACHE_KEY_BASE = '@afetnet:contacts_cache_v4';
+const BLOCKED_CACHE_KEY_BASE = '@afetnet:blocked_cache_v4';
+const PENDING_SYNC_KEY_BASE = '@afetnet:contacts_pending_sync_v4';
+const STORAGE_GUEST_SCOPE = 'guest';
+const STORAGE_USER_PREFIX = 'user:';
 
 /**
- * Contact Interface - The Contact Record
+ * Contact — Single-UID Model
+ * uid is the ONLY identifier.
  */
 export interface Contact {
-    id: string;                    // QR ID (AFN-XXXXXXXX)
-    cloudUid: string;              // Firebase UID (required for Firebase sync)
-    deviceId: string;              // Physical device ID for mesh routing
-    displayName: string;           // Contact name
-    nickname?: string;             // User-assigned nickname
-    email?: string;                // Contact email
-    photoURL?: string;             // Avatar URL
-    status?: string;               // Status message
-    lastSeen?: number;             // Last seen timestamp
-    addedAt: number;               // When contact was added
-    updatedAt: number;             // Last update timestamp
+    /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR */
+    uid: string;
+    displayName: string;
+    nickname?: string;
+    email?: string;
+    photoURL?: string;
+    status?: string;
+    lastSeen?: number;
+    addedAt: number;
+    updatedAt: number;
     addedVia: 'qr' | 'id' | 'ble' | 'invite' | 'sync';
-    isFavorite: boolean;           // Favorite/starred status
-    isVerified: boolean;           // ID verified via QR or mutual add
-    publicKey?: string;            // Public encryption key
-    notes?: string;                // User notes about contact
-    tags?: string[];               // Custom tags
-    isMutual?: boolean;            // Both users added each other
+    isFavorite: boolean;
+    isVerified: boolean;
+    notes?: string;
+    tags?: string[];
+    isMutual?: boolean;
 }
 
 /**
- * Blocked Contact Interface
+ * Blocked Contact
  */
 export interface BlockedContact {
-    id: string;
-    cloudUid: string;
+    uid: string;
     displayName: string;
     blockedAt: number;
     reason?: string;
@@ -88,7 +89,7 @@ export interface BlockedContact {
  */
 interface PendingSync {
     operation: 'add' | 'update' | 'delete' | 'block' | 'unblock';
-    contactId: string;
+    contactUid: string;
     data?: Partial<Contact> | BlockedContact;
     timestamp: number;
 }
@@ -99,39 +100,70 @@ class ContactService {
     private pendingSync: PendingSync[] = [];
     private isInitialized = false;
     private initPromise: Promise<void> | null = null;
+    private activeScope = STORAGE_GUEST_SCOPE;
 
-    /**
-     * Initialize the contact service
-     */
+    private getStorageScope(): string {
+        const uid = identityService.getUid().trim();
+        if (uid) return `${STORAGE_USER_PREFIX}${uid}`;
+
+        try {
+            const app = initializeFirebase();
+            if (!app) return STORAGE_GUEST_SCOPE;
+            const authUid = getAuth(app).currentUser?.uid?.trim();
+            return authUid ? `${STORAGE_USER_PREFIX}${authUid}` : STORAGE_GUEST_SCOPE;
+        } catch {
+            return STORAGE_GUEST_SCOPE;
+        }
+    }
+
+    private getScopedKey(base: string, scope: string = this.activeScope): string {
+        return `${base}:${scope}`;
+    }
+
+    private getStorageKeys(scope: string = this.activeScope) {
+        return {
+            contacts: this.getScopedKey(CONTACTS_CACHE_KEY_BASE, scope),
+            blocked: this.getScopedKey(BLOCKED_CACHE_KEY_BASE, scope),
+            pending: this.getScopedKey(PENDING_SYNC_KEY_BASE, scope),
+        };
+    }
+
+    private resetInMemoryState(): void {
+        this.contacts.clear();
+        this.blockedContacts.clear();
+        this.pendingSync = [];
+    }
+
+    // ==================== INITIALIZATION ====================
+
     async initialize(): Promise<void> {
         if (this.initPromise) return this.initPromise;
-        if (this.isInitialized) return;
-
         this.initPromise = this._doInitialize();
         return this.initPromise;
     }
 
     private async _doInitialize(): Promise<void> {
         try {
-            logger.info('📇 Initializing ContactService...');
-
-            // Initialize identity first
             await identityService.initialize();
 
-            // Load from local cache first (offline-first)
-            await this.loadFromCache();
+            const nextScope = this.getStorageScope();
+            if (this.isInitialized && nextScope === this.activeScope) return;
 
-            // If user is authenticated, sync from Firebase
+            if (this.activeScope !== nextScope) this.resetInMemoryState();
+            this.activeScope = nextScope;
+            logger.info(`📇 Initializing ContactService (scope=${this.activeScope})...`);
+
+            await this.loadFromCache(this.activeScope);
+
             if (identityService.isCloudAuthenticated()) {
                 await this.syncFromFirebase();
                 await this.processPendingSync();
             }
 
             this.isInitialized = true;
-            logger.info(`✅ ContactService initialized with ${this.contacts.size} contacts`);
-
+            logger.info(`✅ ContactService: ${this.contacts.size} contacts`);
         } catch (error) {
-            logger.error('❌ Failed to initialize ContactService:', error);
+            logger.error('❌ ContactService init failed:', error);
             this.isInitialized = true;
         } finally {
             this.initPromise = null;
@@ -140,62 +172,45 @@ class ContactService {
 
     // ==================== CACHE OPERATIONS ====================
 
-    /**
-     * Load contacts from local cache
-     */
-    private async loadFromCache(): Promise<void> {
+    private async loadFromCache(scope: string): Promise<void> {
         try {
-            // Load contacts
-            const contactsData = await AsyncStorage.getItem(CONTACTS_CACHE_KEY);
+            this.resetInMemoryState();
+            const keys = this.getStorageKeys(scope);
+
+            const contactsData = await AsyncStorage.getItem(keys.contacts);
+            const blockedData = await AsyncStorage.getItem(keys.blocked);
+            const pendingData = await AsyncStorage.getItem(keys.pending);
+
             if (contactsData) {
                 const parsed = JSON.parse(contactsData) as Contact[];
-                parsed.forEach(c => this.contacts.set(c.id, c));
-                logger.info(`📂 Loaded ${this.contacts.size} contacts from cache`);
+                parsed.forEach(c => this.contacts.set(c.uid, c));
+                logger.info(`📂 ${this.contacts.size} contacts from cache`);
             }
-
-            // Load blocked list
-            const blockedData = await AsyncStorage.getItem(BLOCKED_CACHE_KEY);
             if (blockedData) {
                 const parsed = JSON.parse(blockedData) as BlockedContact[];
-                parsed.forEach(b => this.blockedContacts.set(b.id, b));
+                parsed.forEach(b => this.blockedContacts.set(b.uid, b));
             }
-
-            // Load pending sync operations
-            const pendingData = await AsyncStorage.getItem(PENDING_SYNC_KEY);
             if (pendingData) {
                 this.pendingSync = JSON.parse(pendingData);
-                logger.info(`📤 ${this.pendingSync.length} pending sync operations`);
             }
-
         } catch (error) {
             logger.error('Failed to load from cache:', error);
         }
     }
 
-    /**
-     * Save contacts to local cache
-     */
     private async saveToCache(): Promise<void> {
         try {
-            await AsyncStorage.setItem(
-                CONTACTS_CACHE_KEY,
-                JSON.stringify(Array.from(this.contacts.values()))
-            );
-            await AsyncStorage.setItem(
-                BLOCKED_CACHE_KEY,
-                JSON.stringify(Array.from(this.blockedContacts.values()))
-            );
+            const keys = this.getStorageKeys();
+            await AsyncStorage.setItem(keys.contacts, JSON.stringify(Array.from(this.contacts.values())));
+            await AsyncStorage.setItem(keys.blocked, JSON.stringify(Array.from(this.blockedContacts.values())));
         } catch (error) {
             logger.error('Failed to save to cache:', error);
         }
     }
 
-    /**
-     * Save pending sync operations
-     */
     private async savePendingSync(): Promise<void> {
         try {
-            await AsyncStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(this.pendingSync));
+            await AsyncStorage.setItem(this.getStorageKeys().pending, JSON.stringify(this.pendingSync));
         } catch (error) {
             logger.error('Failed to save pending sync:', error);
         }
@@ -203,12 +218,9 @@ class ContactService {
 
     // ==================== FIREBASE SYNC ====================
 
-    /**
-     * Sync contacts from Firebase
-     */
     async syncFromFirebase(): Promise<void> {
-        const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) {
+        const myUid = identityService.getUid();
+        if (!myUid) {
             logger.warn('Cannot sync: not authenticated');
             return;
         }
@@ -219,121 +231,103 @@ class ContactService {
 
             const db = getFirestore(app);
 
-            // Get contacts collection
-            const contactsRef = collection(db, 'users', cloudUid, 'contacts');
+            // Contacts
+            const contactsRef = collection(db, 'users', myUid, 'contacts');
             const contactsQuery = query(contactsRef, orderBy('addedAt', 'desc'));
             const contactsSnap = await getDocs(contactsQuery);
 
             contactsSnap.forEach(docSnap => {
                 const data = docSnap.data();
+                // Handle both new (uid) and old (cloudUid) format from Firestore
+                const contactUid = (data.uid || data.cloudUid || docSnap.id || '').trim();
+                if (!contactUid) return;
+
                 const contact: Contact = {
-                    id: data.id || docSnap.id,
-                    cloudUid: data.cloudUid,
-                    deviceId: data.deviceId,
-                    displayName: data.displayName,
+                    uid: contactUid,
+                    displayName: data.displayName || 'Bilinmeyen',
                     nickname: data.nickname,
                     email: data.email,
                     photoURL: data.photoURL,
                     status: data.status,
-                    lastSeen: data.lastSeen,
-                    addedAt: data.addedAt?.toMillis?.() || data.addedAt,
+                    lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen,
+                    addedAt: data.addedAt?.toMillis?.() || data.addedAt || Date.now(),
                     updatedAt: data.updatedAt?.toMillis?.() || data.updatedAt || Date.now(),
                     addedVia: data.addedVia || 'sync',
                     isFavorite: data.isFavorite || false,
                     isVerified: data.isVerified || false,
-                    publicKey: data.publicKey,
                     notes: data.notes,
                     tags: data.tags,
                     isMutual: data.isMutual,
                 };
 
-                // Conflict resolution: keep newer version
-                const existing = this.contacts.get(contact.id);
+                const existing = this.contacts.get(contactUid);
                 if (!existing || contact.updatedAt > existing.updatedAt) {
-                    this.contacts.set(contact.id, contact);
+                    this.contacts.set(contactUid, contact);
                 }
             });
 
-            // Get blocked collection
-            const blockedRef = collection(db, 'users', cloudUid, 'blocked');
+            // Blocked
+            const blockedRef = collection(db, 'users', myUid, 'blocked');
             const blockedSnap = await getDocs(blockedRef);
 
             blockedSnap.forEach(docSnap => {
                 const data = docSnap.data();
-                this.blockedContacts.set(docSnap.id, {
-                    id: docSnap.id,
-                    cloudUid: data.cloudUid,
-                    displayName: data.displayName,
-                    blockedAt: data.blockedAt?.toMillis?.() || data.blockedAt,
+                const blockedUid = data.uid || data.cloudUid || docSnap.id;
+                this.blockedContacts.set(blockedUid, {
+                    uid: blockedUid,
+                    displayName: data.displayName || 'Bilinmeyen',
+                    blockedAt: data.blockedAt?.toMillis?.() || data.blockedAt || Date.now(),
                     reason: data.reason,
                 });
             });
 
             await this.saveToCache();
             logger.info(`🔄 Synced ${this.contacts.size} contacts from Firebase`);
-
         } catch (error) {
             logger.error('Failed to sync from Firebase:', error);
         }
     }
 
-    /**
-     * Sync a single contact to Firebase
-     */
+    private async _writeContactToFirebase(contact: Contact): Promise<void> {
+        const myUid = identityService.getUid();
+        if (!myUid) throw new Error('Not authenticated');
+
+        const app = initializeFirebase();
+        if (!app) throw new Error('Firebase not initialized');
+
+        const db = getFirestore(app);
+        const contactRef = doc(db, 'users', myUid, 'contacts', contact.uid);
+
+        await setDoc(contactRef, {
+            ...contact,
+            addedAt: Timestamp.fromMillis(contact.addedAt),
+            updatedAt: Timestamp.fromMillis(contact.updatedAt),
+            lastSeen: contact.lastSeen ? Timestamp.fromMillis(contact.lastSeen) : null,
+        });
+    }
+
     private async syncContactToFirebase(contact: Contact): Promise<void> {
-        const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) {
-            // Queue for later sync
-            this.pendingSync.push({
-                operation: 'add',
-                contactId: contact.id,
-                data: contact,
-                timestamp: Date.now(),
-            });
+        const myUid = identityService.getUid();
+        if (!myUid) {
+            this.pendingSync.push({ operation: 'add', contactUid: contact.uid, data: contact, timestamp: Date.now() });
             await this.savePendingSync();
             return;
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-
-            const db = getFirestore(app);
-            const contactRef = doc(db, 'users', cloudUid, 'contacts', contact.id);
-
-            await setDoc(contactRef, {
-                ...contact,
-                addedAt: Timestamp.fromMillis(contact.addedAt),
-                updatedAt: Timestamp.fromMillis(contact.updatedAt),
-                lastSeen: contact.lastSeen ? Timestamp.fromMillis(contact.lastSeen) : null,
-            });
-
-            logger.info(`☁️ Contact synced to Firebase: ${contact.displayName}`);
-
+            await this._writeContactToFirebase(contact);
+            logger.info(`☁️ Contact synced: ${contact.displayName}`);
         } catch (error) {
-            logger.error('Failed to sync contact to Firebase:', error);
-            // Queue for retry
-            this.pendingSync.push({
-                operation: 'add',
-                contactId: contact.id,
-                data: contact,
-                timestamp: Date.now(),
-            });
+            logger.error('Failed to sync contact:', error);
+            this.pendingSync.push({ operation: 'add', contactUid: contact.uid, data: contact, timestamp: Date.now() });
             await this.savePendingSync();
         }
     }
 
-    /**
-     * Delete contact from Firebase
-     */
-    private async deleteContactFromFirebase(contactId: string): Promise<void> {
-        const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) {
-            this.pendingSync.push({
-                operation: 'delete',
-                contactId,
-                timestamp: Date.now(),
-            });
+    private async deleteContactFromFirebase(contactUid: string): Promise<void> {
+        const myUid = identityService.getUid();
+        if (!myUid) {
+            this.pendingSync.push({ operation: 'delete', contactUid, timestamp: Date.now() });
             await this.savePendingSync();
             return;
         }
@@ -341,71 +335,61 @@ class ContactService {
         try {
             const app = initializeFirebase();
             if (!app) return;
-
             const db = getFirestore(app);
-            await deleteDoc(doc(db, 'users', cloudUid, 'contacts', contactId));
-
-            logger.info(`🗑️ Contact deleted from Firebase: ${contactId}`);
-
+            await deleteDoc(doc(db, 'users', myUid, 'contacts', contactUid));
+            logger.info(`🗑️ Contact deleted from Firebase: ${contactUid}`);
         } catch (error) {
             logger.error('Failed to delete contact from Firebase:', error);
         }
     }
 
-    /**
-     * Process pending sync operations
-     */
     async processPendingSync(): Promise<void> {
         if (this.pendingSync.length === 0) return;
         if (!identityService.isCloudAuthenticated()) return;
 
-        logger.info(`📤 Processing ${this.pendingSync.length} pending sync operations...`);
+        logger.info(`📤 Processing ${this.pendingSync.length} pending ops...`);
 
         const toProcess = [...this.pendingSync];
         this.pendingSync = [];
+        const failed: PendingSync[] = [];
 
         for (const op of toProcess) {
             try {
                 switch (op.operation) {
                     case 'add':
                     case 'update':
-                        if (op.data) {
-                            await this.syncContactToFirebase(op.data as Contact);
-                        }
+                        if (op.data) await this._writeContactToFirebase(op.data as Contact);
                         break;
                     case 'delete':
-                        await this.deleteContactFromFirebase(op.contactId);
+                        await this.deleteContactFromFirebase(op.contactUid);
                         break;
                     case 'block':
                         await this.syncBlockedToFirebase(op.data as BlockedContact);
                         break;
                     case 'unblock':
-                        await this.deleteBlockedFromFirebase(op.contactId);
+                        await this.deleteBlockedFromFirebase(op.contactUid);
                         break;
                 }
             } catch (error) {
-                logger.error(`Failed to process pending sync: ${op.operation}`, error);
-                // Re-queue failed operation
-                this.pendingSync.push(op);
+                logger.error(`Pending sync failed: ${op.operation}`, error);
+                failed.push(op);
             }
         }
 
+        this.pendingSync = failed;
         await this.savePendingSync();
     }
 
     // ==================== CONTACT OPERATIONS ====================
 
     /**
-     * Add a new contact
+     * Add a new contact by UID
      */
     async addContact(
-        qrId: string,
-        cloudUid: string,
+        uid: string,
         displayName: string,
         options: {
-            deviceId?: string;
             addedVia?: Contact['addedVia'];
-            publicKey?: string;
             isVerified?: boolean;
             photoURL?: string;
             email?: string;
@@ -414,27 +398,30 @@ class ContactService {
     ): Promise<Contact> {
         if (!this.isInitialized) await this.initialize();
 
-        // Validate
-        const myId = identityService.getMyId();
-        if (qrId === myId) {
+        const trimUid = uid.trim();
+        if (!trimUid || !UID_REGEX.test(trimUid)) {
+            throw new Error('Geçersiz kullanıcı kimliği');
+        }
+
+        // Self-check
+        const myUid = identityService.getUid();
+        if (trimUid === myUid) {
             throw new Error('Kendi kendinizi kişi olarak ekleyemezsiniz');
         }
 
-        if (this.blockedContacts.has(qrId)) {
+        if (this.blockedContacts.has(trimUid)) {
             throw new Error('Bu kişi engellendi. Önce engeli kaldırın.');
         }
 
-        // Check if exists
-        if (this.contacts.has(qrId)) {
-            logger.info(`Contact ${qrId} exists, updating...`);
-            return this.updateContact(qrId, { displayName, ...options });
+        // Existing → update
+        if (this.contacts.has(trimUid)) {
+            logger.info(`Contact ${trimUid} exists, updating...`);
+            return this.updateContact(trimUid, { displayName, ...options });
         }
 
         const now = Date.now();
         const contact: Contact = {
-            id: qrId,
-            cloudUid: cloudUid,
-            deviceId: options.deviceId || qrId,
+            uid: trimUid,
             displayName,
             email: options.email,
             photoURL: options.photoURL,
@@ -443,177 +430,126 @@ class ContactService {
             addedVia: options.addedVia || 'id',
             isFavorite: false,
             isVerified: options.isVerified || false,
-            publicKey: options.publicKey,
         };
 
-        this.contacts.set(qrId, contact);
+        this.contacts.set(trimUid, contact);
         await this.saveToCache();
         await this.syncContactToFirebase(contact);
 
-        // ELITE: Send contact request notification if requested
-        if (options.sendContactRequest && cloudUid) {
+        // Send contact request
+        const shouldSendRequest = options.sendContactRequest !== false;
+        if (shouldSendRequest) {
             try {
                 const requestService = await getContactRequestService();
-                await requestService.sendContactRequest(cloudUid, qrId);
+                await requestService.sendContactRequest(trimUid, trimUid);
                 logger.info(`📬 Contact request sent to ${displayName}`);
             } catch (error) {
                 logger.warn('Failed to send contact request:', error);
             }
         }
 
-        logger.info(`✅ Added contact: ${displayName} (${qrId})`);
+        logger.info(`✅ Added contact: ${displayName} (${trimUid})`);
         return contact;
     }
 
     /**
-     * Add contact from QR code scan
+     * Add contact from QR code scan — clean v4 flow
      */
     async addContactFromQR(qrData: string): Promise<Contact> {
-        const payload = identityService.parseQRPayload(qrData);
+        const payload = await identityService.parseQRPayload(qrData);
 
-        if (!payload || !payload.id) {
-            throw new Error('Geçersiz QR kod');
+        if (!payload) throw new Error('Geçersiz QR kod');
+
+        const uid = payload.uid?.trim();
+        if (!uid || !UID_REGEX.test(uid)) {
+            throw new Error('QR kod geçerli bir kullanıcı kimliği içermiyor');
         }
 
-        return this.addContact(
-            payload.id,
-            payload.uid,
-            payload.name || 'Bilinmeyen Kullanıcı',
-            {
-                deviceId: payload.did || payload.id,
-                addedVia: 'qr',
-                isVerified: true,
-                sendContactRequest: true, // Trigger contact request
-            }
-        );
+        return this.addContact(uid, payload.name || 'Bilinmeyen Kullanıcı', {
+            addedVia: 'qr',
+            isVerified: true,
+            sendContactRequest: true,
+        });
     }
 
     /**
      * Update existing contact
      */
     async updateContact(
-        id: string,
-        updates: Partial<Omit<Contact, 'id' | 'addedAt' | 'cloudUid'>>
+        uid: string,
+        updates: Partial<Omit<Contact, 'uid' | 'addedAt'>>
     ): Promise<Contact> {
         if (!this.isInitialized) await this.initialize();
 
-        const existing = this.contacts.get(id);
-        if (!existing) {
-            throw new Error('Kişi bulunamadı');
-        }
+        const existing = this.contacts.get(uid);
+        if (!existing) throw new Error('Kişi bulunamadı');
 
-        const updated: Contact = {
-            ...existing,
-            ...updates,
-            updatedAt: Date.now(),
-        };
-
-        this.contacts.set(id, updated);
+        const updated: Contact = { ...existing, ...updates, updatedAt: Date.now() };
+        this.contacts.set(uid, updated);
         await this.saveToCache();
         await this.syncContactToFirebase(updated);
 
-        logger.info(`✏️ Updated contact: ${id}`);
+        logger.info(`✏️ Updated contact: ${uid}`);
         return updated;
     }
 
-    /**
-     * Remove a contact
-     */
-    async removeContact(id: string): Promise<void> {
+    async removeContact(uid: string): Promise<void> {
         if (!this.isInitialized) await this.initialize();
+        if (!this.contacts.has(uid)) return;
 
-        if (!this.contacts.has(id)) {
-            logger.warn(`Contact ${id} not found`);
-            return;
-        }
-
-        this.contacts.delete(id);
+        this.contacts.delete(uid);
         await this.saveToCache();
-        await this.deleteContactFromFirebase(id);
-
-        logger.info(`🗑️ Removed contact: ${id}`);
+        await this.deleteContactFromFirebase(uid);
+        logger.info(`🗑️ Removed contact: ${uid}`);
     }
 
-    /**
-     * Set contact as favorite
-     */
-    async setFavorite(id: string, isFavorite: boolean): Promise<void> {
-        await this.updateContact(id, { isFavorite });
+    async setFavorite(uid: string, isFavorite: boolean): Promise<void> {
+        await this.updateContact(uid, { isFavorite });
     }
 
-    /**
-     * Set nickname for contact
-     */
-    async setNickname(id: string, nickname: string): Promise<void> {
-        await this.updateContact(id, { nickname });
+    async setNickname(uid: string, nickname: string): Promise<void> {
+        await this.updateContact(uid, { nickname });
     }
 
-    /**
-     * Update contact notes
-     */
-    async setNotes(id: string, notes: string): Promise<void> {
-        await this.updateContact(id, { notes });
+    async setNotes(uid: string, notes: string): Promise<void> {
+        await this.updateContact(uid, { notes });
     }
 
-    /**
-     * Update last seen timestamp
-     */
-    updateLastSeen(id: string): void {
-        const contact = this.contacts.get(id);
+    updateLastSeen(uid: string): void {
+        const contact = this.contacts.get(uid);
         if (contact) {
-            contact.lastSeen = Date.now();
-            contact.updatedAt = Date.now();
+            const now = Date.now();
+            const updated = { ...contact, lastSeen: now, updatedAt: now };
+            this.contacts.set(uid, updated);
             this.saveToCache().catch(e => logger.error('Save lastSeen failed:', e));
-            this.syncContactToFirebase(contact).catch(e => logger.warn('Sync lastSeen failed:', e));
+            this.syncContactToFirebase(updated).catch(e => logger.warn('Sync lastSeen failed:', e));
         }
     }
 
     // ==================== BLOCK OPERATIONS ====================
 
-    /**
-     * Block a contact
-     */
-    async blockContact(id: string, reason?: string): Promise<void> {
+    async blockContact(uid: string, reason?: string): Promise<void> {
         if (!this.isInitialized) await this.initialize();
 
-        const contact = this.contacts.get(id);
+        const contact = this.contacts.get(uid);
         const displayName = contact?.displayName || 'Bilinmeyen';
-        const cloudUid = contact?.cloudUid || id;
 
-        // Remove from contacts
         if (contact) {
-            this.contacts.delete(id);
-            await this.deleteContactFromFirebase(id);
+            this.contacts.delete(uid);
+            await this.deleteContactFromFirebase(uid);
         }
 
-        // Add to blocked list
-        const blocked: BlockedContact = {
-            id,
-            cloudUid,
-            displayName,
-            blockedAt: Date.now(),
-            reason,
-        };
-
-        this.blockedContacts.set(id, blocked);
+        const blocked: BlockedContact = { uid, displayName, blockedAt: Date.now(), reason };
+        this.blockedContacts.set(uid, blocked);
         await this.saveToCache();
         await this.syncBlockedToFirebase(blocked);
-
-        logger.info(`🚫 Blocked: ${id}`);
+        logger.info(`🚫 Blocked: ${uid}`);
     }
 
-    /**
-     * Sync blocked contact to Firebase
-     */
     private async syncBlockedToFirebase(blocked: BlockedContact): Promise<void> {
-        const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) {
-            this.pendingSync.push({
-                operation: 'block',
-                contactId: blocked.id,
-                data: blocked,
-                timestamp: Date.now(),
-            });
+        const myUid = identityService.getUid();
+        if (!myUid) {
+            this.pendingSync.push({ operation: 'block', contactUid: blocked.uid, data: blocked, timestamp: Date.now() });
             await this.savePendingSync();
             return;
         }
@@ -621,66 +557,60 @@ class ContactService {
         try {
             const app = initializeFirebase();
             if (!app) return;
-
             const db = getFirestore(app);
-            await setDoc(doc(db, 'users', cloudUid, 'blocked', blocked.id), {
+            await setDoc(doc(db, 'users', myUid, 'blocked', blocked.uid), {
                 ...blocked,
                 blockedAt: Timestamp.fromMillis(blocked.blockedAt),
             });
-
         } catch (error) {
             logger.error('Failed to sync blocked to Firebase:', error);
         }
     }
 
-    /**
-     * Delete blocked from Firebase
-     */
-    private async deleteBlockedFromFirebase(blockedId: string): Promise<void> {
-        const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) return;
+    private async deleteBlockedFromFirebase(blockedUid: string): Promise<void> {
+        const myUid = identityService.getUid();
+        if (!myUid) return;
 
         try {
             const app = initializeFirebase();
             if (!app) return;
-
             const db = getFirestore(app);
-            await deleteDoc(doc(db, 'users', cloudUid, 'blocked', blockedId));
-
+            await deleteDoc(doc(db, 'users', myUid, 'blocked', blockedUid));
         } catch (error) {
             logger.error('Failed to delete blocked from Firebase:', error);
         }
     }
 
-    /**
-     * Unblock a contact
-     */
-    async unblockContact(id: string): Promise<void> {
+    async unblockContact(uid: string): Promise<void> {
         if (!this.isInitialized) await this.initialize();
+        if (!this.blockedContacts.has(uid)) return;
 
-        if (!this.blockedContacts.has(id)) {
-            logger.warn(`${id} not in blocked list`);
-            return;
-        }
-
-        this.blockedContacts.delete(id);
+        this.blockedContacts.delete(uid);
         await this.saveToCache();
-        await this.deleteBlockedFromFirebase(id);
-
-        logger.info(`✅ Unblocked: ${id}`);
+        await this.deleteBlockedFromFirebase(uid);
+        logger.info(`✅ Unblocked: ${uid}`);
     }
 
-    /**
-     * Check if contact is blocked
-     */
-    isBlocked(id: string): boolean {
-        return this.blockedContacts.has(id);
+    isBlocked(uid: string): boolean {
+        return this.blockedContacts.has(uid);
     }
 
     // ==================== GETTERS ====================
 
-    getContact(id: string): Contact | undefined {
-        return this.contacts.get(id);
+    getContact(uid: string): Contact | undefined {
+        return this.contacts.get(uid);
+    }
+
+    /** Find contact by uid — single lookup, no multi-ID search */
+    getContactByAnyId(uid: string): Contact | undefined {
+        if (!uid) return undefined;
+        return this.contacts.get(uid.trim());
+    }
+
+    /** Resolve uid for a contact — just returns the uid directly */
+    resolveCloudUid(uid: string): string | undefined {
+        const contact = this.contacts.get(uid.trim());
+        return contact?.uid;
     }
 
     getAllContacts(): Contact[] {
@@ -699,8 +629,8 @@ class ContactService {
         return Array.from(this.blockedContacts.values());
     }
 
-    searchContacts(query: string): Contact[] {
-        const lower = query.toLowerCase();
+    searchContacts(queryStr: string): Contact[] {
+        const lower = queryStr.toLowerCase();
         return this.getAllContacts().filter(c =>
             c.displayName.toLowerCase().includes(lower) ||
             (c.nickname && c.nickname.toLowerCase().includes(lower)) ||
@@ -721,50 +651,33 @@ class ContactService {
 
     // ==================== UTILITY ====================
 
-    /**
-     * Get my QR code data
-     */
     getMyQRData(): string {
         return identityService.getQRPayload();
     }
 
-    /**
-     * Force sync with Firebase
-     */
     async forceSync(): Promise<void> {
-        if (!identityService.isCloudAuthenticated()) {
-            logger.warn('Cannot force sync: not authenticated');
-            return;
-        }
-
+        if (!identityService.isCloudAuthenticated()) return;
         await this.syncFromFirebase();
         await this.processPendingSync();
         logger.info('🔄 Force sync completed');
     }
 
-    /**
-     * Clear all contacts (for logout/reset)
-     */
     async clearAll(): Promise<void> {
-        this.contacts.clear();
-        this.blockedContacts.clear();
-        this.pendingSync = [];
-        await this.saveToCache();
-        await AsyncStorage.removeItem(PENDING_SYNC_KEY);
+        this.resetInMemoryState();
+        const keys = this.getStorageKeys();
+        await AsyncStorage.multiRemove([keys.contacts, keys.blocked, keys.pending]).catch(e =>
+            logger.warn('Failed to clear storage:', e)
+        );
+        this.isInitialized = false;
+        this.initPromise = null;
+        this.activeScope = STORAGE_GUEST_SCOPE;
         logger.info('🗑️ Cleared all contacts');
     }
 
-    /**
-     * Get sync status
-     */
     getSyncStatus(): { pending: number; lastSync: number | null } {
-        return {
-            pending: this.pendingSync.length,
-            lastSync: null, // Could track this
-        };
+        return { pending: this.pendingSync.length, lastSync: null };
     }
 }
 
-// Export singleton
 export const contactService = new ContactService();
 export default contactService;

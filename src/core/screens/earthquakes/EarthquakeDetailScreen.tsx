@@ -20,6 +20,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import MapView, { Marker, Circle } from 'react-native-maps';
+import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { earthquakeService } from '../../services/EarthquakeService';
 import { Earthquake } from '../../stores/earthquakeStore';
 import * as haptics from '../../utils/haptics';
@@ -50,25 +52,28 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const initialEarthquake = route?.params?.earthquake;
 
-  if (!initialEarthquake) return null;
-
-  const [earthquake, setEarthquake] = useState<Earthquake>(initialEarthquake);
+  const [earthquake, setEarthquake] = useState<Earthquake | null>(initialEarthquake ?? null);
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!initialEarthquake) return;
     fetchEarthquakeDetail();
     getUserLocation();
   }, []);
 
   useEffect(() => {
-    if (userLocation && earthquake) {
+    if (!earthquake) return;
+    if (userLocation) {
       setDistance(calculateDistance(userLocation.latitude, userLocation.longitude, earthquake.latitude, earthquake.longitude));
     } else {
       setDistance(calculateDistance(ISTANBUL_CENTER.latitude, ISTANBUL_CENTER.longitude, earthquake.latitude, earthquake.longitude));
     }
   }, [userLocation, earthquake]);
+
+  // FIXED: Early return moved AFTER all hooks to comply with React Rules of Hooks
+  if (!earthquake) return null;
 
   const getUserLocation = async () => {
     try {
@@ -186,6 +191,54 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
           </LinearGradient>
         </Animated.View>
 
+        {/* EARTHQUAKE LOCATION MAP */}
+        <Animated.View entering={FadeInDown.delay(200).duration(600).springify()}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={openMaps}
+            style={styles.mapContainer}
+          >
+            <MapView
+              style={styles.mapPreview}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              rotateEnabled={false}
+              pitchEnabled={false}
+              initialRegion={{
+                latitude: earthquake.latitude,
+                longitude: earthquake.longitude,
+                latitudeDelta: 0.5,
+                longitudeDelta: 0.5,
+              }}
+              liteMode={Platform.OS === 'android'}
+            >
+              <Marker
+                coordinate={{
+                  latitude: earthquake.latitude,
+                  longitude: earthquake.longitude,
+                }}
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <EarthquakeMarker magnitude={earthquake.magnitude} selected />
+              </Marker>
+              <Circle
+                center={{
+                  latitude: earthquake.latitude,
+                  longitude: earthquake.longitude,
+                }}
+                radius={earthquake.magnitude * 10000}
+                fillColor="rgba(239, 68, 68, 0.12)"
+                strokeColor="rgba(239, 68, 68, 0.4)"
+                strokeWidth={1.5}
+              />
+            </MapView>
+            <View style={styles.mapOverlayBadge}>
+              <Ionicons name="expand-outline" size={14} color="#fff" />
+              <Text style={styles.mapOverlayText}>Haritada Gör</Text>
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+
         {/* COMPREHENSIVE INFO GRID */}
         <View style={styles.gridContainer}>
           {/* Distance */}
@@ -292,6 +345,38 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 50,
+  },
+  mapContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  mapPreview: {
+    width: '100%',
+    height: 200,
+    borderRadius: 20,
+  },
+  mapOverlayBadge: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+  },
+  mapOverlayText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   magnitudeCard: {
     borderRadius: 32,

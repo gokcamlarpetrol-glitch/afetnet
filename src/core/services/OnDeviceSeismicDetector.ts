@@ -31,7 +31,7 @@ import { Accelerometer, AccelerometerMeasurement } from 'expo-sensors';
 import { Platform, Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../utils/logger';
-import { ultraFastEEWNotification } from './UltraFastEEWNotification';
+// NotificationCenter handles all notifications now
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
 // Lazy import to avoid circular dependency
 let crowdsourcedSeismicNetwork: any = null;
@@ -88,10 +88,13 @@ const DEFAULT_CONFIG: DetectorConfig = {
     sampleRate: 100,           // 100 Hz = 10ms per sample
     staWindow: 50,             // 0.5 seconds
     ltaWindow: 500,            // 5 seconds  
-    triggerThreshold: 3.0,     // STA/LTA ratio threshold
-    minAcceleration: 0.02,     // ~0.02g minimum (filters walking, etc.)
+    triggerThreshold: 5.0,     // STA/LTA ratio threshold (raised from 3.0 to reduce false positives)
+    minAcceleration: 0.08,     // ~0.08g minimum — filters walking/typing/phone placement/vibrations
     backgroundEnabled: true,
 };
+
+// PRODUCTION: Cooldown between alerts to prevent notification spam
+const ALERT_COOLDOWN_MS = 120000; // 120 seconds (2 min) minimum between alerts
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -118,6 +121,7 @@ class OnDeviceSeismicDetectorService {
     private isTriggered = false;
     private triggerStartTime = 0;
     private peakAcceleration = 0;
+    private lastAlertTime = 0; // ELITE: Cooldown tracking
 
     // Calibration (device at rest baseline)
     private baselineNoise = 0.005; // Expected noise level
@@ -283,8 +287,9 @@ class OnDeviceSeismicDetectorService {
 
                 logger.warn(`🚨 P-WAVE DETECTED! STA/LTA=${ratio.toFixed(2)}, Acc=${sta.toFixed(4)}g`);
 
-                // Immediate feedback
-                Vibration.vibrate(100);
+                // NOTE: No immediate vibration here — too many false positives from
+                // walking/typing/phone movement. Confirmed events vibrate via
+                // ultraFastEEWNotification.sendEEWNotification() in analyzeAndAlert().
             } else {
                 // Update peak during event
                 if (sta > this.peakAcceleration) {
@@ -295,9 +300,14 @@ class OnDeviceSeismicDetectorService {
             // Event ended - analyze and possibly alert
             const duration = timestamp - this.triggerStartTime;
 
-            // Only alert if event lasted reasonable duration (100ms - 60s)
-            if (duration > 100 && duration < 60000) {
+            // ELITE: Only alert if event lasted reasonable duration (500ms - 60s)
+            // Raised minimum from 100ms to 500ms to filter sharp impacts (drops, bumps)
+            const withinCooldown = (timestamp - this.lastAlertTime) < ALERT_COOLDOWN_MS;
+            if (duration > 500 && duration < 60000 && !withinCooldown) {
+                this.lastAlertTime = timestamp;
                 this.analyzeAndAlert(duration);
+            } else if (withinCooldown) {
+                logger.debug('Trigger within cooldown, skipping alert');
             }
 
             // Reset trigger state
@@ -319,7 +329,7 @@ class OnDeviceSeismicDetectorService {
             peakAcceleration: this.peakAcceleration,
             duration,
             confidence,
-            triggered: confidence > 0.7, // 70% confidence threshold
+            triggered: confidence > 0.85, // 85% confidence threshold — reduced false positives
         };
 
         logger.info(`📊 Event analysis: Peak=${this.peakAcceleration.toFixed(4)}g, Duration=${duration}ms, Confidence=${(confidence * 100).toFixed(1)}%`);
@@ -341,14 +351,13 @@ class OnDeviceSeismicDetectorService {
             const estimatedMagnitude = this.estimateMagnitude(this.peakAcceleration);
 
             // Send immediate notification
-            await ultraFastEEWNotification.sendEEWNotification({
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('earthquake', {
                 magnitude: estimatedMagnitude,
                 location: 'Yakın Çevreniz (On-Device Tespit)',
-                warningSeconds: 0, // Already at location!
-                estimatedIntensity: this.accelerationToMMI(this.peakAcceleration),
-                epicentralDistance: 0, // Unknown
-                source: 'ON-DEVICE',
-            });
+                timestamp: Date.now(),
+                source: 'OnDevice',
+            }, 'OnDeviceSeismicDetector');
 
             // Track analytics
             firebaseAnalyticsService.logEvent('on_device_earthquake_detected', {

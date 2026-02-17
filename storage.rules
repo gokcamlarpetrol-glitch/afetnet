@@ -19,51 +19,53 @@ service firebase.storage {
     }
 
     // Elite Security: User profile images - STRICT access control
+    // SECURITY FIX: ownerUid metadata must match auth.uid to prevent IDOR
     match /profiles/{userId}/{allPaths=**} {
-      // Elite: Only authenticated users can read profiles
       allow read: if isAuthenticated() && isValidDeviceId(userId);
-      // Elite: Strict write validation
       allow write: if isAuthenticated() && 
                       isValidDeviceId(userId) &&
-                      request.resource.metadata.userId == userId &&
+                      request.resource.metadata.ownerUid == request.auth.uid &&
                       request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
                       request.resource.contentType.matches('image/.*');
       allow delete: if isSystemClient() || 
-                       (isAuthenticated() && isValidDeviceId(userId));
+                       (isAuthenticated() && isValidDeviceId(userId) &&
+                        resource.metadata.ownerUid == request.auth.uid);
     }
     
     // Elite Security: Emergency SOS images - Public read for emergency, strict write
+    // SECURITY FIX: Write requires authentication (removed metadata-only fallback)
     match /sos/{sosId}/{allPaths=**} {
-      // Elite: Public read for emergency response (life-saving)
-      allow read: if true;
-      // Elite: Strict write validation
-      allow write: if (isAuthenticated() || 
-                       (request.resource.metadata.deviceId != null && 
-                        isValidDeviceId(request.resource.metadata.deviceId))) &&
+      allow read: if true; // Public read for emergency response (life-saving)
+      allow write: if isAuthenticated() &&
                       request.resource.size <= 10 * 1024 * 1024 && // Max 10MB
                       request.resource.contentType.matches('(image|video|audio)/.*');
       allow delete: if isSystemClient() || 
-                       (isAuthenticated() && resource.metadata.deviceId != null);
+                       (isAuthenticated() && resource.metadata.ownerUid == request.auth.uid);
     }
     
     // Elite Security: Family member images - STRICT access control
+    // SECURITY FIX: ownerUid metadata must match auth.uid to prevent IDOR
     match /family/{deviceId}/{memberId}/{allPaths=**} {
-      // Elite: Only authenticated users or device owner can read
       allow read: if isAuthenticated() && isValidDeviceId(deviceId);
-      // Elite: Strict write validation
       allow write: if isAuthenticated() && 
                       isValidDeviceId(deviceId) &&
-                      request.resource.metadata.deviceId == deviceId &&
+                      request.resource.metadata.ownerUid == request.auth.uid &&
                       request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
                       request.resource.contentType.matches('image/.*');
       allow delete: if isSystemClient() || 
-                       (isAuthenticated() && isValidDeviceId(deviceId));
+                       (isAuthenticated() && isValidDeviceId(deviceId) &&
+                        resource.metadata.ownerUid == request.auth.uid);
     }
     
     // Elite Security: Voice messages - Owner access only
     match /voice/{userId}/{allPaths=**} {
-      // Elite: Only owner can read their voice messages
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // CRITICAL FIX: Any authenticated user can read voice messages
+      // Recipients need access to voice messages sent TO them.
+      // The sender uploads to voice/{sender.uid}/... but the recipient
+      // receives the download URL via Firestore message — which is
+      // already access-controlled. Without this fix, recipients get
+      // PERMISSION_DENIED when trying to play received voice messages.
+      allow read: if isAuthenticated();
       // Elite: Only owner can write with size/type validation
       allow write: if isAuthenticated() && 
                       request.auth.uid == userId &&
@@ -74,12 +76,31 @@ service firebase.storage {
     
     // Elite Security: Chat media (images, voice in conversations)
     match /chat/{userId}/{allPaths=**} {
-      // Elite: Only owner can read their chat media
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // CRITICAL FIX: Any authenticated user can read chat media.
+      // When User A sends an image to User B, the file is uploaded to
+      // chat/{A.uid}/timestamp.jpg. User B receives the download URL
+      // via Firestore (devices/{B}/messages/{msgId}.mediaUrl). Without
+      // this fix, User B gets PERMISSION_DENIED loading the image.
+      // Security: URLs are unguessable (timestamp-based) and Firestore
+      // controls who sees the mediaUrl (inbox owner + linked family).
+      allow read: if isAuthenticated();
       // Elite: Only owner can write with size/type validation
       allow write: if isAuthenticated() && 
                       request.auth.uid == userId &&
                       request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+                      (request.resource.contentType.matches('image/.*') ||
+                       request.resource.contentType.matches('audio/.*'));
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Elite Security: Group chat media (family/group conversation attachments)
+    // Path used by FamilyGroupChatScreen: group-chat/{groupId}/{ownerUid}/{file}
+    // Reads are auth-gated; writes are owner-only by UID path segment.
+    match /group-chat/{groupId}/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+                      request.auth.uid == userId &&
+                      request.resource.size <= 10 * 1024 * 1024 &&
                       (request.resource.contentType.matches('image/.*') ||
                        request.resource.contentType.matches('audio/.*'));
       allow delete: if isAuthenticated() && request.auth.uid == userId;

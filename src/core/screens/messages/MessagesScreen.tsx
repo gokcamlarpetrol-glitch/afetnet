@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useMessageStore, Conversation, Message } from '../../stores/messageStore';
+import { useMessageStore, Conversation } from '../../stores/messageStore';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
 import * as haptics from '../../utils/haptics';
@@ -35,8 +35,18 @@ import { Modal, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { createLogger } from '../../utils/logger';
 import { safeLowerCase, safeIncludes } from '../../utils/safeString';
+import { groupChatService, type GroupConversation } from '../../services/GroupChatService';
 
 const logger = createLogger('MessagesScreen');
+const isRoutableConversationId = (value?: string | null): value is string => {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  if (!normalized.length) return false;
+  if (normalized === 'broadcast') return false;
+  if (normalized.startsWith('group:')) return false;
+  if (normalized.startsWith('family-')) return false;
+  return true;
+};
 
 // ELITE: Type-safe navigation props
 interface MessagesScreenProps {
@@ -52,6 +62,42 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
   const conversations = useMessageStore((state) => state.conversations);
   const messages = useMessageStore((state) => state.messages);
+  const getConversationMessages = useMessageStore((state) => state.getConversationMessages);
+
+  // Group conversations from GroupChatService
+  const [groupConversations, setGroupConversations] = useState<GroupConversation[]>([]);
+
+  useEffect(() => {
+    const unsub = groupChatService.onGroupsChanged((groups) => {
+      setGroupConversations(groups);
+    });
+    return () => unsub();
+  }, []);
+
+  // Merge DM conversations with group conversations into a unified list
+  const routableConversations = useMemo(() => {
+    const dmConversations = conversations.filter((conversation) => isRoutableConversationId(conversation.userId));
+
+    // Convert group conversations to Conversation shape for unified rendering
+    // Group conversations use 'group:{id}' as userId to distinguish from DMs
+    const groupAsConversations: Conversation[] = groupConversations.map((group) => ({
+      userId: `group:${group.id}`,
+      userName: group.name,
+      lastMessage: group.lastMessage?.content || '',
+      lastMessageTime: group.lastMessage?.timestamp || group.updatedAt || group.createdAt,
+      unreadCount: 0,
+    }));
+
+    // Merge and sort by lastMessageTime (most recent first)
+    const merged = [...dmConversations, ...groupAsConversations];
+    merged.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return (b.lastMessageTime || 0) - (a.lastMessageTime || 0);
+    });
+
+    return merged;
+  }, [conversations, groupConversations]);
 
   // ELITE: Debounce search query to prevent excessive filtering and re-renders
   useEffect(() => {
@@ -73,7 +119,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       const suggestions = new Set<string>();
 
       // Extract unique user names that match
-      conversations.forEach((conv) => {
+      routableConversations.forEach((conv) => {
         const name = safeLowerCase(conv.userName);
         if (safeIncludes(name, normalizedQuery) && name !== normalizedQuery) {
           suggestions.add(conv.userName);
@@ -97,11 +143,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       logger.error('Error generating search suggestions:', error);
       setSearchSuggestions([]);
     }
-  }, [searchQuery, conversations, messages]);
-  const isMeshConnected = useMeshStore((state) => state.isConnected);
+  }, [searchQuery, routableConversations, messages]);
   const myDeviceId = useMeshStore((state) => state.myDeviceId);
-  const peers = useMeshStore((state) => state.peers);
-  const meshMessages = useMeshStore((state) => state.messages);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [qrValue, setQrValue] = useState<string | null>(null);
 
@@ -157,20 +200,10 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     try {
       const normalizedQuery = safeLowerCase(debouncedSearchQuery).trim();
       if (normalizedQuery.length === 0) {
-        return conversations;
+        return routableConversations;
       }
 
-      // Get all messages for each conversation to search within
-      const conversationMessages = new Map<string, Message[]>();
-      messages.forEach((msg) => {
-        const otherUserId = msg.from === 'me' ? msg.to : msg.from;
-        if (!conversationMessages.has(otherUserId)) {
-          conversationMessages.set(otherUserId, []);
-        }
-        conversationMessages.get(otherUserId)!.push(msg);
-      });
-
-      return conversations.filter((conv) => {
+      return routableConversations.filter((conv) => {
         try {
           const name = safeLowerCase(conv.userName);
           const last = safeLowerCase(conv.lastMessage);
@@ -181,7 +214,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           }
 
           // Check all messages in this conversation
-          const convMessages = conversationMessages.get(conv.userId) ?? [];
+          const convMessages = getConversationMessages(conv.userId);
           const foundInMessages = convMessages.some((msg) => {
             const content = safeLowerCase(msg.content);
             return safeIncludes(content, normalizedQuery);
@@ -195,33 +228,9 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       });
     } catch (error) {
       logger.error('Error filtering conversations:', error);
-      return conversations;
+      return routableConversations;
     }
-  }, [conversations, debouncedSearchQuery, messages]);
-
-  // ELITE: Memoize network stats for performance
-  const networkStats = useMemo(() => {
-    try {
-      const peerCount = (peers?.length || 0) + 1;
-      const trackedMessages = meshMessages.filter((msg) =>
-        msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sent' || msg.status === 'failed',
-      );
-      const deliveredMessages = trackedMessages.filter((msg) =>
-        msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sent',
-      );
-      const deliveryPercent = trackedMessages.length > 0
-        ? Math.round((deliveredMessages.length / trackedMessages.length) * 100)
-        : 100;
-      const avgHopValue = meshMessages.length > 0
-        ? meshMessages.reduce((sum, msg) => sum + (Number.isFinite(msg.hops) ? msg.hops : 0), 0) / meshMessages.length
-        : 1;
-      const avgHop = avgHopValue > 0 ? avgHopValue.toFixed(1) : '1.0';
-      return { peerCount, deliveryPercent, avgHop };
-    } catch (error) {
-      logger.error('Error calculating network stats:', error);
-      return { peerCount: 1, deliveryPercent: 0, avgHop: '1.0' };
-    }
-  }, [meshMessages, peers]);
+  }, [routableConversations, debouncedSearchQuery, getConversationMessages]);
 
   // ELITE: Memoized callbacks for performance
   const handleDeleteConversation = useCallback((userId: string) => {
@@ -268,7 +277,19 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
   const handleShowQr = useCallback(async () => {
     try {
-      // ELITE: Try to get device ID from multiple sources
+      // ELITE FIX: Prefer identityService QR payload (AFN-XXXXXXXX format with user info)
+      // over raw BLE mesh device ID. The identity QR is what recipients need to start
+      // conversations — it maps to the Firestore device path.
+      const { identityService } = require('../../services/IdentityService');
+      const identity = identityService.getIdentity();
+      if (identity?.uid) {
+        const qrPayload = identityService.getQRPayload?.();
+        setQrValue(qrPayload || identity.uid);
+        setQrModalVisible(true);
+        return;
+      }
+
+      // Fallback: Try BLE mesh device ID
       let id = myDeviceId || useMeshStore.getState().myDeviceId || bleMeshService.getMyDeviceId();
 
       // ELITE: If still no ID, try to get from lib/device
@@ -286,12 +307,11 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       if (!id || typeof id !== 'string' || id.trim().length === 0) {
         Alert.alert(
           'Cihaz ID hazır değil',
-          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın. Uygulama yeniden başlatılıyor...',
+          'Bluetooth ve konum izinlerini açarak mesh ağını başlatın.',
         );
         // ELITE: Try to start BLE Mesh service
         try {
           await bleMeshService.start();
-          // Wait a bit for device ID to be generated
           await new Promise(resolve => setTimeout(resolve, 1000));
           const newId = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
           if (newId) {
@@ -363,22 +383,52 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   // ELITE: Memoized render function for performance
   const renderConversation = useCallback(({ item, index }: { item: Conversation; index: number }) => {
     try {
+      const isGroup = item.userId.startsWith('group:');
       return (
         <SwipeableConversationCard
           item={item}
           index={index}
+          isGroup={isGroup}
           onPress={() => {
             try {
               if (!item.userId || typeof item.userId !== 'string') {
                 logger.warn('Invalid userId in conversation:', item);
                 return;
               }
-              navigation?.navigate('Conversation', { userId: item.userId });
+              if (isGroup) {
+                // Navigate to group chat screen with the group ID (strip 'group:' prefix)
+                const groupId = item.userId.replace(/^group:/, '');
+                navigation?.navigate('FamilyGroupChat', { groupId });
+              } else {
+                navigation?.navigate('Conversation', { userId: item.userId, userName: item.userName });
+              }
             } catch (error) {
               logger.error('Error navigating to conversation:', error);
             }
           }}
-          onDelete={() => handleDeleteConversation(item.userId)}
+          onDelete={() => {
+            if (isGroup) {
+              const groupId = item.userId.replace(/^group:/, '');
+              Alert.alert(
+                'Gruptan Ayrıl',
+                `"${item.userName}" grubundan ayrılmak istediğinizden emin misiniz?`,
+                [
+                  { text: 'İptal', style: 'cancel' },
+                  {
+                    text: 'Ayrıl',
+                    style: 'destructive',
+                    onPress: () => {
+                      groupChatService.leaveGroup(groupId).catch((error) => {
+                        logger.error('Failed to leave group:', error);
+                      });
+                    },
+                  },
+                ],
+              );
+            } else {
+              handleDeleteConversation(item.userId);
+            }
+          }}
         />
       );
     } catch (error) {
@@ -483,25 +533,9 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle} numberOfLines={1}>Mesajlar</Text>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {filteredConversations.length} konuşma • {isMeshConnected ? 'Online' : 'Offline'}
+              {filteredConversations.length} konuşma
             </Text>
             <View style={styles.meshRow}>
-              <View
-                style={[
-                  styles.meshStatusBadge,
-                  { backgroundColor: isMeshConnected ? 'rgba(74, 222, 128, 0.2)' : 'rgba(251, 146, 60, 0.2)' },
-                ]}
-              >
-                <View style={[styles.statusDot, { backgroundColor: isMeshConnected ? '#22c55e' : '#f97316' }]} />
-                <Text
-                  style={[
-                    styles.meshStatusText,
-                    { color: isMeshConnected ? '#15803d' : '#c2410c' },
-                  ]}
-                >
-                  Mesh {isMeshConnected ? 'aktif' : 'pasif'}
-                </Text>
-              </View>
               <Pressable
                 style={styles.meshQrButton}
                 onPress={handleShowQr}
@@ -510,24 +544,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
                 accessibilityHint="Cihaz kimliğinizi QR kod olarak gösterir"
               >
                 <Ionicons name="qr-code-outline" size={16} color="#475569" />
-                <Text style={styles.meshQrText}>QR</Text>
+                <Text style={styles.meshQrText}>ID Paylaş</Text>
               </Pressable>
-            </View>
-            <View style={styles.telemetryCard}>
-              <View style={styles.telemetryColumn}>
-                <Text style={styles.telemetryLabel}>Cihaz</Text>
-                <Text style={styles.telemetryValue}>{networkStats.peerCount}</Text>
-              </View>
-              <View style={styles.telemetryDivider} />
-              <View style={styles.telemetryColumn}>
-                <Text style={styles.telemetryLabel}>Teslim</Text>
-                <Text style={styles.telemetryValue}>{networkStats.deliveryPercent}%</Text>
-              </View>
-              <View style={styles.telemetryDivider} />
-              <View style={styles.telemetryColumn}>
-                <Text style={styles.telemetryLabel}>Hops</Text>
-                <Text style={styles.telemetryValue}>{networkStats.avgHop}</Text>
-              </View>
             </View>
           </View>
           <Pressable

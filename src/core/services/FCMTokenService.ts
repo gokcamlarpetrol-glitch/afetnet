@@ -60,17 +60,18 @@ class FCMTokenService {
 
             const Notif = await getNotifications();
 
-            // Request permissions
+            // Request permissions — CRITICAL: Actually ASK for permission if not granted
             const { status: existingStatus } = await Notif.getPermissionsAsync();
             let finalStatus = existingStatus;
 
             if (existingStatus !== 'granted') {
-                logger.info('Notification permission not granted yet; token registration deferred');
-                return null;
+                logger.info('Requesting notification permission...');
+                const { status } = await Notif.requestPermissionsAsync();
+                finalStatus = status;
             }
 
             if (finalStatus !== 'granted') {
-                logger.warn('Notification permission not granted');
+                logger.warn('❌ Notification permission DENIED — push notifications will NOT work');
                 return null;
             }
 
@@ -150,6 +151,62 @@ class FCMTokenService {
             lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
         });
 
+        // V3 channel set (aligned with NotificationChannelManager + backend resolveAndroidChannelId)
+        await Notif.setNotificationChannelAsync('eew_critical', {
+            name: 'Erken Uyarı (Kritik)',
+            description: 'P-Dalga tespit kritik uyarıları',
+            importance: Notif.AndroidImportance.MAX,
+            bypassDnd: true,
+            enableVibrate: true,
+            vibrationPattern: [0, 1000, 500, 1000],
+            lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
+            sound: 'default',
+        });
+
+        await Notif.setNotificationChannelAsync('earthquake_alerts', {
+            name: 'Deprem Uyarıları',
+            description: 'Acil deprem uyarı bildirimleri',
+            importance: Notif.AndroidImportance.MAX,
+            bypassDnd: true,
+            enableVibrate: true,
+            vibrationPattern: [0, 500, 200, 500, 200, 500],
+            sound: 'default',
+        });
+
+        await Notif.setNotificationChannelAsync('sos_alerts', {
+            name: 'SOS Bildirimleri',
+            description: 'Aile üyelerinden SOS bildirimleri',
+            importance: Notif.AndroidImportance.MAX,
+            bypassDnd: true,
+            enableVibrate: true,
+            vibrationPattern: [0, 500, 200, 500, 200, 500],
+            enableLights: true,
+            lightColor: '#FF0000',
+            lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
+            sound: 'default',
+        });
+
+        await Notif.setNotificationChannelAsync('family_updates', {
+            name: 'Aile Güncellemeleri',
+            description: 'Aile konum ve durum güncellemeleri',
+            importance: Notif.AndroidImportance.HIGH,
+            sound: 'default',
+        });
+
+        await Notif.setNotificationChannelAsync('messages', {
+            name: 'Mesajlar',
+            description: 'Kişi ve grup mesaj bildirimleri',
+            importance: Notif.AndroidImportance.HIGH,
+            sound: 'default',
+        });
+
+        await Notif.setNotificationChannelAsync('default', {
+            name: 'Genel Bildirimler',
+            description: 'Genel uygulama bildirimleri',
+            importance: Notif.AndroidImportance.DEFAULT,
+            sound: 'default',
+        });
+
         logger.info('✅ Android notification channels created');
     }
 
@@ -200,6 +257,53 @@ class FCMTokenService {
         } catch (error) {
             logger.error('Failed to register token with server:', error);
         }
+
+        // CRITICAL BACKUP: Write directly to BOTH V3 push_tokens AND legacy fcm_tokens.
+        // The registerFCMToken CF call above may silently fail (network, CF not deployed, etc.)
+        // CFs now read from push_tokens first, then fcm_tokens — both must have the token.
+        try {
+            const { getAuth } = await import('firebase/auth');
+            const { getApp } = await import('firebase/app');
+            const auth = getAuth(getApp());
+            const uid = auth.currentUser?.uid;
+            if (uid && this.token) {
+                const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+                const db = await getFirestoreInstanceAsync();
+                if (db) {
+                    const { doc, setDoc } = await import('firebase/firestore');
+
+                    // V3: push_tokens/{uid}/devices/{installationId} (PRIMARY)
+                    try {
+                        const { getInstallationId } = await import('../../lib/installationId');
+                        const installationId = await getInstallationId();
+                        const v3Ref = doc(db, 'push_tokens', uid, 'devices', installationId);
+                        await setDoc(v3Ref, {
+                            token: this.token,
+                            userId: uid,
+                            platform: Platform.OS,
+                            lastUpdated: Date.now(),
+                            installationId,
+                        }, { merge: true });
+                        logger.info('✅ Push token written to push_tokens/' + uid + '/devices/' + installationId);
+                    } catch {
+                        // installationId may not be available — non-blocking
+                    }
+
+                    // Legacy: fcm_tokens/{uid} (BACKWARD COMPAT)
+                    const legacyRef = doc(db, 'fcm_tokens', uid);
+                    await setDoc(legacyRef, {
+                        token: this.token,
+                        userId: uid,
+                        platform: Platform.OS,
+                        lastUpdated: Date.now(),
+                    }, { merge: true });
+                    logger.info('✅ FCM token backup written to fcm_tokens/' + uid);
+                }
+            }
+        } catch (backupError) {
+            // Non-blocking — CF registration may have succeeded
+            logger.debug('FCM token direct backup write failed (non-blocking):', backupError);
+        }
     }
 
     // ==================== NOTIFICATION HANDLERS ====================
@@ -210,52 +314,21 @@ class FCMTokenService {
     private async setupNotificationHandlers(): Promise<void> {
         const Notif = await getNotifications();
 
-        // Foreground handler
-        Notif.setNotificationHandler({
-            handleNotification: async (notification) => {
-                const data = notification.request.content.data;
+        // Foreground handler is centralized in NotificationCenter.initialize()
+        // (EEW MAX priority logic consolidated there)
 
-                // Always show EEW notifications
-                if (data?.type === 'EEW') {
-                    // Trigger ultra-fast notification system
-                    this.handleEEWNotification(data);
-
-                    return {
-                        shouldShowAlert: true,
-                        shouldPlaySound: true,
-                        shouldSetBadge: true,
-                        shouldShowBanner: true,
-                        shouldShowList: true,
-                        priority: Notif.AndroidNotificationPriority.MAX,
-                    };
-                }
-
-                return {
-                    shouldShowAlert: true,
-                    shouldPlaySound: true,
-                    shouldSetBadge: true,
-                    shouldShowBanner: true,
-                    shouldShowList: true,
-                };
-            },
-        });
-
-        // Background/killed handler
+        // Foreground receive hook — avoid duplicate local notifications.
+        // System banner/list delivery is already handled by NotificationCenter
+        // setNotificationHandler + OS push display.
         Notif.addNotificationReceivedListener((notification) => {
             const data = notification.request.content.data;
-            if (data?.type === 'EEW') {
+            const type = String(data?.type || '').toLowerCase();
+            if (type === 'eew') {
                 this.handleEEWNotification(data);
             }
         });
 
-        // Notification response handler
-        Notif.addNotificationResponseReceivedListener((response) => {
-            const data = response.notification.request.content.data;
-            if (data?.type === 'EEW') {
-                // Navigate to EEW detail screen
-                logger.info('User tapped EEW notification:', data);
-            }
-        });
+        // Notification tap handling is centralized in NotificationCenter.initialize()
 
         logger.info('✅ Notification handlers setup');
     }
@@ -267,22 +340,70 @@ class FCMTokenService {
         logger.warn('🚨 EEW NOTIFICATION RECEIVED:', data);
 
         try {
-            // Import ultra-fast notification service
-            const { ultraFastEEWNotification } = await import('./UltraFastEEWNotification');
+            const magnitude = Number(data.magnitude);
+            const location = String(data.location || 'Unknown').trim() || 'Unknown';
+            const latitude = Number(data.latitude);
+            const longitude = Number(data.longitude);
+            const depth = Number(data.depth);
+            const rawSource = String(data.source || 'AFAD').trim().toUpperCase();
+            const source =
+                rawSource === 'AFAD' || rawSource === 'USGS' || rawSource === 'KANDILLI' || rawSource === 'EMSC' || rawSource === 'KOERI'
+                    ? rawSource
+                    : 'AFAD';
+            const timestampRaw = Number(data.timestamp);
+            const eventTimestamp = Number.isFinite(timestampRaw) ? timestampRaw : Date.now();
 
-            // Trigger full alert chain
-            await ultraFastEEWNotification.sendEEWNotification({
-                magnitude: Number(data.magnitude) || 0,
-                location: String(data.location) || 'Unknown',
-                warningSeconds: 30, // Estimated
-                estimatedIntensity: this.estimateIntensity(Number(data.magnitude) || 0),
-                epicentralDistance: 100, // Will be calculated
-                source: (data.source as 'AFAD') || 'AFAD',
-                epicenter: {
-                    latitude: Number(data.latitude) || 0,
-                    longitude: Number(data.longitude) || 0,
-                },
-            });
+            if (!Number.isFinite(magnitude) || magnitude <= 0) {
+                logger.warn('Skipping EEW foreground handling: invalid magnitude', data);
+                return;
+            }
+
+            // IMPORTANT: do NOT call notificationCenter.notify('eew') here.
+            // The push itself is already displayed by OS/NotificationCenter handler.
+            // Calling notify() here created duplicate EEW notifications in foreground.
+
+            // Persist to local EEW history for user-facing traceability.
+            try {
+                const { useEEWHistoryStore } = await import('../stores/eewHistoryStore');
+                useEEWHistoryStore.getState().addEvent({
+                    timestamp: eventTimestamp,
+                    magnitude,
+                    location,
+                    depth: Number.isFinite(depth) ? depth : 0,
+                    latitude: Number.isFinite(latitude) ? latitude : 0,
+                    longitude: Number.isFinite(longitude) ? longitude : 0,
+                    warningTime: 0,
+                    estimatedIntensity: this.estimateIntensity(magnitude),
+                    epicentralDistance: 0,
+                    source: source as 'AFAD' | 'KANDILLI' | 'USGS' | 'EMSC' | 'CROWDSOURCED' | 'DEVICE_SENSOR',
+                    wasNotified: true,
+                    confidence: 1.0,
+                    certainty: magnitude >= 6.0 ? 'high' : magnitude >= 5.0 ? 'medium' : 'low',
+                });
+            } catch (historyError) {
+                logger.debug('EEW history write skipped:', historyError);
+            }
+
+            // Trigger emergency mode if threshold met.
+            try {
+                const { emergencyModeService } = await import('./EmergencyModeService');
+                const earthquake = {
+                    id: String(data.eventId || data.id || `eew_${eventTimestamp}`),
+                    magnitude,
+                    location,
+                    latitude: Number.isFinite(latitude) ? latitude : 0,
+                    longitude: Number.isFinite(longitude) ? longitude : 0,
+                    depth: Number.isFinite(depth) ? depth : 0,
+                    time: eventTimestamp,
+                    source: source as 'AFAD' | 'USGS' | 'KANDILLI' | 'EMSC' | 'KOERI' | 'SEISMIC_SENSOR',
+                };
+
+                if (emergencyModeService.shouldTriggerEmergencyMode(earthquake)) {
+                    await emergencyModeService.activateEmergencyMode(earthquake);
+                }
+            } catch (emergencyError) {
+                logger.debug('EEW emergency mode trigger skipped:', emergencyError);
+            }
         } catch (error) {
             logger.error('Failed to handle EEW notification:', error);
         }

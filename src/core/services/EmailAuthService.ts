@@ -13,7 +13,6 @@
  */
 
 import {
-    getAuth,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
     signOut,
@@ -30,7 +29,7 @@ import {
     UserCredential,
 } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { initializeFirebase } from '../../lib/firebase';
+import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
 import { identityService } from './IdentityService';
@@ -53,11 +52,10 @@ async function sendPremiumVerificationEmail(displayName?: string): Promise<void>
     } catch (error) {
         logger.warn('Premium e-posta gönderilemedi, Firebase varsayılanı kullanılıyor:', error);
         // Fallback: Firebase's built-in (plain) email
-        const app = initializeFirebase();
-        if (app) {
-            const auth = getAuth(app);
-            if (auth.currentUser) {
-                await sendEmailVerification(auth.currentUser);
+        const fallbackAuth = getFirebaseAuth();
+        if (fallbackAuth) {
+            if (fallbackAuth.currentUser) {
+                await sendEmailVerification(fallbackAuth.currentUser);
             }
         }
     }
@@ -167,10 +165,9 @@ export const EmailAuthService = {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const userCredential: UserCredential = await createUserWithEmailAndPassword(
                 auth,
                 email.trim().toLowerCase(),
@@ -260,10 +257,9 @@ export const EmailAuthService = {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const userCredential: UserCredential = await signInWithEmailAndPassword(
                 auth,
                 email.trim().toLowerCase(),
@@ -341,10 +337,9 @@ export const EmailAuthService = {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             await sendPasswordResetEmail(auth, email.trim().toLowerCase());
 
             logger.info('📧 Şifre sıfırlama e-postası gönderildi:', email);
@@ -360,10 +355,9 @@ export const EmailAuthService = {
      */
     resendVerificationEmail: async (): Promise<void> => {
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user) {
@@ -387,10 +381,9 @@ export const EmailAuthService = {
      * E-posta doğrulanmış mı kontrol et
      */
     isEmailVerified: (): boolean => {
-        const app = initializeFirebase();
-        if (!app) return false;
+        const auth = getFirebaseAuth();
+        if (!auth) return false;
 
-        const auth = getAuth(app);
         return auth.currentUser?.emailVerified ?? false;
     },
 
@@ -398,10 +391,9 @@ export const EmailAuthService = {
      * Mevcut kullanıcının e-postasını al
      */
     getCurrentEmail: (): string | null => {
-        const app = initializeFirebase();
-        if (!app) return null;
+        const auth = getFirebaseAuth();
+        if (!auth) return null;
 
-        const auth = getAuth(app);
         return auth.currentUser?.email ?? null;
     },
 
@@ -415,10 +407,9 @@ export const EmailAuthService = {
      */
     reauthenticate: async (password: string): Promise<void> => {
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user || !user.email) {
@@ -452,10 +443,9 @@ export const EmailAuthService = {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user || !user.email) {
@@ -489,10 +479,9 @@ export const EmailAuthService = {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user || !user.email) {
@@ -528,10 +517,9 @@ export const EmailAuthService = {
      */
     deleteAccount: async (password: string): Promise<void> => {
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user || !user.email) {
@@ -582,10 +570,9 @@ export const EmailAuthService = {
      */
     refreshUser: async (): Promise<void> => {
         try {
-            const app = initializeFirebase();
-            if (!app) throw new Error('Firebase başlatılamadı');
+            const auth = getFirebaseAuth();
+            if (!auth) throw new Error('Firebase başlatılamadı');
 
-            const auth = getAuth(app);
             const user = auth.currentUser;
 
             if (!user) {
@@ -605,10 +592,9 @@ export const EmailAuthService = {
      * ELITE: Mevcut kullanıcı bilgilerini al
      */
     getCurrentUser: (): { uid: string; email: string | null; displayName: string | null; emailVerified: boolean } | null => {
-        const app = initializeFirebase();
-        if (!app) return null;
+        const auth = getFirebaseAuth();
+        if (!auth) return null;
 
-        const auth = getAuth(app);
         const user = auth.currentUser;
 
         if (!user) return null;

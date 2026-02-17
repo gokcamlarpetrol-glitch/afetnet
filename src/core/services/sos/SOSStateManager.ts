@@ -80,6 +80,30 @@ export interface SOSSignal {
     lastBeaconAt: number | null;
 }
 
+/**
+ * Incoming SOS alert from another user (received via SOSAlertListener).
+ * Displayed as markers on DisasterMapScreen.
+ */
+export interface IncomingSOSAlert {
+    id: string;
+    signalId: string;
+    senderDeviceId: string;
+    senderUid?: string;
+    senderName: string;
+    latitude: number;
+    longitude: number;
+    timestamp: number;
+    message: string;
+    trapped: boolean;
+    battery?: number;
+    healthInfo?: {
+        bloodType?: string;
+        allergies?: string;
+        chronicConditions?: string;
+        emergencyNotes?: string;
+    };
+}
+
 // ============================================================================
 // STORE INTERFACE
 // ============================================================================
@@ -96,6 +120,9 @@ interface SOSState {
     // History
     signalHistory: SOSSignal[];
 
+    // Incoming SOS from other users
+    incomingSOSAlerts: IncomingSOSAlert[];
+
     // Stats
     stats: {
         totalSignals: number;
@@ -104,7 +131,7 @@ interface SOSState {
     };
 
     // Actions
-    startCountdown: (reason: EmergencyReason, message?: string) => void;
+    startCountdown: (reason: EmergencyReason, userId: string, message?: string) => void;
     cancelCountdown: () => void;
     decrementCountdown: () => number;
     activateSOS: (signal: SOSSignal) => void;
@@ -113,6 +140,8 @@ interface SOSState {
     updateDeviceStatus: (device: Partial<DeviceStatus>) => void;
     addAck: (ack: SOSAck) => void;
     incrementBeaconCount: () => void;
+    addIncomingSOSAlert: (alert: IncomingSOSAlert) => void;
+    clearIncomingSOSAlerts: () => void;
     stopSOS: () => void;
     reset: () => void;
 }
@@ -166,6 +195,7 @@ export const useSOSStore = create<SOSState>()(
             countdownSeconds: DEFAULT_COUNTDOWN,
             isCountingDown: false,
             signalHistory: [],
+            incomingSOSAlerts: [],
             stats: {
                 totalSignals: 0,
                 totalAcks: 0,
@@ -173,8 +203,7 @@ export const useSOSStore = create<SOSState>()(
             },
 
             // Start Countdown
-            startCountdown: (reason, message = 'Acil yardım gerekiyor!') => {
-                const userId = 'user'; // Will be set by controller
+            startCountdown: (reason, userId, message = 'Acil yardım gerekiyor!') => {
                 const signal = createEmptySignal(userId, reason, message);
 
                 set({
@@ -301,6 +330,23 @@ export const useSOSStore = create<SOSState>()(
                         },
                     });
                 }
+            },
+
+            // Add incoming SOS alert from another user
+            addIncomingSOSAlert: (alert) => {
+                const { incomingSOSAlerts } = get();
+                // Skip duplicate
+                if (incomingSOSAlerts.some(a => a.id === alert.id)) return;
+                // Keep max 50, newest first
+                set({
+                    incomingSOSAlerts: [alert, ...incomingSOSAlerts].slice(0, 50),
+                });
+                logger.info(`🆘 Incoming SOS alert added: ${alert.senderName}`);
+            },
+
+            // Clear all incoming SOS alerts
+            clearIncomingSOSAlerts: () => {
+                set({ incomingSOSAlerts: [] });
             },
 
             // Stop SOS

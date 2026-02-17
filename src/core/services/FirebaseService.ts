@@ -128,45 +128,12 @@ class FirebaseService {
           this.pushToken = expoToken.data;
           if (__DEV__) logger.info('Expo push token:', this.pushToken);
 
-          // ELITE: Try to get FCM token (for Firebase Cloud Messaging)
-          // Note: FCM token may not be available in all environments (e.g., Expo Go, web)
-          // This is optional - Expo push token is primary
-          try {
-            const { getFCMToken } = await import('../../lib/firebase');
-
-            // ELITE: Wait a bit for Firebase to fully initialize
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            const fcmToken = await getFCMToken();
-            if (fcmToken && typeof fcmToken === 'string' && fcmToken.length > 10) {
-              this.fcmToken = fcmToken;
-              if (__DEV__) {
-                logger.info('FCM token obtained:', fcmToken.substring(0, 20) + '...');
-              }
-
-              // ELITE: Register FCM token with backend (fire and forget)
-              this.registerTokenWithBackend(fcmToken).catch((backendError) => {
-                // Backend registration is optional - don't block initialization
-                if (__DEV__) {
-                  logger.debug('Backend token registration failed (non-critical):', backendError);
-                }
-              });
-            } else {
-              if (__DEV__) {
-                logger.debug('FCM token not available (using Expo push token only)');
-              }
-            }
-          } catch (fcmError: unknown) {
-            // FCM token is optional - Expo push token is primary
-            const errorMessage = fcmError instanceof Error ? fcmError.message : String(fcmError);
-            if (__DEV__) {
-              logger.debug('FCM token not available (using Expo push token):', errorMessage);
-            }
-            // Don't throw - continue with Expo push token
+          // NOTE: firebase/messaging (web SDK) is NOT used in React Native
+          // Push notifications handled entirely by expo-notifications + Expo push token
+          // FCM token registration is done via FCMTokenService if needed
+          if (__DEV__) {
+            logger.debug('FCM web SDK skipped — using Expo push token for notifications');
           }
-
-          // ELITE: Set up foreground message handler for Firebase
-          await this.setupForegroundMessageHandler();
 
           // ELITE: Sync token with Firestore (Future-proof)
           try {
@@ -220,35 +187,12 @@ class FirebaseService {
   }
 
   /**
-   * ELITE: Set up foreground message handler for Firebase Cloud Messaging
+   * NOTE: Foreground message handling is done via expo-notifications
+   * firebase/messaging (web SDK) is NOT available in React Native
    */
   private async setupForegroundMessageHandler(): Promise<void> {
-    try {
-      const { onForegroundMessage } = await import('../../lib/firebase');
-
-      // ELITE: Handle foreground messages from Firebase
-      this.foregroundMessageUnsubscribe = await onForegroundMessage(async (payload: FirebaseMessagePayload) => {
-        try {
-          if (__DEV__) {
-            logger.info('📨 Firebase foreground message received:', payload);
-          }
-
-          // ELITE: Process Firebase message and show notification
-          await this.handleFirebaseMessage(payload);
-        } catch (error) {
-          logger.error('Failed to handle Firebase foreground message:', error);
-        }
-      });
-
-      if (__DEV__) {
-        logger.info('✅ Firebase foreground message handler registered');
-      }
-    } catch (error) {
-      // ELITE: Foreground message handler is optional
-      if (__DEV__) {
-        logger.debug('Firebase foreground message handler not available:', error);
-      }
-    }
+    // No-op: firebase/messaging web SDK removed
+    // Foreground notifications handled by expo-notifications
   }
 
   /**
@@ -267,105 +211,122 @@ class FirebaseService {
       const data = payload?.data || {};
       const notification = payload?.notification || {};
 
-      // ELITE: Get notification service dynamically
-      const { notificationService } = await import('./NotificationService');
-
       // ELITE: Determine notification type and show appropriate notification
       const notificationType = safeLowerCase(data.type || 'general');
 
       switch (notificationType) {
-      case 'earthquake':
-      case 'eew': {
-        const magnitude = parseFloat(data.magnitude || '0');
-        const location = String(data.location || data.region || 'Bilinmeyen konum').trim();
+        case 'earthquake':
+        case 'eew': {
+          const magnitude = parseFloat(data.magnitude || '0');
+          const location = String(data.location || data.region || 'Bilinmeyen konum').trim();
 
-        if (magnitude > 0 && location.length > 0) {
-          await notificationService.showEarthquakeNotification(magnitude, location);
-        } else {
-          if (__DEV__) {
-            logger.debug('Invalid earthquake notification data:', { magnitude, location });
+          if (magnitude > 0 && location.length > 0) {
+            // CRITICAL FIX: Route through MagnitudeBasedNotificationService directly.
+            // Using notificationService.showEarthquakeNotification adds unnecessary
+            // indirection (it calls MBN internally anyway) and lacks lat/lng passing.
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('earthquake', {
+              magnitude,
+              location,
+              isEEW: notificationType === 'eew',
+              timestamp: Date.now(),
+              depth: data.depth ? parseFloat(data.depth) : undefined,
+              source: data.source || 'FCM',
+              latitude: data.latitude ? parseFloat(data.latitude) : undefined,
+              longitude: data.longitude ? parseFloat(data.longitude) : undefined,
+            }, 'FirebaseService');
+          } else {
+            if (__DEV__) {
+              logger.debug('Invalid earthquake notification data:', { magnitude, location });
+            }
           }
+          break;
         }
-        break;
-      }
 
-      case 'message': {
-        const senderName = String(data.senderName || 'Bilinmeyen').trim();
-        const messageContent = String(data.message || notification.body || '').trim();
-        const messageId = String(data.messageId || '').trim();
-        const userId = String(data.userId || '').trim();
-        const priority = (data.priority === 'critical' || data.priority === 'high') ? data.priority : 'normal';
+        case 'message': {
+          const senderName = String(data.senderName || 'Bilinmeyen').trim();
+          const messageContent = String(data.message || notification.body || '').trim();
+          const messageId = String(data.messageId || '').trim();
+          const userId = String(data.userId || '').trim();
 
-        if (senderName.length > 0 && messageContent.length > 0) {
-          await notificationService.showMessageNotification(
-            senderName,
-            messageContent,
-            messageId,
-            userId,
-            priority,
-          );
-        } else {
-          if (__DEV__) {
-            logger.debug('Invalid message notification data:', { senderName, messageContent });
+          if (senderName.length > 0 && messageContent.length > 0) {
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('message', {
+              senderName,
+              from: senderName,
+              message: messageContent,
+              messageId,
+              senderId: userId,
+              userId,
+              conversationId: String(data.conversationId || userId || '').trim() || undefined,
+            }, 'FirebaseService');
+          } else {
+            if (__DEV__) {
+              logger.debug('Invalid message notification data:', { senderName, messageContent });
+            }
           }
+          break;
         }
-        break;
-      }
 
-      case 'news': {
-        const title = String(notification.title || data.title || 'Yeni Haber').trim();
-        const summary = String(notification.body || data.summary || '').trim();
-        const source = String(data.source || 'Haber').trim();
+        case 'news': {
+          const title = String(notification.title || data.title || 'Yeni Haber').trim();
+          const summary = String(notification.body || data.summary || '').trim();
+          const source = String(data.source || 'Haber').trim();
 
-        if (title.length > 0 && summary.length > 0) {
-          await notificationService.showNewsNotification({
-            title,
-            summary,
-            source,
-            url: data.url && typeof data.url === 'string' ? data.url.trim() : undefined,
-            articleId: data.articleId && typeof data.articleId === 'string' ? data.articleId.trim() : undefined,
-          });
-        } else {
-          if (__DEV__) {
-            logger.debug('Invalid news notification data:', { title, summary });
+          if (title.length > 0 && summary.length > 0) {
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('news', {
+              title,
+              summary,
+              source,
+              url: data.url && typeof data.url === 'string' ? data.url.trim() : undefined,
+            }, 'FirebaseService');
+          } else {
+            if (__DEV__) {
+              logger.debug('Invalid news notification data:', { title, summary });
+            }
           }
+          break;
         }
-        break;
-      }
 
-      case 'sos': {
-        const from = String(data.from || data.senderName || 'Bilinmeyen').trim();
+        case 'sos': {
+          const from = String(data.from || data.senderName || 'Bilinmeyen').trim();
 
-        if (from.length > 0) {
-          await notificationService.showSOSNotification(from);
-        } else {
-          if (__DEV__) {
-            logger.debug('Invalid SOS notification data:', { from });
+          if (from.length > 0) {
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('sos_received', {
+              from,
+              senderName: from,
+              senderId: String(data.userId || data.senderId || '').trim() || undefined,
+              signalId: String(data.signalId || data.id || '').trim() || undefined,
+              timestamp: Date.now(),
+              location: data.latitude && data.longitude ? {
+                latitude: parseFloat(data.latitude),
+                longitude: parseFloat(data.longitude),
+              } : undefined,
+            }, 'FirebaseService');
+          } else {
+            if (__DEV__) {
+              logger.debug('Invalid SOS notification data:', { from });
+            }
           }
+          break;
         }
-        break;
-      }
 
-      default: {
-        // ELITE: Show generic notification for unknown types
-        const Notifications = await getNotificationsAsync();
-        if (Notifications) {
+        default: {
+          // ELITE: Show generic notification for unknown types via NotificationCenter
           const genericTitle = String(notification.title || 'AfetNet').trim();
           const genericBody = String(notification.body || data.message || '').trim();
 
           if (genericTitle.length > 0 || genericBody.length > 0) {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: genericTitle || 'AfetNet',
-                body: genericBody || '',
-                sound: 'default',
-                data: data,
-              },
-              trigger: null,
-            });
+            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            await notificationCenter.notify('system', {
+              subtype: 'generic',
+              title: genericTitle || 'AfetNet',
+              message: genericBody || '',
+            }, 'FirebaseService-generic');
           }
         }
-      }
       }
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
@@ -417,64 +378,13 @@ class FirebaseService {
   }
 
   /**
-   * ELITE: Refresh FCM token (called when token changes)
-   * This should be called periodically or when token refresh is detected
+   * NOTE: FCM token refresh via web SDK removed
+   * Token management handled by FCMTokenService + expo-notifications
    */
   async refreshFCMToken(): Promise<string | null> {
-    try {
-      const { getFCMToken } = await import('../../lib/firebase');
-      const newToken = await getFCMToken();
-
-      if (newToken && typeof newToken === 'string' && newToken.length > 10) {
-        if (newToken !== this.fcmToken) {
-          const oldToken = this.fcmToken;
-          this.fcmToken = newToken;
-
-          // ELITE: Re-register with backend if token changed
-          if (oldToken) {
-            // Fire and forget - don't block token refresh
-            this.registerTokenWithBackend(newToken).catch((backendError) => {
-              if (__DEV__) {
-                logger.debug('Backend token re-registration failed (non-critical):', backendError);
-              }
-            });
-          } else {
-            // First time getting token - register with backend
-            this.registerTokenWithBackend(newToken).catch((backendError) => {
-              if (__DEV__) {
-                logger.debug('Backend token registration failed (non-critical):', backendError);
-              }
-            });
-          }
-
-          if (__DEV__) {
-            logger.info('✅ FCM token refreshed');
-          }
-        }
-      } else {
-        // Token is null or invalid - this is expected in some environments
-        if (__DEV__) {
-          logger.debug('FCM token refresh returned null (expected in some environments)');
-        }
-      }
-
-      return this.fcmToken;
-    } catch (error: unknown) {
-      const errorObj = error as { message?: string };
-      const errorMessage = errorObj?.message || String(error);
-
-      // ELITE: Some errors are expected and shouldn't be logged as errors
-      if (errorMessage.includes('messaging/unsupported-browser') ||
-        errorMessage.includes('messaging/registration-token-not-found')) {
-        if (__DEV__) {
-          logger.debug('FCM token refresh not available (expected in some environments)');
-        }
-      } else {
-        logger.error('Failed to refresh FCM token:', errorMessage);
-      }
-
-      return this.fcmToken;
-    }
+    // firebase/messaging web SDK not available in React Native
+    // FCM token is managed by FCMTokenService 
+    return this.fcmToken;
   }
 
   getPushToken(): string | null {
@@ -487,16 +397,12 @@ class FirebaseService {
 
   async sendTestNotification() {
     try {
-      const Notifications = await getNotificationsAsync();
-      if (!Notifications) return;
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'AfetNet Test',
-          body: 'Bildirimler çalışıyor!',
-        },
-        trigger: null,
-      });
+      const { notificationCenter } = await import('./notifications/NotificationCenter');
+      await notificationCenter.notify('system', {
+        subtype: 'generic',
+        title: 'AfetNet Test',
+        message: 'Bildirimler çalışıyor!',
+      }, 'FirebaseService-test');
     } catch (error) {
       logger.error('Test notification error:', error);
     }

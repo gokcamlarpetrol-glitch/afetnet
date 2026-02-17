@@ -27,17 +27,22 @@ import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
 import { hybridMessageService } from '../../services/HybridMessageService';
 import { getDeviceId } from '../../../lib/device';
 import { identityService } from '../../services/IdentityService';
+import { contactService } from '../../services/ContactService';
+import { useFamilyStore } from '../../stores/familyStore';
 import { createLogger } from '../../utils/logger';
 import * as haptics from '../../utils/haptics';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import type { ParamListBase } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
+import type { MainStackParamList } from '../../types/navigation';
 
 const logger = createLogger('SOSConversationScreen');
+const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 
 // ELITE: Type-safe navigation prop
-type SOSConversationNavigationProp = StackNavigationProp<ParamListBase>;
+type SOSConversationNavigationProp = StackNavigationProp<MainStackParamList, 'SOSConversation'>;
+type SOSConversationRouteProp = RouteProp<MainStackParamList, 'SOSConversation'>;
 
 // ELITE: Message type for SOS conversation
 interface SOSMessageType {
@@ -49,33 +54,47 @@ interface SOSMessageType {
 }
 
 interface SOSConversationScreenProps {
-  route?: {
-    params: {
-      sosUserId: string;
-      sosLocation?: {
-        latitude: number;
-        longitude: number;
-        accuracy?: number;
-      };
-      sosMessage?: string;
-      sosBatteryLevel?: number;
-      sosNetworkStatus?: string;
-      sosTrapped?: boolean;
-    };
-  };
+  route?: SOSConversationRouteProp;
   navigation?: SOSConversationNavigationProp;
 }
 
 export default function SOSConversationScreen({ route, navigation }: SOSConversationScreenProps) {
   // ELITE: Safe param access with defaults
   const params = route?.params ?? { sosUserId: '' };
-  const { sosUserId, sosLocation, sosMessage, sosBatteryLevel, sosNetworkStatus, sosTrapped } = params;
+  const { sosUserId, sosSenderUid, sosUserAliases, sosLocation, sosMessage, sosBatteryLevel, sosNetworkStatus, sosTrapped } = params;
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<SOSMessageType[]>([]);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const meshMessages = useMeshStore((state) => state.messages);
+  const familyMembers = useFamilyStore((state) => state.members);
+
+  const peerIdCandidates = useMemo(() => {
+    const ids = new Set<string>();
+    const addId = (value?: string | null) => {
+      if (!value) return;
+      const normalized = value.trim();
+      if (!normalized || normalized === 'broadcast') return;
+      ids.add(normalized);
+    };
+
+    addId(sosUserId);
+    addId(sosSenderUid);
+    sosUserAliases?.forEach((alias) => addId(alias));
+
+    return ids;
+  }, [sosSenderUid, sosUserAliases, sosUserId]);
+
+  const resolvedRecipientId = useMemo(() => {
+    for (const candidate of peerIdCandidates) {
+      if (UID_REGEX.test(candidate)) return candidate;
+    }
+
+    const fallback = (sosSenderUid || sosUserId || '').trim();
+    if (!fallback || fallback === 'broadcast') return '';
+    return fallback;
+  }, [peerIdCandidates, sosSenderUid, sosUserId]);
 
   // Load device ID
   useEffect(() => {
@@ -118,17 +137,9 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
   }, []);
 
   const conversationMessages = useMemo(() => {
-    const selfIds = new Set<string>(['ME']);
-    if (myDeviceId) {
-      selfIds.add(myDeviceId);
-    }
-    const identity = identityService.getIdentity();
-    if (identity?.id) {
-      selfIds.add(identity.id);
-    }
-    if (identity?.deviceId) {
-      selfIds.add(identity.deviceId);
-    }
+    const selfIds = new Set<string>(['ME', 'me']);
+    const uid = identityService.getUid();
+    if (uid) selfIds.add(uid);
 
     const filtered = meshMessages
       .filter((msg: MeshMessage) => {
@@ -136,8 +147,8 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
           return false;
         }
 
-        const fromTarget = msg.senderId === sosUserId;
-        const toTarget = msg.to === sosUserId;
+        const fromTarget = peerIdCandidates.has(msg.senderId);
+        const toTarget = !!msg.to && peerIdCandidates.has(msg.to);
         const fromMe = selfIds.has(msg.senderId);
         const toMe = !!msg.to && selfIds.has(msg.to);
 
@@ -156,7 +167,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
 
     filtered.sort((a, b) => a.timestamp - b.timestamp);
     return filtered;
-  }, [meshMessages, myDeviceId, normalizeMessageContent, sosUserId]);
+  }, [meshMessages, myDeviceId, normalizeMessageContent, peerIdCandidates]);
 
   useEffect(() => {
     setMessages(conversationMessages);
@@ -164,11 +175,22 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
 
   // Send message
   const sendMessage = useCallback(async () => {
-    if (!inputText.trim() || !myDeviceId || isSending) {
+    if (!inputText.trim() || isSending) {
       return;
     }
 
     const messageContent = inputText.trim();
+    if (!resolvedRecipientId) {
+      Alert.alert('Hata', 'SOS kişi kimliği çözümlenemedi. Lütfen tekrar deneyin.');
+      return;
+    }
+    const selfIds = new Set<string>();
+    const myUid = identityService.getUid();
+    if (myUid) selfIds.add(myUid);
+    if (selfIds.has(resolvedRecipientId)) {
+      Alert.alert('Hata', 'Kendi hesabınıza SOS konuşması başlatılamaz.');
+      return;
+    }
     setInputText('');
     setIsSending(true);
 
@@ -178,7 +200,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
         await bleMeshService.start();
       }
 
-      await hybridMessageService.sendMessage(messageContent, sosUserId, {
+      await hybridMessageService.sendMessage(messageContent, resolvedRecipientId, {
         type: 'CHAT',
         priority: 'critical',
       });
@@ -191,7 +213,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     } finally {
       setIsSending(false);
     }
-  }, [inputText, myDeviceId, sosUserId, isSending]);
+  }, [inputText, isSending, myDeviceId, resolvedRecipientId]);
 
   // Share location
   const shareLocation = useCallback(async () => {
@@ -226,12 +248,19 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
       android: `geo:${sosLocation.latitude},${sosLocation.longitude}?q=${sosLocation.latitude},${sosLocation.longitude}`,
     });
 
-    if (url) {
-      Linking.openURL(url).catch((error) => {
-        logger.error('Failed to open maps:', error);
+    if (!url) {
+      Alert.alert('Hata', 'Harita açılamadı');
+      return;
+    }
+
+    const fallbackUrl = `https://maps.google.com/?q=${sosLocation.latitude},${sosLocation.longitude}`;
+    Linking.openURL(url).catch((error) => {
+      logger.warn('Primary maps URL failed in SOSConversationScreen:', error);
+      Linking.openURL(fallbackUrl).catch((fallbackError) => {
+        logger.error('Fallback maps URL failed in SOSConversationScreen:', fallbackError);
         Alert.alert('Hata', 'Harita açılamadı');
       });
-    }
+    });
   }, [sosLocation]);
 
   // Call emergency services

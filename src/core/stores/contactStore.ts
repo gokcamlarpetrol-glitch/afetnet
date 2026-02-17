@@ -15,11 +15,56 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth } from 'firebase/auth';
+import { initializeFirebase } from '../../lib/firebase';
 import { contactService, Contact, BlockedContact } from '../services/ContactService';
 import { identityService } from '../services/IdentityService';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('ContactStore');
+const CONTACT_STORE_KEY_BASE = 'afetnet-contacts-v2';
+const CONTACT_STORE_GUEST_SCOPE = 'guest';
+
+const getContactStoreScope = (): string => {
+    try {
+        const app = initializeFirebase();
+        if (!app) return CONTACT_STORE_GUEST_SCOPE;
+        const uid = getAuth(app).currentUser?.uid;
+        return uid ? `user:${uid}` : CONTACT_STORE_GUEST_SCOPE;
+    } catch {
+        return CONTACT_STORE_GUEST_SCOPE;
+    }
+};
+
+const getScopedContactStoreKey = (base: string): string => `${base}:${getContactStoreScope()}`;
+
+const scopedContactStoreStorage = {
+    getItem: async (name: string): Promise<string | null> => {
+        const scopedKey = getScopedContactStoreKey(name);
+        const scopedData = await AsyncStorage.getItem(scopedKey);
+        if (scopedData) {
+            return scopedData;
+        }
+
+        // One-time migration from legacy global store key.
+        const legacyData = await AsyncStorage.getItem(name);
+        if (!legacyData) {
+            return null;
+        }
+
+        await AsyncStorage.setItem(scopedKey, legacyData).catch(() => undefined);
+        await AsyncStorage.removeItem(name).catch(() => undefined);
+        logger.info(`♻️ ContactStore cache migrated to ${scopedKey}`);
+        return legacyData;
+    },
+    setItem: async (name: string, value: string): Promise<void> => {
+        await AsyncStorage.setItem(getScopedContactStoreKey(name), value);
+    },
+    removeItem: async (name: string): Promise<void> => {
+        await AsyncStorage.removeItem(getScopedContactStoreKey(name));
+        await AsyncStorage.removeItem(name).catch(() => undefined);
+    },
+};
 
 interface ContactState {
     // State
@@ -54,6 +99,7 @@ interface ContactState {
     refreshContacts: () => void;
     forceSync: () => Promise<void>;
     getContact: (id: string) => Contact | undefined;
+    clearLocalCache: () => Promise<void>;
 }
 
 export const useContactStore = create<ContactState>()(
@@ -107,10 +153,10 @@ export const useContactStore = create<ContactState>()(
             addContact: async (qrId, cloudUid, name, options) => {
                 set({ isLoading: true, error: null });
                 try {
-                    const contact = await contactService.addContact(qrId, cloudUid, name, options);
+                    const contact = await contactService.addContact(qrId, name, { ...options, addedVia: options?.addedVia || 'qr' });
 
                     set(state => ({
-                        contacts: [...state.contacts.filter(c => c.id !== qrId), contact],
+                        contacts: [...state.contacts.filter(c => c.uid !== qrId), contact],
                         isLoading: false,
                     }));
 
@@ -131,7 +177,7 @@ export const useContactStore = create<ContactState>()(
                     const contact = await contactService.addContactFromQR(qrData);
 
                     set(state => ({
-                        contacts: [...state.contacts.filter(c => c.id !== contact.id), contact],
+                        contacts: [...state.contacts.filter(c => c.uid !== contact.uid), contact],
                         isLoading: false,
                     }));
 
@@ -151,8 +197,8 @@ export const useContactStore = create<ContactState>()(
                     await contactService.removeContact(id);
 
                     set(state => ({
-                        contacts: state.contacts.filter(c => c.id !== id),
-                        favorites: state.favorites.filter(c => c.id !== id),
+                        contacts: state.contacts.filter(c => c.uid !== id),
+                        favorites: state.favorites.filter(c => c.uid !== id),
                     }));
 
                     logger.info(`🗑️ Removed: ${id}`);
@@ -168,10 +214,10 @@ export const useContactStore = create<ContactState>()(
 
                     set(state => ({
                         contacts: state.contacts.map(c =>
-                            c.id === id ? { ...c, ...updates } : c
+                            c.uid === id ? { ...c, ...updates } : c
                         ),
                         favorites: updates.isFavorite !== undefined
-                            ? state.favorites.map(c => c.id === id ? { ...c, ...updates } : c)
+                            ? state.favorites.map(c => c.uid === id ? { ...c, ...updates } : c)
                             : state.favorites,
                     }));
                 } catch (error) {
@@ -181,7 +227,7 @@ export const useContactStore = create<ContactState>()(
 
             // Toggle favorite (with Firebase sync)
             toggleFavorite: async (id) => {
-                const contact = get().contacts.find(c => c.id === id);
+                const contact = get().contacts.find(c => c.uid === id);
                 if (!contact) return;
 
                 const newFavoriteStatus = !contact.isFavorite;
@@ -189,7 +235,7 @@ export const useContactStore = create<ContactState>()(
 
                 set(state => {
                     const updatedContacts = state.contacts.map(c =>
-                        c.id === id ? { ...c, isFavorite: newFavoriteStatus } : c
+                        c.uid === id ? { ...c, isFavorite: newFavoriteStatus } : c
                     );
                     return {
                         contacts: updatedContacts,
@@ -205,8 +251,8 @@ export const useContactStore = create<ContactState>()(
                     const blockedList = contactService.getBlockedContacts();
 
                     set(state => ({
-                        contacts: state.contacts.filter(c => c.id !== id),
-                        favorites: state.favorites.filter(c => c.id !== id),
+                        contacts: state.contacts.filter(c => c.uid !== id),
+                        favorites: state.favorites.filter(c => c.uid !== id),
                         blocked: blockedList,
                     }));
 
@@ -222,7 +268,7 @@ export const useContactStore = create<ContactState>()(
                     await contactService.unblockContact(id);
 
                     set(state => ({
-                        blocked: state.blocked.filter(b => b.id !== id),
+                        blocked: state.blocked.filter(b => b.uid !== id),
                     }));
 
                     logger.info(`✅ Unblocked: ${id}`);
@@ -280,11 +326,28 @@ export const useContactStore = create<ContactState>()(
             },
 
             // Get single contact
-            getContact: (id) => get().contacts.find(c => c.id === id),
+            getContact: (id) => get().contacts.find(c => c.uid === id),
+
+            clearLocalCache: async () => {
+                set({
+                    contacts: [],
+                    favorites: [],
+                    blocked: [],
+                    isLoading: false,
+                    isSyncing: false,
+                    error: null,
+                    searchQuery: '',
+                    selectedContactId: null,
+                    pendingSyncCount: 0,
+                    lastSyncTime: null,
+                });
+                await AsyncStorage.removeItem(getScopedContactStoreKey(CONTACT_STORE_KEY_BASE)).catch(() => undefined);
+                await AsyncStorage.removeItem(CONTACT_STORE_KEY_BASE).catch(() => undefined);
+            },
         }),
         {
-            name: 'afetnet-contacts-v2',
-            storage: createJSONStorage(() => AsyncStorage),
+            name: CONTACT_STORE_KEY_BASE,
+            storage: createJSONStorage(() => scopedContactStoreStorage),
             partialize: (state) => ({
                 // Only persist these fields (cache for offline)
                 contacts: state.contacts,
