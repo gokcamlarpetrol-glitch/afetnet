@@ -231,60 +231,16 @@ class SOSChannelRouter {
     // ============================================================================
 
     private async broadcastViaPush(
-        signal: SOSSignal,
+        _signal: SOSSignal,
         updateStatus: (channel: 'push', status: ChannelStatus) => void
     ): Promise<void> {
-        updateStatus('push', 'pending');
-
-        try {
-            const netInfo = await NetInfo.fetch();
-            if (!netInfo.isConnected) {
-                logger.debug('Push skipped: offline');
-                updateStatus('push', 'idle');
-                return;
-            }
-
-            updateStatus('push', 'sending');
-
-            const { multiChannelAlertService } = await import('../MultiChannelAlertService');
-
-            // NOTE: This is a LOCAL confirmation notification for the SENDER.
-            // Remote family alerts are delivered via broadcastToFamily → SOSAlertListener.
-            await multiChannelAlertService.sendAlert({
-                title: '✅ SOS Gönderildi',
-                body: `Acil yardım çağrınız tüm kanallara iletildi.\n${signal.location
-                    ? `Konum: ${signal.location.latitude.toFixed(4)}, ${signal.location.longitude.toFixed(4)}`
-                    : 'Konum bilgisi yok'
-                    }`,
-                priority: 'high',
-                sound: 'default',
-                vibrationPattern: [0, 200, 100, 200],
-                ttsText: 'SOS çağrınız başarıyla gönderildi.',
-                channels: {
-                    pushNotification: true,
-                    fullScreenAlert: false,
-                    alarmSound: false,
-                    vibration: true,
-                    tts: true,
-                    led: false,
-                    bluetooth: false,
-                },
-                data: {
-                    type: 'sos_confirmation',
-                    signalId: signal.id,
-                    userId: signal.userId,
-                    location: signal.location,
-                    timestamp: signal.timestamp,
-                    trapped: signal.trapped,
-                },
-            });
-
-            updateStatus('push', 'sent');
-            logger.info('✅ SOS sent via Push');
-        } catch (error) {
-            logger.error('❌ Push broadcast failed:', error);
-            updateStatus('push', 'failed');
-        }
+        // CRITICAL FIX: Do NOT send a push notification to the SENDER's own phone.
+        // The sender already sees the SOSModal UI confirming their SOS is active.
+        // Remote family/nearby alerts are delivered via broadcastToFamily and broadcastToNearbyUsers.
+        // Sending a push to self was confusing — the user thought their own phone was receiving
+        // someone else's SOS when in reality it was their own confirmation.
+        updateStatus('push', 'sent');
+        logger.info('✅ Push channel: self-notification skipped (sender sees SOSModal UI)');
     }
 
     // ============================================================================

@@ -143,7 +143,7 @@ class NewsAggregatorService {
   private setCacheEntry(key: string, value: { summary: string; timestamp: number }): void {
     // Delete first so re-insertion moves it to the end (Map preserves insertion order)
     this.summaryCache.delete(key);
-    this.setCacheEntry(key, value);
+    this.summaryCache.set(key, value);
 
     // LRU eviction: remove oldest entries when cache exceeds limit
     if (this.summaryCache.size > NewsAggregatorService.MAX_CACHE_SIZE) {
@@ -1201,6 +1201,11 @@ class NewsAggregatorService {
       ? articleSummary.substring(0, maxSummaryLength) + '...'
       : (articleSummary || articleTitle);
 
+    // Format article publication date for the prompt
+    const articleDate = (article.publishedAt && typeof article.publishedAt === 'number' && article.publishedAt > 0)
+      ? new Date(article.publishedAt).toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : new Date().toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' });
+
     const prompt = `Aşağıdaki haberi kapsamlı ve profesyonel şekilde Türkçe özetle.
 
 GÖREV:
@@ -1211,13 +1216,15 @@ YAPI VE KURALLAR:
 2) İkinci paragrafta detayları aç — arka plan, nedenler, gelişmeler ve bağlam bilgisi.
 3) Üçüncü paragrafta etkileri ve sonuçları belirt — kimi etkiliyor, ne anlama geliyor, sonraki adımlar neler.
 4) Deprem haberi ise: büyüklük, merkez üssü, derinlik, il/ilçe, sarsıntının hissedildiği bölgeler, hasar bilgisi ve artçı şoklar bilgisini mutlaka dahil et.
-5) Yalnızca doğrulanabilir bilgi ver; kendi yorumunu ekleme.
+5) Yalnızca doğrulanabilir bilgi ver; kendi yorumunu ekleme. Tarih bilgisi olarak YALNIZCA haberde verilen tarihi kullan: ${articleDate}.
 6) Akıcı, profesyonel ve gazetecilik diline uygun Türkçe kullan.
 7) Gereksiz tekrar yapma, emoji kullanma, "Özet" başlığı ekleme.
 8) Haberin başlığını tekrarlama, doğrudan içeriğe gir.
+9) Tarih uydurmak YASAKTIR. Haberin yayın tarihi: ${articleDate}. Özetin herhangi bir yerinde tarih belirtiyorsan bu tarihi kullan.
 
 HABER:
 Başlık: ${articleTitle}
+Yayın Tarihi: ${articleDate}
 ${truncatedSummary ? `İçerik: ${truncatedSummary}` : ''}
 ${articleSource ? `Kaynak: ${articleSource}` : ''}
 ${(article.magnitude && typeof article.magnitude === 'number' && !isNaN(article.magnitude)) ? `Deprem Büyüklüğü: ${article.magnitude}` : ''}

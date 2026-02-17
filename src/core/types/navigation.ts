@@ -50,6 +50,18 @@ export type MainStackParamList = {
     } | undefined;
     CreateGroup: undefined;
     SOSHistory: undefined;
+    SOSHelp: {
+        signalId?: string;
+        senderUid?: string;
+        senderDeviceId?: string;
+        senderName?: string;
+        latitude?: number;
+        longitude?: number;
+        message?: string;
+        trapped?: boolean;
+        battery?: number;
+        healthInfo?: Record<string, string>;
+    } | undefined;
     NewsDetail: { newsId?: string; article?: Record<string, unknown> } | undefined;
     AllNews: undefined;
     PreparednessPlan: undefined;

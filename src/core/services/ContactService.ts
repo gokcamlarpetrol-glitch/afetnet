@@ -441,7 +441,7 @@ class ContactService {
         if (shouldSendRequest) {
             try {
                 const requestService = await getContactRequestService();
-                await requestService.sendContactRequest(trimUid, trimUid);
+                await requestService.sendContactRequest(trimUid, displayName || trimUid);
                 logger.info(`📬 Contact request sent to ${displayName}`);
             } catch (error) {
                 logger.warn('Failed to send contact request:', error);

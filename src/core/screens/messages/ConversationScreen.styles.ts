@@ -179,8 +179,6 @@ const styles = StyleSheet.create({
 
   // Input
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: 10,
     paddingTop: 10,
     borderTopWidth: 1,

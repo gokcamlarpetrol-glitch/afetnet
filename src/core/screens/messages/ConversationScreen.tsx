@@ -1004,16 +1004,20 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       text: conv.userName || `Kullanıcı ${conv.userId.slice(0, 6)}`,
       onPress: async () => {
         try {
-          const forwardContent = msg.mediaType
-            ? msg.content
-            : `↩️ İletilen mesaj:\n${msg.content}`;
-          await hybridMessageService.sendMessage(conv.userId, forwardContent, {
-            ...(msg.mediaType ? { mediaType: msg.mediaType } : {}),
-            ...(msg.mediaUrl ? { mediaUrl: msg.mediaUrl } : {}),
-            ...(typeof msg.mediaDuration === 'number' ? { mediaDuration: msg.mediaDuration } : {}),
-            ...(msg.mediaThumbnail ? { mediaThumbnail: msg.mediaThumbnail } : {}),
-            ...(msg.location ? { location: msg.location } : {}),
-          });
+          if (msg.mediaType && (msg.mediaType === 'image' || msg.mediaType === 'voice' || msg.mediaType === 'location')) {
+            await hybridMessageService.sendMediaMessage(msg.mediaType, conv.userId, {
+              mediaUrl: msg.mediaUrl,
+              mediaDuration: typeof msg.mediaDuration === 'number' ? msg.mediaDuration : undefined,
+              mediaThumbnail: msg.mediaThumbnail,
+              location: msg.location,
+              caption: msg.content || undefined,
+            });
+          } else {
+            const forwardContent = `↩️ İletilen mesaj:\n${msg.content}`;
+            await hybridMessageService.sendMessage(forwardContent, conv.userId, {
+              location: msg.location,
+            });
+          }
           haptics.notificationSuccess();
           Alert.alert('Başarılı', 'Mesaj iletildi.');
         } catch {
@@ -1144,6 +1148,12 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       if (isRecordingVoice) {
         return;
       }
+      // Ensure audio permissions and mode are configured before recording
+      const initialized = await voiceMessageService.initialize();
+      if (!initialized) {
+        Alert.alert('İzin Gerekli', 'Ses kaydı için mikrofon izni vermeniz gerekmektedir.');
+        return;
+      }
       const success = await voiceMessageService.startRecording();
       if (success) {
         setIsRecordingVoice(true);
@@ -1157,6 +1167,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         voiceRecordingIntervalRef.current = setInterval(() => {
           setVoiceRecordingDuration(prev => prev + 1);
         }, 1000);
+      } else {
+        Alert.alert('Hata', 'Ses kaydı başlatılamadı. Lütfen mikrofon izinlerini kontrol edin.');
       }
     } catch (error) {
       logger.error('Voice recording error:', error);
@@ -1528,7 +1540,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
             />
           )}
         </BlurView>
-      </KeyboardAvoidingView >
+      </KeyboardAvoidingView>
 
       {/* ELITE: Message Options Modal */}
       <MessageOptionsModal
@@ -1551,6 +1563,6 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         onSelectVoice={handleVoiceRecordStart}
         onSelectLocation={handleShareLocation}
       />
-    </ImageBackground >
+    </ImageBackground>
   );
 }

@@ -46,6 +46,7 @@ import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
 import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import SOSHistoryScreen from '../screens/sos/SOSHistoryScreen';
+import SOSHelpScreen from '../screens/sos/SOSHelpScreen';
 import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
 import MyQRScreen from '../screens/profile/MyQRScreen';
 
@@ -110,6 +111,7 @@ export default function MainNavigator() {
         <Stack.Screen name="SOSConversation" component={SOSConversationScreen} options={{ headerShown: false }} />
         <Stack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ headerShown: false }} />
         <Stack.Screen name="SOSHistory" component={SOSHistoryScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="SOSHelp" component={SOSHelpScreen} options={{ headerShown: false }} />
 
         <Stack.Screen name="NewsDetail" component={NewsDetailScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllNews" component={AllNewsScreen} options={{ headerShown: false }} />

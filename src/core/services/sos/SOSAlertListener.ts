@@ -246,6 +246,9 @@ async function showSOSReceivedNotification(alertData: any): Promise<void> {
             from: senderName,
             senderName,
             senderId: alertData.senderUid || alertData.senderDeviceId,
+            // Pass all fields needed by SOSHelp screen for deep link navigation
+            senderUid: alertData.senderUid,
+            senderDeviceId: alertData.senderDeviceId,
             signalId: alertData.signalId,
             message: alertData.trapped
                 ? `${senderName} enkaz altında! Acil yardım gerekiyor!`
@@ -254,8 +257,11 @@ async function showSOSReceivedNotification(alertData: any): Promise<void> {
                 latitude: alertData.location.latitude,
                 longitude: alertData.location.longitude,
             } : undefined,
+            trapped: alertData.trapped,
+            battery: alertData.battery,
+            healthInfo: alertData.healthInfo,
             timestamp: normalizeTimestampMs(alertData?.timestamp) ?? Date.now(),
-        }, 'SOSAlertListener');
+        } as any, 'SOSAlertListener');
 
         logger.info(`✅ SOS notification shown for alert from ${senderName}`);
     } catch (error) {

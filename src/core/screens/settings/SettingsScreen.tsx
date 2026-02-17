@@ -1053,6 +1053,29 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         <Text style={styles.userIdText}>ID: {deviceId}</Text>
       </ScrollView>
 
+      {/* Account Deletion Progress Overlay */}
+      {isDeletingAccount && (
+        <Modal visible transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <ActivityIndicator size="large" color="#ef4444" />
+              <Text style={[styles.modalTitle, { marginTop: 16 }]}>Hesap Siliniyor...</Text>
+              {deletionProgress && (
+                <>
+                  <Text style={styles.modalStep}>{deletionProgress.step}</Text>
+                  <View style={{ width: '100%', height: 6, backgroundColor: '#334155', borderRadius: 3, marginTop: 12 }}>
+                    <View style={{ width: `${(deletionProgress.progress / deletionProgress.total) * 100}%`, height: 6, backgroundColor: '#ef4444', borderRadius: 3 }} />
+                  </View>
+                  <Text style={[styles.modalStep, { marginTop: 8, fontSize: 12 }]}>
+                    {deletionProgress.progress}/{deletionProgress.total}
+                  </Text>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Android Password Change Modal */}
       {Platform.OS === 'android' && (
         <Modal

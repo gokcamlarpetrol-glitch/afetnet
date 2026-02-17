@@ -47,6 +47,13 @@ class AccountDeletionService {
     try {
       logger.info('Starting account deletion process...');
 
+      // Pre-initialize Firebase services for deletion
+      try {
+        await firebaseDataService.initialize();
+      } catch (initError) {
+        logger.warn('Firebase init before deletion (best effort):', initError);
+      }
+
       // Step 1: Delete device document
       progress++;
       onProgress?.({

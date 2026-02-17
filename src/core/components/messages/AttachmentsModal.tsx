@@ -122,8 +122,8 @@ export function AttachmentsModal({
                 </Pressable>
 
                 <Animated.View
-                    entering={SlideInDown.springify().damping(20)}
-                    exiting={SlideOutDown.springify()}
+                    entering={SlideInDown.duration(300).damping(24).stiffness(200)}
+                    exiting={SlideOutDown.duration(200)}
                     style={styles.contentContainer}
                 >
                     <BlurView intensity={80} tint="light" style={styles.content}>

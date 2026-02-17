@@ -50,6 +50,7 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
     const [qrPayload, setQrPayload] = useState<string>('');
     const [userName, setUserName] = useState<string>('');
     const [userId, setUserId] = useState<string>('');
+    const [publicCode, setPublicCode] = useState<string>('');
 
     // Pulse animation for QR code
     const pulseAnim = useRef(new RNAnimated.Value(1)).current;
@@ -60,11 +61,13 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
             await identityService.initialize();
             const payload = identityService.getQRPayload();
             const name = identityService.getDisplayName();
-            const id = identityService.getUid() || identityService.getMyId();
+            const uid = identityService.getUid() || identityService.getMyId();
+            const code = identityService.getPublicUserCode();
 
             setQrPayload(payload);
             setUserName(name || 'AfetNet Kullanıcısı');
-            setUserId(id || '');
+            setUserId(uid || '');
+            setPublicCode(code || '');
         };
 
         loadIdentity();
@@ -90,38 +93,41 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
         return () => pulse.stop();
     }, [pulseAnim]);
 
-    // Copy QR payload to clipboard
+    // Copy shareable ID code to clipboard
     const handleCopy = useCallback(async () => {
-        if (!qrPayload) return;
+        const codeToCopy = publicCode || userId;
+        if (!codeToCopy) return;
 
-        await Clipboard.setStringAsync(qrPayload);
+        await Clipboard.setStringAsync(codeToCopy);
         haptics.notificationSuccess();
-        Alert.alert('Kopyalandı', 'Kimlik bilgisi panoya kopyalandı.');
-    }, [qrPayload]);
+        Alert.alert('Kopyalandı', `Kullanıcı kodunuz panoya kopyalandı: ${codeToCopy}`);
+    }, [publicCode, userId]);
 
-    // Share QR payload as text
+    // Share QR payload as text — share publicUserCode for easy manual entry
     const handleShare = useCallback(async () => {
         try {
             haptics.impactMedium();
+            const shareCode = publicCode || userId;
 
             await Share.share({
-                message: `AfetNet ile beni ekle:\n\n${qrPayload}\n\nAfetNet uygulamasını açıp bu kodu QR tarayıcısında kullanabilirsin.`,
+                message: `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareCode}\n\nAfetNet uygulamasında Aile Üyesi Ekle > Manuel bölümünden bu kodu girebilirsin.\n\nVeya QR verisi:\n${qrPayload}`,
                 title: 'AfetNet Kişi Bilgisi',
             });
         } catch (error) {
             logger.error('Share error:', error);
             Alert.alert('Hata', 'Paylaşım başarısız. Lütfen tekrar deneyin.');
         }
-    }, [qrPayload]);
+    }, [qrPayload, publicCode, userId]);
 
-    // Copy short ID to clipboard
+    // Copy shareable code to clipboard (publicUserCode preferred)
     const handleCopyId = useCallback(async () => {
-        if (!userId) return;
+        const codeToCopy = publicCode || userId;
+        if (!codeToCopy) return;
 
-        await Clipboard.setStringAsync(userId);
+        await Clipboard.setStringAsync(codeToCopy);
         haptics.notificationSuccess();
-        Alert.alert('Kopyalandı', 'Kullanıcı ID panoya kopyalandı.');
-    }, [userId]);
+        Alert.alert('Kopyalandı', `Kullanıcı kodu panoya kopyalandı: ${codeToCopy}`);
+    }, [publicCode, userId]);
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -151,7 +157,9 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
                                 </View>
                                 <Text style={styles.userName}>{userName}</Text>
                                 <Pressable onPress={handleCopyId}>
-                                    <Text style={styles.userIdText}>ID: {userId.slice(0, 12)}... 📋</Text>
+                                    <Text style={styles.userIdText}>
+                                        {publicCode ? `Kod: ${publicCode}` : `ID: ${userId.slice(0, 12)}...`} 📋
+                                    </Text>
                                 </Pressable>
                             </View>
 

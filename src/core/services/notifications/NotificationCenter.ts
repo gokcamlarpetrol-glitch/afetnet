@@ -895,11 +895,12 @@ class NotificationCenter {
                 case 'sos_proximity':
                 case 'nearby_sos': {
                     // Store SOS alert for map marker display (proximity alerts)
+                    const pLat = toFiniteNumber(locationPayload.latitude ?? data.latitude ?? data.lat);
+                    const pLng = toFiniteNumber(locationPayload.longitude ?? data.longitude ?? data.lng);
+
                     if (type === 'sos_proximity' || type === 'nearby_sos' || type === 'sos_family' || type === 'family_sos') {
                         try {
                             const { useSOSStore } = await import('../sos/SOSStateManager');
-                            const pLat = toFiniteNumber(locationPayload.latitude ?? data.latitude ?? data.lat);
-                            const pLng = toFiniteNumber(locationPayload.longitude ?? data.longitude ?? data.lng);
                             if (pLat !== null && pLng !== null) {
                                 const senderDeviceId = toNonEmptyString(data.senderDeviceId) || '';
                                 const senderUid =
@@ -927,22 +928,24 @@ class NotificationCenter {
                         } catch { /* non-critical */ }
                     }
 
-                    // Navigate to map with SOS focus (parse location from various formats)
-                    const lat = toFiniteNumber(locationPayload.latitude ?? data.latitude ?? data.lat);
-                    const lng = toFiniteNumber(locationPayload.longitude ?? data.longitude ?? data.lng);
+                    // CRITICAL: Navigate to SOSHelp page — the dedicated rescue response screen
+                    // with live location tracking, rescue ACK, and emergency actions.
+                    const healthInfoRaw = data.healthInfo && typeof data.healthInfo === 'object'
+                        ? data.healthInfo as Record<string, string>
+                        : undefined;
 
-                    if (lat !== null && lng !== null) {
-                        navigateTo('DisasterMap', {
-                            focusOnSOS: true,
-                            sosLatitude: lat,
-                            sosLongitude: lng,
-                            sosSenderName: data.senderName || data.from || 'SOS',
-                        });
-                    } else if (data.signalId) {
-                        navigateTo('SOSHistory');
-                    } else {
-                        navigateTo('DisasterMap', { focusOnSOS: true });
-                    }
+                    navigateTo('SOSHelp', {
+                        signalId: toNonEmptyString(data.signalId),
+                        senderUid: toNonEmptyString(data.senderUid) || toNonEmptyString(data.userId),
+                        senderDeviceId: toNonEmptyString(data.senderDeviceId),
+                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from) || 'SOS',
+                        latitude: pLat ?? undefined,
+                        longitude: pLng ?? undefined,
+                        message: toNonEmptyString(data.message),
+                        trapped: data.trapped === 'true' || data.trapped === true,
+                        battery: toFiniteNumber(data.battery) ?? undefined,
+                        healthInfo: healthInfoRaw,
+                    });
                     break;
                 }
 

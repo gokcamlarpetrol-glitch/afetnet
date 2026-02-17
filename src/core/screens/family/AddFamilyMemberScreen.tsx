@@ -275,10 +275,33 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     }
   }, [selectedRelationship]);
 
-  // ELITE: Handle manual ID validation
-  const handleManualIdChange = useCallback((text: string) => {
-    // Elite Security: Sanitize input - only allow alphanumeric and dash
-    const sanitized = text.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 64);
+  // ELITE: Handle manual ID validation — also accepts pasted JSON QR payloads
+  const handleManualIdChange = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+
+    // Detect pasted JSON QR payload (e.g. {"v":4,"uid":"...","name":"..."})
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = await identityService.parseQRPayload(trimmed);
+        if (parsed?.uid) {
+          const normalizedUid = normalizeId(parsed.uid);
+          setManualId(normalizedUid);
+          setTargetUid(normalizedUid);
+          setTargetDeviceId('');
+          if (parsed.name && parsed.name !== 'Bilinmeyen Kullanıcı') {
+            setMemberName(parsed.name);
+          }
+          haptics.notificationSuccess();
+          Alert.alert('Kişi Bulundu', `"${parsed.name}" bilgileri otomatik dolduruldu.`);
+          return;
+        }
+      } catch {
+        // Not valid JSON QR — fall through to normal handling
+      }
+    }
+
+    // Normal input: Sanitize — only allow alphanumeric and dash
+    const sanitized = trimmed.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 64);
     const normalizedId = normalizeId(sanitized);
     setManualId(normalizedId);
     if (!normalizedId) {
