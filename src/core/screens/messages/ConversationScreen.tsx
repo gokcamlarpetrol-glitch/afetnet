@@ -455,16 +455,38 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     return ids;
   }, [identityId]);
 
+  const [asyncResolvedUid, setAsyncResolvedUid] = useState('');
   const resolvedRecipientId = useMemo(() => {
     const normalizedUserId = validUserId.trim();
     if (!normalizedUserId) return '';
     if (UID_REGEX.test(normalizedUserId)) return normalizedUserId;
 
-    const familyMember = familyMembers.find((m) => m.uid === normalizedUserId);
+    const familyMember = familyMembers.find((m) => m.uid === normalizedUserId || m.deviceId === normalizedUserId);
     if (familyMember?.uid && UID_REGEX.test(familyMember.uid)) return familyMember.uid;
 
+    // Use async-resolved UID if available
+    if (asyncResolvedUid && UID_REGEX.test(asyncResolvedUid)) return asyncResolvedUid;
+
     return '';
-  }, [familyMembers, validUserId]);
+  }, [familyMembers, validUserId, asyncResolvedUid]);
+
+  // Async UID resolution for non-UID identifiers (AFN codes, device IDs)
+  useEffect(() => {
+    const normalizedUserId = validUserId.trim();
+    if (!normalizedUserId || UID_REGEX.test(normalizedUserId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { firebaseDataService } = await import('../../services/FirebaseDataService');
+        await firebaseDataService.initialize();
+        const uid = await firebaseDataService.resolveRecipientUid(normalizedUserId);
+        if (!cancelled && uid && UID_REGEX.test(uid)) {
+          setAsyncResolvedUid(uid);
+        }
+      } catch { /* best effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, [validUserId]);
 
   const peerIdCandidates = useMemo(() => {
     const ids = new Set<string>();

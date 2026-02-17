@@ -97,7 +97,11 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     [],
   );
 
-  const displayDeviceId = myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...';
+  const displayUserCode = useMemo(() => {
+    const code = identityService.getPublicUserCode();
+    if (code) return code;
+    return myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...';
+  }, [myDeviceId, meshStoreDeviceId]);
 
   const handleHelp = useCallback(() => {
     Alert.alert(
@@ -536,11 +540,28 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     return false;
   };
 
-  const handleManualAdd = () => {
+  const handleManualAdd = async () => {
     const trimmedDeviceId = deviceId.trim();
     if (!trimmedDeviceId) {
       Alert.alert('Hata', 'Lütfen bir kullanıcı ID girin.');
       return;
+    }
+
+    // Detect pasted JSON QR payload (e.g. {"v":4,"uid":"...","name":"..."})
+    if (trimmedDeviceId.startsWith('{') && trimmedDeviceId.endsWith('}')) {
+      try {
+        const parsed = await identityService.parseQRPayload(trimmedDeviceId);
+        if (parsed?.uid) {
+          if (selfIdCandidates.has(parsed.uid)) {
+            Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+            return;
+          }
+          haptics.notificationSuccess();
+          try { await contactService.addContactFromQR(trimmedDeviceId); } catch { /* non-critical */ }
+          await startConversation(parsed.uid);
+          return;
+        }
+      } catch { /* fall through to normal validation */ }
     }
 
     if (!isValidContactId(trimmedDeviceId)) {
@@ -567,21 +588,22 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     startConversation(normalizedTarget);
   };
 
-  const handleCopyId = useCallback(async (explicitId?: string) => {
-    const idToCopy = explicitId || myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
+  const handleCopyId = useCallback(async () => {
+    const code = identityService.getPublicUserCode();
+    const idToCopy = code || myDeviceIdRef.current || useMeshStore.getState().myDeviceId;
     if (!idToCopy) return;
 
     await Clipboard.setStringAsync(idToCopy);
     haptics.notificationSuccess();
-    Alert.alert('Kopyalandı', 'Cihaz ID panoya kaydedildi.');
+    Alert.alert('Kopyalandı', `Kullanıcı kodu panoya kopyalandı: ${idToCopy}`);
   }, []);
 
   const statusItems = useMemo(() => [
     {
-      label: 'Cihaz ID',
-      value: myDeviceId ?? meshStoreDeviceId ?? 'Hazırlanıyor...',
+      label: 'Kullanıcı Kodu',
+      value: displayUserCode,
       icon: 'finger-print' as const,
-      action: myDeviceId ? (() => handleCopyId()) : undefined,
+      action: displayUserCode !== 'Hazırlanıyor...' ? (() => handleCopyId()) : undefined,
     },
     {
       label: 'Mesh Durumu',
@@ -1164,11 +1186,11 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
               <Pressable
                 style={({ pressed }) => [
                   styles.connectionAction,
-                  (!myDeviceId && !meshStoreDeviceId) && styles.connectionActionDisabled,
+                  (displayUserCode === 'Hazırlanıyor...') && styles.connectionActionDisabled,
                   pressed && styles.connectionActionPressed,
                 ]}
                 onPress={() => handleCopyId()}
-                disabled={!myDeviceId && !meshStoreDeviceId}
+                disabled={displayUserCode === 'Hazırlanıyor...'}
               >
                 <Ionicons name="copy-outline" size={16} color="#0ea5e9" />
                 <Text style={styles.connectionActionText}>Kimliği Kopyala</Text>
@@ -1180,8 +1202,8 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
                 <View style={[styles.statIcon, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
                   <Ionicons name="finger-print" size={16} color="#38bdf8" />
                 </View>
-                <Text style={styles.statLabel}>Cihaz ID</Text>
-                <Text style={styles.statValue} numberOfLines={1}>{displayDeviceId}</Text>
+                <Text style={styles.statLabel}>Kullanıcı Kodu</Text>
+                <Text style={styles.statValue} numberOfLines={1}>{displayUserCode}</Text>
               </View>
               <View style={styles.statItem}>
                 <View style={[styles.statIcon, { backgroundColor: isMeshConnected ? 'rgba(74,222,128,0.18)' : 'rgba(248,113,113,0.18)' }]}>
@@ -1249,7 +1271,14 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
               {qrValue && (
                 <View style={styles.qrWrapper}>
                   <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
-                  <Text style={styles.modalIdText}>{qrValue}</Text>
+                  <Text style={styles.modalIdText}>
+                    {(() => {
+                      try {
+                        const parsed = JSON.parse(qrValue);
+                        return parsed.code || parsed.uid || qrValue;
+                      } catch { return qrValue; }
+                    })()}
+                  </Text>
                 </View>
               )}
               <Text style={styles.modalHint}>
@@ -1264,7 +1293,12 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
                   style={styles.modalActionPrimary}
                   onPress={async () => {
                     if (qrValue) {
-                      await Clipboard.setStringAsync(qrValue);
+                      let codeToCopy = qrValue;
+                      try {
+                        const parsed = JSON.parse(qrValue);
+                        codeToCopy = parsed.code || parsed.uid || qrValue;
+                      } catch { /* not JSON */ }
+                      await Clipboard.setStringAsync(codeToCopy);
                       haptics.notificationSuccess();
                     }
                     handleCloseQrModal();

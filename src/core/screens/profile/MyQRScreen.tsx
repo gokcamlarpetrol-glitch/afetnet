@@ -110,7 +110,7 @@ export default function MyQRScreen({ navigation }: MyQRScreenProps) {
             const shareCode = publicCode || userId;
 
             await Share.share({
-                message: `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareCode}\n\nAfetNet uygulamasında Aile Üyesi Ekle > Manuel bölümünden bu kodu girebilirsin.\n\nVeya QR verisi:\n${qrPayload}`,
+                message: `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareCode}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`,
                 title: 'AfetNet Kişi Bilgisi',
             });
         } catch (error) {

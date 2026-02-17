@@ -284,6 +284,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       const identity = identityService.getIdentity();
       if (identity?.uid) {
         const qrPayload = identityService.getQRPayload?.();
+        // Use full QR payload for QR code encoding, but display publicUserCode
         setQrValue(qrPayload || identity.uid);
         setQrModalVisible(true);
         return;
@@ -484,7 +485,14 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
               {qrValue && (
                 <View style={styles.modalQrWrapper}>
                   <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
-                  <Text style={styles.modalIdText}>{qrValue}</Text>
+                  <Text style={styles.modalIdText}>
+                    {(() => {
+                      try {
+                        const parsed = JSON.parse(qrValue);
+                        return parsed.code || parsed.uid || qrValue;
+                      } catch { return qrValue; }
+                    })()}
+                  </Text>
                 </View>
               )}
               <View style={styles.modalActions}>
@@ -502,9 +510,15 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
                   onPress={async () => {
                     try {
                       if (qrValue && typeof qrValue === 'string') {
-                        await Clipboard.setStringAsync(qrValue);
+                        // Copy publicUserCode, not full JSON
+                        let codeToCopy = qrValue;
+                        try {
+                          const parsed = JSON.parse(qrValue);
+                          codeToCopy = parsed.code || parsed.uid || qrValue;
+                        } catch { /* not JSON, copy as-is */ }
+                        await Clipboard.setStringAsync(codeToCopy);
                         haptics.notificationSuccess();
-                        logger.info('QR value copied to clipboard');
+                        logger.info('User code copied to clipboard');
                       }
                     } catch (error) {
                       logger.error('Error copying QR value:', error);

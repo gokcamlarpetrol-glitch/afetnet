@@ -25,28 +25,88 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
-import GlassButton from '../../components/buttons/GlassButton';
-import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { useMeshStore } from '../../services/mesh/MeshStore';
-import { useSettingsStore } from '../../stores/settingsStore';
-import { bleMeshService } from '../../services/BLEMeshService';
-import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
-import { MeshMessageType } from '../../services/mesh/MeshProtocol';
-import { familyTrackingService } from '../../services/FamilyTrackingService';
-import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
-import { identityService } from '../../services/IdentityService';
-import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
-import { MemberCard } from '../../components/family/MemberCard';
-import { FamilyMapView } from '../../components/family/FamilyMapView';
-import { colors, typography, spacing } from '../../theme';
-import { styles } from './FamilyScreen.styles';
-import { createLogger } from '../../utils/logger';
-import * as haptics from '../../utils/haptics';
-import { resolveFamilyMemberLocation } from '../../utils/familyLocation';
-import QRCode from 'react-native-qrcode-svg';
-import * as Clipboard from 'expo-clipboard';
-import * as SMS from 'expo-sms';
+import type { FamilyMember } from '../../types/family';
+
+// ===== DIAGNOSTIC IMPORTS: Catch which module crashes at import time =====
+const IMPORT_ERRORS: string[] = [];
+
+let Location: any = null;
+try { Location = require('expo-location'); } catch (e: any) { IMPORT_ERRORS.push('expo-location: ' + e?.message); }
+
+let GlassButton: any = ({ title, onPress, ...rest }: any) => <Pressable onPress={onPress} style={{ padding: 12, backgroundColor: '#3b82f6', borderRadius: 12, margin: 4 }}><Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>{title}</Text></Pressable>;
+try { GlassButton = require('../../components/buttons/GlassButton').default; } catch (e: any) { IMPORT_ERRORS.push('GlassButton: ' + e?.message); }
+
+
+let useFamilyStore: any = () => ({ members: [], addMember: () => { }, removeMember: () => { }, updateMember: () => { }, loadFromStorage: () => { } });
+try { const mod = require('../../stores/familyStore'); useFamilyStore = mod.useFamilyStore; } catch (e: any) { IMPORT_ERRORS.push('familyStore: ' + e?.message); }
+
+let useMeshStore: any = () => ({ connectedPeers: [] });
+try { useMeshStore = require('../../services/mesh/MeshStore').useMeshStore; } catch (e: any) { IMPORT_ERRORS.push('MeshStore: ' + e?.message); }
+
+let useSettingsStore: any = () => ({ locationEnabled: false, vibrationEnabled: true });
+try { useSettingsStore = require('../../stores/settingsStore').useSettingsStore; } catch (e: any) { IMPORT_ERRORS.push('settingsStore: ' + e?.message); }
+
+let bleMeshService: any = null;
+try { bleMeshService = require('../../services/BLEMeshService').bleMeshService; } catch (e: any) { IMPORT_ERRORS.push('BLEMeshService: ' + e?.message); }
+
+let meshNetworkService: any = null;
+try { meshNetworkService = require('../../services/mesh/MeshNetworkService').meshNetworkService; } catch (e: any) { IMPORT_ERRORS.push('MeshNetworkService: ' + e?.message); }
+
+let MeshMessageType: any = {};
+try { MeshMessageType = require('../../services/mesh/MeshProtocol').MeshMessageType; } catch (e: any) { IMPORT_ERRORS.push('MeshProtocol: ' + e?.message); }
+
+let familyTrackingService: any = null;
+try { familyTrackingService = require('../../services/FamilyTrackingService').familyTrackingService; } catch (e: any) { IMPORT_ERRORS.push('FamilyTrackingService: ' + e?.message); }
+
+let multiChannelAlertService: any = null;
+try { multiChannelAlertService = require('../../services/MultiChannelAlertService').multiChannelAlertService; } catch (e: any) { IMPORT_ERRORS.push('MultiChannelAlertService: ' + e?.message); }
+
+let identityService: any = { getUid: () => null, getAfetNetId: () => null };
+try { identityService = require('../../services/IdentityService').identityService; } catch (e: any) { IMPORT_ERRORS.push('IdentityService: ' + e?.message); }
+
+let getDeviceIdFromLib: any = async () => 'unknown';
+try { getDeviceIdFromLib = require('../../utils/device').getDeviceId; } catch (e: any) { IMPORT_ERRORS.push('device utils: ' + e?.message); }
+
+let MemberCard: any = () => null;
+try { MemberCard = require('../../components/family/MemberCard').MemberCard; } catch (e: any) { IMPORT_ERRORS.push('MemberCard: ' + e?.message); }
+
+let FamilyMapView: any = () => null;
+try { FamilyMapView = require('../../components/family/FamilyMapView').FamilyMapView; } catch (e: any) { IMPORT_ERRORS.push('FamilyMapView: ' + e?.message); }
+
+let themeColors: any = {}; let themeTypography: any = {}; let themeSpacing: any = {};
+try { const t = require('../../theme'); themeColors = t.colors; themeTypography = t.typography; themeSpacing = t.spacing; } catch (e: any) { IMPORT_ERRORS.push('theme: ' + e?.message); }
+const colors = themeColors;
+const typography = themeTypography;
+const spacing = themeSpacing;
+
+let styles: any = {};
+try { styles = require('./FamilyScreen.styles').styles; } catch (e: any) { IMPORT_ERRORS.push('FamilyScreen.styles: ' + e?.message); }
+
+let createLogger: any = (name: string) => ({ info: console.log, error: console.error, warn: console.warn, debug: console.log });
+try { createLogger = require('../../utils/logger').createLogger; } catch (e: any) { IMPORT_ERRORS.push('logger: ' + e?.message); }
+
+let ErrorBoundary: any = ({ children }: any) => children;
+try { ErrorBoundary = require('../../components/ErrorBoundary').default; } catch (e: any) { IMPORT_ERRORS.push('ErrorBoundary: ' + e?.message); }
+
+let haptics: any = { impactLight: () => { }, impactMedium: () => { }, impactHeavy: () => { }, notificationSuccess: () => { }, selectionChanged: () => { } };
+try { haptics = require('../../utils/haptics'); } catch (e: any) { IMPORT_ERRORS.push('haptics: ' + e?.message); }
+
+let resolveFamilyMemberLocation: any = (m: any) => ({ latitude: m?.latitude || 0, longitude: m?.longitude || 0 });
+try { resolveFamilyMemberLocation = require('../../utils/familyLocation').resolveFamilyMemberLocation; } catch (e: any) { IMPORT_ERRORS.push('familyLocation: ' + e?.message); }
+
+let QRCode: any = () => null;
+try { QRCode = require('react-native-qrcode-svg').default; } catch (e: any) { IMPORT_ERRORS.push('react-native-qrcode-svg: ' + e?.message); }
+
+let Clipboard: any = { setStringAsync: () => { } };
+try { Clipboard = require('expo-clipboard'); } catch (e: any) { IMPORT_ERRORS.push('expo-clipboard: ' + e?.message); }
+
+let SMS: any = { isAvailableAsync: async () => false };
+try { SMS = require('expo-sms'); } catch (e: any) { IMPORT_ERRORS.push('expo-sms: ' + e?.message); }
+
+// Log import errors if any
+if (IMPORT_ERRORS.length > 0) {
+  console.error('🔴🔴🔴 FAMILY SCREEN IMPORT ERRORS:', JSON.stringify(IMPORT_ERRORS));
+}
 
 const logger = createLogger('FamilyScreen');
 const FAMILY_TRACKING_CONSUMER_ID = 'family-screen';
@@ -87,19 +147,67 @@ interface FamilyScreenProps {
   };
 }
 
-export default function FamilyScreen({ navigation }: FamilyScreenProps) {
+// SafeFamilyMapView: Wraps FamilyMapView in its own error boundary to prevent
+// native module crashes (react-native-maps) from tearing down the entire screen.
+const SafeFamilyMapView: React.FC<React.ComponentProps<typeof FamilyMapView>> = (props) => {
+  try {
+    return (
+      <ErrorBoundary
+        fallback={
+          <View style={{ height: 200, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 16 }}>
+            <Ionicons name="map-outline" size={40} color="#94a3b8" />
+            <Text style={{ color: '#64748b', fontSize: 14, marginTop: 8 }}>Harita yüklenemedi</Text>
+          </View>
+        }
+      >
+        <FamilyMapView {...props} />
+      </ErrorBoundary>
+    );
+  } catch {
+    return (
+      <View style={{ height: 200, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 16 }}>
+        <Ionicons name="map-outline" size={40} color="#94a3b8" />
+        <Text style={{ color: '#64748b', fontSize: 14, marginTop: 8 }}>Harita yüklenemedi</Text>
+      </View>
+    );
+  }
+};
+
+// SafeQRCode: Wraps QRCode in error handling to prevent react-native-svg crashes
+const SafeQRCode: React.FC<{ value: string; size: number }> = ({ value, size }) => {
+  try {
+    if (!value) return null;
+    return <QRCode value={value} size={size} />;
+  } catch {
+    return (
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 12 }}>
+        <Text style={{ color: '#94a3b8', fontSize: 12 }}>QR kod oluşturulamadı</Text>
+      </View>
+    );
+  }
+};
+
+function FamilyScreenInner({ navigation }: FamilyScreenProps) {
+  console.log('🔵 [1] FamilyScreenInner: START');
   const insets = useSafeAreaInsets();
+  console.log('🔵 [2] useSafeAreaInsets OK');
 
   // Use Zustand hooks - they handle referential equality automatically
+  const allMembers = useFamilyStore((state) => state.members);
+
   // Filter out the device owner (self) — only show added family members
-  const members = useFamilyStore((state) => {
-    const myUid = identityService.getUid();
-    if (!myUid) return state.members;
-    return state.members.filter((m) => m.uid !== myUid);
-  });
+  const myUid = React.useMemo(() => {
+    try { return identityService.getUid() || ''; } catch { return ''; }
+  }, []);
+  const members = React.useMemo(
+    () => myUid ? allMembers.filter((m) => m.uid !== myUid) : allMembers,
+    [allMembers, myUid],
+  );
+  console.log('🔵 [3] useFamilyStore OK, members:', members?.length);
 
   // ELITE: Settings integration for location control
   const locationEnabled = useSettingsStore((state) => state.locationEnabled);
+  console.log('🔵 [4] useSettingsStore OK');
 
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
@@ -119,6 +227,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   // ELITE V2: Map/List toggle (Life360 pattern)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  console.log('🔵 [5] useState hooks OK');
 
   // Batch update mechanism to prevent subscription loops
   const pendingUpdatesRef = useRef<Map<string, PendingFamilyUpdate>>(new Map());
@@ -452,7 +561,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
       }
 
       const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
-      let location: Location.LocationObject | null = null;
+      let location: any = null;
 
       if (locStatus === 'granted') {
         try {
@@ -462,7 +571,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
           });
 
           let timeoutId: NodeJS.Timeout | null = null;
-          const timeoutPromise = new Promise<Location.LocationObject | null>((resolve) => {
+          const timeoutPromise = new Promise<any>((resolve) => {
             timeoutId = setTimeout(() => resolve(null), 10000); // 10 second timeout
           });
 
@@ -911,39 +1020,39 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     setShowIdModal(true);
   };
 
-  const getShareValue = useCallback((): string => {
+  /** Full QR payload for QR code encoding (scanners need full JSON) */
+  const getQRValue = useCallback((): string => {
     const payload = mySharePayload.trim();
-    if (payload.length > 0) {
-      return payload;
-    }
+    if (payload.length > 0) return payload;
     return myDeviceId || '';
   }, [myDeviceId, mySharePayload]);
 
+  /** Human-readable publicUserCode for display, copy, and share */
   const shareDisplayId = useMemo(() => {
-    const payload = getShareValue();
-    if (!payload) return '';
-    try {
-      const parsed = JSON.parse(payload) as { code?: string; uid?: string; id?: string; did?: string };
-      return parsed.code || parsed.uid || parsed.id || parsed.did || (myDeviceId || payload);
-    } catch {
-      return myDeviceId || payload;
+    const code = identityService.getPublicUserCode();
+    if (code) return code;
+    // Fallback: extract from QR payload
+    const payload = mySharePayload.trim();
+    if (payload) {
+      try {
+        const parsed = JSON.parse(payload) as { code?: string; uid?: string };
+        if (parsed.code) return parsed.code;
+      } catch { /* not JSON */ }
     }
-  }, [getShareValue, myDeviceId]);
+    return myDeviceId || '';
+  }, [mySharePayload, myDeviceId]);
 
   const handleCopyId = async () => {
-    const shareValue = getShareValue();
-    if (!shareValue) return;
-
-    await Clipboard.setStringAsync(shareValue);
+    if (!shareDisplayId) return;
+    await Clipboard.setStringAsync(shareDisplayId);
     haptics.notificationSuccess();
-    Alert.alert('Kopyalandı', 'ID panoya kopyalandı');
+    Alert.alert('Kopyalandı', `ID panoya kopyalandı: ${shareDisplayId}`);
   };
 
   const handleShareId = async () => {
-    const shareValue = getShareValue();
-    if (!shareValue) return;
+    if (!shareDisplayId) return;
 
-    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
+    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
 
     if (Platform.OS === 'ios') {
       // iOS: Show ActionSheet
@@ -1024,10 +1133,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdWhatsApp = async () => {
-    const shareValue = getShareValue();
-    if (!shareValue) return;
+    if (!shareDisplayId) return;
 
-    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
+    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
 
     try {
@@ -1045,10 +1153,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdSMS = async () => {
-    const shareValue = getShareValue();
-    if (!shareValue) return;
+    if (!shareDisplayId) return;
 
-    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
+    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
 
     try {
       const isAvailable = await SMS.isAvailableAsync();
@@ -1065,10 +1172,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
   };
 
   const handleShareIdOther = async () => {
-    const shareValue = getShareValue();
-    if (!shareValue) return;
+    if (!shareDisplayId) return;
 
-    const shareMessage = `AfetNet ile beni ekle:\n\n${shareValue}\n\nID: ${shareDisplayId}`;
+    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
 
     try {
       const result = await NativeShare.share({ message: shareMessage });
@@ -1210,6 +1316,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
     }
   }, [navigation]);
 
+  console.log('🔵 [10] FamilyScreenInner: RENDER START');
   return (
     <ImageBackground
       source={require('../../../../assets/images/premium/family_soft_bg.png')}
@@ -1365,7 +1472,7 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
             viewMode === 'map' ? (
               /* ELITE V2: Interactive Family Map (Life360 pattern) */
               <View style={{ height: 350, borderRadius: 16, overflow: 'hidden', marginHorizontal: 4 }}>
-                <FamilyMapView
+                <SafeFamilyMapView
                   members={members}
                   onMemberPress={(member) => {
                     haptics.impactLight();
@@ -1490,11 +1597,9 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
             {(myDeviceId || mySharePayload) ? (
               <>
                 <View style={styles.qrContainer}>
-                  <QRCode
-                    value={getShareValue() || myDeviceId || ''}
+                  <SafeQRCode
+                    value={getQRValue() || myDeviceId || ''}
                     size={200}
-                    color={colors.text.primary}
-                    backgroundColor={colors.background.secondary}
                   />
                 </View>
 
@@ -1675,5 +1780,82 @@ export default function FamilyScreen({ navigation }: FamilyScreenProps) {
 
 
     </ImageBackground >
+  );
+}
+
+// Diagnostic ErrorBoundary with detailed console logging
+class FamilyScreenErrorCatcher extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errorMsg: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMsg: error?.message || 'Unknown error' };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('🔴 FAMILY SCREEN CRASH:', error?.message);
+    console.error('🔴 STACK:', error?.stack);
+    console.error('🔴 COMPONENT STACK:', info?.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e', padding: 20 }}>
+          <Ionicons name="warning" size={48} color="#ff6b6b" />
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: 16 }}>
+            Aile Ekranı Hatası
+          </Text>
+          <Text style={{ color: '#94a3b8', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
+            {this.state.errorMsg}
+          </Text>
+          <Pressable
+            onPress={() => this.setState({ hasError: false, errorMsg: '' })}
+            style={{ marginTop: 20, backgroundColor: '#3b82f6', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Tekrar Dene</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Default export wraps the screen in a diagnostic error boundary
+export default function FamilyScreen(props: FamilyScreenProps) {
+  console.log('🟢 FamilyScreen: export wrapper called, import errors:', IMPORT_ERRORS.length);
+
+  // If any imports crashed, show diagnostic screen
+  if (IMPORT_ERRORS.length > 0) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e', padding: 20 }}>
+        <Ionicons name="bug" size={48} color="#ff6b6b" />
+        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: 16 }}>
+          Import Hataları Tespit Edildi
+        </Text>
+        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, textAlign: 'left', width: '100%' }}>
+          Aşağıdaki modüller yüklenemedi:
+        </Text>
+        <ScrollView style={{ maxHeight: 300, width: '100%', marginTop: 12 }}>
+          {IMPORT_ERRORS.map((err, i) => (
+            <Text key={i} style={{ color: '#f87171', fontSize: 11, marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+              {i + 1}. {err}
+            </Text>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return (
+    <FamilyScreenErrorCatcher>
+      <FamilyScreenInner {...props} />
+    </FamilyScreenErrorCatcher>
   );
 }
