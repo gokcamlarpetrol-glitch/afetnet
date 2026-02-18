@@ -11,7 +11,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import { SOSSignal, SOSLocation, ChannelStatus, useSOSStore } from './SOSStateManager';
+import { SOSSignal, ChannelStatus, useSOSStore } from './SOSStateManager';
 import NetInfo from '@react-native-community/netinfo';
 import * as Battery from 'expo-battery';
 
@@ -310,12 +310,25 @@ class SOSChannelRouter {
                 } else {
                     const { doc, setDoc } = await import('firebase/firestore');
 
-                    // Resolve sender identity for self-exclusion
-                    const { getAuth: getAuth2 } = await import('firebase/auth');
-                    const senderUid = getAuth2()?.currentUser?.uid;
+                    // Resolve ALL sender identity forms for robust self-exclusion
+                    const senderSelfIds = new Set<string>();
+                    try {
+                        const { getAuth: getAuth2 } = await import('firebase/auth');
+                        const authUid = getAuth2()?.currentUser?.uid;
+                        if (authUid) senderSelfIds.add(authUid);
+                    } catch { /* auth not ready */ }
+                    if (signal.userId) senderSelfIds.add(signal.userId);
+                    if (senderDeviceId) senderSelfIds.add(senderDeviceId);
+                    try {
+                        const { identityService: idSvc } = await import('../IdentityService');
+                        const publicCode = idSvc.getPublicUserCode?.();
+                        if (publicCode) senderSelfIds.add(publicCode);
+                    } catch { /* non-critical */ }
 
                     const writePromises = members.flatMap((member) => {
-                        if (senderUid && member.uid === senderUid) {
+                        // Skip self — check all known IDs for the sender
+                        if ((member.uid && senderSelfIds.has(member.uid)) ||
+                            (member.deviceId && senderSelfIds.has(member.deviceId))) {
                             return [];
                         }
                         // Write to ALL known IDs for this member
@@ -540,13 +553,17 @@ class SOSChannelRouter {
                 }
             }
 
+            // CRITICAL FIX: userId is REQUIRED by sos_broadcasts/acks security rule
+            // (request.resource.data.userId == request.auth.uid)
+            // Always include it — if auth UID is unavailable, the Firestore write
+            // will be rejected by rules anyway, so we must not omit the field.
             const ackData: Record<string, any> = {
                 rescuerDeviceId,
                 rescuerName,
                 rescuerLocation,
                 timestamp: Date.now(),
                 type: 'on_the_way',
-                ...(userId ? { userId } : {}),
+                userId: userId || '',
             };
 
             const ackDocId = `${signalId}_${rescuerDeviceId || userId || Date.now().toString(36)}`;
@@ -556,6 +573,11 @@ class SOSChannelRouter {
             }
             if (options?.sosSenderUid?.trim()) {
                 targetIds.add(options.sosSenderUid.trim());
+            }
+            // LIFE-SAFETY: Validate we have at least one target before attempting delivery
+            if (targetIds.size === 0) {
+                logger.error(`❌ Rescue ACK has NO targets for signal ${signalId} — trapped person will NOT be notified`);
+                throw new Error('Kurtarma mesajı gönderilemedi: Hedef bulunamadı. Lütfen tekrar deneyin.');
             }
             let deliveredTargetCount = 0;
             for (const targetId of targetIds) {
@@ -568,7 +590,8 @@ class SOSChannelRouter {
                 }
             }
             if (deliveredTargetCount === 0) {
-                logger.warn(`Rescue ACK delivery paths failed for signal ${signalId}`);
+                logger.error(`❌ Rescue ACK delivery FAILED for signal ${signalId} — all write paths rejected`);
+                throw new Error('Kurtarma mesajı gönderilemedi: Bağlantı hatası. Lütfen tekrar deneyin.');
             }
 
             // Also write to sos_broadcasts sub-collection for global visibility

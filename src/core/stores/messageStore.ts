@@ -88,6 +88,9 @@ export interface Conversation {
   isPinned?: boolean;
   isMuted?: boolean;
   status?: 'online' | 'offline' | 'mesh'; // Connection status
+  // WhatsApp-level preview fields
+  lastMessageFrom?: string; // userId of the last message sender
+  lastMessageStatus?: 'pending' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 }
 
 // ELITE: Typing indicator state
@@ -107,6 +110,8 @@ interface MessageState {
   typingUsers: Record<string, TypingIndicator>;
   // Store Firebase unsubscribe function for cleanup
   firebaseUnsubscribe: (() => void) | null;
+  // Loading state during initialization
+  isInitializing: boolean;
 }
 
 export interface MessageActions {
@@ -372,6 +377,7 @@ const initialState: MessageState = {
   conversationIndex: new Map(),
   typingUsers: {},
   firebaseUnsubscribe: null,
+  isInitializing: false,
 };
 
 // ELITE V2: Build conversation-indexed Map from flat message array
@@ -407,17 +413,20 @@ const debouncedConversationUpdate = (updateFn: () => void) => {
 
 // ELITE: Load messages from MMKV (Sync & Fast)
 const loadMessages = (): Message[] => {
+  const data = readScopedStorage(STORAGE_KEY_MESSAGES_BASE);
+  if (!data) return [];
+  let parsed: Message[];
   try {
-    const data = readScopedStorage(STORAGE_KEY_MESSAGES_BASE);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-      logger.warn('messageStore: corrupt messages data, resetting');
-    }
-  } catch (error) {
-    logger.error('Failed to load messages:', error);
+    parsed = JSON.parse(data);
+  } catch (e) {
+    logger.warn('Failed to parse messages JSON:', e);
+    return [];
   }
-  return [];
+  if (!Array.isArray(parsed)) {
+    logger.warn('messageStore: corrupt messages data, resetting');
+    return [];
+  }
+  return parsed;
 };
 
 // ELITE: Save messages to MMKV (Sync & Fast)
@@ -431,17 +440,20 @@ const saveMessages = (messages: Message[]) => {
 
 // ELITE: Load conversations from MMKV
 const loadConversations = (): Conversation[] => {
+  const data = readScopedStorage(STORAGE_KEY_CONVERSATIONS_BASE);
+  if (!data) return [];
+  let parsed: Conversation[];
   try {
-    const data = readScopedStorage(STORAGE_KEY_CONVERSATIONS_BASE);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-      logger.warn('messageStore: corrupt conversations data, resetting');
-    }
-  } catch (error) {
-    logger.error('Failed to load conversations:', error);
+    parsed = JSON.parse(data);
+  } catch (e) {
+    logger.warn('Failed to parse conversations JSON:', e);
+    return [];
   }
-  return [];
+  if (!Array.isArray(parsed)) {
+    logger.warn('messageStore: corrupt conversations data, resetting');
+    return [];
+  }
+  return parsed;
 };
 
 // ELITE: Save conversations to MMKV
@@ -453,11 +465,18 @@ const saveConversations = (conversations: Conversation[]) => {
   }
 };
 
+// ELITE: Guard flag to prevent concurrent initialize() race conditions
+let _initializePromise: Promise<void> | null = null;
+
 export const useMessageStore = create<MessageState & MessageActions>((set, get) => ({
   ...initialState,
 
   // ELITE: Initialize by loading from storage and Firebase
   initialize: async () => {
+    if (_initializePromise) return _initializePromise;
+    _initializePromise = (async () => {
+    set({ isInitializing: true });
+    try {
     // ELITE: Cleanup existing Firebase subscription before re-initializing
     const { firebaseUnsubscribe } = get();
     if (firebaseUnsubscribe && typeof firebaseUnsubscribe === 'function') {
@@ -496,6 +515,12 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     // Previously, messageStore wrote to Firestore with getDeviceId() (random
     // hardware ID), which was DIFFERENT from the identity ID, causing messages
     // to be written to wrong paths and invisible to recipients.
+    } finally {
+      set({ isInitializing: false });
+      _initializePromise = null;
+    }
+    })();
+    return _initializePromise;
   },
 
   addMessage: async (message: Message) => {
@@ -542,8 +567,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       if (otherUserId) {
         const existing = newIndex.get(otherUserId);
         if (existing) {
-          existing.push(normalizedMessage);
-          existing.sort((a, b) => a.timestamp - b.timestamp);
+          const updated = [...existing, normalizedMessage].sort((a, b) => a.timestamp - b.timestamp);
+          newIndex.set(otherUserId, updated);
         } else {
           newIndex.set(otherUserId, [normalizedMessage]);
         }
@@ -824,7 +849,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
     // O(n) single-pass: compute unread counts and latest message per user
     const unreadCounts = new Map<string, number>();
-    const latestMessages = new Map<string, { content: string; timestamp: number; fromName?: string }>();
+    const latestMessages = new Map<string, { content: string; timestamp: number; fromName?: string; from: string; status?: Message['status'] }>();
 
     for (const msg of messages) {
       if (isBlockedIdentity(msg.from) || isBlockedIdentity(msg.to)) continue;
@@ -845,6 +870,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
           content: (msg.content || '').substring(0, 100),
           timestamp: msg.timestamp,
           fromName: msg.fromName,
+          from: msg.from,
+          status: msg.status,
         });
       }
     }
@@ -862,6 +889,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         unreadCount: unreadCounts.get(userId) || 0,
         isPinned: meta?.isPinned,
         isMuted: meta?.isMuted,
+        lastMessageFrom: latest.from,
+        lastMessageStatus: latest.status,
       });
     }
 

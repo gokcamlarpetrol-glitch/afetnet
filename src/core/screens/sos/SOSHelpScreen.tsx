@@ -23,11 +23,15 @@ import {
     Alert,
     ScrollView,
     ActivityIndicator,
+    Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import MapView, { Marker, Polyline } from 'react-native-maps';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 import * as Location from 'expo-location';
 import * as haptics from '../../utils/haptics';
 import { sosChannelRouter } from '../../services/sos/SOSChannelRouter';
@@ -36,6 +40,8 @@ import { createLogger } from '../../utils/logger';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { MainStackParamList } from '../../types/navigation';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const logger = createLogger('SOSHelpScreen');
 
@@ -79,8 +85,13 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     const [distance, setDistance] = useState<number | null>(null);
     const [ackSent, setAckSent] = useState(false);
     const [ackSending, setAckSending] = useState(false);
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
+    const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+    const mapRef = useRef<MapView | null>(null);
+    const soundRef = useRef<AudioPlayer | null>(null);
     const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
     const firestoreUnsubRef = useRef<(() => void) | null>(null);
+    const audioUnsubRef = useRef<(() => void) | null>(null);
 
     // Start watching my own location
     useEffect(() => {
@@ -191,6 +202,110 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         setDistance(R * c);
     }, [myLocation, senderLocation]);
 
+    // Listen for audio_url from sos_signals/{signalId}
+    useEffect(() => {
+        if (!signalId) return;
+
+        let cancelled = false;
+        const listenAudio = async () => {
+            try {
+                const { getFirestoreInstanceAsync } = await import(
+                    '../../services/firebase/FirebaseInstanceManager'
+                );
+                const db = await getFirestoreInstanceAsync();
+                if (!db || cancelled) return;
+
+                const { doc, onSnapshot } = await import('firebase/firestore');
+                const sigRef = doc(db, 'sos_signals', signalId);
+                const unsub = onSnapshot(
+                    sigRef,
+                    (snap) => {
+                        if (cancelled || !snap.exists()) return;
+                        const data = snap.data();
+                        if (data?.audio_url && typeof data.audio_url === 'string') {
+                            setAudioUrl(data.audio_url);
+                        }
+                    },
+                    () => { /* offline/permission errors are non-critical */ },
+                );
+                audioUnsubRef.current = unsub;
+            } catch {
+                // Offline — audio feature degrades gracefully
+            }
+        };
+
+        listenAudio();
+        return () => {
+            cancelled = true;
+            audioUnsubRef.current?.();
+        };
+    }, [signalId]);
+
+    // Fit map to show both locations
+    useEffect(() => {
+        if (!mapRef.current || !senderLocation) return;
+
+        const coords = [{ latitude: senderLocation.latitude, longitude: senderLocation.longitude }];
+        if (myLocation) {
+            coords.push({ latitude: myLocation.latitude, longitude: myLocation.longitude });
+        }
+
+        try {
+            mapRef.current.fitToCoordinates(coords, {
+                edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
+                animated: true,
+            });
+        } catch { /* non-critical */ }
+    }, [senderLocation, myLocation]);
+
+    // Cleanup audio on unmount
+    useEffect(() => {
+        return () => {
+            if (soundRef.current) {
+                try { soundRef.current.remove(); } catch { /* */ }
+                soundRef.current = null;
+            }
+        };
+    }, []);
+
+    // Play/stop ambient audio
+    const handlePlayAudio = useCallback(async () => {
+        if (!audioUrl) return;
+        haptics.impactLight();
+
+        if (isPlayingAudio && soundRef.current) {
+            soundRef.current.pause();
+            try { soundRef.current.remove(); } catch { /* */ }
+            soundRef.current = null;
+            setIsPlayingAudio(false);
+            return;
+        }
+
+        try {
+            await setAudioModeAsync({
+                allowsRecording: false,
+                playsInSilentMode: true,
+                shouldPlayInBackground: false,
+            });
+
+            const player = createAudioPlayer({ uri: audioUrl });
+            soundRef.current = player;
+            setIsPlayingAudio(true);
+            player.play();
+
+            player.addListener('playbackStatusUpdate', (status: any) => {
+                if (status?.didJustFinish || status?.isBuffering === false && status?.positionMillis >= status?.durationMillis) {
+                    setIsPlayingAudio(false);
+                    try { player.remove(); } catch { /* */ }
+                    soundRef.current = null;
+                }
+            });
+        } catch {
+            Alert.alert('Hata', 'Ses dosyası oynatılamadı.');
+            setIsPlayingAudio(false);
+        }
+    }, [audioUrl, isPlayingAudio]);
+
     // Send rescue ACK
     const handleSendACK = useCallback(async () => {
         if (ackSent || ackSending) return;
@@ -213,7 +328,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         }
     }, [ackSent, ackSending, signalId, senderDeviceId, senderUid, senderName]);
 
-    // Open directions in Maps
+    // Open directions in Maps (full turn-by-turn navigation)
     const handleOpenDirections = useCallback(() => {
         if (!senderLocation) return;
         haptics.impactLight();
@@ -226,6 +341,23 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         if (url) {
             Linking.openURL(url).catch(() => {
                 Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+            });
+        }
+    }, [senderLocation]);
+
+    // Quick open location in Apple Maps (pin drop)
+    const handleOpenLocationOnMap = useCallback(() => {
+        if (!senderLocation) return;
+        haptics.impactMedium();
+
+        const { latitude: lat, longitude: lng } = senderLocation;
+        const url = Platform.select({
+            ios: `maps:0,0?q=${lat},${lng}`,
+            default: `https://maps.google.com/?q=${lat},${lng}`,
+        });
+        if (url) {
+            Linking.openURL(url).catch(() => {
+                Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch(() => {});
             });
         }
     }, [senderLocation]);
@@ -285,13 +417,106 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                     <Ionicons name="alert-circle" size={28} color="#fbbf24" />
                     <View style={styles.alertTextContainer}>
                         <Text style={styles.alertTitle}>
-                            {trapped ? 'Enkaz Altında!' : 'Acil Yardım Çağrısı'}
+                            {trapped ? 'Enkaz Alt\u0131nda!' : 'Acil Yard\u0131m \u00C7a\u011Fr\u0131s\u0131'}
                         </Text>
                         <Text style={styles.alertSubtitle}>
-                            {senderName} yardım bekliyor
+                            {senderName} yard\u0131m bekliyor
                         </Text>
                     </View>
                 </Animated.View>
+
+                {/* In-App Map */}
+                {senderLocation && (
+                    <Animated.View entering={FadeInUp.delay(250)} style={styles.mapContainer}>
+                        <MapView
+                            ref={mapRef}
+                            style={styles.mapView}
+                            initialRegion={{
+                                latitude: senderLocation.latitude,
+                                longitude: senderLocation.longitude,
+                                latitudeDelta: 0.01,
+                                longitudeDelta: 0.01,
+                            }}
+                            showsUserLocation={false}
+                            showsMyLocationButton={false}
+                            loadingEnabled
+                        >
+                            {/* SOS Sender Marker - Red */}
+                            <Marker
+                                coordinate={{
+                                    latitude: senderLocation.latitude,
+                                    longitude: senderLocation.longitude,
+                                }}
+                                title={senderName}
+                                description={trapped ? 'Enkaz Altında!' : 'Acil Yardım'}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                            >
+                                <View style={styles.senderMarker}>
+                                    <View style={styles.senderMarkerPulse} />
+                                    <View style={styles.senderMarkerCore}>
+                                        <Ionicons name="alert-circle" size={20} color="#fff" />
+                                    </View>
+                                </View>
+                            </Marker>
+
+                            {/* My Location Marker - Blue */}
+                            {myLocation && (
+                                <Marker
+                                    coordinate={{
+                                        latitude: myLocation.latitude,
+                                        longitude: myLocation.longitude,
+                                    }}
+                                    title="Ben"
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                >
+                                    <View style={styles.myMarker}>
+                                        <Ionicons name="person" size={16} color="#fff" />
+                                    </View>
+                                </Marker>
+                            )}
+
+                            {/* Polyline between locations */}
+                            {myLocation && (
+                                <Polyline
+                                    coordinates={[
+                                        { latitude: myLocation.latitude, longitude: myLocation.longitude },
+                                        { latitude: senderLocation.latitude, longitude: senderLocation.longitude },
+                                    ]}
+                                    strokeColor="#ef4444"
+                                    strokeWidth={3}
+                                    lineDashPattern={[10, 5]}
+                                />
+                            )}
+                        </MapView>
+
+                        {/* Map overlay buttons */}
+                        <View style={styles.mapOverlay}>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.mapOverlayButton,
+                                    pressed && { opacity: 0.8 },
+                                ]}
+                                onPress={handleOpenDirections}
+                            >
+                                <Ionicons name="navigate" size={18} color="#fff" />
+                                <Text style={styles.mapOverlayButtonText}>
+                                    Yol Tarifi {distanceText ? `(${distanceText})` : ''}
+                                </Text>
+                            </Pressable>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.mapOverlayButton,
+                                    styles.mapOverlayButtonSecondary,
+                                    pressed && { opacity: 0.8 },
+                                ]}
+                                onPress={handleOpenLocationOnMap}
+                            >
+                                <Ionicons name="open-outline" size={18} color="#fff" />
+                                <Text style={styles.mapOverlayButtonText}>Haritada Aç</Text>
+                            </Pressable>
+                        </View>
+                    </Animated.View>
+                )}
 
                 {/* Sender Info Card */}
                 <Animated.View entering={FadeInUp.delay(300)} style={styles.card}>
@@ -364,6 +589,29 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                         </View>
                     )}
                 </Animated.View>
+
+                {/* Ambient Audio Card */}
+                {audioUrl && (
+                    <Animated.View entering={FadeInUp.delay(350)} style={styles.card}>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.audioButton,
+                                isPlayingAudio && styles.audioButtonPlaying,
+                                pressed && { opacity: 0.8 },
+                            ]}
+                            onPress={handlePlayAudio}
+                        >
+                            <Ionicons
+                                name={isPlayingAudio ? 'stop-circle' : 'mic'}
+                                size={22}
+                                color="#fff"
+                            />
+                            <Text style={styles.audioButtonText}>
+                                {isPlayingAudio ? 'Kaydı Durdur' : 'Ortam Sesi Dinle'}
+                            </Text>
+                        </Pressable>
+                    </Animated.View>
+                )}
 
                 {/* Location Card */}
                 <Animated.View entering={FadeInUp.delay(400)} style={styles.card}>
@@ -680,6 +928,91 @@ const styles = StyleSheet.create({
         backgroundColor: '#ef4444',
     },
     actionButtonText: {
+        fontSize: typography.body.fontSize,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    mapContainer: {
+        borderRadius: borderRadius.lg,
+        overflow: 'hidden',
+        marginBottom: spacing.md,
+        borderWidth: 2,
+        borderColor: '#fbbf24',
+    },
+    mapView: {
+        width: '100%',
+        height: SCREEN_HEIGHT * 0.4,
+    },
+    senderMarker: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 44,
+        height: 44,
+    },
+    senderMarkerPulse: {
+        position: 'absolute',
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(239, 68, 68, 0.3)',
+    },
+    senderMarkerCore: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#ef4444',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: '#fff',
+    },
+    myMarker: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#3b82f6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: '#fff',
+    },
+    mapOverlay: {
+        flexDirection: 'row',
+        gap: spacing.xs,
+        padding: spacing.sm,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    },
+    mapOverlayButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#dc2626',
+        borderRadius: borderRadius.md,
+        paddingVertical: 10,
+        gap: 6,
+    },
+    mapOverlayButtonSecondary: {
+        backgroundColor: '#1e40af',
+    },
+    mapOverlayButtonText: {
+        fontSize: typography.bodySmall.fontSize,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    audioButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#7c3aed',
+        borderRadius: borderRadius.md,
+        paddingVertical: 14,
+        gap: spacing.sm,
+    },
+    audioButtonPlaying: {
+        backgroundColor: '#dc2626',
+    },
+    audioButtonText: {
         fontSize: typography.body.fontSize,
         fontWeight: '700',
         color: '#fff',

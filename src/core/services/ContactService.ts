@@ -103,8 +103,9 @@ class ContactService {
     private activeScope = STORAGE_GUEST_SCOPE;
 
     private getStorageScope(): string {
-        const uid = identityService.getUid().trim();
-        if (uid) return `${STORAGE_USER_PREFIX}${uid}`;
+        const rawUid = identityService.getUid();
+        const uid = rawUid ? rawUid.trim() : '';
+        if (uid && uid.length > 0) return `${STORAGE_USER_PREFIX}${uid}`;
 
         try {
             const app = initializeFirebase();
@@ -137,6 +138,13 @@ class ContactService {
     // ==================== INITIALIZATION ====================
 
     async initialize(): Promise<void> {
+        // If already initialized and scope hasn't changed, return cached promise
+        if (this.initPromise && this.isInitialized) {
+            const nextScope = this.getStorageScope();
+            if (nextScope === this.activeScope) return this.initPromise;
+            // Scope changed — need re-init
+            this.initPromise = null;
+        }
         if (this.initPromise) return this.initPromise;
         this.initPromise = this._doInitialize();
         return this.initPromise;
@@ -165,9 +173,10 @@ class ContactService {
         } catch (error) {
             logger.error('❌ ContactService init failed:', error);
             this.isInitialized = true;
-        } finally {
-            this.initPromise = null;
         }
+        // NOTE: initPromise is NOT cleared here. Subsequent callers will
+        // return the same (resolved/rejected) promise. The isInitialized
+        // flag is checked separately in initialize() for re-init scenarios.
     }
 
     // ==================== CACHE OPERATIONS ====================

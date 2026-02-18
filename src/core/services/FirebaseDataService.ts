@@ -517,7 +517,7 @@ class FirebaseDataService {
       if (!ownerUid) return false;
       const myDisplayName = await this.getCurrentDisplayName();
       const familyId = await getOrCreateDefaultFamily(ownerUid, myDisplayName);
-      await deleteFamilyMemberV3(familyId, memberUid);
+      await deleteFamilyMemberV3(familyId, memberUid, ownerUid);
       return true;
     } catch (error) {
       logger.warn('deleteFamilyMember V3 failed:', error);
@@ -764,7 +764,7 @@ class FirebaseDataService {
   async subscribeToInbox(
     uid: string,
     callback: (threads: UserInboxThread[]) => void,
-  ): Promise<() => void> {
+  ): Promise<(() => void) | null> {
     if (!this._isInitialized) return () => { };
     return subscribeToInbox(uid, callback);
   }
@@ -955,12 +955,17 @@ class FirebaseDataService {
         updatedAt: new Date().toISOString(),
       }, { merge: true });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Seismic detection save timeout')), TIMEOUT_MS),
-      );
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Seismic detection save timeout')), TIMEOUT_MS);
+      });
 
-      await Promise.race([savePromise, timeoutPromise]);
-      return true;
+      try {
+        await Promise.race([savePromise, timeoutPromise]);
+        return true;
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     } catch (error: unknown) {
       const errorObj = error as { code?: string; message?: string };
       const errorMessage = errorObj?.message || String(error);

@@ -53,6 +53,7 @@ export interface GroupConversation {
         timestamp: number;
     };
     avatarUrl?: string;
+    unreadCount?: number;
 }
 
 export interface GroupMessage {

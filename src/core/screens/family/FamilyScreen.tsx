@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  RefreshControl,
   StatusBar,
   Modal,
   Linking,
@@ -21,6 +22,9 @@ import {
   Share as NativeShare,
   TextInput,
   ImageBackground,
+  ActivityIndicator,
+  useWindowDimensions,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -187,27 +191,62 @@ const SafeQRCode: React.FC<{ value: string; size: number }> = ({ value, size }) 
   }
 };
 
+// Toast notification component
+const Toast: React.FC<{ message: string; visible: boolean }> = ({ message, visible }) => {
+  if (!visible) return null;
+  return (
+    <View style={inlineStyles.toast}>
+      <Ionicons name="checkmark-circle" size={16} color="#fff" />
+      <Text style={inlineStyles.toastText}>{message}</Text>
+    </View>
+  );
+};
+
+const inlineStyles = StyleSheet.create({
+  toast: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 999,
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  statusButtonActive: {
+    borderWidth: 2,
+  },
+  statusButtonInactive: {
+    borderWidth: 0,
+    opacity: 0.6,
+  },
+});
+
 function FamilyScreenInner({ navigation }: FamilyScreenProps) {
-  console.log('🔵 [1] FamilyScreenInner: START');
   const insets = useSafeAreaInsets();
-  console.log('🔵 [2] useSafeAreaInsets OK');
+  const { height: screenHeight } = useWindowDimensions();
 
   // Use Zustand hooks - they handle referential equality automatically
-  const allMembers = useFamilyStore((state) => state.members);
+  const allMembers = useFamilyStore((state: any) => state.members);
 
   // Filter out the device owner (self) — only show added family members
   const myUid = React.useMemo(() => {
     try { return identityService.getUid() || ''; } catch { return ''; }
   }, []);
   const members = React.useMemo(
-    () => myUid ? allMembers.filter((m) => m.uid !== myUid) : allMembers,
+    () => myUid ? allMembers.filter((m: FamilyMember) => m.uid !== myUid) : allMembers,
     [allMembers, myUid],
   );
-  console.log('🔵 [3] useFamilyStore OK, members:', members?.length);
-
   // ELITE: Settings integration for location control
-  const locationEnabled = useSettingsStore((state) => state.locationEnabled);
-  console.log('🔵 [4] useSettingsStore OK');
+  const locationEnabled = useSettingsStore((state: any) => state.locationEnabled);
 
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
@@ -221,17 +260,29 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
   const [editRelationship, setEditRelationship] = useState<string | null>(null);
   const [editPhone, setEditPhone] = useState('');
   const [editNotes, setEditNotes] = useState('');
-  // ELITE: Search and detail modal
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   // ELITE V2: Map/List toggle (Life360 pattern)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
-  console.log('🔵 [5] useState hooks OK');
+  // Loading states
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  // Toast state
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Batch update mechanism to prevent subscription loops
   const pendingUpdatesRef = useRef<Map<string, PendingFamilyUpdate>>(new Map());
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastVisible(false);
+    }, 2000);
+  }, []);
 
   const applyPendingFamilyUpdates = useCallback((source: 'debounce' | 'cleanup') => {
     if (pendingUpdatesRef.current.size === 0) {
@@ -242,11 +293,11 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     const pendingEntries = Array.from(pendingUpdatesRef.current.entries());
 
     for (const [memberId, updateData] of pendingEntries) {
-      const member = latestMembers.find((candidate) => candidate.uid === memberId);
+      const member = latestMembers.find((candidate: FamilyMember) => candidate.uid === memberId);
       if (!member) continue;
 
       if (updateData.status && member.status !== updateData.status) {
-        useFamilyStore.getState().updateMemberStatus(member.uid, updateData.status, 'remote').catch((error) => {
+        useFamilyStore.getState().updateMemberStatus(member.uid, updateData.status, 'remote').catch((error: unknown) => {
           logger.error(`Failed to update member status (${source}):`, error);
         });
       }
@@ -257,7 +308,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           updateData.location.latitude,
           updateData.location.longitude,
           'remote',
-        ).catch((error) => {
+        ).catch((error: unknown) => {
           logger.error(`Failed to update member location (${source}):`, error);
         });
       }
@@ -279,11 +330,13 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
     const init = async () => {
       try {
+        setIsInitializing(true);
         // Initialize family store
         await useFamilyStore.getState().initialize();
 
         // ELITE: Ensure BLE Mesh service is started for offline messaging
-        if (!bleMeshService.getIsRunning()) {
+        // Null guard: bleMeshService can be null if import fails
+        if (bleMeshService && typeof bleMeshService.getIsRunning === 'function' && !bleMeshService.getIsRunning()) {
           try {
             await bleMeshService.start();
             if (__DEV__) {
@@ -296,16 +349,12 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         }
 
         // Get device ID
-        let deviceId = bleMeshService.getMyDeviceId();
+        let deviceId = bleMeshService?.getMyDeviceId?.() ?? null;
         if (!deviceId) {
           deviceId = await getDeviceIdFromLib();
           if (deviceId && mounted) {
             useMeshStore.getState().setMyDeviceId(deviceId);
             setMyDeviceId(deviceId);
-            // ELITE: Set device ID in BLE Mesh service if not already set
-            if (!bleMeshService.getMyDeviceId()) {
-              // Device ID will be set when BLE Mesh service starts
-            }
           }
         } else if (mounted) {
           setMyDeviceId(deviceId);
@@ -324,6 +373,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         }
       } catch (error) {
         logger.error('Initialization error:', error);
+      } finally {
+        if (mounted) setIsInitializing(false);
       }
     };
 
@@ -331,13 +382,16 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
     return () => {
       mounted = false;
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, []);
 
   // Separate effect for message listener - uses refs so no dependency issues
   useEffect(() => {
+    if (!bleMeshService || typeof bleMeshService.onMessage !== 'function') return;
+
     // Listen for family status and location update messages
-    const unsubscribeMessage = bleMeshService.onMessage(async (message) => {
+    const unsubscribeMessage = bleMeshService.onMessage(async (message: any) => {
       try {
         const content = message.content;
         if (typeof content !== 'string') return;
@@ -369,8 +423,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           if (normalizedCandidates.length === 0) return;
 
           // Resolve family member with UID/deviceId/local-id aliases.
-          const members = useFamilyStore.getState().members;
-          const member = members.find((candidate) =>
+          const storeMembers = useFamilyStore.getState().members;
+          const member = storeMembers.find((candidate: FamilyMember) =>
             normalizedCandidates.some((value) =>
               value === candidate.deviceId ||
               value === candidate.uid
@@ -435,9 +489,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 text: 'SOS Görüşmesi',
                 style: 'destructive',
                 onPress: () => {
-                  // CRITICAL FIX: Prefer message.senderId (mesh layer, consistent with identity.id)
-                  // over messageData.senderDeviceId (payload field, could be physical ID mismatch).
-                  // SOSConversationScreen filters msg.senderId === sosUserId.
                   navigation.navigate('SOSConversation', {
                     sosUserId:
                       messageData.senderUid ||
@@ -451,7 +502,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                       messageData.senderDeviceId,
                       messageData.fromDeviceId,
                       messageData.deviceId,
-                    ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+                    ].filter((value: unknown): value is string => typeof value === 'string' && value.length > 0),
                     sosUserName: senderName,
                     sosMessage: messageData.message,
                     sosLocation: messageData.location,
@@ -480,7 +531,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
   const startLocationSharing = useCallback(async () => {
     // CRITICAL FIX: If location is disabled in app settings, offer to enable it
-    // instead of silently blocking. Users confuse device GPS with app setting.
     if (!locationEnabled) {
       Alert.alert(
         'Konum Paylaşımı Kapalı',
@@ -492,9 +542,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
             style: 'default',
             onPress: () => {
               try {
-                const { useSettingsStore } = require('../../stores/settingsStore');
-                useSettingsStore.getState().setLocation(true);
-                // Will re-trigger via useEffect since isSharingLocation is still true
+                const { useSettingsStore: useSettings } = require('../../stores/settingsStore');
+                useSettings.getState().setLocation(true);
                 logger.info('✅ Location enabled via auto-activate prompt');
               } catch (e) {
                 logger.error('Failed to auto-enable location:', e);
@@ -510,7 +559,15 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Konum İzni', 'Konum paylaşımı için izin gereklidir');
+        // Single consolidated alert for permission denial
+        Alert.alert(
+          'Konum İzni Gerekli',
+          'Konum paylaşımı için konum iznini uygulama ayarlarından vermeniz gerekiyor.',
+          [
+            { text: 'İptal', style: 'cancel' },
+            { text: 'Ayarları Aç', onPress: () => Linking.openSettings() },
+          ]
+        );
         setIsSharingLocation(false);
         return;
       }
@@ -534,21 +591,23 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         setIsSharingLocation(false);
       });
     } else {
-      familyTrackingService.stopTracking(FAMILY_TRACKING_CONSUMER_ID);
+      familyTrackingService?.stopTracking?.(FAMILY_TRACKING_CONSUMER_ID);
     }
 
     return () => {
-      familyTrackingService.stopTracking(FAMILY_TRACKING_CONSUMER_ID);
+      familyTrackingService?.stopTracking?.(FAMILY_TRACKING_CONSUMER_ID);
     };
   }, [isSharingLocation, startLocationSharing]);
 
-  const handleStatusUpdate = async (status: 'safe' | 'need-help' | 'critical') => {
+  const handleStatusUpdate = useCallback(async (status: 'safe' | 'need-help' | 'critical') => {
     haptics.notificationSuccess();
     const previousStatus = myStatus;
+    setStatusUpdating(true);
 
     try {
       // ELITE: Ensure BLE Mesh service is started before sending status update
-      if (!bleMeshService.getIsRunning()) {
+      // Null guard: bleMeshService can be null if import fails
+      if (bleMeshService && typeof bleMeshService.getIsRunning === 'function' && !bleMeshService.getIsRunning()) {
         try {
           await bleMeshService.start();
           if (__DEV__) {
@@ -594,13 +653,12 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         logger.debug('Location permission not granted - status update will be sent without location');
       }
 
-      let myDeviceId = bleMeshService.getMyDeviceId();
-      if (!myDeviceId) {
+      let resolvedDeviceId = bleMeshService?.getMyDeviceId?.() ?? null;
+      if (!resolvedDeviceId) {
         try {
-          myDeviceId = await getDeviceIdFromLib();
-          if (myDeviceId) {
-            // Set it in MeshStore for future use
-            useMeshStore.getState().setMyDeviceId(myDeviceId);
+          resolvedDeviceId = await getDeviceIdFromLib();
+          if (resolvedDeviceId) {
+            useMeshStore.getState().setMyDeviceId(resolvedDeviceId);
           }
         } catch (error) {
           logger.warn('Failed to get device ID from fallback provider:', error);
@@ -609,7 +667,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
       const myIdentity = identityService.getIdentity();
       const senderRouteId = (
-        myDeviceId ||
+        resolvedDeviceId ||
         identityService.getUid() ||
         myIdentity?.uid ||
         ''
@@ -617,7 +675,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
       if (!senderRouteId) {
         logger.error('Status update aborted: sender identity could not be resolved');
-        haptics.notificationError();
+        haptics.notificationError?.();
         Alert.alert('Hata', 'Kimlik bilgisi alınamadı. Lütfen tekrar giriş yapıp yeniden deneyin.');
         return;
       }
@@ -625,7 +683,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       // Create status update message
       const statusMessage = JSON.stringify({
         type: 'family_status_update',
-        deviceId: senderRouteId, // Include sender routing ID so receiver can match aliases
+        deviceId: senderRouteId,
         senderUid: identityService.getUid(),
         status,
         location: location ? {
@@ -641,14 +699,12 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       const selfIds = new Set(
         [
           senderRouteId,
-          myDeviceId,
+          resolvedDeviceId,
           identityService.getUid(),
-          myIdentity?.uid,
-          myIdentity?.uid,
           myIdentity?.uid,
         ].filter((value): value is string => !!value && value.trim().length > 0),
       );
-      const reachableMembers = familyMembers.filter((member) => {
+      const reachableMembers = familyMembers.filter((member: FamilyMember) => {
         const targets = [
           member.uid?.trim(),
           member.deviceId?.trim(),
@@ -658,9 +714,9 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         return targets.some((target) => !selfIds.has(target));
       });
 
-      // Broadcast status via dedicated STATUS mesh type so chat UIs don't render raw JSON payloads.
+      // Broadcast status via dedicated STATUS mesh type
       let broadcastSuccess = false;
-      if (bleMeshService.getIsRunning()) {
+      if (bleMeshService?.getIsRunning?.()) {
         try {
           await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.STATUS, {
             to: 'broadcast',
@@ -672,7 +728,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           }
         } catch (broadcastError) {
           logger.warn('BLE Mesh broadcast failed (non-critical):', broadcastError);
-          // Continue - Firebase sync will still work
         }
       } else {
         logger.warn('BLE Mesh service not running - status update will only be saved to Firebase');
@@ -692,7 +747,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
             timestamp: Date.now(),
           });
 
-          // Also save location if available
           if (location) {
             await firebaseDataService.saveLocationUpdate(cloudTargetId, {
               latitude: location.coords.latitude,
@@ -707,7 +761,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       }
 
       // CRITICAL: Send to backend for rescue coordination
-      // ELITE: This ensures rescue teams know user's current status
       try {
         const { backendEmergencyService } = await import('../../services/BackendEmergencyService');
         if (backendEmergencyService.initialized) {
@@ -719,7 +772,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
               accuracy: location.coords.accuracy || undefined,
             } : undefined,
             timestamp: Date.now(),
-          }).catch((error) => {
+          }).catch((error: unknown) => {
             logger.error('Failed to send status update to backend:', error);
           });
         }
@@ -732,8 +785,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         const directTargets = Array.from(
           new Set(
             [member.uid, member.deviceId]
-              .map((value) => (typeof value === 'string' ? value.trim() : ''))
-              .filter((value) => value.length > 0 && !selfIds.has(value) && !value.startsWith('family-')),
+              .map((value: string | undefined) => (typeof value === 'string' ? value.trim() : ''))
+              .filter((value: string) => value.length > 0 && !selfIds.has(value) && !value.startsWith('family-')),
           ),
         );
         for (const directTarget of directTargets) {
@@ -751,7 +804,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       }
 
       // CRITICAL FIX: Write status update to each family member's Firestore path
-      // Without this, family members NEVER receive the status update!
       try {
         const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
         const db = await getFirestoreInstanceAsync();
@@ -805,7 +857,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
             return resolvedUid;
           };
 
-          const writePromises = reachableMembers.map(async (member) => {
+          const writePromises = reachableMembers.map(async (member: FamilyMember) => {
             try {
               const targetAliases = new Set<string>();
               const memberDeviceId = member.deviceId?.trim();
@@ -814,21 +866,17 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
               if (memberUid) targetAliases.add(memberUid);
 
               const nonSelfTargets = Array.from(targetAliases).filter((target) => !selfIds.has(target));
-              if (nonSelfTargets.length === 0) {
-                return;
-              }
+              if (nonSelfTargets.length === 0) return;
 
               const docIdBase = `${senderRouteId}_${Date.now()}`;
               await Promise.allSettled(nonSelfTargets.map(async (target) => {
                 const resolvedUid = await resolveUidFromAlias(target);
                 if (resolvedUid) {
-                  // V3 canonical path: users/{uid}/status_updates
                   const v3StatusRef = doc(db, 'users', resolvedUid, 'status_updates', docIdBase);
                   await setDoc(v3StatusRef, statusPayload).catch(() => { });
                   return;
                 }
 
-                // Legacy / device path: devices/{deviceId}/status_updates
                 const statusRef = doc(db, 'devices', target, 'status_updates', docIdBase);
                 await setDoc(statusRef, statusPayload).catch(() => { });
               }));
@@ -841,11 +889,11 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
           await Promise.allSettled(writePromises);
 
-          // Also update own device doc with current status (for others who subscribe)
+          // Also update own device doc with current status
           try {
             const ownDeviceDocId = (
-              myDeviceId ||
-              identityService.getMeshDeviceId() ||
+              resolvedDeviceId ||
+              identityService.getMeshDeviceId?.() ||
               ''
             ).trim();
             if (ownDeviceDocId) {
@@ -914,12 +962,10 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
               status: 'critical',
               deviceId: senderRouteId,
             },
-          }).catch((alertError) => {
-            // Silent fail for alert - status update already succeeded
+          }).catch((alertError: unknown) => {
             logger.warn('Multi-channel alert failed (non-critical):', alertError);
           });
         } catch (alertError) {
-          // Silent fail for alert - status update already succeeded
           logger.warn('Multi-channel alert error (non-critical):', alertError);
         }
       }
@@ -927,12 +973,14 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     } catch (error) {
       setMyStatus(previousStatus);
       logger.error('Status update error:', error);
-      haptics.notificationError();
+      haptics.notificationError?.();
       Alert.alert('Hata', 'Durum güncellenemedi. Lütfen tekrar deneyin.');
+    } finally {
+      setStatusUpdating(false);
     }
-  };
+  }, [myStatus]);
 
-  const handleShareLocation = async () => {
+  const handleShareLocation = useCallback(async () => {
     haptics.impactLight();
     const newSharing = !isSharingLocation;
     setIsSharingLocation(newSharing);
@@ -942,29 +990,29 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     } else {
       Alert.alert('Konum Paylaşımı', 'Konum paylaşımı durduruldu');
     }
-  };
+  }, [isSharingLocation]);
 
-  const handleStatusButtonPress = (status: 'safe' | 'need-help' | 'critical' | 'location') => {
+  const handleStatusButtonPress = useCallback((status: 'safe' | 'need-help' | 'critical' | 'location') => {
+    if (statusUpdating) return; // prevent double-tap while loading
     if (status === 'location') {
       void handleShareLocation().catch((error) => {
         logger.error('Error sharing location:', error);
-        haptics.notificationError();
+        haptics.notificationError?.();
       });
     } else {
       void handleStatusUpdate(status).catch((error) => {
-        // Error already handled in handleStatusUpdate, but ensure it's caught
         logger.error('Error in handleStatusUpdate:', error);
       });
     }
-  };
+  }, [statusUpdating, handleShareLocation, handleStatusUpdate]);
 
   const getMemberConversationTargetId = useCallback((member: Pick<FamilyMember, 'uid' | 'deviceId'>): string => {
     const selfAliases = new Set<string>(
       [
         identityService.getUid(),
         myDeviceId,
-        identityService.getMyId(),
-        identityService.getIdentity()?.uid,
+        identityService.getMyId?.(),
+        identityService.getIdentity?.()?.uid,
       ].filter((value): value is string => !!value && value.trim().length > 0),
     );
 
@@ -987,7 +1035,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
   }, [navigation]);
 
-  const handleShowMyId = async () => {
+  const handleShowMyId = useCallback(async () => {
     haptics.impactLight();
 
     // Ensure device ID is available before showing modal
@@ -1018,7 +1066,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
 
     setShowIdModal(true);
-  };
+  }, [myDeviceId, mySharePayload]);
 
   /** Full QR payload for QR code encoding (scanners need full JSON) */
   const getQRValue = useCallback((): string => {
@@ -1029,7 +1077,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
   /** Human-readable publicUserCode for display, copy, and share */
   const shareDisplayId = useMemo(() => {
-    const code = identityService.getPublicUserCode();
+    const code = identityService.getPublicUserCode?.();
     if (code) return code;
     // Fallback: extract from QR payload
     const payload = mySharePayload.trim();
@@ -1042,20 +1090,19 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     return myDeviceId || '';
   }, [mySharePayload, myDeviceId]);
 
-  const handleCopyId = async () => {
+  const handleCopyId = useCallback(async () => {
     if (!shareDisplayId) return;
     await Clipboard.setStringAsync(shareDisplayId);
     haptics.notificationSuccess();
-    Alert.alert('Kopyalandı', `ID panoya kopyalandı: ${shareDisplayId}`);
-  };
+    showToast(`ID kopyalandı: ${shareDisplayId}`);
+  }, [shareDisplayId, showToast]);
 
-  const handleShareId = async () => {
+  const handleShareId = useCallback(async () => {
     if (!shareDisplayId) return;
 
     const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
 
     if (Platform.OS === 'ios') {
-      // iOS: Show ActionSheet
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: ['İptal', 'WhatsApp', 'SMS', 'Diğer'],
@@ -1064,17 +1111,30 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         async (buttonIndex) => {
           try {
             if (buttonIndex === 1) {
-              // WhatsApp
               const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-              const canOpen = await Linking.canOpenURL(whatsappUrl);
-              if (canOpen) {
-                await Linking.openURL(whatsappUrl);
-                haptics.notificationSuccess();
-              } else {
-                Alert.alert('WhatsApp', 'WhatsApp yüklü değil');
+              let opened = false;
+              try {
+                const canOpen = await Linking.canOpenURL(whatsappUrl);
+                if (canOpen) {
+                  await Linking.openURL(whatsappUrl);
+                  haptics.notificationSuccess();
+                  opened = true;
+                }
+              } catch { /* scheme failed */ }
+              if (!opened) {
+                // Fallback to wa.me web URL
+                try {
+                  const webUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
+                  await Linking.openURL(webUrl);
+                  haptics.notificationSuccess();
+                  opened = true;
+                } catch {
+                  // Fallback to native share
+                  const result = await NativeShare.share({ message: shareMessage });
+                  if (result.action === NativeShare.sharedAction) haptics.notificationSuccess();
+                }
               }
             } else if (buttonIndex === 2) {
-              // SMS
               const isAvailable = await SMS.isAvailableAsync();
               if (isAvailable) {
                 await SMS.sendSMSAsync([], shareMessage);
@@ -1083,7 +1143,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 Alert.alert('SMS', 'SMS gönderimi bu cihazda desteklenmiyor');
               }
             } else if (buttonIndex === 3) {
-              // Other (System share sheet)
               const result = await NativeShare.share({ message: shareMessage });
               if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
                 haptics.notificationSuccess();
@@ -1098,61 +1157,101 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         },
       );
     } else {
-      // Android: Try WhatsApp first, then SMS, then system share
       try {
-        // Try WhatsApp
         const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-        const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
+        let opened = false;
 
-        if (canOpenWhatsApp) {
-          await Linking.openURL(whatsappUrl);
-          haptics.notificationSuccess();
-          return;
+        try {
+          const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
+          if (canOpenWhatsApp) {
+            await Linking.openURL(whatsappUrl);
+            haptics.notificationSuccess();
+            opened = true;
+          }
+        } catch {
+          // whatsapp:// scheme failed
         }
 
-        // Try SMS
-        const isSMSAvailable = await SMS.isAvailableAsync();
-        if (isSMSAvailable) {
-          await SMS.sendSMSAsync([], shareMessage);
-          haptics.notificationSuccess();
-          return;
+        if (!opened) {
+          // Fallback: WhatsApp web API
+          try {
+            const webWhatsAppUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
+            const canOpenWeb = await Linking.canOpenURL(webWhatsAppUrl);
+            if (canOpenWeb) {
+              await Linking.openURL(webWhatsAppUrl);
+              haptics.notificationSuccess();
+              opened = true;
+            }
+          } catch {
+            // wa.me fallback also failed
+          }
         }
 
-        // Fallback to system share
-        const result = await NativeShare.share({ message: shareMessage });
-        if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
-          haptics.notificationSuccess();
-        } else {
-          await handleCopyId();
+        if (!opened) {
+          const isSMSAvailable = await SMS.isAvailableAsync();
+          if (isSMSAvailable) {
+            await SMS.sendSMSAsync([], shareMessage);
+            haptics.notificationSuccess();
+            return;
+          }
+
+          const result = await NativeShare.share({ message: shareMessage });
+          if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
+            haptics.notificationSuccess();
+          } else {
+            await handleCopyId();
+          }
         }
       } catch (error) {
         logger.error('Share ID error:', error);
         await handleCopyId();
       }
     }
-  };
+  }, [shareDisplayId, handleCopyId]);
 
-  const handleShareIdWhatsApp = async () => {
+  const handleShareIdWhatsApp = useCallback(async () => {
     if (!shareDisplayId) return;
 
     const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
 
     try {
+      // Try whatsapp:// scheme first
       const canOpen = await Linking.canOpenURL(whatsappUrl);
       if (canOpen) {
         await Linking.openURL(whatsappUrl);
         haptics.notificationSuccess();
-      } else {
-        Alert.alert('WhatsApp', 'WhatsApp yüklü değil');
+        return;
+      }
+
+      // Fallback: Try WhatsApp web API URL (works even without scheme declaration)
+      const webWhatsAppUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
+      const canOpenWeb = await Linking.canOpenURL(webWhatsAppUrl);
+      if (canOpenWeb) {
+        await Linking.openURL(webWhatsAppUrl);
+        haptics.notificationSuccess();
+        return;
+      }
+
+      // Final fallback: Use native share sheet
+      const result = await NativeShare.share({ message: shareMessage });
+      if (result.action === NativeShare.sharedAction) {
+        haptics.notificationSuccess();
       }
     } catch (error) {
       logger.error('WhatsApp share error:', error);
-      Alert.alert('Hata', 'WhatsApp ile paylaşılamadı');
+      // Last resort: copy to clipboard
+      try {
+        await Clipboard.setStringAsync(shareDisplayId);
+        haptics.notificationSuccess();
+        showToast(`ID kopyalandı: ${shareDisplayId}`);
+      } catch {
+        Alert.alert('Hata', 'Paylaşım yapılamadı. Lütfen tekrar deneyin.');
+      }
     }
-  };
+  }, [shareDisplayId, showToast]);
 
-  const handleShareIdSMS = async () => {
+  const handleShareIdSMS = useCallback(async () => {
     if (!shareDisplayId) return;
 
     const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
@@ -1169,9 +1268,9 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       logger.error('SMS share error:', error);
       Alert.alert('Hata', 'SMS ile paylaşılamadı');
     }
-  };
+  }, [shareDisplayId]);
 
-  const handleShareIdOther = async () => {
+  const handleShareIdOther = useCallback(async () => {
     if (!shareDisplayId) return;
 
     const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
@@ -1187,52 +1286,55 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       logger.error('Share error:', error);
       await handleCopyId();
     }
-  };
+  }, [shareDisplayId, handleCopyId]);
 
-  const getStatusColor = (status: FamilyMember['status']) => {
+  const getStatusColor = useCallback((status: FamilyMember['status']) => {
     switch (status) {
       case 'safe': return '#10b981';
       case 'need-help': return '#f59e0b';
       case 'critical': return '#ef4444';
-      default: return colors.text.tertiary;
+      case 'danger': return '#dc2626';
+      case 'offline': return '#94a3b8';
+      default: return colors.text?.tertiary ?? '#64748b';
     }
-  };
+  }, []);
 
-  const getStatusText = (status: FamilyMember['status']) => {
+  const getStatusText = useCallback((status: FamilyMember['status']) => {
     switch (status) {
       case 'safe': return 'Güvende';
       case 'need-help': return 'Yardım Gerekiyor';
       case 'critical': return 'ACİL DURUM';
+      case 'danger': return 'TEHLİKEDE';
+      case 'offline': return 'Çevrimdışı';
       default: return 'Bilinmiyor';
     }
-  };
+  }, []);
 
   // ELITE: Memoize safe count for performance
   const safeCount = useMemo(() => {
     try {
-      return members.filter(m => m.status === 'safe').length;
+      return members.filter((m: FamilyMember) => m.status === 'safe').length;
     } catch (error) {
       logger.error('Error calculating safe count:', error);
       return 0;
     }
   }, [members]);
 
-  const handleEditMember = (member: FamilyMember) => {
+  const handleEditMember = useCallback((member: FamilyMember) => {
     setEditingMember(member);
     setEditName(member.name || '');
     setEditRelationship(member.relationship || null);
     setEditPhone(member.phoneNumber || '');
     setEditNotes(member.notes || '');
     setShowEditModal(true);
-  };
+  }, []);
 
-  const handleSaveEdit = async () => {
+  const handleSaveEdit = useCallback(async () => {
     if (!editingMember || !editName.trim()) {
       Alert.alert('Hata', 'Lütfen geçerli bir isim girin.');
       return;
     }
 
-    // ELITE: Validate name length
     if (editName.trim().length < 2) {
       Alert.alert('Hata', 'İsim en az 2 karakter olmalıdır.');
       return;
@@ -1243,9 +1345,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       return;
     }
 
-    // ELITE: Validate phone number if provided
     if (editPhone.trim()) {
-      const phoneRegex = /^(\+90|0)?[5][0-9]{9}$/;
+      const phoneRegex = /^(\+?\d{1,4}[-.\s]?)?(\(?\d{1,4}\)?[-.\s]?)?[\d\-.\s]{5,15}$/;
       if (!phoneRegex.test(editPhone.replace(/\s/g, ''))) {
         Alert.alert('Hata', 'Geçersiz telefon numarası formatı.');
         return;
@@ -1271,11 +1372,10 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       logger.error('Failed to update member:', error);
       Alert.alert('Hata', 'Üye güncellenemedi. Lütfen tekrar deneyin.');
     }
-  };
+  }, [editingMember, editName, editRelationship, editPhone, editNotes]);
 
-  const handleDeleteMember = async (memberId: string) => {
-    // ELITE: Find member for confirmation message
-    const member = members.find(m => m.uid === memberId);
+  const handleDeleteMember = useCallback(async (memberId: string) => {
+    const member = members.find((m: FamilyMember) => m.uid === memberId);
     const memberName = member?.name || 'Üye';
 
     Alert.alert(
@@ -1298,13 +1398,25 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
             } catch (error) {
               logger.error('Failed to delete member:', error);
               Alert.alert('Hata', 'Üye silinemedi. Lütfen tekrar deneyin.');
-              haptics.notificationError();
+              haptics.notificationError?.();
             }
           },
         },
       ],
     );
-  };
+  }, [members]);
+
+  // ELITE: Pull-to-refresh
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await useFamilyStore.getState().initialize();
+    } catch (error) {
+      logger.error('Refresh failed:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
 
   // ELITE: Memoized callback for performance
   const handleGroupChat = useCallback(() => {
@@ -1316,7 +1428,58 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
   }, [navigation]);
 
-  console.log('🔵 [10] FamilyScreenInner: RENDER START');
+  // FlatList render item (memoized)
+  const renderMemberItem = useCallback(({ item, index }: { item: FamilyMember; index: number }) => (
+    <MemberCard
+      member={item}
+      index={index}
+      onPress={() => {
+        haptics.impactLight();
+        navigation.navigate('Map', { focusOnMember: item.uid });
+      }}
+      onEdit={handleEditMember}
+      onDelete={(memberId: string) => handleDeleteMember(memberId)}
+      onMessage={(m: FamilyMember) => {
+        haptics.impactLight();
+        const conversationTargetId = getMemberConversationTargetId(m);
+        if (conversationTargetId) {
+          navigation.navigate('Conversation', {
+            userId: conversationTargetId,
+            userName: m.name,
+          });
+        } else {
+          Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
+        }
+      }}
+      onLocate={(m: FamilyMember) => {
+        const resolvedLocation = resolveFamilyMemberLocation(m);
+        if (resolvedLocation) {
+          const lat = resolvedLocation.latitude;
+          const lng = resolvedLocation.longitude;
+          const url = Platform.select({
+            ios: `maps:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
+            android: `geo:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
+          });
+          if (url) {
+            Linking.openURL(url).catch((err) => {
+              logger.warn('Primary map URL failed in FamilyScreen:', err);
+              Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch((fallbackError) => {
+                logger.error('Fallback map URL failed in FamilyScreen:', fallbackError);
+              });
+            });
+          }
+        } else {
+          Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
+        }
+      }}
+    />
+  ), [handleEditMember, handleDeleteMember, getMemberConversationTargetId, navigation]);
+
+  const keyExtractor = useCallback((item: FamilyMember) => item.uid, []);
+
+  // Responsive map height: 45% of screen height
+  const mapHeight = Math.round(screenHeight * 0.45);
+
   return (
     <ImageBackground
       source={require('../../../../assets/images/premium/family_soft_bg.png')}
@@ -1324,16 +1487,16 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       resizeMode="cover"
     >
       <LinearGradient
-        colors={['rgba(255, 255, 255, 0.1)', 'rgba(255, 255, 255, 0.4)']} // ELITE: Light/Soft overlay
+        colors={['rgba(255, 255, 255, 0.1)', 'rgba(255, 255, 255, 0.4)']}
         style={StyleSheet.absoluteFill}
       />
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent={true}
       />
 
-      <View style={[styles.header, { paddingTop: insets.top + 16, backgroundColor: 'transparent' }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
           <View style={styles.titleContainer}>
             <Text style={styles.headerTitle}>Ailem</Text>
@@ -1365,213 +1528,239 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={viewMode !== 'map'}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#6366f1"
+            colors={['#6366f1']}
+          />
+        }
       >
-        <View style={styles.statusSection}>
-          <Text style={styles.sectionTitle}>Durumum</Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-            <GlassButton
-              title="Güvendeyim"
-              variant="success"
-              icon="checkmark-circle"
-              onPress={() => handleStatusButtonPress('safe')}
-              style={{ flex: 1, opacity: myStatus === 'safe' ? 1 : 0.6, borderWidth: myStatus === 'safe' ? 2 : 0, borderColor: myStatus === 'safe' ? '#10b981' : 'transparent' }}
-            />
-            <GlassButton
-              title="Yardım Lazım"
-              variant="secondary"
-              icon="hand-left"
-              onPress={() => handleStatusButtonPress('need-help')}
-              style={{ flex: 1, opacity: myStatus === 'need-help' ? 1 : 0.6, borderWidth: myStatus === 'need-help' ? 2 : 0, borderColor: myStatus === 'need-help' ? '#f59e0b' : 'transparent' }}
-            />
-          </View>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <GlassButton
-              title="ACİL YARDIM"
-              variant="danger"
-              icon="alert-circle"
-              onPress={() => handleStatusButtonPress('critical')}
-              style={{ flex: 1, opacity: myStatus === 'critical' ? 1 : 0.6, borderWidth: myStatus === 'critical' ? 2 : 0, borderColor: myStatus === 'critical' ? '#ef4444' : 'transparent' }}
-            />
-            <GlassButton
-              title={isSharingLocation ? "Konum Açık" : "Konum Paylaş"}
-              variant="primary"
-              icon={isSharingLocation ? "location" : "location-outline"}
-              onPress={() => handleStatusButtonPress('location')}
-              style={{ flex: 1, opacity: isSharingLocation ? 1 : 0.8, borderWidth: isSharingLocation ? 2 : 0, borderColor: isSharingLocation ? '#3b82f6' : 'transparent' }}
-            />
-          </View>
-        </View>
-
-        {/* Group Chat Button */}
-        {members.length > 0 && (
-          <View style={styles.groupChatSection}>
-            <Pressable style={styles.groupChatButton} onPress={handleGroupChat}>
-              <LinearGradient
-                colors={[colors.brand.primary, colors.brand.secondary]}
-                style={styles.groupChatGradient}
-              >
-                <Ionicons name="chatbubbles" size={24} color="#fff" />
-                <Text style={styles.groupChatText}>Aile Grubu Sohbeti</Text>
-                <Ionicons name="chevron-forward" size={20} color="#fff" />
-              </LinearGradient>
-            </Pressable>
+        {IMPORT_ERRORS.length > 0 && (
+          <View style={{ backgroundColor: '#FFF3CD', padding: 8, borderRadius: 4, margin: 8 }}>
+            <Text style={{ fontSize: 12, color: '#856404' }}>
+              Bazı bileşenler yüklenemedi. Lütfen uygulamayı yeniden başlatın.
+            </Text>
           </View>
         )}
 
-        {/* Member List */}
-        <View style={styles.membersSection}>
-          <View style={styles.sectionHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={styles.sectionTitle}>Aile Üyeleri</Text>
-              <View style={{
-                backgroundColor: '#6366f1',
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{members.length}</Text>
-              </View>
-            </View>
-            {/* Map/List toggle */}
-            <Pressable
-              onPress={() => {
-                haptics.impactLight();
-                setViewMode(prev => prev === 'list' ? 'map' : 'list');
-              }}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                backgroundColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.7)',
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.9)',
-              }}
-            >
-              <Ionicons
-                name={viewMode === 'map' ? 'list' : 'map'}
-                size={15}
-                color={viewMode === 'map' ? '#6366f1' : '#64748b'}
-              />
-              <Text style={{
-                fontSize: 12,
-                fontWeight: '700',
-                color: viewMode === 'map' ? '#6366f1' : '#64748b',
-                letterSpacing: 0.2,
-              }}>
-                {viewMode === 'map' ? 'Liste' : 'Harita'}
-              </Text>
-            </Pressable>
+        {/* Loading skeleton while initializing */}
+        {isInitializing ? (
+          <View style={{ padding: 20, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#6366f1" />
+            <Text style={{ color: '#64748b', marginTop: 12, fontSize: 14 }}>Yükleniyor...</Text>
           </View>
-
-          {members.length > 0 ? (
-            viewMode === 'map' ? (
-              /* ELITE V2: Interactive Family Map (Life360 pattern) */
-              <View style={{ height: 350, borderRadius: 16, overflow: 'hidden', marginHorizontal: 4 }}>
-                <SafeFamilyMapView
-                  members={members}
-                  onMemberPress={(member) => {
-                    haptics.impactLight();
-                  }}
-                  onCheckIn={(memberId) => {
-                    haptics.impactMedium();
-                    const member = members.find(
-                      (m) => m.uid === memberId || m.deviceId === memberId,
-                    );
-                    if (member) {
-                      // Send an explicit check-in ping first (cloud + mesh).
-                      familyTrackingService.requestCheckIn(memberId).catch((error) => {
-                        logger.warn('Family check-in request failed from map card:', error);
-                      });
-
-                      const conversationTargetId = getMemberConversationTargetId(member);
-                      if (conversationTargetId) {
-                        navigation.navigate('Conversation', {
-                          userId: conversationTargetId,
-                          userName: member.name,
-                        });
-                      } else {
-                        Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
-                      }
-                    }
-                  }}
+        ) : (
+          <>
+            <View style={styles.statusSection}>
+              <Text style={styles.sectionTitle}>Durumum</Text>
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                <GlassButton
+                  title="Güvendeyim"
+                  variant="success"
+                  icon={statusUpdating && myStatus === 'safe' ? undefined : 'checkmark-circle'}
+                  disabled={statusUpdating}
+                  onPress={() => handleStatusButtonPress('safe')}
+                  style={[
+                    { flex: 1 },
+                    myStatus === 'safe'
+                      ? { backgroundColor: '#10b981', borderWidth: 2, borderColor: '#059669' }
+                      : { opacity: 0.6, borderWidth: 1, borderColor: '#10b981', borderStyle: 'solid' as const }
+                  ]}
+                />
+                <GlassButton
+                  title="Yardım Lazım"
+                  variant="secondary"
+                  icon={statusUpdating && myStatus === 'need-help' ? undefined : 'hand-left'}
+                  disabled={statusUpdating}
+                  onPress={() => handleStatusButtonPress('need-help')}
+                  style={[
+                    { flex: 1 },
+                    myStatus === 'need-help'
+                      ? { backgroundColor: '#f59e0b', borderWidth: 2, borderColor: '#d97706' }
+                      : { opacity: 0.6, borderWidth: 1, borderColor: '#f59e0b', borderStyle: 'solid' as const }
+                  ]}
                 />
               </View>
-            ) : (
-              <View style={styles.memberList}>
-                {members.map((member, index) => (
-                  <MemberCard
-                    key={member.uid}
-                    member={member}
-                    index={index}
-                    onPress={() => {
-                      haptics.impactLight();
-                      navigation.navigate('Map', { focusOnMember: member.uid });
-                    }}
-                    onEdit={handleEditMember}
-                    onDelete={(memberId) => handleDeleteMember(memberId)}
-                    onMessage={(m) => {
-                      haptics.impactLight();
-                      const conversationTargetId = getMemberConversationTargetId(m);
-                      if (conversationTargetId) {
-                        navigation.navigate('Conversation', {
-                          userId: conversationTargetId,
-                          userName: m.name,
-                        });
-                      } else {
-                        Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
-                      }
-                    }}
-                    onLocate={(m) => {
-                      const resolvedLocation = resolveFamilyMemberLocation(m);
-                      if (resolvedLocation) {
-                        const lat = resolvedLocation.latitude;
-                        const lng = resolvedLocation.longitude;
-                        const url = Platform.select({
-                          ios: `maps:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
-                          android: `geo:0,0?q=${lat},${lng}(${encodeURIComponent(m.name)})`,
-                        });
-                        if (url) {
-                          Linking.openURL(url).catch((err) => {
-                            logger.warn('Primary map URL failed in FamilyScreen:', err);
-                            Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch((fallbackError) => {
-                              logger.error('Fallback map URL failed in FamilyScreen:', fallbackError);
-                            });
-                          });
-                        }
-                      } else {
-                        Alert.alert('Konum Yok', 'Bu üyenin konumu henüz paylaşılmamış.');
-                      }
-                    }}
-                  />
-                ))}
-
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <GlassButton
+                  title="ACİL YARDIM"
+                  variant="danger"
+                  icon={statusUpdating && myStatus === 'critical' ? undefined : 'alert-circle'}
+                  disabled={statusUpdating}
+                  onPress={() => handleStatusButtonPress('critical')}
+                  style={[
+                    { flex: 1 },
+                    myStatus === 'critical'
+                      ? { backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#dc2626' }
+                      : { opacity: 0.6, borderWidth: 1, borderColor: '#ef4444', borderStyle: 'solid' as const }
+                  ]}
+                />
+                <GlassButton
+                  title={isSharingLocation ? 'Konum Açık' : 'Konum Paylaş'}
+                  variant="primary"
+                  icon={isSharingLocation ? 'location' : 'location-outline'}
+                  disabled={statusUpdating}
+                  onPress={() => handleStatusButtonPress('location')}
+                  style={[
+                    { flex: 1 },
+                    isSharingLocation
+                      ? { backgroundColor: '#3b82f6', borderWidth: 2, borderColor: '#2563eb' }
+                      : { opacity: 0.8, borderWidth: 1, borderColor: '#3b82f6', borderStyle: 'solid' as const }
+                  ]}
+                />
               </View>
-            )
-          ) : (
-            <View style={styles.emptyState}>
-              {/* Icon removed for cleaner look */}
-              <Text style={styles.emptyText}>Henüz üye eklenmemiş</Text>
-              <Text style={styles.emptySubtext}>
-                Aile üyelerinizi ekleyerek durumlarını takip edebilirsiniz.
-              </Text>
-              <GlassButton
-                title="Üye Ekle"
-                variant="primary"
-                icon="add-circle"
-                onPress={handleAddMember}
-                style={{ marginTop: 16, minWidth: 200 }}
-              />
+              {statusUpdating && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, gap: 6 }}>
+                  <ActivityIndicator size="small" color="#6366f1" />
+                  <Text style={{ fontSize: 12, color: '#6366f1', fontWeight: '600' }}>Durum bildiriliyor...</Text>
+                </View>
+              )}
             </View>
-          )}
-        </View>
+
+            {/* Group Chat Button */}
+            {members.length > 0 && (
+              <View style={styles.groupChatSection}>
+                <Pressable style={styles.groupChatButton} onPress={handleGroupChat}>
+                  <LinearGradient
+                    colors={[colors.brand?.primary ?? '#6366f1', colors.brand?.secondary ?? '#4f46e5']}
+                    style={styles.groupChatGradient}
+                  >
+                    <Ionicons name="chatbubbles" size={24} color="#fff" />
+                    <Text style={styles.groupChatText}>Aile Grubu Sohbeti</Text>
+                    <Ionicons name="chevron-forward" size={20} color="#fff" />
+                  </LinearGradient>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Member List */}
+            <View style={styles.membersSection}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.sectionTitle}>Aile Üyeleri</Text>
+                  {/* Member count badge reflecting actual count */}
+                  <View style={{
+                    backgroundColor: '#6366f1',
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{members.length}</Text>
+                  </View>
+                </View>
+                {/* Map/List toggle */}
+                <Pressable
+                  onPress={() => {
+                    haptics.impactLight();
+                    setViewMode(prev => prev === 'list' ? 'map' : 'list');
+                  }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.7)',
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: viewMode === 'map' ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.9)',
+                  }}
+                >
+                  <Ionicons
+                    name={viewMode === 'map' ? 'list' : 'map'}
+                    size={15}
+                    color={viewMode === 'map' ? '#6366f1' : '#64748b'}
+                  />
+                  <Text style={{
+                    fontSize: 12,
+                    fontWeight: '700',
+                    color: viewMode === 'map' ? '#6366f1' : '#64748b',
+                    letterSpacing: 0.2,
+                  }}>
+                    {viewMode === 'map' ? 'Liste' : 'Harita'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {members.length > 0 ? (
+                viewMode === 'map' ? (
+                  /* ELITE V2: Interactive Family Map — responsive height */
+                  <View style={{ height: mapHeight, borderRadius: 16, overflow: 'hidden', marginHorizontal: 4 }}>
+                    <SafeFamilyMapView
+                      members={members}
+                      onMemberPress={(member: FamilyMember) => {
+                        haptics.impactLight();
+                        const targetId = getMemberConversationTargetId(member);
+                        if (targetId) {
+                          navigation.navigate('Conversation', { userId: targetId, userName: member.name });
+                        } else {
+                          Alert.alert('Bilgi', `${member.name} - Durum: ${getStatusText(member.status)}`);
+                        }
+                      }}
+                      onCheckIn={(memberId: string) => {
+                        haptics.impactMedium();
+                        const member = members.find(
+                          (m: FamilyMember) => m.uid === memberId || m.deviceId === memberId,
+                        );
+                        if (member) {
+                          familyTrackingService?.requestCheckIn?.(memberId).catch((error: unknown) => {
+                            logger.warn('Family check-in request failed from map card:', error);
+                          });
+
+                          const conversationTargetId = getMemberConversationTargetId(member);
+                          if (conversationTargetId) {
+                            navigation.navigate('Conversation', {
+                              userId: conversationTargetId,
+                              userName: member.name,
+                            });
+                          } else {
+                            Alert.alert('Mesajlaşma Kimliği Yok', 'Bu üye için geçerli UID veya cihaz kimliği bulunamadı.');
+                          }
+                        }
+                      }}
+                    />
+                  </View>
+                ) : (
+                  /* FlatList replaces members.map() for proper virtualization */
+                  <FlatList
+                    data={members}
+                    keyExtractor={keyExtractor}
+                    renderItem={renderMemberItem}
+                    scrollEnabled={false}
+                    contentContainerStyle={styles.memberList}
+                    removeClippedSubviews={false}
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={10}
+                    windowSize={5}
+                  />
+                )
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>Henüz üye eklenmemiş</Text>
+                  <Text style={styles.emptySubtext}>
+                    Aile üyelerinizi ekleyerek durumlarını takip edebilirsiniz.
+                  </Text>
+                  <GlassButton
+                    title="Üye Ekle"
+                    variant="primary"
+                    icon="add-circle"
+                    onPress={handleAddMember}
+                    style={{ marginTop: 16, minWidth: 200 }}
+                  />
+                </View>
+              )}
+            </View>
+          </>
+        )}
       </ScrollView>
 
-      {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
+      {/* Toast notification */}
+      <Toast message={toastMessage} visible={toastVisible} />
 
       {/* ID Share Modal */}
       <Modal
@@ -1586,7 +1775,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
               style={styles.modalCloseButton}
               onPress={() => setShowIdModal(false)}
             >
-              <Ionicons name="close" size={28} color={colors.text.primary} />
+              <Ionicons name="close" size={28} color={colors.text?.primary ?? '#1e293b'} />
             </Pressable>
 
             <Text style={styles.modalTitle}>Benim ID'm</Text>
@@ -1634,7 +1823,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         </View>
       </Modal>
 
-      {/* Edit Member Modal - ELITE EXPANDED */}
+      {/* Edit Member Modal */}
       <Modal
         visible={showEditModal}
         transparent
@@ -1661,7 +1850,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 setEditNotes('');
               }}
             >
-              <Ionicons name="close" size={28} color={colors.text.primary} />
+              <Ionicons name="close" size={28} color={colors.text?.primary ?? '#1e293b'} />
             </Pressable>
 
             <Text style={styles.modalTitle}>Üyeyi Düzenle</Text>
@@ -1676,7 +1865,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 <TextInput
                   style={styles.editInput}
                   placeholder="Üye ismi"
-                  placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
                   value={editName}
                   onChangeText={setEditName}
                   maxLength={50}
@@ -1724,7 +1913,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 <TextInput
                   style={styles.editInput}
                   placeholder="05551234567"
-                  placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
                   value={editPhone}
                   onChangeText={(text) => setEditPhone(text.replace(/[^\d+\s]/g, '').substring(0, 20))}
                   keyboardType="phone-pad"
@@ -1738,7 +1927,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                 <TextInput
                   style={[styles.editInput, { minHeight: 80, textAlignVertical: 'top' }]}
                   placeholder="Ek bilgiler..."
-                  placeholderTextColor={colors.text.tertiary}
+                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
                   value={editNotes}
                   onChangeText={(text) => setEditNotes(text.substring(0, 500))}
                   multiline
@@ -1779,7 +1968,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       </Modal>
 
 
-    </ImageBackground >
+    </ImageBackground>
   );
 }
 
@@ -1829,30 +2018,6 @@ class FamilyScreenErrorCatcher extends React.Component<
 
 // Default export wraps the screen in a diagnostic error boundary
 export default function FamilyScreen(props: FamilyScreenProps) {
-  console.log('🟢 FamilyScreen: export wrapper called, import errors:', IMPORT_ERRORS.length);
-
-  // If any imports crashed, show diagnostic screen
-  if (IMPORT_ERRORS.length > 0) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e', padding: 20 }}>
-        <Ionicons name="bug" size={48} color="#ff6b6b" />
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: 16 }}>
-          Import Hataları Tespit Edildi
-        </Text>
-        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, textAlign: 'left', width: '100%' }}>
-          Aşağıdaki modüller yüklenemedi:
-        </Text>
-        <ScrollView style={{ maxHeight: 300, width: '100%', marginTop: 12 }}>
-          {IMPORT_ERRORS.map((err, i) => (
-            <Text key={i} style={{ color: '#f87171', fontSize: 11, marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-              {i + 1}. {err}
-            </Text>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  }
-
   return (
     <FamilyScreenErrorCatcher>
       <FamilyScreenInner {...props} />

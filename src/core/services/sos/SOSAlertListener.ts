@@ -29,39 +29,58 @@ let isListening = false;
  * Uses processedAlertIds for dedup (prevents double notification from dual-path).
  */
 function processSOSAlert(alertId: string, alertData: any): void {
+    // Bug #23: Add alertId to processedAlertIds at the START to prevent duplicate processing
+    if (processedAlertIds.has(alertId)) return;
+    processedAlertIds.add(alertId);
+
+    // Evict oldest entries in batch to prevent unbounded memory growth
+    if (processedAlertIds.size >= MAX_PROCESSED_IDS) {
+        const toEvict = Math.max(5, Math.floor(MAX_PROCESSED_IDS * 0.1));
+        const iter = processedAlertIds.values();
+        for (let i = 0; i < toEvict; i++) {
+            const val = iter.next().value;
+            if (val) processedAlertIds.delete(val);
+        }
+    }
+
     // CRITICAL: Skip self-sent SOS alerts — sender should NOT receive their own notification
     try {
         const { identityService } = require('../IdentityService');
-        const myUid = identityService.getUid();
-        const myId = identityService.getMyId?.();
         const selfIds = new Set<string>();
-        if (myUid) selfIds.add(myUid);
+
+        // Collect ALL identity forms for robust self-detection
+        const uid = identityService.getUid();
+        const myId = identityService.getMyId?.();
+        const publicCode = identityService.getPublicUserCode?.();
+        if (uid) selfIds.add(uid);
         if (myId) selfIds.add(myId);
-        const senderUid = alertData?.senderUid || alertData?.userId;
-        const senderDeviceId = alertData?.senderDeviceId;
-        if ((senderUid && selfIds.has(senderUid)) || (senderDeviceId && selfIds.has(senderDeviceId))) {
-            processedAlertIds.add(alertId);
+        if (publicCode) selfIds.add(publicCode);
+
+        // Also check Firebase Auth UID directly (in case IdentityService hasn't synced)
+        try {
+            const { getAuth } = require('firebase/auth');
+            const authUid = getAuth()?.currentUser?.uid;
+            if (authUid) selfIds.add(authUid);
+        } catch { /* auth not ready */ }
+
+        // Check ALL sender identity fields from the alert
+        const senderIds = [
+            alertData?.senderUid,
+            alertData?.userId,
+            alertData?.senderDeviceId,
+            alertData?.creatorUid,
+        ].filter(Boolean) as string[];
+
+        if (senderIds.some(id => selfIds.has(id))) {
             return;
         }
     } catch { /* IdentityService not ready — allow alert through to be safe */ }
-
-    // Skip already processed alerts (prevents duplicate on hot-reload or dual-path)
-    if (processedAlertIds.has(alertId)) return;
 
     // Skip very old alerts (older than 30 minutes)
     const normalizedTimestamp = normalizeTimestampMs(alertData?.timestamp) ?? 0;
     const alertAge = Date.now() - normalizedTimestamp;
     if (alertAge > 30 * 60 * 1000) {
-        processedAlertIds.add(alertId);
         return;
-    }
-
-    processedAlertIds.add(alertId);
-
-    // Evict oldest entries to prevent memory leak
-    if (processedAlertIds.size > MAX_PROCESSED_IDS) {
-        const first = processedAlertIds.values().next().value;
-        if (first) processedAlertIds.delete(first);
     }
 
     logger.warn(`🚨 SOS ALERT RECEIVED from ${alertData.senderName || alertData.senderDeviceId}!`);

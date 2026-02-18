@@ -725,7 +725,16 @@ service cloud.firestore {
 
       match /threads/{threadId} {
         allow read: if isOwner(userId);
-        allow create, update: if isAuthenticated(); // Participants write inbox entries
+        // SECURITY FIX: Only allow writes from conversation participants (not any authenticated user).
+        // The threadId IS the conversationId — check if the writer is in that conversation's participants.
+        // Fallback: allow the inbox owner to write to their own inbox (self-write for cleanup/mark-read).
+        allow create, update: if isOwner(userId)
+                              || (
+                                isAuthenticated()
+                                && exists(/databases/$(database)/documents/conversations/$(threadId))
+                                && get(/databases/$(database)/documents/conversations/$(threadId)).data.participants is list
+                                && request.auth.uid in get(/databases/$(database)/documents/conversations/$(threadId)).data.participants
+                              );
         allow delete: if isOwner(userId);
       }
     }
@@ -845,11 +854,17 @@ service cloud.firestore {
 
     match /sos_broadcasts/{broadcastId} {
       allow read: if isAuthenticated();
+      // SECURITY FIX: Bind creatorUid to auth.uid to prevent spoofed SOS broadcasts
       allow create: if isAuthenticated()
                     && request.resource.data.signalId is string
                     && request.resource.data.latitude is number
                     && request.resource.data.longitude is number
-                    && request.resource.data.timestamp is number;
+                    && request.resource.data.timestamp is number
+                    && (
+                      // New field: must match auth.uid if present
+                      !('senderUid' in request.resource.data)
+                      || request.resource.data.senderUid == request.auth.uid
+                    );
       allow update: if false;
       allow delete: if false; // Cleanup via TTL or Cloud Functions
 

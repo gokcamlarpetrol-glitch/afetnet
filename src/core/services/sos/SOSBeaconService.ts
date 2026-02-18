@@ -234,8 +234,48 @@ class SOSBeaconService {
 
             useSOSStore.getState().updateLocation(sosLocation);
             logger.debug('📍 Location updated');
+
+            // ELITE V4: Write to Firestore locations_current so rescuers can track live
+            // Non-blocking, fails silently if offline (mesh beacon still works)
+            this.writeLocationToFirestore(sosLocation).catch(() => {});
         } catch (error) {
             logger.debug('Location update failed:', error);
+        }
+    }
+
+    /**
+     * Write current location to Firestore locations_current/{userId}
+     * SOSHelpScreen listens to this document for live location tracking.
+     * Fails silently when offline — mesh beacon is the primary offline channel.
+     */
+    private async writeLocationToFirestore(location: SOSLocation): Promise<void> {
+        const signal = useSOSStore.getState().currentSignal;
+        if (!signal?.userId) return;
+
+        try {
+            const { getFirestoreInstanceAsync } = await import(
+                '../firebase/FirebaseInstanceManager'
+            );
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
+
+            const { doc, setDoc } = await import('firebase/firestore');
+            await setDoc(
+                doc(db, 'locations_current', signal.userId),
+                {
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    accuracy: location.accuracy,
+                    timestamp: location.timestamp,
+                    source: location.source,
+                    isSOS: true,
+                    batteryLevel: signal.device.batteryLevel,
+                },
+                { merge: true },
+            );
+        } catch {
+            // Offline — Firestore write queued by SDK or silently dropped
+            // Mesh beacon is the primary offline location channel
         }
     }
 

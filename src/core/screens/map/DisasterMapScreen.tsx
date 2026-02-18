@@ -17,33 +17,29 @@ import {
   StyleSheet,
   Pressable,
   StatusBar,
-  Dimensions,
   Platform,
   Linking,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
+// expo-location used via useLiveLocation hook
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import Animated, {
   FadeIn,
-  FadeOut,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
   withSpring,
   Easing,
-  interpolateColor,
 } from 'react-native-reanimated';
-import { colors } from '../../theme';
 import { styles, PREMIUM_COLORS } from './DisasterMapScreen.styles';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
-import { useSOSStore, SOSSignal, IncomingSOSAlert } from '../../services/sos';
+import { useSOSStore } from '../../services/sos';
 import { createLogger } from '../../utils/logger';
 import { formatLastSeen } from '../../utils/dateUtils';
 import { useLiveLocation } from '../../hooks/useLiveLocation';
@@ -103,7 +99,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 import MapView, { Marker, Circle } from 'react-native-maps';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Dimensions available via Dimensions.get('window') when needed
 
 type DisasterMapNavigationProp = StackNavigationProp<MainStackParamList, 'DisasterMap'>;
 type DisasterMapRouteProp = RouteProp<MainStackParamList, 'DisasterMap'>;
@@ -395,7 +391,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
   const shouldFocusRouteLocation = Boolean((focusOnSOS || focusOnFamily) && targetLatitude !== null && targetLongitude !== null);
 
   // FIX #2: Live location tracking (replaces one-shot getCurrentPositionAsync)
-  const { location: userLocation, locationData } = useLiveLocation({
+  const { location: userLocation } = useLiveLocation({
     distanceInterval: 10,
     timeInterval: 5000,
   });
@@ -771,7 +767,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
           const lat = member.location?.latitude ?? member.latitude;
           const lng = member.location?.longitude ?? member.longitude;
 
-          if (!lat || !lng || !isFinite(lat) || !isFinite(lng)) return null;
+          if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) return null;
 
           return (
             <Marker

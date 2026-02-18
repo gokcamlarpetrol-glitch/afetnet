@@ -163,9 +163,22 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     haptics.impactMedium();
     if (isListening) {
       setIsListening(false);
-      handleSend("Deprem oluyor ne yapmalıyım?");
+      // Voice recognition session ended — currently using quick scenario fallback
+      // Real speech-to-text requires expo-speech-recognition (not yet integrated)
     } else {
       setIsListening(true);
+      // Auto-stop after 5 seconds and show guidance
+      setTimeout(() => {
+        setIsListening(false);
+        // Guide user to use quick scenarios or type their question
+        setMessages(prev => [...prev, {
+          id: `voice_hint_${Date.now()}`,
+          text: '🎙️ Sesli komut henüz desteklenmiyor.\n\n💡 Hızlı erişim butonlarını kullanabilir veya sorunuzu yazarak sorabilirsiniz.',
+          sender: 'ai' as const,
+          timestamp: Date.now(),
+          source: 'offline' as const,
+        }]);
+      }, 3000);
     }
   };
 
@@ -259,7 +272,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
         maxToRenderPerBatch={5}
         windowSize={7}
         removeClippedSubviews={true}
-        getItemLayout={(data, index) => ({
+        getItemLayout={(_data, index) => ({
           length: 100, // Approximate message height
           offset: 100 * index,
           index,

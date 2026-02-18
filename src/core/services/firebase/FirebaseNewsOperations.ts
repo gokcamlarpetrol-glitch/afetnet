@@ -23,11 +23,15 @@ async function withTimeout<T>(
   operation: () => Promise<T>,
   operationName: string,
 ): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS),
-  );
-
-  return Promise.race([operation(), timeoutPromise]);
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${operationName} timeout`)), TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([operation(), timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export interface NewsSummaryRecord {

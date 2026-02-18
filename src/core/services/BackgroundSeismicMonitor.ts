@@ -79,6 +79,8 @@ interface BackgroundDetection {
 // ============================================================
 
 // Define the background task
+// CRITICAL FIX: Guard against double-define crash on iOS production
+if (!TaskManager.isTaskDefined(BACKGROUND_SEISMIC_TASK)) {
 TaskManager.defineTask(BACKGROUND_SEISMIC_TASK, async ({ data, error }) => {
     if (error) {
         logger.error('Background task error:', error);
@@ -109,6 +111,7 @@ TaskManager.defineTask(BACKGROUND_SEISMIC_TASK, async ({ data, error }) => {
         return BackgroundFetch.BackgroundFetchResult.Failed;
     }
 });
+} // end isTaskDefined guard
 
 // ============================================================
 // BACKGROUND SEISMIC MONITOR CLASS

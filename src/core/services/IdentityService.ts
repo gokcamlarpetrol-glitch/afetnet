@@ -61,6 +61,8 @@ export interface QRPayload {
   uid: string;
   /** Display name */
   name: string;
+  /** Human-readable public code (e.g. AFN-A3F9B2C1) */
+  code?: string;
 }
 
 const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
@@ -150,6 +152,10 @@ class IdentityService {
         if (!publicUserCode) {
           publicUserCode = await generatePublicUserCode();
         }
+        // Validate generated code is truthy before using
+        if (!publicUserCode) {
+          publicUserCode = `AFN-${Date.now().toString(16).slice(-8).toUpperCase()}`;
+        }
 
         this.identity = {
           uid: user.uid,
@@ -172,7 +178,10 @@ class IdentityService {
 
       } else {
         // New user
-        const publicUserCode = await generatePublicUserCode();
+        let publicUserCode = await generatePublicUserCode();
+        if (!publicUserCode) {
+          publicUserCode = `AFN-${Date.now().toString(16).slice(-8).toUpperCase()}`;
+        }
 
         this.identity = {
           uid: user.uid,
@@ -212,9 +221,9 @@ class IdentityService {
     return this.identity;
   }
 
-  /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR */
-  getUid(): string {
-    return this.identity?.uid || '';
+  /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR. Returns null when not initialized. */
+  getUid(): string | null {
+    return this.identity?.uid || null;
   }
 
   /** Public sharing code for QR display and friend-add */
@@ -242,15 +251,15 @@ class IdentityService {
   // ─── BACKWARD COMPAT ALIASES (tüm eski çağrıları uid'ye yönlendir) ──
 
   /** @deprecated Use getUid() */
-  getMyId(): string { return this.getUid(); }
+  getMyId(): string | null { return this.getUid(); }
   /** @deprecated Use getUid() */
   getCloudUid(): string | undefined { return this.identity?.uid; }
   /** @deprecated Use getUid() — deviceId artık identity katmanında yok */
-  getDeviceId(): string { return this.getUid(); }
+  getDeviceId(): string | null { return this.getUid(); }
   /** @deprecated Use getUid() */
-  getMeshDeviceId(): string { return this.getUid(); }
+  getMeshDeviceId(): string | null { return this.getUid(); }
   /** @deprecated Not needed */
-  getInstallationId(): string { return this.getUid(); }
+  getInstallationId(): string | null { return this.getUid(); }
 
   // ─── QR CODE ──────────────────────────────────────
 
@@ -262,6 +271,7 @@ class IdentityService {
       v: 4,
       uid: this.identity.uid,
       name: this.identity.displayName,
+      code: this.identity.publicUserCode,
     };
 
     return JSON.stringify(payload);
@@ -317,32 +327,53 @@ class IdentityService {
 
     // AFN code — resolve via Firestore lookup (publicUserCode or qrId)
     if (raw.toUpperCase().startsWith('AFN-')) {
-      try {
+      const attemptResolve = async (): Promise<QRPayload | null> => {
         const app = initializeFirebase();
-        if (app) {
-          const db = getFirestore(app);
-          const { collection, getDocs, query, where, limit } = require('firebase/firestore');
-          const usersRef = collection(db, 'users');
-          const code = raw.toUpperCase();
+        if (!app) return null;
 
-          // Try publicUserCode first
-          const byPublicCode = query(usersRef, where('publicUserCode', '==', code), limit(1));
-          const publicSnap = await getDocs(byPublicCode);
-          if (!publicSnap.empty) {
-            const docData = publicSnap.docs[0];
-            return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
-          }
+        const db = getFirestore(app);
+        const { collection, getDocs, query, where, limit } = require('firebase/firestore');
+        const usersRef = collection(db, 'users');
+        const code = raw.toUpperCase();
 
-          // Fallback to qrId
-          const byQrId = query(usersRef, where('qrId', '==', code), limit(1));
-          const qrSnap = await getDocs(byQrId);
-          if (!qrSnap.empty) {
-            const docData = qrSnap.docs[0];
-            return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
-          }
+        // Try publicUserCode first
+        const byPublicCode = query(usersRef, where('publicUserCode', '==', code), limit(1));
+        const publicSnap = await getDocs(byPublicCode);
+        if (!publicSnap.empty) {
+          const docData = publicSnap.docs[0];
+          return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
         }
-      } catch (error) {
-        logger.warn('AFN code Firestore resolution failed:', error);
+
+        // Fallback to qrId
+        const byQrId = query(usersRef, where('qrId', '==', code), limit(1));
+        const qrSnap = await getDocs(byQrId);
+        if (!qrSnap.empty) {
+          const docData = qrSnap.docs[0];
+          return { v: 0, uid: docData.id, name: docData.data()?.displayName || 'Bilinmeyen Kullanıcı' };
+        }
+
+        return null;
+      };
+
+      try {
+        const result = await attemptResolve();
+        if (result) return result;
+      } catch (error: any) {
+        // Retry once after 1s for network errors only
+        const isNetworkError = error?.code === 'unavailable' || error?.code === 'deadline-exceeded' ||
+          error?.message?.includes('network') || error?.message?.includes('fetch');
+        if (isNetworkError) {
+          logger.warn('AFN code Firestore resolution failed (network), retrying in 1s:', error?.message);
+          try {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const retryResult = await attemptResolve();
+            if (retryResult) return retryResult;
+          } catch (retryError) {
+            logger.warn('AFN code Firestore retry also failed:', retryError);
+          }
+        } else {
+          logger.warn('AFN code Firestore resolution failed:', error);
+        }
       }
       // If resolution fails, return null so caller knows it's unresolvable
       return null;

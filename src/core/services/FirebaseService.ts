@@ -257,8 +257,10 @@ class FirebaseService {
               message: messageContent,
               messageId,
               senderId: userId,
+              senderUid: String(data.senderUid || userId || '').trim() || undefined,
               userId,
               conversationId: String(data.conversationId || userId || '').trim() || undefined,
+              isGroup: data.isGroup === 'true' || data.chatType === 'group' || data.conversationType === 'group',
             }, 'FirebaseService');
           } else {
             if (__DEV__) {

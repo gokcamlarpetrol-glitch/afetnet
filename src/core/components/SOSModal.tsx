@@ -20,11 +20,12 @@ import {
   Animated,
   Vibration,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, typography } from '../theme';
+// theme colors managed via inline styles
 import * as haptics from '../utils/haptics';
 import {
   useSOSStore,
@@ -53,7 +54,7 @@ interface SOSModalProps {
 export default function SOSModal({
   visible,
   onClose,
-  onConfirm,
+  onConfirm: _onConfirm,
   reason = EmergencyReason.MANUAL_SOS,
   message = 'Acil yardım gerekiyor!',
 }: SOSModalProps) {
@@ -198,11 +199,16 @@ export default function SOSModal({
     onClose();
   }, [onClose]);
 
+  const handleCall112 = useCallback(() => {
+    haptics.impactHeavy();
+    Linking.openURL('tel:112');
+  }, []);
+
   // ============================================================================
   // RENDER HELPERS
   // ============================================================================
 
-  const getChannelIcon = (status: ChannelStatus): keyof typeof Ionicons.glyphMap => {
+  const _getChannelIcon = (status: ChannelStatus): keyof typeof Ionicons.glyphMap => {
     switch (status) {
       case 'sent':
       case 'acked':
@@ -217,7 +223,7 @@ export default function SOSModal({
     }
   };
 
-  const getChannelColor = (status: ChannelStatus): string => {
+  const _getChannelColor = (status: ChannelStatus): string => {
     switch (status) {
       case 'sent':
       case 'acked':
@@ -236,6 +242,7 @@ export default function SOSModal({
   const getLocationAccuracyText = (): string => {
     if (!currentSignal?.location) return 'Bekleniyor...';
     const accuracy = currentSignal.location.accuracy;
+    if (!accuracy || accuracy <= 0) return 'Alınıyor...';
     if (accuracy < 20) return `Yüksek (${accuracy.toFixed(0)}m)`;
     if (accuracy < 50) return `Orta (${accuracy.toFixed(0)}m)`;
     return `Düşük (${accuracy.toFixed(0)}m)`;
@@ -410,6 +417,17 @@ export default function SOSModal({
                   accessibilityRole="button"
                 >
                   <Text style={styles.stopButtonText}>SOS'U DURDUR</Text>
+                </TouchableOpacity>
+
+                {/* 112 Emergency Call Button */}
+                <TouchableOpacity
+                  style={styles.call112Button}
+                  onPress={handleCall112}
+                  accessibilityLabel="112 Acil Ara"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="call" size={22} color="#fff" />
+                  <Text style={styles.call112ButtonText}>112 ACİL ARA</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -660,6 +678,23 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   stopButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  call112Button: {
+    marginTop: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    borderRadius: 30,
+    backgroundColor: '#ef4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  call112ButtonText: {
     fontSize: 16,
     fontWeight: '800',
     color: '#fff',

@@ -1813,6 +1813,23 @@ class MeshNetworkService {
             } catch (notifImportErr) {
               logger.error('Failed to import NotificationCenter for mesh SOS:', notifImportErr);
             }
+
+            // ELITE V4: Direct full-screen alert as BACKUP for offline scenarios
+            // The notification chain (notify→schedule→foreground listener→emit) can break
+            // if expo-notifications isn't initialized. Direct emit guarantees the alert shows.
+            try {
+              const { DeviceEventEmitter } = require('react-native');
+              const directName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
+              DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
+                signalId: messageId,
+                senderDeviceId: senderId,
+                senderName: directName,
+                message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
+                latitude: typeof sosLat === 'number' && isFinite(sosLat) ? sosLat : undefined,
+                longitude: typeof sosLng === 'number' && isFinite(sosLng) ? sosLng : undefined,
+                trapped: content?.toLowerCase().includes('enkaz') || content?.toLowerCase().includes('trapped') || false,
+              });
+            } catch { /* DeviceEventEmitter is always available in RN */ }
           } catch (sosError) {
             logger.error('Failed to add mesh SOS to incoming alerts:', sosError);
           }

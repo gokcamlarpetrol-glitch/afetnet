@@ -42,6 +42,7 @@ class GroupChatService {
     private groupListSubscription: (() => void) | null = null;
     private authUnsubscribe: AuthUnsubscribe | null = null;
     private groups: GroupConversation[] = [];
+    private groupUnreadCounts = new Map<string, number>();
     private onGroupsChangedCallbacks: Array<(groups: GroupConversation[]) => void> = [];
 
     private getCurrentUserSafe() {
@@ -476,6 +477,20 @@ class GroupChatService {
         await Promise.all(promises).catch((error) => {
             logger.debug('Batch markAllRead partial failure:', error);
         });
+        // Reset unread count for this group
+        this.groupUnreadCounts.set(groupId, 0);
+        this.updateGroupUnreadAndNotify(groupId, 0);
+    }
+
+    /**
+     * Update a group's unreadCount and notify listeners.
+     */
+    private updateGroupUnreadAndNotify(groupId: string, unreadCount: number): void {
+        const idx = this.groups.findIndex(g => g.id === groupId);
+        if (idx !== -1) {
+            this.groups[idx] = { ...this.groups[idx], unreadCount };
+            this.onGroupsChangedCallbacks.forEach((cb) => cb(this.groups));
+        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -503,6 +518,18 @@ class GroupChatService {
             // Forward messages to the original callback
             callback(messages);
 
+            // Track unread count: messages not read by current user (and not sent by self)
+            if (myUid) {
+                const unreadCount = messages.filter(m =>
+                    m.senderUid !== myUid && m.from !== myUid && !m.readBy?.[myUid]
+                ).length;
+                const prevCount = this.groupUnreadCounts.get(groupId) ?? 0;
+                this.groupUnreadCounts.set(groupId, unreadCount);
+                if (unreadCount !== prevCount) {
+                    this.updateGroupUnreadAndNotify(groupId, unreadCount);
+                }
+            }
+
             // Trigger notifications for new incoming group messages (non-self)
             if (isInitialLoad) {
                 // Mark all initial messages as seen without notifying
@@ -528,7 +555,9 @@ class GroupChatService {
                         message: msg.content || '',
                         messageId: msg.id,
                         senderId: msg.senderUid,
+                        senderUid: msg.senderUid,
                         conversationId: groupId,
+                        isGroup: true,
                     }, 'GroupChatService').catch(() => { /* best-effort */ });
                 } catch { /* NotificationCenter not available */ }
             }

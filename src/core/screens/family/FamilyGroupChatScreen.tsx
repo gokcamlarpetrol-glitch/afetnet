@@ -43,6 +43,8 @@ import { getAuth } from 'firebase/auth';
 
 const logger = createLogger('FamilyGroupChatScreen');
 
+const MAX_VOICE_DURATION = 60;
+
 // ELITE: Family group conversation ID — stable per-family group
 const FAMILY_GROUP_PREFIX = 'family_group_';
 const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
@@ -126,6 +128,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
   const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const handleVoiceRecordSendRef = useRef<() => void>(() => {});
 
   // ELITE: InViewPort auto-read — mark group messages read when scrolled into view
   const selfIdsRef = useRef<Set<string>>(new Set());
@@ -696,14 +699,8 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         }));
 
       setFirestoreMessages(normalized);
-
-      // Mark unread messages as read
-      const unreadIds = msgs
-        .filter((m) => m.from !== myUid && (!m.readBy || !m.readBy[myUid]))
-        .map((m) => m.id);
-      if (unreadIds.length > 0) {
-        groupChatService.markAllRead(firestoreGroupId, unreadIds).catch(() => { });
-      }
+      // Read receipts are handled by onGroupViewableItemsChanged (InViewPort),
+      // so we do NOT auto-mark all messages as read here on mount/subscription fire.
     });
 
     return unsub;
@@ -756,6 +753,17 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       showDidSub?.remove();
       hideDidSub?.remove();
     };
+  }, []);
+
+  // Scroll to bottom when keyboard appears
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const sub = Keyboard.addListener(showEvent, () => {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+    return () => sub.remove();
   }, []);
 
   // ELITE: Merge mesh messages + Firestore messages (dedup by ID)
@@ -1208,6 +1216,12 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         return;
       }
 
+      const initialized = await voiceMessageService.initialize();
+      if (!initialized) {
+        Alert.alert('İzin Gerekli', 'Ses kaydı için mikrofon izni vermeniz gerekmektedir.');
+        return;
+      }
+
       const success = await voiceMessageService.startRecording();
       if (success) {
         setIsRecordingVoice(true);
@@ -1217,7 +1231,14 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
           clearInterval(voiceRecordingIntervalRef.current);
         }
         voiceRecordingIntervalRef.current = setInterval(() => {
-          setVoiceRecordingDuration(prev => prev + 1);
+          setVoiceRecordingDuration(prev => {
+            if (prev >= MAX_VOICE_DURATION - 1) {
+              // Auto-stop at max duration
+              handleVoiceRecordSendRef.current();
+              return 0;
+            }
+            return prev + 1;
+          });
         }, 1000);
       }
     } catch (error) {
@@ -1249,6 +1270,11 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       Alert.alert('Hata', 'Ses mesajı gönderilemedi.');
     }
   }, [sendMediaToGroup]);
+
+  // Keep ref in sync so the interval timer in handleVoiceRecordStart can call it
+  useEffect(() => {
+    handleVoiceRecordSendRef.current = handleVoiceRecordSend;
+  }, [handleVoiceRecordSend]);
 
   const handleVoiceRecordCancel = useCallback(async () => {
     try {
@@ -1484,11 +1510,6 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         maxToRenderPerBatch={10}
         windowSize={10}
         removeClippedSubviews={true}
-        getItemLayout={(data, index) => ({
-          length: 80, // Approximate message height
-          offset: 80 * index,
-          index,
-        })}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Ionicons name="chatbubbles-outline" size={64} color={colors.text.tertiary} />
@@ -1503,7 +1524,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       {/* Input */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
+        keyboardVerticalOffset={0}
       >
         <View
           style={[

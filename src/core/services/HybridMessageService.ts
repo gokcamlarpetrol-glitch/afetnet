@@ -204,8 +204,10 @@ class HybridMessageService {
 
     // ELITE: Start Cloud Hydration (Background)
     // This restores message history from Firestore on app launch, correcting "Amnesia".
-    this.syncMessagesWithCloud().catch(err => {
-      logger.warn('Cloud hydration failed (non-fatal):', err);
+    this.syncMessagesWithCloud().catch((err) => {
+      logger.warn('Cloud hydration failed, will retry:', err?.message);
+      const retryTimer = setTimeout(() => this.syncMessagesWithCloud().catch(() => {}), 30000);
+      this.cleanupTimers.add(retryTimer);
     });
   }
 
@@ -261,7 +263,7 @@ class HybridMessageService {
             );
 
             // Take recent 20 locally
-            const recentMessages = threadMessages.slice(0, 20);
+            const recentMessages = Array.isArray(threadMessages) ? threadMessages.slice(0, 20) : [];
 
             if (recentMessages && recentMessages.length > 0) {
               const selfIds = this.getSelfIdentityIds();
@@ -313,8 +315,12 @@ class HybridMessageService {
                 });
               });
             }
-          } catch (e) {
-            logger.warn(`Failed to hydrate thread ${thread.conversationId}`, e);
+          } catch (e: any) {
+            logger.warn(`Failed to hydrate thread ${thread.conversationId}:`, e?.message);
+            // Let outer catch handle if this is a critical/auth error
+            if (e?.code === 'permission-denied' || e?.code === 'unauthenticated') {
+              throw e;
+            }
           }
         }));
       }
@@ -392,6 +398,10 @@ class HybridMessageService {
       this.isActive = true;
       // Resume processing
       this.scheduleQueueProcessing();
+      // Process queued messages immediately on foreground resume (don't wait 10s)
+      if (this.queue.length > 0) {
+        this.processQueue();
+      }
       logger.debug('HybridMessageService resumed (foreground)');
     }
   };
@@ -425,8 +435,16 @@ class HybridMessageService {
       // subscribeToMessages → clearCloudSubscriptions + ensureCloudSubscriptions
       // ping-pong that destroys active Firestore onSnapshot listeners.
       if (state !== this.lastEmittedConnectionState) {
+        const previousState = this.lastEmittedConnectionState;
         this.lastEmittedConnectionState = state;
         this.connectionCallbacks.forEach(cb => cb(state));
+
+        // When transitioning to online, immediately process pending queue
+        // so queued messages don't wait for the next 10-second cycle
+        if (state === 'online' && previousState !== 'online' && this.queue.length > 0) {
+          logger.info(`Connection restored (${previousState} → online), processing ${this.queue.length} queued messages`);
+          this.processQueue();
+        }
       }
     }, CONNECTION_CHECK_INTERVAL_MS);
   }
@@ -448,7 +466,7 @@ class HybridMessageService {
    */
   private async generateId(): Promise<string> {
     try {
-      return await cryptoService.generateUUID();
+      return cryptoService.generateUUID();
     } catch {
       // Fallback if crypto not ready
       const timestamp = Date.now().toString(36);
@@ -674,16 +692,6 @@ class HybridMessageService {
     return value.trim();
   }
 
-  private findFamilyMemberByUid(uid: string): { uid: string; name: string } | undefined {
-    const normalized = this.normalizeIdentity(uid);
-    if (!normalized) return undefined;
-    try {
-      const { useFamilyStore } = require('../stores/familyStore');
-      return useFamilyStore.getState().members.find((m: { uid: string }) => m.uid === normalized);
-    } catch {
-      return undefined;
-    }
-  }
 
   private getIdentityAliasCandidates(value: string | null | undefined): Set<string> {
     const aliases = new Set<string>();
@@ -857,7 +865,7 @@ class HybridMessageService {
       // because no conversation entry exists for the sender.
       if (!isFromMe && message.senderId && message.senderId !== 'unknown') {
         const conversations = useMessageStore.getState().conversations;
-        if (!conversations.some(c => c.userId === message.senderId)) {
+        if (!conversations.some((c: { userId: string }) => c.userId === message.senderId)) {
           // ELITE FIX: Look up contact display name before falling back to generic name
           let displayName = message.senderName || '';
           if (!displayName) {
@@ -889,6 +897,7 @@ class HybridMessageService {
             message: message.content || '',
             messageId: message.id,
             senderId: message.senderId,
+            senderUid: message.senderId,
             conversationId: message.senderId,
             isSOS: message.type === 'SOS',
             isCritical: message.priority === 'critical',
@@ -1777,6 +1786,39 @@ class HybridMessageService {
 
         if (inboxUnsub && !isDisposed) {
           inboxUnsubscriber = inboxUnsub;
+        }
+
+        // FALLBACK: Scan for conversations where user is a participant
+        // but no inbox entry exists (e.g., inbox write failed due to security rules).
+        // This ensures messages are still received even if the inbox is incomplete.
+        try {
+          if (!isDisposed) {
+            const { collection, query: firestoreQuery, where, getDocs } = await import('firebase/firestore');
+            const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+            const db = await getFirestoreInstanceAsync();
+            if (db && !isDisposed) {
+              const conversationsRef = collection(db, 'conversations');
+              const q = firestoreQuery(
+                conversationsRef,
+                where('participants', 'array-contains', uid),
+              );
+              const snapshot = await getDocs(q);
+              let discoveredCount = 0;
+              for (const docSnap of snapshot.docs) {
+                if (isDisposed) break;
+                const convId = docSnap.id;
+                if (!conversationUnsubscribers.has(convId)) {
+                  await subscribeToConversation(convId, firebaseDataService);
+                  discoveredCount++;
+                }
+              }
+              if (discoveredCount > 0) {
+                logger.info(`Fallback scan discovered ${discoveredCount} conversations not in inbox`);
+              }
+            }
+          }
+        } catch (fallbackError) {
+          logger.debug('Fallback conversation scan failed (non-critical):', fallbackError);
         }
       } catch (error) {
         logger.warn('Cloud subscription failed:', error);

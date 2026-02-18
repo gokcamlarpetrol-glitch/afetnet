@@ -16,16 +16,19 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert,
-  Image, Linking, Keyboard,
+  Image, Linking, Keyboard, Modal, ActivityIndicator,
 } from 'react-native';
 import { styles } from './ConversationScreen.styles';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from '../../components/SafeLinearGradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
+import { useMeshStore, MeshMessage, MessageReaction } from '../../services/mesh/MeshStore';
 import { hybridMessageService } from '../../services/HybridMessageService';
 import { BlurView } from '../../components/SafeBlurView';
-import Animated, { FadeInUp, Layout, FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, {
+  FadeInUp, Layout, FadeIn, FadeOut,
+  useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming,
+} from 'react-native-reanimated';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Message, useMessageStore } from '../../stores/messageStore';
@@ -47,6 +50,7 @@ import type { MainStackParamList } from '../../types/navigation';
 
 const logger = createLogger('ConversationScreen');
 const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const MAX_VOICE_DURATION = 60; // seconds — auto-stop voice recording at this limit
 const CHAT_RENDERABLE_TYPES = new Set<MeshMessage['type']>(['CHAT', 'SOS', 'IMAGE', 'VOICE', 'LOCATION']);
 const NON_CHAT_SYSTEM_TYPES = new Set([
   'family_status_update',
@@ -102,9 +106,55 @@ interface MessageBubbleProps {
   isMe: boolean;
   showTail: boolean;
   onLongPress?: () => void;
+  replyToContent?: string;
 }
 
-// ELITE: Typing Indicator Component (inline for now)
+// List item type — either a message or a date separator
+type ListItem =
+  | { kind: 'message'; data: MeshMessage }
+  | { kind: 'separator'; date: string; id: string };
+
+/** Format a timestamp into a Turkish date label */
+const formatDateSeparator = (timestamp: number): string => {
+  const msgDate = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (isSameDay(msgDate, today)) return 'Bugün';
+  if (isSameDay(msgDate, yesterday)) return 'Dün';
+  return msgDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+// ELITE: Typing Indicator Component — animated cascade dots
+const TypingDot = ({ delay }: { delay: number }) => {
+  const translateY = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withRepeat(
+      withSequence(
+        withTiming(0, { duration: delay }),
+        withTiming(-6, { duration: 300 }),
+        withTiming(0, { duration: 300 }),
+        withTiming(0, { duration: 600 - delay }),
+      ),
+      -1,
+      false,
+    );
+  }, [delay, translateY]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return <Animated.View style={[styles.dot, animStyle]} />;
+};
+
 const TypingIndicatorDots = () => {
   return (
     <Animated.View
@@ -114,9 +164,9 @@ const TypingIndicatorDots = () => {
     >
       <View style={styles.typingBubble}>
         <View style={styles.dotContainer}>
-          <Animated.View style={[styles.dot, { opacity: 0.4 }]} />
-          <Animated.View style={[styles.dot, { opacity: 0.6 }]} />
-          <Animated.View style={[styles.dot, { opacity: 0.8 }]} />
+          <TypingDot delay={0} />
+          <TypingDot delay={150} />
+          <TypingDot delay={300} />
         </View>
       </View>
     </Animated.View>
@@ -146,16 +196,44 @@ const NetworkBanner = ({ status }: { status: 'online' | 'mesh' | 'offline' }) =>
   );
 };
 
+/** Generate stable waveform heights from message ID hash — 12 bars, values 0.2–1.0 */
+const getWaveformHeights = (id: string): number[] => {
+  const bars: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    let hash = 0;
+    for (let j = 0; j < id.length; j++) {
+      hash = ((hash << 5) - hash + id.charCodeAt(j) * (i + 1)) | 0;
+    }
+    bars.push(0.2 + (Math.abs(hash) % 100) / 125); // range 0.2–1.0
+  }
+  return bars;
+};
+
+const formatSeconds = (sec: number): string =>
+  `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
 // ELITE: Inline Voice Player for voice messages
 const VoicePlayerInline = ({ message, isMe }: { message: MeshMessage; isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const [elapsed, setElapsed] = React.useState(0);
+  const elapsedRef = React.useRef<NodeJS.Timeout | null>(null);
   const durationSec = message.mediaDuration || 0;
+  const waveHeights = React.useMemo(() => getWaveformHeights(message.id), [message.id]);
+
+  const stopElapsed = () => {
+    if (elapsedRef.current) {
+      clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
+    }
+  };
 
   const handlePlay = async () => {
     try {
       if (isPlaying) {
         await voiceMessageService.stop();
         setIsPlaying(false);
+        stopElapsed();
+        setElapsed(0);
       } else {
         const voiceMsg = {
           id: message.id,
@@ -168,13 +246,35 @@ const VoicePlayerInline = ({ message, isMe }: { message: MeshMessage; isMe: bool
           played: false,
         };
         setIsPlaying(true);
+        setElapsed(0);
+        elapsedRef.current = setInterval(() => {
+          setElapsed(prev => {
+            const next = prev + 1;
+            if (durationSec > 0 && next >= durationSec) {
+              stopElapsed();
+              setIsPlaying(false);
+              return 0;
+            }
+            return next;
+          });
+        }, 1000);
         await voiceMessageService.play(voiceMsg);
         setIsPlaying(false);
+        stopElapsed();
+        setElapsed(0);
       }
     } catch {
       setIsPlaying(false);
+      stopElapsed();
+      setElapsed(0);
     }
   };
+
+  React.useEffect(() => () => stopElapsed(), []);
+
+  const displayTime = isPlaying && elapsed > 0
+    ? formatSeconds(elapsed)
+    : (durationSec > 0 ? formatSeconds(durationSec) : '0:00');
 
   return (
     <Pressable onPress={handlePlay} style={styles.voicePlayer}>
@@ -184,18 +284,28 @@ const VoicePlayerInline = ({ message, isMe }: { message: MeshMessage; isMe: bool
         color={isMe ? '#1e3a8a' : '#3b82f6'}
       />
       <View style={styles.voiceWaveform}>
-        {[0.4, 0.7, 1, 0.6, 0.9, 0.5, 0.8, 0.3, 0.6, 0.9, 0.5, 0.7].map((h, i) => (
-          <View
-            key={i}
-            style={[
-              styles.voiceBar,
-              { height: h * 20, backgroundColor: isMe ? '#1e3a8a50' : '#3b82f650' },
-            ]}
-          />
-        ))}
+        {waveHeights.map((h, i) => {
+          const playedFraction = durationSec > 0 ? elapsed / durationSec : 0;
+          const barFraction = i / waveHeights.length;
+          const isPlayed = isPlaying && barFraction < playedFraction;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.voiceBar,
+                {
+                  height: h * 20,
+                  backgroundColor: isPlayed
+                    ? (isMe ? '#1e3a8a' : '#3b82f6')
+                    : (isMe ? '#1e3a8a50' : '#3b82f650'),
+                },
+              ]}
+            />
+          );
+        })}
       </View>
       <Text style={[styles.voiceDuration, { color: isMe ? '#1e3a8a' : '#64748b' }]}>
-        {durationSec > 0 ? `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}` : '0:00'}
+        {displayTime}
       </Text>
     </Pressable>
   );
@@ -255,7 +365,11 @@ const LocationCard = ({ location, isMe }: { location: { lat: number; lng: number
 };
 
 // Bubble Component
-const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
+const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: MessageBubbleProps) => {
+  const isDeleted = !!(message as MeshMessage & { isDeleted?: boolean }).isDeleted || message.content === 'Bu mesaj silindi';
+  const isEdited = !!(message as MeshMessage & { isEdited?: boolean }).isEdited;
+  const [lightboxVisible, setLightboxVisible] = React.useState(false);
+
   // Sanitize content for display
   const displayContent = sanitizeForDisplay(message.content);
 
@@ -279,34 +393,71 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
 
   const getStatusColor = () => {
     if (message.status === 'failed') return '#ef4444';
-    if (message.status === 'read') return '#22c55e';
+    if (message.status === 'read') return '#53bdeb'; // WhatsApp blue for read ticks
     return '#64748b';
   };
 
   // ELITE: Render media content based on message type
   const renderContent = () => {
+    // Deleted ghost — no interactions, italic grey
+    if (isDeleted) {
+      return <Text style={{ fontSize: 14, fontStyle: 'italic', color: '#94a3b8' }}>Bu mesaj silindi</Text>;
+    }
+
     // Image message
     if (message.mediaType === 'image') {
       if (message.mediaUrl) {
         return (
           <View>
-            <Image
-              source={{ uri: message.mediaUrl }}
-              style={styles.mediaImage}
-              resizeMode="cover"
-            />
+            <Pressable onPress={() => setLightboxVisible(true)}>
+              <View>
+                <Image
+                  source={{ uri: message.mediaUrl }}
+                  style={styles.mediaImage}
+                  resizeMode="cover"
+                />
+                {/* Upload progress overlay when sending */}
+                {message.status === 'sending' && (
+                  <View style={styles.mediaUploadOverlay}>
+                    <ActivityIndicator size="large" color="#fff" />
+                  </View>
+                )}
+              </View>
+            </Pressable>
             {displayContent && displayContent !== '📷 Fotoğraf' && (
               <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther, { marginTop: 6 }]}>
                 {displayContent}
               </Text>
             )}
+            {/* Lightbox modal */}
+            <Modal
+              visible={lightboxVisible}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setLightboxVisible(false)}
+            >
+              <View style={styles.lightboxContainer}>
+                <Pressable style={styles.lightboxClose} onPress={() => setLightboxVisible(false)}>
+                  <Ionicons name="close" size={30} color="#fff" />
+                </Pressable>
+                <Image
+                  source={{ uri: message.mediaUrl }}
+                  style={styles.lightboxImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </Modal>
           </View>
         );
       }
       // Fallback: no URL yet (upload in progress or mesh-only)
       return (
         <View style={styles.mediaPlaceholder}>
-          <Ionicons name="image-outline" size={32} color={isMe ? '#1e3a8a' : '#64748b'} />
+          {message.status === 'sending' ? (
+            <ActivityIndicator size="small" color={isMe ? '#1e3a8a' : '#64748b'} />
+          ) : (
+            <Ionicons name="image-outline" size={32} color={isMe ? '#1e3a8a' : '#64748b'} />
+          )}
           <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>📷 Fotoğraf</Text>
         </View>
       );
@@ -339,6 +490,18 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
     );
   };
 
+  const senderName = message.senderName || '';
+
+  // Group reactions by emoji for chip display
+  const reactionGroups = useMemo(() => {
+    if (!message.reactions || message.reactions.length === 0) return [];
+    const map = new Map<string, number>();
+    for (const r of message.reactions) {
+      map.set(r.emoji, (map.get(r.emoji) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([emoji, count]) => ({ emoji, count }));
+  }, [message.reactions]);
+
   return (
     <Animated.View
       entering={FadeInUp.springify()}
@@ -349,31 +512,128 @@ const MessageBubble = ({ message, isMe, showTail }: MessageBubbleProps) => {
         !showTail && { marginBottom: 2 },
       ]}
     >
-      <View style={[
-        styles.bubble,
-        isMe ? styles.bubbleMe : styles.bubbleOther,
-        !showTail && (isMe ? styles.noTailMe : styles.noTailOther),
-        message.status === 'failed' && styles.bubbleFailed,
-        message.mediaType === 'image' && message.mediaUrl && styles.bubbleImage,
-      ]}>
-        {renderContent()}
+      <View style={{ flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+        {/* Sender name above incoming bubbles */}
+        {!isMe && senderName ? (
+          <Text style={styles.senderNameLabel}>{senderName}</Text>
+        ) : null}
+        <View style={[
+          styles.bubble,
+          isMe ? styles.bubbleMe : styles.bubbleOther,
+          !showTail && (isMe ? styles.noTailMe : styles.noTailOther),
+          message.status === 'failed' && styles.bubbleFailed,
+          message.mediaType === 'image' && message.mediaUrl && styles.bubbleImage,
+          isDeleted && bubbleStyles.bubbleDeleted,
+        ]}>
+          {/* Reply quote block */}
+          {!isDeleted && replyToContent ? (
+            <View style={[bubbleStyles.replyQuote, isMe ? bubbleStyles.replyQuoteMe : bubbleStyles.replyQuoteOther]}>
+              <Text style={bubbleStyles.replyQuoteText} numberOfLines={2}>{replyToContent}</Text>
+            </View>
+          ) : null}
 
-        <View style={styles.metaRow}>
-          <Text style={[styles.timeText, isMe ? styles.timeMe : styles.timeOther]}>
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-          {isMe && (
-            <Ionicons
-              name={getStatusIcon()}
-              size={12}
-              color={getStatusColor()}
-            />
-          )}
+          {renderContent()}
+
+          <View style={styles.metaRow}>
+            <Text style={[styles.timeText, isMe ? styles.timeMe : styles.timeOther]}>
+              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            {isEdited && !isDeleted ? (
+              <Text style={bubbleStyles.editedLabel}>(düzenlendi)</Text>
+            ) : null}
+            {isMe && (
+              <Ionicons
+                name={getStatusIcon()}
+                size={12}
+                color={getStatusColor()}
+              />
+            )}
+          </View>
         </View>
+
+        {/* Reaction chips below bubble */}
+        {reactionGroups.length > 0 ? (
+          <View style={[bubbleStyles.reactionsRow, isMe ? bubbleStyles.reactionsRowMe : bubbleStyles.reactionsRowOther]}>
+            {reactionGroups.map(({ emoji, count }) => (
+              <View key={emoji} style={bubbleStyles.reactionChip}>
+                <Text style={bubbleStyles.reactionChipText}>{emoji} {count}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
     </Animated.View>
   );
-};
+}, (prev, next) =>
+  prev.message.id === next.message.id &&
+  prev.message.status === next.message.status &&
+  prev.message.content === next.message.content &&
+  prev.message.reactions === next.message.reactions &&
+  prev.isMe === next.isMe &&
+  prev.showTail === next.showTail &&
+  prev.replyToContent === next.replyToContent
+);
+
+/** Inline styles for bubble sub-components */
+const bubbleStyles = StyleSheet.create({
+  deletedText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    color: '#94a3b8',
+  },
+  bubbleDeleted: {
+    opacity: 0.7,
+  },
+  replyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 6,
+    borderRadius: 4,
+  },
+  replyQuoteMe: {
+    borderLeftColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+  },
+  replyQuoteOther: {
+    borderLeftColor: '#64748b',
+    backgroundColor: 'rgba(100, 116, 139, 0.08)',
+  },
+  replyQuoteText: {
+    fontSize: 12,
+    color: '#64748b',
+    fontStyle: 'italic',
+  },
+  editedLabel: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    color: '#94a3b8',
+    marginRight: 2,
+  },
+  reactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 2,
+  },
+  reactionsRowMe: {
+    justifyContent: 'flex-end',
+  },
+  reactionsRowOther: {
+    justifyContent: 'flex-start',
+  },
+  reactionChip: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  reactionChipText: {
+    fontSize: 12,
+  },
+});
 
 export default function ConversationScreen({ navigation, route }: ConversationScreenProps) {
   const { userId, userName } = route.params || {};
@@ -384,11 +644,12 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const [text, setText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [connectionState, setConnectionState] = useState<'online' | 'mesh' | 'offline'>('offline');
-  const [physicalDeviceId, setPhysicalDeviceId] = useState<string | null>(null);
+  const [, setPhysicalDeviceId] = useState<string | null>(null);
   // ELITE FIX: Track identity ID in state so selfIds recalculates when identity loads
   const [identityId, setIdentityId] = useState<string | null>(identityService.getIdentity()?.uid || null);
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTypingBroadcastRef = useRef<number>(0);
 
   // ELITE: Message options modal state
   const [optionsModalVisible, setOptionsModalVisible] = useState(false);
@@ -404,9 +665,12 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Scroll-to-bottom FAB state
+  const [showScrollFab, setShowScrollFab] = useState(false);
+
   // ELITE: InViewPort auto-read receipts — marks messages as read when scrolled into view
   const selfIdsRef = useRef<Set<string>>(new Set());
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 1000 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: MeshMessage; isViewable: boolean }> }) => {
     const myUid = identityService.getUid();
     if (!myUid) return;
@@ -422,11 +686,12 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
   // ELITE: Use mesh store state for in-screen mutations
   const updateMeshMessage = useMeshStore(state => state.updateMessage);
+  const addMeshReaction = useMeshStore(state => state.addReaction);
 
   // ELITE V2: DUAL-SOURCE READ — merge MeshStore (rich media) + messageStore (Firebase inbox)
   // This ensures both BLE mesh messages AND Firebase cloud messages are displayed
   const meshMessages = useMeshStore(state => state.messages);
-  const myDeviceId = useMeshStore(state => state.myDeviceId);
+  // myDeviceId available via useMeshStore if needed for mesh routing
   const familyMembers = useFamilyStore((state) => state.members);
   const blockedUsers = useSettingsStore((state) => state.blockedUsers);
   const validUserId = (userId && typeof userId === 'string') ? userId : '';
@@ -630,7 +895,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         return true;
       })
       .sort((a, b) => a.timestamp - b.timestamp);
-  }, [isBlockedIdentity, meshMessages, storeMessages, selfIds, validUserId, physicalDeviceId, peerIdCandidates]);
+  }, [isBlockedIdentity, meshMessages, storeMessages, selfIds, validUserId, peerIdCandidates]);
 
   const conversationTitle = useMemo(() => {
     const explicitName = typeof userName === 'string' ? userName.trim() : '';
@@ -674,20 +939,17 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       });
   }, []);
 
-  // ELITE V2: Auto-mark as read when conversation opens (WhatsApp pattern)
-  // Sends read receipts to Firebase so sender sees blue ticks (✓✓🔵)
+  // FIX: Auto-mark conversation as read ONLY on mount (not on every message arrival).
+  // Per-message read receipts are handled by onViewableItemsChanged (InViewPort mechanism).
+  // Bulk marking all on every new message would wrongly mark unread future messages.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (peerIdCandidates.size === 0) return;
-    // Mark unread messages for all known aliases of this peer identity
+    // Mark conversation-level unread count on mount only
     peerIdCandidates.forEach((peerId) => {
       useMessageStore.getState().markConversationRead(peerId);
     });
-    // Also update MeshStore message statuses for visual consistency
-    // Without this, merged messages from MeshStore show stale delivery status
-    meshMessages
-      .filter(m => peerIdCandidates.has(m.senderId) && m.status !== 'read')
-      .forEach(m => updateMeshMessage(m.id, { status: 'read' }));
-  }, [messages.length, peerIdCandidates, meshMessages, updateMeshMessage]); // Re-trigger when new messages arrive
+  }, []); // Run only on mount — intentionally omitting peerIdCandidates
 
   // Keep hybrid inbox bridge active while conversation is open (cloud + mesh)
   useEffect(() => {
@@ -830,11 +1092,22 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      // Auto-scroll to end so user always sees latest messages when keyboard appears
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
     // iOS interactive dismiss may skip "will" callbacks on some builds.
     const showDidSub = Platform.OS === 'ios'
-      ? Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true))
+      ? Keyboard.addListener('keyboardDidShow', () => {
+          setKeyboardVisible(true);
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        })
       : null;
     const hideDidSub = Platform.OS === 'ios'
       ? Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))
@@ -883,15 +1156,19 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     );
   }
 
-  // Handle text change with typing indicator
+  // Handle text change with typing indicator (throttled to max once per 3 seconds)
   const handleTextChange = useCallback((newText: string) => {
     setText(newText);
 
-    // Broadcast typing indicator
+    // Broadcast typing indicator — throttle to once per 3 seconds
     if (newText.length > 0) {
-      const typingConversationId = activeRecipientId || userId;
-      if (typingConversationId) {
-        hybridMessageService.broadcastTyping(typingConversationId);
+      const now = Date.now();
+      if (now - lastTypingBroadcastRef.current >= 3000) {
+        const typingConversationId = activeRecipientId || userId;
+        if (typingConversationId) {
+          hybridMessageService.broadcastTyping(typingConversationId);
+          lastTypingBroadcastRef.current = now;
+        }
       }
     }
 
@@ -947,11 +1224,37 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     }
   }, [activeRecipientId, replyToMessage, text, userId, validUserId, resolvedRecipientId]);
 
-  // Retry failed message
+  // Retry failed message — find the specific message and resend it
   const retryMessage = useCallback(async (messageId: string) => {
     haptics.impactMedium();
-    await hybridMessageService.retryAllFailed();
-  }, []);
+    // Try to find the specific message and resend it
+    const msg = useMessageStore.getState().messages.find(m => m.id === messageId);
+    if (msg && activeRecipientId) {
+      try {
+        if (msg.mediaType && msg.mediaUrl) {
+          await hybridMessageService.sendMediaMessage(msg.mediaType as 'image' | 'voice' | 'location', activeRecipientId, {
+            mediaUrl: msg.mediaUrl,
+            mediaDuration: typeof msg.mediaDuration === 'number' ? msg.mediaDuration : undefined,
+            location: msg.location,
+            caption: msg.content || undefined,
+          });
+        } else {
+          await hybridMessageService.sendMessage(msg.content, activeRecipientId, {
+            priority: 'normal',
+            type: 'CHAT',
+          });
+        }
+        // Remove the failed message from store after successful retry
+        useMessageStore.getState().deleteMessage(messageId).catch(() => {});
+      } catch {
+        // If single-message retry fails, fall back to retrying all failed for this conversation
+        await hybridMessageService.retryAllFailed();
+      }
+    } else {
+      // Fallback: retry all failed messages in the queue
+      await hybridMessageService.retryAllFailed();
+    }
+  }, [activeRecipientId]);
 
   // ELITE: Handle message long press to show options
   const handleMessageLongPress = useCallback((message: MeshMessage) => {
@@ -995,9 +1298,14 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     setEditText('');
   }, []);
 
-  // ELITE: Handle delete message
+  // ELITE: Handle delete message — local + cloud sync
   const handleDeleteMessage = useCallback(async (messageId: string) => {
+    // Update MeshStore locally: mark content as deleted
     updateMeshMessage(messageId, { content: 'Bu mesaj silindi' });
+
+    // Sync to messageStore (handles Firebase cloud sync internally)
+    useMessageStore.getState().deleteMessage(messageId).catch(() => {});
+
     haptics.notificationWarning();
     setOptionsModalVisible(false);
   }, [updateMeshMessage]);
@@ -1055,13 +1363,21 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   }, [messages, peerIdCandidates]);
 
   // ELITE: Handle reply to message
-  const handleReplyToMessage = useCallback((messageId: string) => {
+  const handleReplyToMessage = useCallback((_messageId: string) => {
     const message = selectedMessage;
     if (message) {
       setReplyToMessage(message);
     }
     setOptionsModalVisible(false);
   }, [selectedMessage]);
+
+  // Wire reaction from MessageOptionsModal to MeshStore
+  const handleReaction = useCallback((messageId: string, emoji: string) => {
+    const myUid = identityService.getUid() || 'me';
+    addMeshReaction(messageId, emoji as MessageReaction, myUid);
+    haptics.impactLight();
+    setOptionsModalVisible(false);
+  }, [addMeshReaction]);
 
   // ELITE: Close options modal
   const closeOptionsModal = useCallback(() => {
@@ -1094,56 +1410,6 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   // ELITE: Media Message Handlers
   // ============================================================================
 
-  // Open camera and take photo
-  const handleCameraCapture = useCallback(async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('İzin Gerekli', 'Kameraya erişim için izin vermeniz gerekmektedir.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
-        await sendImageMessage(imageUri);
-      }
-    } catch (error) {
-      logger.error('Camera error:', error);
-      Alert.alert('Hata', 'Fotoğraf çekilemedi.');
-    }
-  }, [activeRecipientId]);
-
-  // Open gallery and select photo
-  const handleGallerySelect = useCallback(async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('İzin Gerekli', 'Galeriye erişim için izin vermeniz gerekmektedir.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
-        await sendImageMessage(imageUri);
-      }
-    } catch (error) {
-      logger.error('Gallery error:', error);
-      Alert.alert('Hata', 'Fotoğraf seçilemedi.');
-    }
-  }, [activeRecipientId]);
-
   // Send image message
   const sendImageMessage = useCallback(async (imageUri: string) => {
     if (!activeRecipientId) {
@@ -1164,6 +1430,56 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     }
   }, [activeRecipientId]);
 
+  // Open camera and take photo
+  const handleCameraCapture = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Kameraya erişim için izin vermeniz gerekmektedir.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        await sendImageMessage(imageUri);
+      }
+    } catch (error) {
+      logger.error('Camera error:', error);
+      Alert.alert('Hata', 'Fotoğraf çekilemedi.');
+    }
+  }, [sendImageMessage]);
+
+  // Open gallery and select photo
+  const handleGallerySelect = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('İzin Gerekli', 'Galeriye erişim için izin vermeniz gerekmektedir.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        await sendImageMessage(imageUri);
+      }
+    } catch (error) {
+      logger.error('Gallery error:', error);
+      Alert.alert('Hata', 'Fotoğraf seçilemedi.');
+    }
+  }, [sendImageMessage]);
+
   // Start voice recording
   const handleVoiceRecordStart = useCallback(async () => {
     try {
@@ -1182,12 +1498,41 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         setVoiceRecordingDuration(0);
         haptics.impactMedium();
 
-        // Start duration timer
+        // Start duration timer (auto-stop at MAX_VOICE_DURATION)
         if (voiceRecordingIntervalRef.current) {
           clearInterval(voiceRecordingIntervalRef.current);
         }
         voiceRecordingIntervalRef.current = setInterval(() => {
-          setVoiceRecordingDuration(prev => prev + 1);
+          setVoiceRecordingDuration(prev => {
+            const next = prev + 1;
+            if (next >= MAX_VOICE_DURATION) {
+              // Auto-stop: clear interval immediately, then trigger send
+              if (voiceRecordingIntervalRef.current) {
+                clearInterval(voiceRecordingIntervalRef.current);
+                voiceRecordingIntervalRef.current = null;
+              }
+              // Schedule send on next tick to avoid state update during interval callback
+              setTimeout(() => {
+                voiceMessageService.stopRecording().then((voiceMessage) => {
+                  if (voiceMessage && activeRecipientId) {
+                    hybridMessageService.sendMediaMessage('voice', activeRecipientId, {
+                      mediaLocalUri: voiceMessage.uri,
+                      mediaDuration: Math.floor(voiceMessage.durationMs / 1000),
+                    }).catch((err) => {
+                      logger.error('Auto-stop voice send error:', err);
+                    });
+                    voiceMessageService.backupToFirebase(voiceMessage).catch(() => {});
+                    haptics.notificationSuccess();
+                  }
+                }).catch((err) => {
+                  logger.error('Auto-stop voice recording error:', err);
+                });
+                setIsRecordingVoice(false);
+                setVoiceRecordingDuration(0);
+              }, 0);
+            }
+            return next;
+          });
         }, 1000);
       } else {
         Alert.alert('Hata', 'Ses kaydı başlatılamadı. Lütfen mikrofon izinlerini kontrol edin.');
@@ -1196,7 +1541,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       logger.error('Voice recording error:', error);
       Alert.alert('Hata', 'Ses kaydı başlatılamadı.');
     }
-  }, [isRecordingVoice]);
+  }, [isRecordingVoice, activeRecipientId]);
 
   // Stop and send voice recording
   const handleVoiceRecordSend = useCallback(async () => {
@@ -1319,6 +1664,91 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     }
   }, [activeRecipientId]);
 
+  // Build flat list data with date separator items inserted between days
+  const listData = useMemo((): ListItem[] => {
+    const result: ListItem[] = [];
+    let lastDay = '';
+    for (const msg of messages) {
+      const day = new Date(msg.timestamp).toDateString();
+      if (day !== lastDay) {
+        lastDay = day;
+        result.push({ kind: 'separator', date: formatDateSeparator(msg.timestamp), id: `sep-${day}` });
+      }
+      result.push({ kind: 'message', data: msg });
+    }
+    return result;
+  }, [messages]);
+
+  // Build message ID → content map for quick replyTo lookup
+  const messageContentMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const msg of messages) {
+      map.set(msg.id, sanitizeForDisplay(msg.content));
+    }
+    return map;
+  }, [messages]);
+
+  // Extract renderItem to useCallback for FlatList perf
+  const renderItem = useCallback(({ item }: { item: ListItem }) => {
+    if (item.kind === 'separator') {
+      return (
+        <View style={fabStyles.dateSeparator}>
+          <Text style={fabStyles.dateSeparatorText}>{item.date}</Text>
+        </View>
+      );
+    }
+    const msg = item.data;
+    const isMe = selfIds.has(msg.senderId);
+    const nextIndex = listData.findIndex(i => i.kind === 'message' && (i as { kind: 'message'; data: MeshMessage }).data.id === msg.id) + 1;
+    const nextItem = listData[nextIndex];
+    const nextMsg = nextItem?.kind === 'message' ? nextItem.data : undefined;
+    const isLast = !nextMsg || nextMsg.senderId !== msg.senderId;
+    const replyToContent = msg.replyTo ? (messageContentMap.get(msg.replyTo) || msg.replyPreview) : undefined;
+    const isDeleted = !!(msg as MeshMessage & { isDeleted?: boolean }).isDeleted || msg.content === 'Bu mesaj silindi';
+
+    return (
+      <Pressable
+        onLongPress={() => {
+          haptics.impactLight();
+          if (msg.status === 'failed') {
+            Alert.alert(
+              'Mesaj Gönderilemedi',
+              'Bu mesajı yeniden göndermek ister misiniz?',
+              [
+                { text: 'İptal', style: 'cancel' },
+                { text: 'Yeniden Gönder', onPress: () => retryMessage(msg.id) },
+              ]
+            );
+          } else if (!isDeleted) {
+            handleMessageLongPress(msg);
+          }
+        }}
+      >
+        <MessageBubble
+          message={msg}
+          isMe={isMe}
+          showTail={isLast}
+          replyToContent={replyToContent}
+        />
+      </Pressable>
+    );
+  }, [listData, selfIds, messageContentMap, retryMessage, handleMessageLongPress]);
+
+  const keyExtractor = useCallback((item: ListItem) =>
+    item.kind === 'separator' ? item.id : item.data.id,
+  []);
+
+  const handleScroll = useCallback((event: { nativeEvent: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } } }) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
+    setShowScrollFab(distanceFromBottom > 120);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+    setShowScrollFab(false);
+  }, []);
+
   return (
     <ImageBackground
       source={require('../../../../assets/images/premium/family_soft_bg.png')}
@@ -1414,52 +1844,22 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
+        keyboardVerticalOffset={0}
       >
         <FlatList
           ref={flatListRef}
-          data={messages}
-          keyExtractor={item => item.id}
-          renderItem={({ item, index }) => {
-            const isMe = selfIds.has(item.senderId);
-            const nextMsg = messages[index + 1];
-            const isLast = !nextMsg || nextMsg.senderId !== item.senderId;
-
-            return (
-              <Pressable
-                onLongPress={() => {
-                  haptics.impactLight();
-                  if (item.status === 'failed') {
-                    // Show retry option for failed messages
-                    Alert.alert(
-                      'Mesaj Gönderilemedi',
-                      'Bu mesajı yeniden göndermek ister misiniz?',
-                      [
-                        { text: 'İptal', style: 'cancel' },
-                        { text: 'Yeniden Gönder', onPress: () => retryMessage(item.id) },
-                      ]
-                    );
-                  } else {
-                    // Show message options modal
-                    handleMessageLongPress(item);
-                  }
-                }}
-              >
-                <MessageBubble
-                  message={item}
-                  isMe={isMe}
-                  showTail={isLast}
-                />
-              </Pressable>
-            );
-          }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 100 }}
+          data={listData}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: insets.top + 68 }}
           initialNumToRender={15}
           maxToRenderPerBatch={10}
           windowSize={10}
           removeClippedSubviews={true}
           viewabilityConfig={viewabilityConfig}
           onViewableItemsChanged={onViewableItemsChanged}
+          onScroll={handleScroll}
+          scrollEventThrottle={100}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           ListEmptyComponent={
@@ -1472,13 +1872,28 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           ListFooterComponent={isTyping ? <TypingIndicatorDots /> : null}
         />
 
+        {/* Scroll-to-bottom FAB */}
+        {showScrollFab ? (
+          <Pressable style={fabStyles.fab} onPress={scrollToBottom}>
+            <Ionicons name="chevron-down" size={22} color="#fff" />
+          </Pressable>
+        ) : null}
+
+        {/* Offline Queue Banner */}
+        {connectionState === 'offline' && (
+          <Animated.View entering={FadeIn} style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline-outline" size={14} color="#b45309" />
+            <Text style={styles.offlineBannerText}>Bağlantı bekleniyor... Mesajlar sıraya alındı</Text>
+          </Animated.View>
+        )}
+
         {/* Input Area */}
         <BlurView
           intensity={50}
           tint="light"
           style={[
             styles.inputContainer,
-            { paddingBottom: Platform.OS === 'ios' && keyboardVisible ? 8 : insets.bottom + 10 },
+            { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 8) },
           ]}
         >
           {/* ELITE: Reply Preview Banner */}
@@ -1574,6 +1989,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         onDelete={handleDeleteMessage}
         onForward={handleForwardMessage}
         onReply={handleReplyToMessage}
+        onReaction={handleReaction}
       />
 
       {/* ELITE: Attachments Modal */}
@@ -1588,3 +2004,37 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     </ImageBackground>
   );
 }
+
+/** Styles for scroll FAB and date separator */
+const fabStyles = StyleSheet.create({
+  fab: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  dateSeparator: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  dateSeparatorText: {
+    backgroundColor: 'rgba(100, 116, 139, 0.12)',
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '500',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+});

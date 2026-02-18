@@ -64,9 +64,48 @@ const waitForFirebaseInit = async (maxRetries = 3, delayMs = 2000): Promise<Fire
 // ─── Subscriptions ──────────────────────────────────────
 const memberLocationSubscriptions = new Map<string, () => void>();
 const statusUpdateSubscriptions = new Map<string, () => void>();
+let familyLinksUnsubscribe: (() => void) | null = null;
+
+// Debounced merge pattern to prevent concurrent set() race from dual subscriptions
+let _pendingMergeMembers: FamilyMember[] | null = null;
+let _mergeTimer: ReturnType<typeof setTimeout> | null = null;
+const MERGE_DEBOUNCE_MS = 100;
+
+const debouncedMergeAndSet = (
+  incoming: FamilyMember[],
+  getState: () => FamilyState & FamilyActions,
+  setState: (partial: Partial<FamilyState>) => void,
+) => {
+  // Accumulate incoming members
+  if (_pendingMergeMembers) {
+    for (const m of incoming) {
+      if (!_pendingMergeMembers.some(p => p.uid === m.uid)) {
+        _pendingMergeMembers.push(m);
+      }
+    }
+  } else {
+    _pendingMergeMembers = [...incoming];
+  }
+
+  if (_mergeTimer) clearTimeout(_mergeTimer);
+  _mergeTimer = setTimeout(async () => {
+    const pending = _pendingMergeMembers;
+    _pendingMergeMembers = null;
+    _mergeTimer = null;
+    if (!pending || pending.length === 0) return;
+
+    const merged = mergeMembers(getState().members, pending);
+    setState({ members: merged });
+    await saveMembers(merged);
+    await syncLocationSubscriptions(merged, (uid, lat, lng) => {
+      void getState().updateMemberLocation(uid, lat, lng, 'remote');
+    });
+    await syncStatusUpdateListeners(merged);
+  }, MERGE_DEBOUNCE_MS);
+};
 
 const clearSubscriptions = (map: Map<string, () => void>) => {
-  map.forEach(unsub => { try { unsub(); } catch { /* */ } });
+  map.forEach(unsub => { try { unsub(); } catch (e) { logger.debug('Cleanup failed:', e); } });
   map.clear();
 };
 
@@ -113,8 +152,11 @@ const syncStatusUpdateListeners = async (members: FamilyMember[]) => {
         },
         (error: unknown) => {
           const code = (error as { code?: string })?.code || '';
+          const message = (error as { message?: string })?.message || '';
           if (code === 'permission-denied') {
             logger.debug(`Status listener for ${member.uid}: permission denied`);
+          } else if (code === 'failed-precondition' || message.includes('index')) {
+            logger.warn(`Status listener for ${member.uid}: missing Firestore index. Check Firebase console to create the required index.`);
           } else {
             logger.warn(`Status listener error for ${member.uid}:`, error);
           }
@@ -204,8 +246,8 @@ const normalizeMember = (raw: unknown): FamilyMember | null => {
   const locObj = r.location && typeof r.location === 'object'
     ? r.location as Record<string, unknown>
     : undefined;
-  const latitude = normalizeNumber(r.latitude, normalizeNumber(locObj?.latitude));
-  const longitude = normalizeNumber(r.longitude, normalizeNumber(locObj?.longitude));
+  const latitude = normalizeNumber(r.latitude) || normalizeNumber(locObj?.latitude);
+  const longitude = normalizeNumber(r.longitude) || normalizeNumber(locObj?.longitude);
   const locTimestamp = locObj ? normalizeTimestamp(locObj.timestamp) : 0;
 
   const location = locObj ? {
@@ -339,10 +381,13 @@ const mergeMembers = (local: FamilyMember[], remote: FamilyMember[]): FamilyMemb
     if (!existing) {
       map.set(m.uid, m);
     } else {
-      // Merge: prefer newer data
+      // Merge: prefer newer data, filter out undefined values from remote
+      const filtered = Object.fromEntries(
+        Object.entries(m).filter(([_, v]) => v !== undefined)
+      );
       map.set(m.uid, {
         ...existing,
-        ...m,
+        ...filtered,
         uid: m.uid,
       });
     }
@@ -432,11 +477,15 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     // Cleanup existing subscriptions
     const { firebaseUnsubscribe } = get();
     if (firebaseUnsubscribe) {
-      try { firebaseUnsubscribe(); } catch { /* */ }
+      try { firebaseUnsubscribe(); } catch (e) { logger.debug('Cleanup failed:', e); }
       set({ firebaseUnsubscribe: null });
     }
     clearSubscriptions(memberLocationSubscriptions);
     clearSubscriptions(statusUpdateSubscriptions);
+    if (familyLinksUnsubscribe) {
+      try { familyLinksUnsubscribe(); } catch (e) { logger.debug('Cleanup failed:', e); }
+      familyLinksUnsubscribe = null;
+    }
 
     // Load from AsyncStorage (fast)
     const localMembers = await loadMembers();
@@ -452,27 +501,46 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       const firebaseService = await waitForFirebaseInit();
       if (!firebaseService) return;
 
-      // Load cloud members
+      const myDisplayName = identityService.getDisplayName() || 'Aile Üyesi';
+
+      // Load cloud members from my own family
       const cloudMembers = await firebaseService.loadFamilyMembers(ownerUid);
       const normalizedCloud = cloudMembers.map(m => normalizeMember(m)).filter((m): m is FamilyMember => !!m);
 
-      if (normalizedCloud.length > 0) {
-        set({ members: normalizedCloud });
-        await saveMembers(normalizedCloud);
+      // BIDIRECTIONAL SYNC: Check users/{myUid}/familyMembers for remote additions
+      // This handles: B was offline when A added them -> B opens app -> B sees A
+      let remoteMembers: FamilyMember[] = [];
+      try {
+        const { syncRemoteFamilyAdditions } = await import('../services/firebase/FirebaseFamilyOperations');
+        remoteMembers = await Promise.race([
+          syncRemoteFamilyAdditions(ownerUid, myDisplayName),
+          new Promise<FamilyMember[]>((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 10000)),
+        ]);
+      } catch (error) {
+        logger.warn('Remote family sync failed:', (error as Error)?.message);
       }
 
-      // Real-time subscription
+      // Merge: local + cloud (my family) + remote additions (others' families)
+      const allRemote = [...normalizedCloud];
+      for (const rm of remoteMembers) {
+        const normalized = normalizeMember(rm);
+        if (normalized && !allRemote.some(m => m.uid === normalized.uid)) {
+          allRemote.push(normalized);
+        }
+      }
+
+      if (allRemote.length > 0) {
+        const merged = mergeMembers(get().members, allRemote);
+        set({ members: merged });
+        await saveMembers(merged);
+      }
+
+      // Real-time subscription to families/{familyId}/members
       try {
         const unsubscribe = await firebaseService.subscribeToFamilyMembers?.(ownerUid, async (firebaseMembers) => {
           try {
             const normalized = firebaseMembers.map(m => normalizeMember(m)).filter((m): m is FamilyMember => !!m);
-            const merged = mergeMembers(get().members, normalized);
-            set({ members: merged });
-            await saveMembers(merged);
-            await syncLocationSubscriptions(merged, (uid, lat, lng) => {
-              void get().updateMemberLocation(uid, lat, lng, 'remote');
-            });
-            await syncStatusUpdateListeners(merged);
+            debouncedMergeAndSet(normalized, get, set);
           } catch (error) {
             logger.error('Real-time family error:', error);
           }
@@ -484,10 +552,73 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       } catch (subError: unknown) {
         const errorObj = subError as { code?: string; message?: string };
         if (errorObj?.code === 'permission-denied' || errorObj?.message?.includes('permission')) {
-          if (__DEV__) logger.debug('Family subscription: permission denied');
+          logger.warn('Family subscription: permission denied — skipping');
         } else {
           logger.error('Family subscription error:', subError);
+          // Retry for non-permission errors (max 3 attempts, 5s delay)
+          let retryCount = 0;
+          const retrySubscription = async () => {
+            if (retryCount >= 3) {
+              logger.warn('Family subscription retry exhausted');
+              return;
+            }
+            retryCount++;
+            await new Promise(r => setTimeout(r, 5000));
+            try {
+              const retryUnsub = await firebaseService.subscribeToFamilyMembers?.(ownerUid, async (firebaseMembers) => {
+                try {
+                  const normalized = firebaseMembers.map(m => normalizeMember(m)).filter((m): m is FamilyMember => !!m);
+                  debouncedMergeAndSet(normalized, get, set);
+                } catch (error) {
+                  logger.error('Real-time family error:', error);
+                }
+              });
+              if (retryUnsub && typeof retryUnsub === 'function') {
+                set({ firebaseUnsubscribe: retryUnsub });
+                logger.info(`Family subscription recovered on retry ${retryCount}`);
+              }
+            } catch (retryError: unknown) {
+              const retryErr = retryError as { code?: string };
+              if (retryErr?.code === 'permission-denied') {
+                logger.warn('Family subscription retry: permission denied — stopping');
+              } else {
+                logger.warn(`Family subscription retry ${retryCount} failed:`, retryError);
+                retrySubscription();
+              }
+            }
+          };
+          retrySubscription();
         }
+      }
+
+      // BIDIRECTIONAL SYNC: Real-time listener for users/{myUid}/familyMembers
+      // Detects when someone adds us to their family in real-time
+      try {
+        const { subscribeToFamilyMemberLinks } = await import('../services/firebase/FirebaseFamilyOperations');
+        familyLinksUnsubscribe = await subscribeToFamilyMemberLinks(
+          ownerUid,
+          myDisplayName,
+          async (member, _familyId) => {
+            try {
+              const currentMembers = get().members;
+              // Dedup: skip if already in our local store
+              if (currentMembers.some(m => m.uid === member.uid)) {
+                logger.debug(`Remote family member ${member.uid} already in local store, skipping`);
+                return;
+              }
+
+              const normalized = normalizeMember(member);
+              if (!normalized) return;
+
+              debouncedMergeAndSet([normalized], get, set);
+              logger.info(`📥 Auto-added remote family member: ${member.name} (${member.uid})`);
+            } catch (error) {
+              logger.error('Error adding remote family member:', error);
+            }
+          },
+        );
+      } catch (error) {
+        logger.warn('Family member links subscription failed:', error);
       }
 
       // Fallback: sync subscriptions if no real-time listener
@@ -723,6 +854,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     if (firebaseUnsubscribe) { try { firebaseUnsubscribe(); } catch { /* */ } }
     clearSubscriptions(memberLocationSubscriptions);
     clearSubscriptions(statusUpdateSubscriptions);
+    if (familyLinksUnsubscribe) { try { familyLinksUnsubscribe(); } catch { /* */ } familyLinksUnsubscribe = null; }
 
     try { const { stopSOSAlertListener } = await import('../services/sos/SOSAlertListener'); stopSOSAlertListener(); } catch { /* */ }
     try { const { stopNearbySOSListener } = await import('../services/sos/NearbySOSListener'); stopNearbySOSListener(); } catch { /* */ }

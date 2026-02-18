@@ -25,6 +25,7 @@ import { sosChannelRouter } from './SOSChannelRouter';
 import { sosBeaconService } from './SOSBeaconService';
 import * as Location from 'expo-location';
 import * as haptics from '../../utils/haptics';
+import { Vibration } from 'react-native';
 import { getDeviceId } from '../../utils/device';
 
 const logger = createLogger('UnifiedSOSController');
@@ -55,6 +56,10 @@ class UnifiedSOSController {
     // Location is fetched continuously so it's available INSTANTLY when SOS triggers
     private preCachedLocation: SOSLocation | null = null;
     private locationPrecacheTimer: NodeJS.Timeout | null = null;
+
+    // ELITE V4: Ambient recording timer
+    private ambientRecordingTimer: NodeJS.Timeout | null = null;
+    private isAmbientRecording = false;
 
     // ============================================================================
     // INITIALIZATION
@@ -207,6 +212,10 @@ class UnifiedSOSController {
             // Stop active SOS
             sosBeaconService.stop();
 
+            // ELITE V4: Stop alarm sound + vibration + ambient recording
+            this.stopAlarmAndVibration();
+            this.stopAmbientRecording();
+
             // Stop ACK listener
             try {
                 const { stopSOSAckListener } = require('./SOSAckListener');
@@ -344,6 +353,12 @@ class UnifiedSOSController {
         // Start beacon service
         await sosBeaconService.start();
 
+        // ELITE V4: Start SOS alarm sound + continuous vibration
+        this.startAlarmAndVibration();
+
+        // ELITE V4: Start 10-second ambient sound recording
+        this.startAmbientRecording(signal.id);
+
         // Start ACK listener so we get notified when rescuers respond
         try {
             const { startSOSAckListener } = await import('./SOSAckListener');
@@ -437,6 +452,122 @@ class UnifiedSOSController {
             haptics.notificationSuccess();
 
             logger.info(`✅ ACK received: ${ack.receiverName || ack.receiverId} (${ack.type})`);
+        }
+    }
+
+    // ============================================================================
+    // ELITE V4: ALARM SOUND + VIBRATION
+    // ============================================================================
+
+    private async startAlarmAndVibration(): Promise<void> {
+        try {
+            const { whistleService } = await import('../WhistleService');
+            await whistleService.initialize();
+            await whistleService.playSOSWhistle('continuous');
+            logger.info('🔊 SOS alarm sound started');
+        } catch (err) {
+            logger.warn('Alarm sound failed (non-critical):', err);
+        }
+
+        // Continuous vibration pattern: 500ms on, 500ms off, repeating
+        try {
+            Vibration.vibrate([500, 500, 500, 500], true);
+            logger.info('📳 SOS vibration started');
+        } catch { /* non-critical */ }
+    }
+
+    private async stopAlarmAndVibration(): Promise<void> {
+        try {
+            const { whistleService } = await import('../WhistleService');
+            await whistleService.stop();
+            logger.info('🔇 SOS alarm sound stopped');
+        } catch { /* non-critical */ }
+
+        try {
+            Vibration.cancel();
+        } catch { /* non-critical */ }
+    }
+
+    // ============================================================================
+    // ELITE V4: AMBIENT SOUND RECORDING (10 seconds)
+    // ============================================================================
+
+    private async startAmbientRecording(signalId: string): Promise<void> {
+        if (this.isAmbientRecording) return;
+
+        try {
+            const { voiceMessageService } = await import('../VoiceMessageService');
+            const started = await voiceMessageService.startRecording();
+            if (!started) {
+                logger.warn('Ambient recording failed to start');
+                return;
+            }
+
+            this.isAmbientRecording = true;
+            logger.info('🎙️ Ambient recording started (10s)');
+
+            // Stop recording after 10 seconds and save to Firebase
+            this.ambientRecordingTimer = setTimeout(async () => {
+                await this.finishAmbientRecording(signalId);
+            }, 10_000);
+        } catch (err) {
+            logger.warn('Ambient recording error:', err);
+        }
+    }
+
+    private async finishAmbientRecording(signalId: string): Promise<void> {
+        if (!this.isAmbientRecording) return;
+        this.isAmbientRecording = false;
+
+        try {
+            const { voiceMessageService } = await import('../VoiceMessageService');
+            const recording = await voiceMessageService.stopRecording();
+            if (!recording) {
+                logger.warn('No ambient recording data');
+                return;
+            }
+
+            logger.info('🎙️ Ambient recording completed, uploading to Firebase...');
+
+            // Upload to Firebase Storage and get URL
+            const audioUrl = await voiceMessageService.backupToFirebase(recording);
+            if (audioUrl) {
+                // Save audio URL to sos_signals/{signalId}/audio_url in Firestore
+                try {
+                    const { getFirestoreInstanceAsync } = await import(
+                        '../firebase/FirebaseInstanceManager'
+                    );
+                    const db = await getFirestoreInstanceAsync();
+                    if (db) {
+                        const { doc, setDoc } = await import('firebase/firestore');
+                        await setDoc(
+                            doc(db, 'sos_signals', signalId),
+                            { audio_url: audioUrl, audio_timestamp: Date.now() },
+                            { merge: true },
+                        );
+                        logger.info('✅ Ambient recording saved to Firestore:', audioUrl);
+                    }
+                } catch (fsErr) {
+                    logger.warn('Failed to save audio URL to Firestore:', fsErr);
+                }
+            }
+        } catch (err) {
+            logger.warn('Ambient recording finish error:', err);
+        }
+    }
+
+    private async stopAmbientRecording(): Promise<void> {
+        if (this.ambientRecordingTimer) {
+            clearTimeout(this.ambientRecordingTimer);
+            this.ambientRecordingTimer = null;
+        }
+
+        if (this.isAmbientRecording) {
+            this.isAmbientRecording = false;
+            try {
+                const { voiceMessageService } = await import('../VoiceMessageService');
+                await voiceMessageService.cancelRecording();
+            } catch { /* non-critical */ }
         }
     }
 

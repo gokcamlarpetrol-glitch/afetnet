@@ -465,7 +465,7 @@ export const eewEmergencyTrigger = functions
 export const onPWaveDetection = functions
     .region(REGION)
     .firestore.document('eew_pwave_detections/{detectionId}')
-    .onCreate(async (snap, context) => {
+    .onCreate(async (snap, _context) => {
         const detection = snap.data();
         functions.logger.info('🌊 New P-wave detection:', detection);
 
@@ -658,6 +658,11 @@ export const eewWebhook = functions
                 return;
             }
 
+            // SECURITY FIX: Validate source against known list to prevent arbitrary values
+            const VALID_SOURCES: EEWEvent['source'][] = ['AFAD', 'KANDILLI', 'USGS', 'EMSC', 'CROWDSOURCED'];
+            const rawSource = typeof req.body.source === 'string' ? req.body.source.toUpperCase() : 'AFAD';
+            const source = (VALID_SOURCES.includes(rawSource as EEWEvent['source']) ? rawSource : 'AFAD') as EEWEvent['source'];
+
             const event: EEWEvent = {
                 id: req.body.id || `webhook-${Date.now()}`,
                 magnitude,
@@ -665,7 +670,7 @@ export const eewWebhook = functions
                 longitude,
                 depth: Number(req.body.depth) || 10,
                 location: req.body.location || 'Unknown',
-                source: req.body.source || 'AFAD',
+                source,
                 timestamp: Date.now(),
                 issuedAt: Date.now(),
             };
@@ -1084,7 +1089,16 @@ export const onSOSAlert = functions
             const ownerUid = deviceDoc.exists ? deviceDoc.data()?.ownerUid : null;
 
             if (!ownerUid) {
-                functions.logger.warn(`No ownerUid found on device doc ${targetDeviceId} — cannot send push`);
+                // LIFE-SAFETY FALLBACK: If ownerUid missing, try pushToken directly from device doc
+                const fallbackToken = deviceDoc.exists ? (deviceDoc.data()?.pushToken || deviceDoc.data()?.token) : null;
+                if (fallbackToken) {
+                    functions.logger.warn(`No ownerUid on device ${targetDeviceId} — using device pushToken fallback`);
+                    const fbTitle = `🆘 ACİL SOS: ${alert.senderName || 'Aile Üyesi'}`;
+                    const fbBody = alert.message || 'Acil yardım gerekiyor!';
+                    await sendPushToToken(fallbackToken, fbTitle, fbBody, { type: 'sos_family', signalId: alert.signalId || context.params.alertId });
+                    return null;
+                }
+                functions.logger.error(`No ownerUid AND no pushToken on device ${targetDeviceId} — SOS push LOST`);
                 return null;
             }
 
@@ -1169,6 +1183,99 @@ export const onSOSAlert = functions
 
         } catch (error) {
             functions.logger.error('❌ SOS FCM push failed:', error);
+        }
+
+        return null;
+    });
+
+// ============================================================
+// 10b. V3: SOS ALERT - FCM PUSH TO FAMILY MEMBERS (UID PATH)
+// Trigger: sos_alerts/{targetUid}/items/{signalId} -> push to targetUid
+// Complements the legacy onSOSAlert trigger for the V3 write path.
+// SOSChannelRouter writes to BOTH legacy and V3 paths; without this
+// trigger, the V3 path would silently not deliver push notifications.
+// ============================================================
+
+export const onSOSAlertV3 = functions
+    .region(REGION)
+    .firestore.document('sos_alerts/{targetUid}/items/{signalId}')
+    .onCreate(async (snap, context) => {
+        const alert = snap.data();
+        const targetUid = context.params.targetUid;
+        const signalId = context.params.signalId;
+
+        functions.logger.warn(`🚨 V3 SOS Alert received for user ${targetUid}:`, {
+            sender: alert.senderDeviceId,
+            message: alert.message,
+        });
+
+        try {
+            // DEDUP: Check if legacy path also has this alert AND can deliver push.
+            // SOSChannelRouter writes same alert to BOTH devices/{id}/sos_alerts
+            // and sos_alerts/{id}/items with the SAME targetId. If targetId happens
+            // to be a deviceId with a valid ownerUid, onSOSAlert already sent push.
+            try {
+                const legacyAlertDoc = await db
+                    .collection('devices').doc(targetUid)
+                    .collection('sos_alerts').doc(signalId)
+                    .get();
+                if (legacyAlertDoc.exists) {
+                    // Check if the legacy device doc has ownerUid (meaning onSOSAlert can deliver)
+                    const deviceDoc = await db.collection('devices').doc(targetUid).get();
+                    if (deviceDoc.exists && deviceDoc.data()?.ownerUid) {
+                        functions.logger.info(`V3 SOS dedup: legacy path can deliver for ${targetUid}/${signalId} — skipping`);
+                        return null;
+                    }
+                }
+            } catch {
+                // Legacy check failed — continue with V3 push (better double than none for SOS)
+            }
+
+            // V3 path: targetUid IS the Firebase Auth UID — look up tokens directly
+            const allTokens = await collectPushTokensForUid(targetUid);
+
+            if (allTokens.length === 0) {
+                functions.logger.warn(`No push tokens found for uid: ${targetUid} (V3 SOS alert)`);
+                return null;
+            }
+
+            const isTrapped = alert.trapped === true;
+            const alertSenderName = alert.senderName || 'Aile Üyesi';
+            const title = isTrapped
+                ? `🚨 ENKAZ ALTINDA: ${alertSenderName}`
+                : `🆘 ACİL SOS: ${alertSenderName}`;
+
+            const locationText = alert.location
+                ? `Konum: ${Number(alert.location.latitude).toFixed(4)}, ${Number(alert.location.longitude).toFixed(4)}`
+                : 'Konum bilgisi yok';
+            const body = `${alert.message || 'Acil yardım gerekiyor!'}\n${locationText}`;
+
+            const senderUid = typeof alert.senderUid === 'string'
+                ? alert.senderUid
+                : (typeof alert.userId === 'string' ? alert.userId : '');
+
+            const pushData = {
+                type: 'sos_family',
+                signalId: alert.signalId || context.params.signalId,
+                senderDeviceId: alert.senderDeviceId || '',
+                senderUid,
+                senderName: alertSenderName,
+                message: alert.message || '',
+                timestamp: String(alert.timestamp || Date.now()),
+                trapped: String(isTrapped),
+                latitude: alert.location?.latitude ? String(alert.location.latitude) : '',
+                longitude: alert.location?.longitude ? String(alert.location.longitude) : '',
+            };
+
+            let sentCount = 0;
+            for (const pushToken of allTokens) {
+                const success = await sendPushToToken(pushToken, title, body, pushData);
+                if (success) sentCount++;
+            }
+
+            functions.logger.info(`✅ V3 SOS family push sent: ${sentCount}/${allTokens.length} tokens (uid: ${targetUid})`);
+        } catch (error) {
+            functions.logger.error('❌ V3 SOS FCM push failed:', error);
         }
 
         return null;
@@ -1298,14 +1405,26 @@ export const onSOSBroadcast = functions
             }
 
             // Remove sender's own uid to prevent self-notification
-            // Find sender's ownerUid from their device doc
+            // LIFE-SAFETY: Use ALL available sender identifiers for robust self-exclusion
+            // 1. Direct fields from broadcast document (most reliable, no lookup needed)
+            if (typeof broadcast.senderUid === 'string' && broadcast.senderUid) {
+                targetOwnerUids.delete(broadcast.senderUid);
+                functions.logger.info(`🔇 Excluded sender via senderUid: ${broadcast.senderUid}`);
+            }
+            if (typeof broadcast.userId === 'string' && broadcast.userId) {
+                targetOwnerUids.delete(broadcast.userId);
+                functions.logger.info(`🔇 Excluded sender via userId: ${broadcast.userId}`);
+            }
+            // 2. Fallback: device doc lookup (for cases where senderUid/userId differ from ownerUid)
             if (senderDeviceId) {
-                const senderDeviceDoc = await db.collection('devices').doc(senderDeviceId).get();
-                const senderOwnerUid = senderDeviceDoc.exists ? senderDeviceDoc.data()?.ownerUid : null;
-                if (senderOwnerUid) {
-                    targetOwnerUids.delete(senderOwnerUid);
-                    functions.logger.info(`🔇 Excluded sender's ownerUid: ${senderOwnerUid}`);
-                }
+                try {
+                    const senderDeviceDoc = await db.collection('devices').doc(senderDeviceId).get();
+                    const senderOwnerUid = senderDeviceDoc.exists ? senderDeviceDoc.data()?.ownerUid : null;
+                    if (senderOwnerUid) {
+                        targetOwnerUids.delete(senderOwnerUid);
+                        functions.logger.info(`🔇 Excluded sender via device ownerUid: ${senderOwnerUid}`);
+                    }
+                } catch { /* device doc lookup failed — direct exclusion above should suffice */ }
             }
 
             functions.logger.info(`📊 Device discovery results:`, {
@@ -2049,7 +2168,7 @@ async function createCrowdsourcedAlert(consensus: PWaveConsensus): Promise<void>
 export const onSeismicReportCreated = functions
     .region(REGION)
     .database.ref('seismic_reports/{reportId}')
-    .onCreate(async (snapshot, context) => {
+    .onCreate(async (snapshot, _context) => {
         const report = snapshot.val();
         functions.logger.info('📱 New seismic report from device:', report);
 

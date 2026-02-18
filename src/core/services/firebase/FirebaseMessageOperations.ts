@@ -176,16 +176,27 @@ export async function findOrCreateDMConversation(
     );
 
     // 3. Create inbox entries for both users
+    // CRITICAL: Use allSettled instead of all — if the recipient's inbox write
+    // fails (e.g., due to security rules), we still return the conversation.
+    // The message can still be saved to the conversation, and the recipient
+    // will discover it via direct conversation subscription.
     const inboxData: UserInboxThread = {
       conversationId: convId,
       unreadCount: 0,
       lastMessageAt: now,
     };
 
-    await Promise.all([
+    const inboxResults = await Promise.allSettled([
       setDoc(doc(db, 'user_inbox', myUid, 'threads', convId), inboxData),
       setDoc(doc(db, 'user_inbox', otherUid, 'threads', convId), inboxData),
     ]);
+
+    if (inboxResults[0].status === 'rejected') {
+      logger.warn(`Inbox entry write failed for sender ${myUid}:`, inboxResults[0].reason);
+    }
+    if (inboxResults[1].status === 'rejected') {
+      logger.warn(`Inbox entry write failed for recipient ${otherUid}:`, inboxResults[1].reason);
+    }
 
     logger.info(`✅ New DM created: ${convId} between ${myUid} and ${otherUid}`);
     return conversationData;
@@ -239,19 +250,35 @@ export async function saveMessage(
     }, { merge: true });
 
     // Update each participant's inbox
-    const inboxUpdates = participantUids.map(uid => {
+    // CRITICAL: The recipient's inbox entry MUST be written for message delivery.
+    // If this fails, the recipient's inbox subscription never fires and they
+    // never receive the message in real-time.
+    const inboxUpdates = participantUids.map(async (uid) => {
       const isSender = uid === message.senderUid;
       const threadRef = doc(db, 'user_inbox', uid, 'threads', conversationId);
-      return setDoc(threadRef, {
-        conversationId,
-        lastMessagePreview: message.content.substring(0, 100),
-        lastMessageSenderName: message.senderName || '',
-        lastMessageAt: message.timestamp,
-        ...(!isSender ? { unreadCount: increment(1) } : {}),
-      }, { merge: true });
+      try {
+        await setDoc(threadRef, {
+          conversationId,
+          lastMessagePreview: message.content.substring(0, 100),
+          lastMessageSenderName: message.senderName || '',
+          lastMessageAt: message.timestamp,
+          ...(!isSender ? { unreadCount: increment(1) } : {}),
+        }, { merge: true });
+        logger.debug(`Inbox updated for ${isSender ? 'sender' : 'recipient'} ${uid}`);
+      } catch (inboxError) {
+        logger.error(`INBOX UPDATE FAILED for ${isSender ? 'sender' : 'recipient'} ${uid}:`, inboxError);
+        // Re-throw only for recipient — sender inbox failure is non-critical
+        if (!isSender) throw inboxError;
+      }
     });
 
-    await Promise.allSettled(inboxUpdates);
+    const inboxResults = await Promise.allSettled(inboxUpdates);
+    const recipientFailed = inboxResults.some((r, i) =>
+      r.status === 'rejected' && participantUids[i] !== message.senderUid
+    );
+    if (recipientFailed) {
+      logger.warn(`Recipient inbox update failed — message saved but may not be delivered in real-time`);
+    }
 
     logger.info(`💾 Message saved: conversations/${conversationId}/messages/${message.id}`);
     return true;

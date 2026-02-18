@@ -234,11 +234,17 @@ class BackendPushService {
           accuracy: Location.Accuracy.Balanced,
         });
 
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 10000), // 10 second timeout
-        );
+        let locationTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<null>((resolve) => {
+          locationTimeoutId = setTimeout(() => resolve(null), 10000); // 10 second timeout
+        });
 
-        const location = await Promise.race([locationPromise, timeoutPromise]);
+        let location: Awaited<typeof locationPromise> | null;
+        try {
+          location = await Promise.race([locationPromise, timeoutPromise]);
+        } finally {
+          if (locationTimeoutId) clearTimeout(locationTimeoutId);
+        }
 
         if (!location) {
           if (__DEV__) {
@@ -363,11 +369,16 @@ class BackendPushService {
         }),
       });
 
-      const fetchTimeoutPromise = new Promise<Response>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), 10000), // 10 second timeout
-      );
+      let unregTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      const fetchTimeoutPromise = new Promise<Response>((_, reject) => {
+        unregTimeoutId = setTimeout(() => reject(new Error('Request timeout')), 10000); // 10 second timeout
+      });
 
-      await Promise.race([fetchPromise, fetchTimeoutPromise]);
+      try {
+        await Promise.race([fetchPromise, fetchTimeoutPromise]);
+      } finally {
+        if (unregTimeoutId) clearTimeout(unregTimeoutId);
+      }
 
       this.isRegistered = false;
       logger.info('Unregistered from backend');
@@ -445,11 +456,17 @@ class BackendPushService {
         }),
       });
 
-      const timeoutPromise = new Promise<Response>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), 10000), // 10 second timeout
-      );
+      let seismicTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<Response>((_, reject) => {
+        seismicTimeoutId = setTimeout(() => reject(new Error('Request timeout')), 10000); // 10 second timeout
+      });
 
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      let response: Response;
+      try {
+        response = await Promise.race([fetchPromise, timeoutPromise]);
+      } finally {
+        if (seismicTimeoutId) clearTimeout(seismicTimeoutId);
+      }
 
       if (!response.ok) {
         if (__DEV__) {

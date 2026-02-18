@@ -14,6 +14,7 @@
 
 import { setAudioModeAsync, requestRecordingPermissionsAsync, createAudioPlayer, IOSOutputFormat, AudioQuality } from 'expo-audio';
 import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
+import AudioModule from 'expo-audio/build/AudioModule';
 import * as FileSystem from 'expo-file-system';
 import { createLogger } from '../utils/logger';
 import { bleMeshService } from './BLEMeshService';
@@ -21,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { identityService } from './IdentityService';
 import { firebaseStorageService } from './FirebaseStorageService';
 import { Buffer } from 'buffer';
+import { Platform } from 'react-native';
 
 const logger = createLogger('VoiceMessageService');
 
@@ -190,10 +192,30 @@ class VoiceMessageService {
         this.sound = null;
       }
 
-      // Create recorder using expo-audio API
-      const { AudioRecorder: NativeAudioRecorder } = require('expo-audio');
-      this.recording = new NativeAudioRecorder();
-      await this.recording!.prepareToRecordAsync(RECORDING_OPTIONS);
+      // Ensure audio mode is set for recording before each attempt
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+      });
+
+      // Build platform-specific recording options matching expo-audio's internal format
+      const commonOpts = {
+        extension: RECORDING_OPTIONS.extension,
+        sampleRate: RECORDING_OPTIONS.sampleRate,
+        numberOfChannels: RECORDING_OPTIONS.numberOfChannels,
+        bitRate: RECORDING_OPTIONS.bitRate,
+        isMeteringEnabled: false,
+      };
+      const platformOpts = Platform.OS === 'ios'
+        ? { ...commonOpts, ...RECORDING_OPTIONS.ios }
+        : Platform.OS === 'android'
+          ? { ...commonOpts, ...RECORDING_OPTIONS.android }
+          : { ...commonOpts, ...RECORDING_OPTIONS.web };
+
+      // Create recorder via the native module constructor (same as useAudioRecorder hook)
+      this.recording = new AudioModule.AudioRecorder(platformOpts) as AudioRecorder;
+      await this.recording!.prepareToRecordAsync();
       this.recording!.record();
       this.isRecording = true;
       this.recordingStartTime = Date.now();
@@ -208,6 +230,7 @@ class VoiceMessageService {
     } catch (e) {
       logger.error('Failed to start recording', e);
       this.isRecording = false;
+      this.recording = null;
       return false;
     }
   }
@@ -273,18 +296,24 @@ class VoiceMessageService {
      * Cancel current recording
      */
   async cancelRecording(): Promise<void> {
-    if (!this.isRecording || !this.recording) return;
+    if (this.autoStopTimer) {
+      clearTimeout(this.autoStopTimer);
+      this.autoStopTimer = null;
+    }
+
+    if (!this.isRecording && !this.recording) return;
 
     try {
-      if (this.autoStopTimer) {
-        clearTimeout(this.autoStopTimer);
-        this.autoStopTimer = null;
-      }
-
-      await this.recording.stop();
-      const uri = this.recording.uri;
-      if (uri) {
-        await FileSystem.deleteAsync(uri, { idempotent: true });
+      if (this.recording) {
+        try {
+          await this.recording.stop();
+        } catch {
+          // Recorder may already be stopped — safe to ignore
+        }
+        const uri = this.recording.uri;
+        if (uri) {
+          await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        }
       }
 
       this.isRecording = false;
@@ -292,6 +321,8 @@ class VoiceMessageService {
       logger.info('Recording cancelled');
     } catch (e) {
       logger.error('Failed to cancel recording', e);
+      this.isRecording = false;
+      this.recording = null;
     }
   }
 
@@ -304,8 +335,22 @@ class VoiceMessageService {
     }
 
     try {
+      // Resolve the audio source: prefer local URI, fall back to Firebase URL
+      const audioUri = message.uri || message.firebaseUrl;
+      if (!audioUri) {
+        logger.warn('No audio URI or Firebase URL for voice message', message.id);
+        return;
+      }
+
+      // Set audio mode for playback (disable recording mode)
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+      });
+
       const sound = createAudioPlayer(
-        { uri: message.uri },
+        { uri: audioUri },
       );
       sound.play();
 

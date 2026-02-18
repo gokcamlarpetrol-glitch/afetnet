@@ -344,6 +344,14 @@ export async function saveFamilyMember(
 
     // 4. Create bidirectional familyMembers mapping (for Firestore rules)
     // users/{myUid}/familyMembers/{memberUid} and vice versa
+    // CRITICAL: Include adderUid + adderName in the reverse doc so the target
+    // user can identify who added them and join the correct family on sync.
+    const adderName = await (async () => {
+      try {
+        const { identityService } = await import('../../services/IdentityService');
+        return identityService.getDisplayName() || 'Aile Üyesi';
+      } catch { return 'Aile Üyesi'; }
+    })();
     await Promise.all([
       setDoc(
         doc(db, 'users', myUid, 'familyMembers', memberUid),
@@ -352,7 +360,7 @@ export async function saveFamilyMember(
       ).catch(() => { }),
       setDoc(
         doc(db, 'users', memberUid, 'familyMembers', myUid),
-        { familyId, addedAt: now },
+        { familyId, adderUid: myUid, adderName, addedAt: now },
         { merge: true }
       ).catch(() => { }),
     ]);
@@ -437,10 +445,12 @@ export async function loadFamilyMembers(
 
 /**
  * Delete family member from a family group.
+ * myUid is optional — when provided, directly cleans up the bidirectional link.
  */
 export async function deleteFamilyMember(
   familyId: string,
   memberUid: string,
+  myUid?: string,
 ): Promise<boolean> {
   try {
     const db = await getFirestoreInstanceAsync();
@@ -468,8 +478,12 @@ export async function deleteFamilyMember(
     ).catch(() => { /* best-effort — may not have permission */ });
 
     // 4. Remove bidirectional familyMembers mapping (best-effort)
-    // We need to find the other members to remove the reverse mapping
-    // For simplicity, we remove what we can — the member's own mapping
+    // Direct cleanup if we know who is removing whom
+    if (myUid) {
+      await deleteDoc(doc(db, 'users', myUid, 'familyMembers', memberUid)).catch(() => { });
+      await deleteDoc(doc(db, 'users', memberUid, 'familyMembers', myUid)).catch(() => { });
+    }
+    // Also enumerate remaining family members for thorough cleanup
     try {
       const membersSnap = await getDocs(collection(db, 'families', familyId, 'members'));
       for (const mDoc of membersSnap.docs) {
@@ -570,6 +584,220 @@ export async function subscribeToFamilyMembers(
     return unsubscribe;
   } catch (error) {
     logger.error('Failed to subscribe to family members:', error);
+    return () => { };
+  }
+}
+
+// ─── BIDIRECTIONAL SYNC ──────────────────────────────
+
+/**
+ * Sync remote family additions on app launch.
+ * Reads users/{myUid}/familyMembers to find families that others have added us to.
+ * For each, ensures:
+ *   - users/{myUid}/familyIds/{familyId} mapping exists (so we can read the family)
+ *   - We are in the families/{familyId}/members array
+ *   - Returns the list of family members from all linked families
+ */
+export async function syncRemoteFamilyAdditions(
+  myUid: string,
+  myDisplayName: string,
+): Promise<FamilyMember[]> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return [];
+
+    // Read all familyMembers links pointing to me
+    const linksRef = collection(db, 'users', myUid, 'familyMembers');
+    const linksSnap = await withTimeout(() => getDocs(linksRef), 'Sync remote family links');
+
+    if (linksSnap.empty) return [];
+
+    const now = Date.now();
+    const allMembers: FamilyMember[] = [];
+    const seenFamilyIds = new Set<string>();
+
+    for (const linkDoc of linksSnap.docs) {
+      const data = linkDoc.data();
+      const familyId = data.familyId;
+      if (!familyId || typeof familyId !== 'string') continue;
+      if (seenFamilyIds.has(familyId)) continue;
+      seenFamilyIds.add(familyId);
+
+      // Ensure I have the familyIds mapping (only owner can write, so this is for MY doc)
+      try {
+        await setDoc(
+          doc(db, 'users', myUid, 'familyIds', familyId),
+          { active: true, joinedAt: now },
+          { merge: true }
+        );
+      } catch (err) {
+        logger.debug(`familyIds self-mapping: ${getErrorMessage(err)}`);
+      }
+
+      // Ensure I'm in the family members array
+      try {
+        const familyRef = doc(db, 'families', familyId);
+        await updateDoc(familyRef, {
+          members: arrayUnion(myUid),
+          updatedAt: now,
+        });
+      } catch {
+        // May fail if family doc doesn't exist or permission — best effort
+      }
+
+      // Ensure I have a member doc in the family
+      try {
+        const myMemberRef = doc(db, 'families', familyId, 'members', myUid);
+        const myMemberDoc = await getDoc(myMemberRef);
+        if (!myMemberDoc.exists()) {
+          await setDoc(myMemberRef, {
+            uid: myUid,
+            name: myDisplayName,
+            status: 'unknown',
+            joinedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          }, { merge: true });
+        }
+      } catch {
+        // best effort
+      }
+
+      // Load members from this family
+      try {
+        const members = await loadFamilyMembers(familyId);
+        for (const m of members) {
+          if (m.uid && m.uid !== myUid) {
+            allMembers.push(m);
+          }
+        }
+      } catch {
+        // best effort — will retry next launch
+      }
+    }
+
+    if (allMembers.length > 0) {
+      logger.info(`✅ Synced ${allMembers.length} remote family members from ${seenFamilyIds.size} families`);
+    }
+
+    return allMembers;
+  } catch (error) {
+    logger.warn('syncRemoteFamilyAdditions failed:', error);
+    return [];
+  }
+}
+
+/**
+ * Subscribe to real-time changes on users/{myUid}/familyMembers.
+ * Detects when another user adds us to their family.
+ * Calls onNewMember for each newly detected family member link.
+ */
+export async function subscribeToFamilyMemberLinks(
+  myUid: string,
+  myDisplayName: string,
+  onNewMember: (member: FamilyMember, familyId: string) => void,
+): Promise<() => void> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return () => { };
+
+    const linksRef = collection(db, 'users', myUid, 'familyMembers');
+    const knownLinks = new Set<string>();
+    let isFirstSnapshot = true;
+
+    const unsubscribe = onSnapshot(
+      linksRef,
+      async (snapshot) => {
+        try {
+          const now = Date.now();
+
+          for (const change of snapshot.docChanges()) {
+            if (change.type !== 'added') continue;
+
+            const otherUid = change.doc.id;
+            if (otherUid === myUid) continue;
+            if (knownLinks.has(otherUid)) continue;
+            knownLinks.add(otherUid);
+
+            // Skip processing on first snapshot (handled by syncRemoteFamilyAdditions)
+            if (isFirstSnapshot) continue;
+
+            const data = change.doc.data();
+            const familyId = data.familyId;
+            if (!familyId || typeof familyId !== 'string') continue;
+
+            logger.info(`📥 Remote family addition detected: ${otherUid} added me to family ${familyId}`);
+
+            // Create my own familyIds mapping
+            try {
+              await setDoc(
+                doc(db, 'users', myUid, 'familyIds', familyId),
+                { active: true, joinedAt: now },
+                { merge: true }
+              );
+            } catch { /* best effort */ }
+
+            // Add myself to the family members array
+            try {
+              const familyRef = doc(db, 'families', familyId);
+              await updateDoc(familyRef, {
+                members: arrayUnion(myUid),
+                updatedAt: now,
+              });
+            } catch { /* best effort */ }
+
+            // Ensure my member doc exists in the family
+            try {
+              const myMemberRef = doc(db, 'families', familyId, 'members', myUid);
+              const myMemberDoc = await getDoc(myMemberRef);
+              if (!myMemberDoc.exists()) {
+                await setDoc(myMemberRef, {
+                  uid: myUid,
+                  name: myDisplayName,
+                  status: 'unknown',
+                  joinedAt: now,
+                  createdAt: now,
+                  updatedAt: now,
+                }, { merge: true });
+              }
+            } catch { /* best effort */ }
+
+            // Resolve the adder's info to create a FamilyMember
+            const adderName = typeof data.adderName === 'string' ? data.adderName : 'Aile Üyesi';
+            const member: FamilyMember = {
+              id: otherUid,
+              uid: otherUid,
+              familyId,
+              name: adderName,
+              status: 'unknown',
+              lastSeen: 0,
+              latitude: 0,
+              longitude: 0,
+              createdAt: typeof data.addedAt === 'number' ? data.addedAt : now,
+              updatedAt: now,
+            } as FamilyMember;
+
+            onNewMember(member, familyId);
+          }
+
+          isFirstSnapshot = false;
+        } catch (error) {
+          logger.error('Error processing familyMemberLinks snapshot:', error);
+        }
+      },
+      (error: any) => {
+        if (error?.code === 'permission-denied') {
+          logger.debug('familyMemberLinks subscription: permission denied');
+          return;
+        }
+        logger.warn('familyMemberLinks subscription error:', error);
+      },
+    );
+
+    logger.info(`✅ Subscribed to family member links: users/${myUid}/familyMembers`);
+    return unsubscribe;
+  } catch (error) {
+    logger.error('Failed to subscribe to family member links:', error);
     return () => { };
   }
 }

@@ -16,6 +16,7 @@ import { initializeApp, shutdownApp } from './init';
 import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
+import SOSFullScreenAlert from './components/SOSFullScreenAlert';
 import { EULAModal } from './components/compliance/EULAModal';
 import { useTrialStore } from './stores/trialStore';
 import { useOnboardingStore } from './stores/onboardingStore';
@@ -163,12 +164,20 @@ export default function CoreApp() {
           <NavigationContainer
             ref={navigationRef}
             onReady={() => {
-              const routeName = navigationRef.getCurrentRoute()?.name;
-              setCurrentRouteName(routeName);
+              try {
+                const routeName = navigationRef.getCurrentRoute()?.name;
+                setCurrentRouteName(routeName);
+              } catch (e) {
+                if (__DEV__) console.warn('Navigation onReady error:', e);
+              }
             }}
             onStateChange={() => {
-              const routeName = navigationRef.getCurrentRoute()?.name;
-              setCurrentRouteName(routeName);
+              try {
+                const routeName = navigationRef.getCurrentRoute()?.name;
+                setCurrentRouteName(routeName);
+              } catch (e) {
+                if (__DEV__) console.warn('Navigation onStateChange error:', e);
+              }
             }}
           >
             {/* Global Overlays */}
@@ -181,6 +190,9 @@ export default function CoreApp() {
 
             {/* ELITE: Compliance - Mandatory EULA */}
             <EULAModal />
+
+            {/* ELITE V4: Full-screen SOS alert for foreground notifications */}
+            <SOSFullScreenAlert />
           </NavigationContainer>
         </ErrorBoundary>
       </SafeAreaProvider>

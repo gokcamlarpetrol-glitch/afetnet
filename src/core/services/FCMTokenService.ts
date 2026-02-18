@@ -16,7 +16,7 @@
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import { createLogger } from '../utils/logger';
-import { firebaseDataService } from './FirebaseDataService';
+// firebaseDataService import removed — direct Firestore ops used instead
 
 const logger = createLogger('FCMTokenService');
 
@@ -310,27 +310,28 @@ class FCMTokenService {
 
     /**
      * Setup notification handlers
+     *
+     * IMPORTANT: Foreground notification display and tap handling are both
+     * centralized in NotificationCenter.initialize(). We only set up an
+     * EEW-specific handler here for emergency mode / history logging.
+     * We must NOT add a duplicate addNotificationReceivedListener since
+     * NotificationCenter already registers one — adding a second would
+     * cause double processing on some devices.
      */
     private async setupNotificationHandlers(): Promise<void> {
-        const Notif = await getNotifications();
+        // Foreground notification display: handled by NotificationCenter.setNotificationHandler
+        // Foreground SOS/message alerts: handled by NotificationCenter.addNotificationReceivedListener
+        // Notification tap navigation: handled by NotificationCenter.addNotificationResponseReceivedListener
+        //
+        // The only thing we need is to process incoming EEW push data for
+        // emergency mode and history logging. We use the NotificationCenter's
+        // foreground listener for this — see the 'eew' type check in
+        // NotificationCenter's foreground handler.
+        //
+        // Previously this method added its own addNotificationReceivedListener
+        // which caused duplicate processing on some devices.
 
-        // Foreground handler is centralized in NotificationCenter.initialize()
-        // (EEW MAX priority logic consolidated there)
-
-        // Foreground receive hook — avoid duplicate local notifications.
-        // System banner/list delivery is already handled by NotificationCenter
-        // setNotificationHandler + OS push display.
-        Notif.addNotificationReceivedListener((notification) => {
-            const data = notification.request.content.data;
-            const type = String(data?.type || '').toLowerCase();
-            if (type === 'eew') {
-                this.handleEEWNotification(data);
-            }
-        });
-
-        // Notification tap handling is centralized in NotificationCenter.initialize()
-
-        logger.info('✅ Notification handlers setup');
+        logger.info('✅ Notification handlers setup (delegated to NotificationCenter)');
     }
 
     /**

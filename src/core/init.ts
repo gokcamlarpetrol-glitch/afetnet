@@ -91,6 +91,17 @@ const safeImport = async <T>(fn: () => Promise<T>, name: string): Promise<T | nu
   catch (e) { logger.error(`Failed to import ${name}:`, e); return null; }
 };
 
+/**
+ * Wrap a promise with a timeout to prevent indefinite hangs.
+ * Resolves to the fallback value if the promise doesn't settle in time.
+ */
+const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+};
+
 // ===========================================================================
 // initializeApp — Phase-based bootstrapper
 // ===========================================================================
@@ -102,6 +113,30 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
 
   try {
     logger.info('🚀 Starting initialization...');
+
+    // -----------------------------------------------------------------------
+    // LIFE-SAFETY PRIORITY: Set notification handler BEFORE everything else.
+    // Expo silently drops ALL foreground notifications if no handler is set.
+    // This ensures SOS/EEW notifications are never lost during init.
+    // -----------------------------------------------------------------------
+    try {
+      const { getNotificationsAsync: getNotifEarly } = await import('./services/notifications/NotificationModuleLoader');
+      const NotifEarly = await getNotifEarly();
+      if (NotifEarly && typeof NotifEarly.setNotificationHandler === 'function') {
+        NotifEarly.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+          }),
+        });
+        logger.info('✅ Early notification handler set (foreground SOS/EEW safe)');
+      }
+    } catch (e: unknown) {
+      logger.warn('Early notification handler failed (non-blocking):', e);
+    }
 
     // -----------------------------------------------------------------------
     // Crash diagnostics baseline (must start before feature modules)
@@ -127,13 +162,13 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     // -----------------------------------------------------------------------
     const [
       esModule, bmsModule, lsModule, nsModule, fsModule,
-      psModule, btsModule, ssModule, omsModule,
+      _psModule, btsModule, ssModule, omsModule,
       // EEW
       ftsModule, bewsModule, pewsModule, mlcModule,
       // Multi-source / Widget / Watch
       msewsModule, wdbsModule, wbsModule,
-      todsModule, tapsModule,
-      trsModule,
+      _todsModule, _tapsModule,
+      _trsModule,
     ] = await Promise.all([
       safeImport(() => import('./services/EarthquakeService'), 'EarthquakeService'),
       safeImport(() => import('./services/BLEMeshService'), 'BLEMeshService'),
@@ -250,13 +285,13 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     if (isAuthed) {
       try {
         const { identityService } = await import('./services/IdentityService');
-        await identityService.initialize();
+        await withTimeout(identityService.initialize(), 10_000, undefined);
         logger.info(`✅ IdentityService (id: ${identityService.getMyId()})`);
       } catch (e: unknown) { logger.error('IdentityService:', e); }
 
       try {
         const { firebaseDataService } = await import('./services/FirebaseDataService');
-        await firebaseDataService.initialize();
+        await withTimeout(firebaseDataService.initialize(), 10_000, undefined);
         logger.info('✅ FirebaseDataService');
       } catch (e: unknown) { logger.error('FirebaseDataService:', e); }
 
@@ -264,7 +299,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         const { hybridMessageService } = await import('./services/HybridMessageService');
         // BUG 1 FIX: initialize() MUST be called before subscribeToMessages()
         // Without this, queue processing, connection listener, and device registration never start
-        await hybridMessageService.initialize();
+        await withTimeout(hybridMessageService.initialize(), 15_000, undefined);
         await hybridMessageService.subscribeToMessages((msg) => {
           logger.debug(`Cloud msg: ${msg.id} from ${msg.senderId}`);
         });
@@ -275,7 +310,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       // Without this, messages don't load from local storage until user opens Messages tab
       try {
         const { useMessageStore } = await import('./stores/messageStore');
-        await useMessageStore.getState().initialize();
+        await withTimeout(useMessageStore.getState().initialize(), 10_000, undefined);
         logger.info('✅ MessageStore');
       } catch (e: unknown) { logger.error('MessageStore:', e); }
 
@@ -315,7 +350,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     // — Firebase sync inside initialize() gracefully fails if not authed
     try {
       const { useFamilyStore } = await import('./stores/familyStore');
-      await useFamilyStore.getState().initialize();
+      await withTimeout(useFamilyStore.getState().initialize(), 10_000, undefined);
       logger.info('✅ FamilyStore');
     } catch (e: unknown) { logger.error('FamilyStore:', e); }
 
@@ -431,7 +466,22 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
           await startNearbySOSListener(myDeviceId);
           logger.info('✅ SOS Alert Listeners (family + nearby)');
         } else {
-          logger.warn('⚠️ SOS listeners skipped: no deviceId yet');
+          logger.warn('⚠️ SOS listeners: no deviceId yet — retrying in 5s');
+          // LIFE-SAFETY: Retry SOS listeners after short delay — critical for first-launch users
+          setTimeout(async () => {
+            try {
+              const retryDeviceId = await getDeviceId();
+              if (retryDeviceId) {
+                const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
+                const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
+                await startSOSAlertListener(retryDeviceId);
+                await startNearbySOSListener(retryDeviceId);
+                logger.info('✅ SOS Alert Listeners started (retry)');
+              } else {
+                logger.error('❌ SOS listeners FAILED after retry — user will NOT receive SOS alerts');
+              }
+            } catch (retryErr) { logger.error('SOS Listeners retry:', retryErr); }
+          }, 5000);
         }
       } catch (e: unknown) { logger.error('SOS Listeners:', e); }
 
@@ -608,6 +658,12 @@ export async function shutdownApp() {
     await voiceCommandService.stopListening();
   } catch { /* already stopped */ }
 
+  // Cleanup BackgroundEEWService (AppState listener + background tasks)
+  try {
+    const { backgroundEEWService } = await import('./services/BackgroundEEWService');
+    await backgroundEEWService.cleanup();
+  } catch { /* already stopped */ }
+
   // Cleanup SOS listeners
   try {
     const { stopSOSAlertListener } = await import('./services/sos/SOSAlertListener');
@@ -617,5 +673,6 @@ export async function shutdownApp() {
   } catch { /* already stopped */ }
 
   isInitialized = false;
+  isInitializing = false;
   useAppStore.getState().setReady(false);
 }

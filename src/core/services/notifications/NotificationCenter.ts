@@ -14,7 +14,7 @@
  *   earthquake, eew, sos, sos_received, rescue, family, message, news, system, drill
  */
 
-import { Platform } from 'react-native';
+import { Platform, Alert, DeviceEventEmitter } from 'react-native';
 import { createLogger } from '../../utils/logger';
 import {
     evaluateNotification,
@@ -76,6 +76,7 @@ export interface MessageNotifyData {
     conversationId?: string;
     isSOS?: boolean;
     isCritical?: boolean;
+    isGroup?: boolean;
     showPreview?: boolean;
 }
 
@@ -157,6 +158,7 @@ class NotificationCenter {
     private isInitialized = false;
     private settingsCache: any = null;
     private responseListenerCleanup: (() => void) | null = null;
+    private foregroundListenerCleanup: (() => void) | null = null;
     private settingsCacheTime = 0;
     private readonly SETTINGS_CACHE_TTL = 5000; // 5s cache
 
@@ -177,13 +179,24 @@ class NotificationCenter {
             // Reset AI state on app start (prevents stale dedup from previous session)
             resetAIState();
 
-            // CRITICAL: Dismiss all previously delivered notifications on app open
-            // This prevents the flood when opening the app
+            // Clear old non-critical notifications on app open.
+            // LIFE-SAFETY: Do NOT dismiss SOS/EEW notifications — they must remain visible
+            // until the user explicitly handles them. Only clear badge count.
             try {
                 const Notifications = await getNotificationsAsync();
                 if (Notifications) {
-                    if (typeof Notifications.dismissAllNotificationsAsync === 'function') {
-                        await Notifications.dismissAllNotificationsAsync();
+                    // Get all presented notifications and only dismiss non-SOS ones
+                    if (typeof Notifications.getPresentedNotificationsAsync === 'function'
+                        && typeof Notifications.dismissNotificationAsync === 'function') {
+                        const presented = await Notifications.getPresentedNotificationsAsync();
+                        for (const notif of presented) {
+                            const nType = (notif?.request?.content?.data?.type || '').toLowerCase();
+                            const isSosOrEew = nType.includes('sos') || nType === 'eew'
+                                || nType === 'earthquake' || nType === 'family_sos';
+                            if (!isSosOrEew) {
+                                await Notifications.dismissNotificationAsync(notif.request.identifier);
+                            }
+                        }
                     }
                     if (typeof Notifications.setBadgeCountAsync === 'function') {
                         await Notifications.setBadgeCountAsync(0);
@@ -226,6 +239,163 @@ class NotificationCenter {
                 }
             } catch (e) {
                 logger.debug('Failed to set notification handler:', e);
+            }
+
+            // CRITICAL: Foreground SOS alert — show prominent in-app alert when SOS arrives while app is open
+            try {
+                const NotifsForeground = await getNotificationsAsync();
+                if (NotifsForeground && typeof NotifsForeground.addNotificationReceivedListener === 'function') {
+                    const fgSub = NotifsForeground.addNotificationReceivedListener((notification: any) => {
+                        try {
+                            const fgData = notification?.request?.content?.data;
+                            const fgType = (fgData?.type || '').toLowerCase();
+                            const isSOS = fgType === 'sos' || fgType === 'sos_received' || fgType === 'sos_alert'
+                                || fgType === 'sos_family' || fgType === 'family_sos'
+                                || fgType === 'sos_proximity' || fgType === 'nearby_sos';
+
+                            if (isSOS) {
+                                const senderName = fgData?.senderName || fgData?.from || 'Aile Uyesi';
+                                const message = fgData?.message || 'Acil yardim gerekiyor!';
+                                const lat = fgData?.location?.latitude ?? fgData?.latitude;
+                                const lng = fgData?.location?.longitude ?? fgData?.longitude;
+
+                                // ELITE V4: Emit full-screen SOS alert via DeviceEventEmitter
+                                // Works fully offline — no network dependency
+                                DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
+                                    signalId: fgData?.signalId,
+                                    senderUid: fgData?.senderUid || fgData?.userId,
+                                    senderDeviceId: fgData?.senderDeviceId,
+                                    senderName,
+                                    message,
+                                    latitude: lat ? Number(lat) : undefined,
+                                    longitude: lng ? Number(lng) : undefined,
+                                    trapped: fgData?.trapped === 'true' || fgData?.trapped === true,
+                                    battery: fgData?.battery ? Number(fgData.battery) : undefined,
+                                    healthInfo: fgData?.healthInfo && typeof fgData.healthInfo === 'object'
+                                        ? fgData.healthInfo
+                                        : undefined,
+                                });
+                            }
+
+                            // === FOREGROUND EEW ALERT ===
+                            // When an EEW push arrives in foreground, trigger full-screen countdown,
+                            // log to history, and activate emergency mode if threshold met.
+                            // This replaces the duplicate listener that was in FCMTokenService.
+                            const isEEW = fgType === 'eew';
+                            if (isEEW) {
+                                // Trigger EEW countdown engine for in-app full-screen alert
+                                try {
+                                    const eewMag = Number(fgData?.magnitude);
+                                    const eewWarnSec = Number(fgData?.warningSeconds) || 0;
+                                    if (Number.isFinite(eewMag) && eewMag >= 4.0) {
+                                        import('../EEWCountdownEngine').then(({ eewCountdownEngine }) => {
+                                            eewCountdownEngine.startCountdown({
+                                                warningTime: eewWarnSec,
+                                                magnitude: eewMag,
+                                                estimatedIntensity: eewMag >= 7.0 ? 9 : eewMag >= 6.0 ? 7 : eewMag >= 5.0 ? 6 : 5,
+                                                location: String(fgData?.location || ''),
+                                                epicentralDistance: 0,
+                                                pWaveArrivalTime: 0,
+                                                sWaveArrivalTime: eewWarnSec,
+                                                origin: {
+                                                    latitude: Number(fgData?.latitude) || 0,
+                                                    longitude: Number(fgData?.longitude) || 0,
+                                                    depth: Number(fgData?.depth) || 10,
+                                                },
+                                            });
+                                        }).catch(() => {});
+                                    }
+                                } catch { /* non-critical */ }
+                                try {
+                                    const magnitude = Number(fgData?.magnitude);
+                                    const location = String(fgData?.location || 'Unknown').trim() || 'Unknown';
+                                    if (Number.isFinite(magnitude) && magnitude > 0) {
+                                        // Log to EEW history
+                                        import('../../stores/eewHistoryStore').then(({ useEEWHistoryStore }) => {
+                                            useEEWHistoryStore.getState().addEvent({
+                                                timestamp: Number(fgData?.timestamp) || Date.now(),
+                                                magnitude,
+                                                location,
+                                                depth: Number(fgData?.depth) || 0,
+                                                latitude: Number(fgData?.latitude) || 0,
+                                                longitude: Number(fgData?.longitude) || 0,
+                                                warningTime: 0,
+                                                estimatedIntensity: magnitude >= 7.0 ? 9 : magnitude >= 6.0 ? 7 : magnitude >= 5.0 ? 6 : magnitude >= 4.0 ? 5 : 4,
+                                                epicentralDistance: 0,
+                                                source: (fgData?.source as any) || 'AFAD',
+                                                wasNotified: true,
+                                                confidence: 1.0,
+                                                certainty: magnitude >= 6.0 ? 'high' : magnitude >= 5.0 ? 'medium' : 'low',
+                                            });
+                                        }).catch(() => {});
+
+                                        // Trigger emergency mode if threshold met
+                                        import('../EmergencyModeService').then(({ emergencyModeService }) => {
+                                            const earthquake = {
+                                                id: String(fgData?.eventId || fgData?.id || `eew_${Date.now()}`),
+                                                magnitude,
+                                                location,
+                                                latitude: Number(fgData?.latitude) || 0,
+                                                longitude: Number(fgData?.longitude) || 0,
+                                                depth: Number(fgData?.depth) || 0,
+                                                time: Number(fgData?.timestamp) || Date.now(),
+                                                source: (fgData?.source || 'AFAD') as any,
+                                            };
+                                            if (emergencyModeService.shouldTriggerEmergencyMode(earthquake)) {
+                                                emergencyModeService.activateEmergencyMode(earthquake);
+                                            }
+                                        }).catch(() => {});
+                                    }
+                                } catch {
+                                    // Non-critical — push is still displayed by OS
+                                }
+                            }
+
+                            // === IN-APP MESSAGE NOTIFICATION BANNER ===
+                            const isMessage = fgType === 'message' || fgType === 'new_message';
+                            if (isMessage) {
+                                const msgSenderName = fgData?.senderName || fgData?.from || 'Yeni Mesaj';
+                                const msgPreview = fgData?.message || 'Yeni mesaj geldi';
+                                const msgConversationId = fgData?.conversationId;
+                                const msgSenderId = fgData?.senderUid || fgData?.userId || fgData?.senderId;
+
+                                // Light haptic for message
+                                haptics.impactLight();
+
+                                Alert.alert(
+                                    `\u{1F4AC} ${msgSenderName}`,
+                                    msgPreview.length > 100 ? msgPreview.substring(0, 97) + '...' : msgPreview,
+                                    [
+                                        {
+                                            text: 'Mesaja Git',
+                                            onPress: () => {
+                                                import('../../navigation/navigationRef').then(({ navigateTo }) => {
+                                                    if (msgConversationId?.startsWith('grp_') || fgData?.isGroup) {
+                                                        navigateTo('FamilyGroupChat', { groupId: msgConversationId });
+                                                    } else if (msgSenderId) {
+                                                        navigateTo('Conversation', {
+                                                            userId: msgSenderId,
+                                                            userName: msgSenderName,
+                                                        });
+                                                    } else {
+                                                        navigateTo('MainTabs', { screen: 'Messages' });
+                                                    }
+                                                }).catch(() => {});
+                                            },
+                                        },
+                                        { text: 'Tamam', style: 'cancel' },
+                                    ],
+                                    { cancelable: true },
+                                );
+                            }
+                        } catch (fgErr) {
+                            logger.debug('Foreground SOS alert handler error:', fgErr);
+                        }
+                    });
+                    this.foregroundListenerCleanup = () => fgSub.remove();
+                }
+            } catch (e) {
+                logger.debug('Failed to register foreground SOS listener:', e);
             }
 
             // CRITICAL: Register tap listener — the SINGLE place for notification taps
@@ -303,13 +473,16 @@ class NotificationCenter {
             }
 
             // 2. CHECK USER SETTINGS
+            // LIFE-SAFETY OVERRIDE: SOS and EEW notifications ALWAYS deliver regardless of user settings
+            const LIFE_SAFETY_CATEGORIES = ['earthquake', 'eew', 'sos', 'sos_received', 'family_sos'];
+            const isLifeSafety = LIFE_SAFETY_CATEGORIES.includes(category as string);
             const settings = await this.getSettings();
-            if (!settings.notificationsEnabled) {
+            if (!settings.notificationsEnabled && !isLifeSafety) {
                 return { delivered: false, reason: 'Notifications disabled by user', priority: decision.priority };
             }
 
-            // Critical notifications bypass silent/critical-only mode
-            if (decision.priority !== 'critical') {
+            // Critical notifications and life-safety categories bypass silent/critical-only mode
+            if (decision.priority !== 'critical' && !isLifeSafety) {
                 if (settings.notificationMode === 'silent') {
                     return { delivered: false, reason: 'Silent mode active', priority: decision.priority };
                 }
@@ -437,15 +610,19 @@ class NotificationCenter {
 
     private formatSOS(data: Record<string, any>, category: NotificationCategory) {
         const from = data.senderName || data.from || data.userName || 'Bilinmeyen';
-        const message = data.message || 'Acil yardım çağrısı alındı. Konumu görmek için dokunun.';
+        const message = data.message || 'Acil yardım çağrısı alındı.';
+        const lat = data.location?.latitude ?? data.latitude;
+        const lng = data.location?.longitude ?? data.longitude;
+        const locationText = (lat && lng) ? '\n\u{1F4CD} Konum bilgisi mevcut \u{2014} bildirimi açarak konuma gidin.' : '';
 
         const isReceived = category === 'sos_received';
-        const title = isReceived ? `🆘 ACİL DURUM: ${from}` : `🆘 SOS GÖNDERİLDİ`;
+        const title = isReceived ? `\u{1F198} AC\u{0130}L DURUM: ${from}` : `\u{1F198} SOS G\u{00D6}NDER\u{0130}LD\u{0130}`;
+        const body = `${message}${locationText}\nKonumu görmek ve yardıma gitmek için dokunun.`;
         const ttsText = `Acil durum çağrısı! ${from} yardım istiyor.`;
 
         return {
             title,
-            body: message,
+            body,
             ttsText,
             vibrationPattern: [0, 1000, 500, 1000],
         };
@@ -857,9 +1034,7 @@ class NotificationCenter {
 
             switch (type) {
                 // ═══ EARTHQUAKE ═══
-                case 'earthquake':
-                case 'turkey_earthquake_detection':
-                case 'global_early_warning': {
+                case 'earthquake': {
                     if (data.magnitude && data.location) {
                         navigateTo('EarthquakeDetail', {
                             earthquake: {
@@ -882,9 +1057,30 @@ class NotificationCenter {
                 }
 
                 case 'eew':
-                    // EEW shows full-screen alert on Home
-                    navigateTo('MainTabs', { screen: 'Home' });
+                case 'turkey_earthquake_detection':
+                case 'global_early_warning': {
+                    // If the push payload has earthquake details, navigate to detail
+                    const eewMag = toFiniteNumber(data.magnitude);
+                    const eewLoc = toNonEmptyString(data.location);
+                    if (eewMag !== null && eewLoc) {
+                        navigateTo('EarthquakeDetail', {
+                            earthquake: {
+                                id: toNonEmptyString(data.eventId) || toNonEmptyString(data.earthquakeId) || `eew_${data.timestamp || Date.now()}`,
+                                magnitude: eewMag,
+                                location: eewLoc,
+                                latitude: toFiniteNumber(data.latitude) ?? 0,
+                                longitude: toFiniteNumber(data.longitude) ?? 0,
+                                depth: toFiniteNumber(data.depth) ?? 0,
+                                time: toFiniteNumber(data.timestamp) ?? Date.now(),
+                                source: toNonEmptyString(data.source) || 'AFAD',
+                            },
+                        });
+                    } else {
+                        // Fallback: EEW shows full-screen alert on Home
+                        navigateTo('MainTabs', { screen: 'Home' });
+                    }
                     break;
+                }
 
                 // ═══ SOS — All variants ═══
                 case 'sos':
@@ -963,7 +1159,8 @@ class NotificationCenter {
                         (conversationId?.startsWith('grp_') ?? false)
                         || toNonEmptyString(data.conversationType) === 'group'
                         || toNonEmptyString(data.chatType) === 'group'
-                        || data.isGroup === true;
+                        || data.isGroup === true
+                        || data.isGroup === 'true';
 
                     if (conversationId && isGroupConversation) {
                         navigateTo('FamilyGroupChat', { groupId: conversationId });

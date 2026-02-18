@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.3.2",
+  version: "1.3.6",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -66,7 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "3",
+    buildNumber: "7",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
@@ -85,13 +85,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSPhotoLibraryUsageDescription: "AfetNet, acil durum fotoğraflarını görüntülemek için fotoğraf kütüphanenize erişir.",
       NSPhotoLibraryAddUsageDescription: "AfetNet, acil durum fotoğraflarını kaydetmek için fotoğraf kütüphanenize erişir.",
       NSFaceIDUsageDescription: "AfetNet, uygulama güvenliği için Face ID kullanır.",
-      NSLocationAlwaysUsageDescription: "AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.",
       UIBackgroundModes: [
         "fetch",
         "remote-notification",
         "location",
         "bluetooth-central",
         "bluetooth-peripheral",
+        "processing",
       ],
       ITSAppUsesNonExemptEncryption: false,
       // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
@@ -115,6 +115,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "https",
         "maps",
         "comgooglemaps",
+        "whatsapp",
       ],
     },
     // Entitlements - Development için minimal
@@ -129,7 +130,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: "com.gokhancamci.afetnetapp",
-    versionCode: 8,
+    versionCode: 10,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png",

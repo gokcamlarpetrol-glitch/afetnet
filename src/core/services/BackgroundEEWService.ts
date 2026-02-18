@@ -40,6 +40,7 @@ class BackgroundEEWService {
     private isInitialized = false;
     private isBackgroundFetchRegistered = false;
     private appState: AppStateStatus = 'active';
+    private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
 
     // ==================== INITIALIZATION ====================
 
@@ -120,13 +121,14 @@ class BackgroundEEWService {
                     logger.error('Location task error:', error);
                     return;
                 }
-                if (data) {
-                    const { locations } = data as { locations: { coords: { latitude: number; longitude: number } }[] };
-                    if (locations && locations.length > 0) {
-                        const location = locations[0];
-                        logger.debug(`📍 Background location: ${location.coords.latitude}, ${location.coords.longitude}`);
-                        await this.performBackgroundEEWCheck(location.coords);
-                    }
+                if (!data || !Array.isArray((data as any).locations) || !(data as any).locations[0]?.coords) {
+                    return; // Invalid data, skip
+                }
+                const { locations } = data as { locations: { coords: { latitude: number; longitude: number } }[] };
+                if (locations.length > 0) {
+                    const location = locations[0];
+                    logger.debug(`📍 Background location: ${location.coords.latitude}, ${location.coords.longitude}`);
+                    await this.performBackgroundEEWCheck(location.coords);
                 }
             });
         } else {
@@ -357,32 +359,85 @@ class BackgroundEEWService {
     }
 
     /**
+     * Mark event as notified
+     * Stores timestamp so we can clean up stale entries on next check.
+     */
+    private async markAsNotified(eventId: string): Promise<void> {
+        try {
+            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            // Store with timestamp for age-based cleanup (setTimeout doesn't survive background kills)
+            await AsyncStorage.setItem(`eew_notified_${eventId}`, String(Date.now()));
+
+            // Cleanup stale entries (older than 24h) on every mark to prevent unbounded growth
+            await this.cleanupStaleNotifications();
+        } catch {
+            // Ignore
+        }
+    }
+
+    /**
      * Check if event already notified
+     * Returns true if event was notified within the last 24 hours.
      */
     private async checkIfNotified(eventId: string): Promise<boolean> {
         try {
             const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-            const notified = await AsyncStorage.getItem(`eew_notified_${eventId}`);
-            return notified === 'true';
+            const value = await AsyncStorage.getItem(`eew_notified_${eventId}`);
+            if (!value) return false;
+
+            // Check age — if stored as timestamp, verify it's within 24h
+            const storedTime = Number(value);
+            if (Number.isFinite(storedTime)) {
+                const ageMs = Date.now() - storedTime;
+                if (ageMs > 24 * 60 * 60 * 1000) {
+                    // Stale entry — remove and return false
+                    await AsyncStorage.removeItem(`eew_notified_${eventId}`);
+                    return false;
+                }
+            }
+            // Legacy 'true' values or recent timestamps both mean "notified"
+            return true;
         } catch {
             return false;
         }
     }
 
     /**
-     * Mark event as notified
+     * Remove notified event keys older than 24 hours.
+     * Runs opportunistically on each new notification to prevent unbounded growth.
      */
-    private async markAsNotified(eventId: string): Promise<void> {
+    private async cleanupStaleNotifications(): Promise<void> {
         try {
             const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-            await AsyncStorage.setItem(`eew_notified_${eventId}`, 'true');
+            const allKeys = await AsyncStorage.getAllKeys();
+            const eewKeys = allKeys.filter(k => k.startsWith('eew_notified_'));
 
-            // Cleanup old entries after 24 hours
-            setTimeout(async () => {
-                await AsyncStorage.removeItem(`eew_notified_${eventId}`);
-            }, 24 * 60 * 60 * 1000);
+            // Only cleanup if there are many entries (avoid unnecessary work)
+            if (eewKeys.length < 20) return;
+
+            const now = Date.now();
+            const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+            const keysToRemove: string[] = [];
+
+            // Check each key's age
+            const entries = await AsyncStorage.multiGet(eewKeys);
+            for (const [key, value] of entries) {
+                if (!key || !value) continue;
+                const storedTime = Number(value);
+                if (Number.isFinite(storedTime) && now - storedTime > TWENTY_FOUR_HOURS) {
+                    keysToRemove.push(key);
+                } else if (value === 'true') {
+                    // Legacy format without timestamp — remove (can't determine age)
+                    keysToRemove.push(key);
+                }
+            }
+
+            if (keysToRemove.length > 0) {
+                await AsyncStorage.multiRemove(keysToRemove);
+                logger.debug(`Cleaned up ${keysToRemove.length} stale notification entries`);
+            }
         } catch {
-            // Ignore
+            // Non-critical
         }
     }
 
@@ -390,7 +445,7 @@ class BackgroundEEWService {
      * Setup app state listener
      */
     private setupAppStateListener(): void {
-        AppState.addEventListener('change', (nextState) => {
+        this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
             if (this.appState.match(/inactive|background/) && nextState === 'active') {
                 // App came to foreground - perform immediate check
                 this.performBackgroundEEWCheck();
@@ -445,6 +500,11 @@ class BackgroundEEWService {
      */
     async cleanup(): Promise<void> {
         try {
+            if (this.appStateSubscription) {
+                this.appStateSubscription.remove();
+                this.appStateSubscription = null;
+            }
+
             if (BackgroundFetch) {
                 await BackgroundFetch.unregisterTaskAsync(TASK_EEW_FETCH);
             }

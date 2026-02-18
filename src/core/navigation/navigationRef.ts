@@ -1,9 +1,9 @@
 /**
  * NAVIGATION REF - Global navigation reference
- * 
+ *
  * Allows programmatic navigation from outside React components,
  * such as notification tap handlers in NotificationService.
- * 
+ *
  * Usage:
  * 1. Assign ref in CoreApp: <NavigationContainer ref={navigationRef}>
  * 2. Call navigate() from anywhere: navigationRef.current?.navigate('Screen', params)
@@ -17,27 +17,15 @@ let lastRouteName = 'UnknownRoute';
 const RETRY_INTERVAL_MS = 500;
 const MAX_RETRIES = 60; // 60 × 500ms = 30 seconds total wait (cold-start safe)
 
-function routeExistsInState(state: any, screenName: string): boolean {
-    if (!state || typeof state !== 'object') return false;
-
-    const routeNames = Array.isArray(state.routeNames) ? state.routeNames : [];
-    if (routeNames.includes(screenName)) return true;
-
-    const routes = Array.isArray(state.routes) ? state.routes : [];
-    for (const route of routes) {
-        if (route?.name === screenName) return true;
-        if (route?.state && routeExistsInState(route.state, screenName)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 /**
  * Safe navigate with retry — critical for cold start notification taps.
  * When user taps notification before navigation is mounted, this retries
  * until navigation is ready (up to 30 seconds).
+ *
+ * LIFE-SAFETY: Uses try/catch dispatch instead of routeExistsInState check.
+ * The previous approach failed on cold-start because nested navigator screens
+ * (like SOSHelp in MainNavigator) weren't in the state tree until after
+ * auth completed and MainNavigator mounted.
  */
 export function navigateTo(screenName: string, params?: Record<string, unknown>): void {
     const tryNavigate = (): boolean => {
@@ -45,18 +33,18 @@ export function navigateTo(screenName: string, params?: Record<string, unknown>)
             return false;
         }
 
-        const rootState = navigationRef.getRootState();
-        if (!routeExistsInState(rootState, screenName)) {
+        try {
+            navigationRef.dispatch(
+                CommonActions.navigate({
+                    name: screenName,
+                    params,
+                })
+            );
+            return true;
+        } catch {
+            // Screen not yet registered in any navigator — retry
             return false;
         }
-
-        navigationRef.dispatch(
-            CommonActions.navigate({
-                name: screenName,
-                params,
-            })
-        );
-        return true;
     };
 
     if (tryNavigate()) {

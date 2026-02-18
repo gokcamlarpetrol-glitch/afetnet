@@ -73,7 +73,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   bubble: {
-    maxWidth: '75%',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
@@ -291,6 +290,7 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
+    gap: 0,
   },
 
   // ELITE: Media message styles
@@ -369,6 +369,65 @@ const styles = StyleSheet.create({
     color: '#3b82f6',
     fontWeight: '600',
     marginTop: 4,
+  },
+
+  // Sender name above incoming bubbles
+  senderNameLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#3b82f6',
+    marginBottom: 2,
+    marginLeft: 4,
+  },
+
+  // Offline queue banner
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#fef3c7',
+    borderTopWidth: 1,
+    borderTopColor: '#fde68a',
+  },
+  offlineBannerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#b45309',
+  },
+
+  // Image lightbox modal
+  lightboxContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '80%',
+  },
+  lightboxClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+
+  // Image upload progress overlay
+  mediaUploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
   },
 });
 

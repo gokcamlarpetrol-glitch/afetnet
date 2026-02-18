@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -26,6 +26,10 @@ interface MemberCardProps {
   onLocate?: (member: FamilyMember) => void;
 }
 
+// Staleness thresholds
+const STALE_WARN_MS = 30 * 60 * 1000;  // 30 minutes → orange
+const STALE_OLD_MS = 2 * 60 * 60 * 1000; // 2 hours → red "Konum eski"
+
 export const MemberCard = React.memo(function MemberCard({
   member, onPress, index, onEdit, onDelete, onMessage, onLocate,
 }: MemberCardProps) {
@@ -35,7 +39,7 @@ export const MemberCard = React.memo(function MemberCard({
   // PREMIUM: Pulse animation for critical/need-help status
   const pulseOpacity = useSharedValue(1);
   React.useEffect(() => {
-    if (member.status === 'critical' || member.status === 'need-help') {
+    if (member.status === 'critical' || member.status === 'need-help' || member.status === 'danger') {
       pulseOpacity.value = withRepeat(
         withTiming(0.4, { duration: 900 }),
         -1,
@@ -87,6 +91,12 @@ export const MemberCard = React.memo(function MemberCard({
   const lastSeenText = formatLastSeen(member.lastSeen);
   const normalizedLastSeen = normalizeTimestampMs(member.lastSeen);
 
+  // Staleness calculation
+  const locationTimestamp = member.location?.timestamp ?? member.lastKnownLocation?.timestamp ?? normalizedLastSeen;
+  const locationAgeMs = locationTimestamp ? Date.now() - locationTimestamp : null;
+  const isLocationStale = locationAgeMs !== null && locationAgeMs > STALE_WARN_MS;
+  const isLocationVeryStale = locationAgeMs !== null && locationAgeMs > STALE_OLD_MS;
+
   // Avatar
   const initial = member.name.charAt(0).toUpperCase();
   const avatarGradient = getAvatarGradient(member.name);
@@ -94,6 +104,18 @@ export const MemberCard = React.memo(function MemberCard({
   const relationLabel = member.relationship ? getRelationshipLabel(member.relationship) : null;
 
   const isOnline = normalizedLastSeen ? normalizedLastSeen > Date.now() - 600000 : false; // active within 10min
+
+  // Battery level
+  const battery = member.batteryLevel ?? member.lastKnownLocation?.batteryLevelAtCapture;
+  const batteryColor = battery !== undefined
+    ? battery > 40 ? '#22c55e' : battery > 20 ? '#f59e0b' : '#ef4444'
+    : '#94a3b8';
+  const batteryIcon = battery !== undefined
+    ? battery > 80 ? 'battery-full' as const
+      : battery > 50 ? 'battery-half' as const
+        : battery > 20 ? 'battery-dead' as const
+          : 'battery-dead' as const
+    : 'battery-dead' as const;
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 60).springify()} style={animatedStyle}>
@@ -115,12 +137,19 @@ export const MemberCard = React.memo(function MemberCard({
             {/* Avatar with status indicator */}
             <View style={styles.avatarContainer}>
               <Animated.View style={[styles.avatarRing, { borderColor: color }, pulseStyle]}>
-                <LinearGradient
-                  colors={avatarGradient}
-                  style={styles.avatar}
-                >
-                  <Text style={styles.avatarInitial}>{initial}</Text>
-                </LinearGradient>
+                {member.avatarUrl ? (
+                  <Image
+                    source={{ uri: member.avatarUrl }}
+                    style={styles.avatar}
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={avatarGradient}
+                    style={styles.avatar}
+                  >
+                    <Text style={styles.avatarInitial}>{initial}</Text>
+                  </LinearGradient>
+                )}
               </Animated.View>
               {/* Online/status dot */}
               <View style={[styles.statusDot, { backgroundColor: isOnline ? '#22c55e' : '#94a3b8' }]} />
@@ -149,11 +178,20 @@ export const MemberCard = React.memo(function MemberCard({
                   <Ionicons name={icon} size={11} color={color} />
                   <Text style={[styles.statusText, { color }]}>{statusText}</Text>
                 </View>
-                {/* Time */}
+                {/* Time with staleness color */}
                 <View style={styles.timeBadge}>
-                  <Ionicons name="time-outline" size={10} color="#94a3b8" />
-                  <Text style={styles.timeText}>{lastSeenText}</Text>
+                  <Ionicons name="time-outline" size={10} color={isLocationVeryStale ? '#ef4444' : isLocationStale ? '#f59e0b' : '#94a3b8'} />
+                  <Text style={[styles.timeText, isLocationVeryStale ? { color: '#ef4444', fontWeight: '700' } : isLocationStale ? { color: '#f59e0b' } : null]}>
+                    {isLocationVeryStale ? `Konum eski (${lastSeenText})` : lastSeenText}
+                  </Text>
                 </View>
+                {/* Battery level */}
+                {battery !== undefined && (
+                  <View style={styles.batteryBadge}>
+                    <Ionicons name={batteryIcon} size={11} color={batteryColor} />
+                    <Text style={[styles.batteryText, { color: batteryColor }]}>{battery}%</Text>
+                  </View>
+                )}
               </View>
 
               {/* Location indicator */}
@@ -259,6 +297,18 @@ function getStatusRenderInfo(status: FamilyMember['status']) {
       icon: 'alert-circle' as const,
       bgGradient: ['#ef4444', '#dc2626'] as [string, string],
     };
+    case 'danger': return {
+      color: '#dc2626',
+      text: 'TEHLİKEDE',
+      icon: 'flame' as const,
+      bgGradient: ['#dc2626', '#b91c1c'] as [string, string],
+    };
+    case 'offline': return {
+      color: '#94a3b8',
+      text: 'Çevrimdışı',
+      icon: 'wifi-outline' as const,
+      bgGradient: ['#94a3b8', '#64748b'] as [string, string],
+    };
     default: return {
       color: '#94a3b8',
       text: 'Bilinmiyor',
@@ -310,17 +360,17 @@ function getRelationshipLabel(relationship: string): string {
 
 const styles = StyleSheet.create({
   cardOuter: {
-    marginBottom: 10,
+    marginBottom: 12,
     borderRadius: 18,
     overflow: 'hidden',
     flexDirection: 'row',
     backgroundColor: '#ffffff',
     // Premium shadow
     shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
   accentBar: {
     width: 4,
@@ -346,6 +396,7 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   avatar: {
     width: 44,
@@ -418,7 +469,8 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -441,6 +493,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#94a3b8',
     fontWeight: '500',
+  },
+  batteryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  batteryText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
   locationChip: {
     flexDirection: 'row',

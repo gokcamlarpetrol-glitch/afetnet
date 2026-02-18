@@ -17,13 +17,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ImageBackground,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useMessageStore, Conversation } from '../../stores/messageStore';
-import { colors, typography, spacing, borderRadius } from '../../theme';
+import { colors } from '../../theme';
 import { SwipeableConversationCard } from '../../components/messages/SwipeableConversationCard';
 import * as haptics from '../../utils/haptics';
 import MessageTemplates from './MessageTemplates';
@@ -55,14 +55,77 @@ interface MessagesScreenProps {
   };
 }
 
+// ─── Skeleton card for loading state ─────────────────────────────────────────
+function SkeletonCard() {
+  return (
+    <View style={skeletonStyles.card}>
+      <View style={skeletonStyles.avatar} />
+      <View style={skeletonStyles.info}>
+        <View style={skeletonStyles.name} />
+        <View style={skeletonStyles.preview} />
+      </View>
+    </View>
+  );
+}
+
+const skeletonStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.5)',
+    borderRadius: 24,
+    padding: 16,
+    gap: 12,
+    marginBottom: 12,
+  },
+  avatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#e2e8f0',
+  },
+  info: {
+    flex: 1,
+    gap: 8,
+  },
+  name: {
+    height: 16,
+    width: '55%',
+    borderRadius: 8,
+    backgroundColor: '#e2e8f0',
+  },
+  preview: {
+    height: 13,
+    width: '80%',
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+  },
+});
+
 export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // ── Store selectors — only subscribe to what is needed ───────────────────
   const conversations = useMessageStore((state) => state.conversations);
-  const messages = useMessageStore((state) => state.messages);
+  const typingUsers = useMessageStore((state) => state.typingUsers);
+  const isInitializing = useMessageStore((state) => state.isInitializing);
   const getConversationMessages = useMessageStore((state) => state.getConversationMessages);
+
+  // My identity for outgoing message detection
+  const [myUserId, setMyUserId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    try {
+      const { identityService } = require('../../services/IdentityService');
+      const uid = identityService.getUid?.();
+      if (uid) setMyUserId(uid);
+    } catch {
+      // best effort
+    }
+  }, []);
 
   // Group conversations from GroupChatService
   const [groupConversations, setGroupConversations] = useState<GroupConversation[]>([]);
@@ -78,17 +141,14 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const routableConversations = useMemo(() => {
     const dmConversations = conversations.filter((conversation) => isRoutableConversationId(conversation.userId));
 
-    // Convert group conversations to Conversation shape for unified rendering
-    // Group conversations use 'group:{id}' as userId to distinguish from DMs
     const groupAsConversations: Conversation[] = groupConversations.map((group) => ({
       userId: `group:${group.id}`,
       userName: group.name,
-      lastMessage: group.lastMessage?.content || '',
+      lastMessage: (group.lastMessage?.content || '').substring(0, 80),
       lastMessageTime: group.lastMessage?.timestamp || group.updatedAt || group.createdAt,
-      unreadCount: 0,
+      unreadCount: group.unreadCount ?? 0,
     }));
 
-    // Merge and sort by lastMessageTime (most recent first)
     const merged = [...dmConversations, ...groupAsConversations];
     merged.sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
@@ -99,7 +159,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     return merged;
   }, [conversations, groupConversations]);
 
-  // ELITE: Debounce search query to prevent excessive filtering and re-renders
+  // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery);
@@ -107,18 +167,17 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // ELITE: Generate search suggestions as user types
+  // Generate search suggestions — guarded by early return when no query
   useEffect(() => {
-    try {
-      const normalizedQuery = safeLowerCase(searchQuery).trim();
-      if (normalizedQuery.length === 0) {
-        setSearchSuggestions([]);
-        return;
-      }
+    const normalizedQuery = safeLowerCase(searchQuery).trim();
+    if (normalizedQuery.length === 0) {
+      setSearchSuggestions([]);
+      return;
+    }
 
+    try {
       const suggestions = new Set<string>();
 
-      // Extract unique user names that match
       routableConversations.forEach((conv) => {
         const name = safeLowerCase(conv.userName);
         if (safeIncludes(name, normalizedQuery) && name !== normalizedQuery) {
@@ -126,38 +185,26 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
         }
       });
 
-      // Extract unique message snippets that match
-      messages.forEach((msg) => {
-        const content = safeLowerCase(msg.content);
-        if (safeIncludes(content, normalizedQuery) && content.length > normalizedQuery.length) {
-          const snippet = msg.content.substring(0, 50).trim();
-          if (snippet.length > normalizedQuery.length) {
-            suggestions.add(snippet);
-          }
-        }
-      });
-
-      // Limit to 5 suggestions
+      // Limit to 5 suggestions — no full message scan here (expensive)
       setSearchSuggestions(Array.from(suggestions).slice(0, 5));
     } catch (error) {
       logger.error('Error generating search suggestions:', error);
       setSearchSuggestions([]);
     }
-  }, [searchQuery, routableConversations, messages]);
+  }, [searchQuery, routableConversations]);
+
   const myDeviceId = useMeshStore((state) => state.myDeviceId);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [qrValue, setQrValue] = useState<string | null>(null);
 
-  // ELITE: Ensure BLE Mesh service is started for offline messaging
+  // Initialize BLE Mesh and message store
   useEffect(() => {
     let mounted = true;
 
     const initMesh = async () => {
       try {
-        // ELITE: Initialize message store (loads from AsyncStorage and Firebase)
         await useMessageStore.getState().initialize();
 
-        // ELITE: Ensure BLE Mesh service is started
         if (!bleMeshService.getIsRunning()) {
           try {
             await bleMeshService.start();
@@ -166,11 +213,9 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             }
           } catch (error) {
             logger.warn('BLE Mesh start failed (non-critical):', error);
-            // Continue - BLE Mesh is optional but recommended
           }
         }
 
-        // ELITE: Ensure device ID is available
         let deviceId = bleMeshService.getMyDeviceId() || useMeshStore.getState().myDeviceId;
         if (!deviceId && mounted) {
           try {
@@ -194,8 +239,19 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     };
   }, []);
 
-  // ELITE: Memoize filtered conversations for performance (using debounced query)
-  // Enhanced search: searches in user names, last messages, and all message content
+  // Pull-to-refresh handler
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await useMessageStore.getState().initialize();
+    } catch (error) {
+      logger.error('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Memoize filtered conversations
   const filteredConversations = useMemo(() => {
     try {
       const normalizedQuery = safeLowerCase(debouncedSearchQuery).trim();
@@ -208,19 +264,15 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           const name = safeLowerCase(conv.userName);
           const last = safeLowerCase(conv.lastMessage);
 
-          // Check user name and last message
           if (safeIncludes(name, normalizedQuery) || safeIncludes(last, normalizedQuery)) {
             return true;
           }
 
-          // Check all messages in this conversation
           const convMessages = getConversationMessages(conv.userId);
-          const foundInMessages = convMessages.some((msg) => {
+          return convMessages.some((msg) => {
             const content = safeLowerCase(msg.content);
             return safeIncludes(content, normalizedQuery);
           });
-
-          return foundInMessages;
         } catch (error) {
           logger.error('Error filtering conversation:', error);
           return false;
@@ -232,10 +284,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     }
   }, [routableConversations, debouncedSearchQuery, getConversationMessages]);
 
-  // ELITE: Memoized callbacks for performance
   const handleDeleteConversation = useCallback((userId: string) => {
     try {
-      // ELITE: Validate userId
       if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
         logger.warn('Invalid userId for delete:', userId);
         return;
@@ -277,23 +327,17 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
   const handleShowQr = useCallback(async () => {
     try {
-      // ELITE FIX: Prefer identityService QR payload (AFN-XXXXXXXX format with user info)
-      // over raw BLE mesh device ID. The identity QR is what recipients need to start
-      // conversations — it maps to the Firestore device path.
       const { identityService } = require('../../services/IdentityService');
       const identity = identityService.getIdentity();
       if (identity?.uid) {
         const qrPayload = identityService.getQRPayload?.();
-        // Use full QR payload for QR code encoding, but display publicUserCode
         setQrValue(qrPayload || identity.uid);
         setQrModalVisible(true);
         return;
       }
 
-      // Fallback: Try BLE mesh device ID
       let id = myDeviceId || useMeshStore.getState().myDeviceId || bleMeshService.getMyDeviceId();
 
-      // ELITE: If still no ID, try to get from lib/device
       if (!id || typeof id !== 'string' || id.trim().length === 0) {
         try {
           id = await getDeviceIdFromLib();
@@ -310,7 +354,6 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           'Cihaz ID hazır değil',
           'Bluetooth ve konum izinlerini açarak mesh ağını başlatın.',
         );
-        // ELITE: Try to start BLE Mesh service
         try {
           await bleMeshService.start();
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -338,14 +381,10 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     setQrModalVisible(false);
   }, []);
 
-  // ELITE: Ref to track focus timeouts for cleanup
   const focusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ELITE: Memoized callback for search input to prevent re-renders
   const handleSearchChange = useCallback((text: string) => {
-    // ELITE: Direct state update without causing re-render issues
     setSearchQuery(text);
-    // ELITE: Maintain focus after state update with cleanup
     if (focusTimeoutRef.current) {
       clearTimeout(focusTimeoutRef.current);
     }
@@ -359,7 +398,6 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
-    // ELITE: Maintain focus after clear with cleanup
     if (focusTimeoutRef.current) {
       clearTimeout(focusTimeoutRef.current);
     }
@@ -371,7 +409,6 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     }, 0);
   }, []);
 
-  // ELITE: Cleanup focus timeout on unmount
   useEffect(() => {
     return () => {
       if (focusTimeoutRef.current) {
@@ -381,15 +418,17 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     };
   }, []);
 
-  // ELITE: Memoized render function for performance
   const renderConversation = useCallback(({ item, index }: { item: Conversation; index: number }) => {
     try {
       const isGroup = item.userId.startsWith('group:');
+      const typingActive = Boolean(typingUsers[item.userId]);
       return (
         <SwipeableConversationCard
           item={item}
           index={index}
           isGroup={isGroup}
+          myUserId={myUserId}
+          typingActive={typingActive}
           onPress={() => {
             try {
               if (!item.userId || typeof item.userId !== 'string') {
@@ -397,7 +436,6 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
                 return;
               }
               if (isGroup) {
-                // Navigate to group chat screen with the group ID (strip 'group:' prefix)
                 const groupId = item.userId.replace(/^group:/, '');
                 navigation?.navigate('FamilyGroupChat', { groupId });
               } else {
@@ -436,23 +474,21 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       logger.error('Error rendering conversation:', error);
       return null;
     }
-  }, [navigation, handleDeleteConversation]);
+  }, [navigation, handleDeleteConversation, typingUsers, myUserId]);
 
-  // ELITE: Memoize ListHeaderComponent (without search bar to prevent re-mounting)
-  const ListHeaderComponent = useMemo(() => {
-    return () => (
-      <>
-        {/* Quick Message Templates */}
-        <MessageTemplates />
+  // Fix: ListHeaderComponent returns JSX element directly (not a factory function)
+  const ListHeaderComponent = useMemo(() => (
+    <>
+      {/* Quick Message Templates */}
+      <MessageTemplates />
 
-        {/* Conversations Header */}
-        <View style={styles.conversationsHeader}>
-          <Text style={styles.conversationsTitle}>Konuşmalar</Text>
-          <Text style={styles.conversationsCount}>{filteredConversations.length}</Text>
-        </View>
-      </>
-    );
-  }, [filteredConversations.length]);
+      {/* Conversations Header */}
+      <View style={styles.conversationsHeader}>
+        <Text style={styles.conversationsTitle}>Konuşmalar</Text>
+        <Text style={styles.conversationsCount}>{filteredConversations.length}</Text>
+      </View>
+    </>
+  ), [filteredConversations.length]);
 
   const searchInputRef = useRef<TextInput>(null);
 
@@ -481,7 +517,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Benim AfetNet ID’m</Text>
+              <Text style={styles.modalTitle}>Benim AfetNet ID'm</Text>
               {qrValue && (
                 <View style={styles.modalQrWrapper}>
                   <QRCode value={qrValue} size={200} color="#0f172a" backgroundColor="#e2e8f0" />
@@ -510,7 +546,6 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
                   onPress={async () => {
                     try {
                       if (qrValue && typeof qrValue === 'string') {
-                        // Copy publicUserCode, not full JSON
                         let codeToCopy = qrValue;
                         try {
                           const parsed = JSON.parse(qrValue);
@@ -539,10 +574,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           </View>
         </Modal>
 
-        {/* UNIQUE FEATURE: Offline Messaging Banner */}
-
-
-        {/* Header - Fixed Position */}
+        {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle} numberOfLines={1}>Mesajlar</Text>
@@ -613,7 +645,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             )}
           </View>
 
-          {/* ELITE: Search Suggestions */}
+          {/* Search Suggestions */}
           {searchSuggestions.length > 0 && searchQuery.length > 0 && (
             <View style={styles.suggestionsContainer}>
               {searchSuggestions.map((suggestion, index) => (
@@ -640,57 +672,73 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
           )}
         </View>
 
-        {/* Scrollable Content - FlatList with header */}
-        <FlatList
-          data={filteredConversations}
-          renderItem={renderConversation}
-          keyExtractor={(item) => item.userId}
-          ListHeaderComponent={ListHeaderComponent}
-          contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          showsVerticalScrollIndicator={true}
-          keyboardShouldPersistTaps="always"
-          keyboardDismissMode="none"
-          removeClippedSubviews={false}
-          nestedScrollEnabled={false}
-          scrollEventThrottle={16}
-          // ELITE: Performance optimizations
-          initialNumToRender={10}
-          maxToRenderPerBatch={5}
-          windowSize={7}
-          getItemLayout={(data, index) => ({
-            length: 100, // Approximate conversation card height + separator
-            offset: 112 * index,
-            index,
-          })}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <Ionicons name="chatbubbles-outline" size={80} color="#cbd5e1" />
-              </View>
-              <Text style={styles.emptyText}>Henüz mesaj yok</Text>
-              <Text style={styles.emptySubtext}>
-                Yakındaki cihazlarla şebekesiz BLE mesh ağı üzerinden güvenle mesajlaşabilirsiniz
-              </Text>
-              <Pressable
-                style={styles.emptyButton}
-                onPress={handleNewMessage}
-                accessibilityRole="button"
-                accessibilityLabel="İlk mesajı gönder"
-                accessibilityHint="Yeni bir mesaj başlatır"
-              >
-                <View style={styles.emptyButtonInner}>
-                  <Ionicons name="add" size={20} color="#334155" />
-                  <Text style={styles.emptyButtonText}>İlk Mesajı Gönder</Text>
+        {/* Loading skeleton */}
+        {isInitializing && conversations.length === 0 ? (
+          <View style={styles.skeletonContainer}>
+            {[0, 1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
+          </View>
+        ) : (
+          <FlatList
+            data={filteredConversations}
+            renderItem={renderConversation}
+            keyExtractor={(item) => item.userId}
+            ListHeaderComponent={ListHeaderComponent}
+            contentContainerStyle={styles.listContent}
+            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+            showsVerticalScrollIndicator={true}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="on-drag"
+            removeClippedSubviews={false}
+            nestedScrollEnabled={false}
+            scrollEventThrottle={16}
+            initialNumToRender={10}
+            maxToRenderPerBatch={5}
+            windowSize={7}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={handleRefresh}
+                tintColor="#64748b"
+                colors={['#3b82f6']}
+              />
+            }
+            ListEmptyComponent={
+              debouncedSearchQuery.trim().length > 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconContainer}>
+                    <Ionicons name="search-outline" size={80} color="#cbd5e1" />
+                  </View>
+                  <Text style={styles.emptyText}>Sonuç bulunamadı</Text>
+                  <Text style={styles.emptySubtext}>
+                    "{debouncedSearchQuery}" ile eşleşen konuşma bulunamadı. Farklı bir arama deneyin.
+                  </Text>
                 </View>
-              </Pressable>
-            </View>
-          }
-        />
-
-        {/* FAB KALDIRILDI - Header'daki + butonu kullanılıyor */}
-
-        {/* Premium Gate KALDIRILDI - Tüm kullanıcılar erişebilir */}
+              ) : (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconContainer}>
+                    <Ionicons name="chatbubbles-outline" size={80} color="#cbd5e1" />
+                  </View>
+                  <Text style={styles.emptyText}>Henüz mesaj yok</Text>
+                  <Text style={styles.emptySubtext}>
+                    Yakındaki cihazlarla şebekesiz BLE mesh ağı üzerinden güvenle mesajlaşabilirsiniz
+                  </Text>
+                  <Pressable
+                    style={styles.emptyButton}
+                    onPress={handleNewMessage}
+                    accessibilityRole="button"
+                    accessibilityLabel="İlk mesajı gönder"
+                    accessibilityHint="Yeni bir mesaj başlatır"
+                  >
+                    <View style={styles.emptyButtonInner}>
+                      <Ionicons name="add" size={20} color="#334155" />
+                      <Text style={styles.emptyButtonText}>İlk Mesajı Gönder</Text>
+                    </View>
+                  </Pressable>
+                </View>
+              )
+            }
+          />
+        )}
       </KeyboardAvoidingView>
     </ImageBackground>
   );
@@ -700,41 +748,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8fafc',
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(59, 130, 246, 0.9)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(59, 130, 246, 0.2)',
-  },
-  offlineBannerText: {
-    flex: 1,
-  },
-  offlineBannerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  offlineBannerSubtitle: {
-    fontSize: 11,
-    color: '#93c5fd',
-  },
-  uniqueBadge: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  uniqueBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 0.5,
   },
   header: {
     flexDirection: 'row',
@@ -785,24 +798,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
-  meshStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 6,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  meshStatusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
   meshQrButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -818,45 +813,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#475569',
-  },
-  telemetryCard: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  telemetryColumn: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  telemetryLabel: {
-    fontSize: 10,
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  telemetryValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#334155',
-  },
-  telemetryDivider: {
-    width: 1,
-    height: 20,
-    backgroundColor: 'rgba(148, 163, 184, 0.2)',
   },
   searchContainer: {
     paddingHorizontal: 16,
@@ -936,76 +892,8 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 100,
   },
-  conversationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderRadius: 24,
+  skeletonContainer: {
     padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    gap: 12,
-    shadowColor: '#64748b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  avatarGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.brand.primary + '30',
-  },
-  conversationInfo: {
-    flex: 1,
-  },
-  conversationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  time: {
-    fontSize: 13,
-    color: '#94a3b8',
-  },
-  messagePreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  lastMessage: {
-    flex: 1,
-    fontSize: 14,
-    color: '#94a3b8',
-  },
-  unreadBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  unreadText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',
@@ -1143,5 +1031,4 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0369a1',
   },
-  // FAB styles removed - using header button instead
 });

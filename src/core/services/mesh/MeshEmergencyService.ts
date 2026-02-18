@@ -86,6 +86,7 @@ class MeshEmergencyService {
 
     // Sensors
     private accelerometerSubscription: { remove: () => void } | null = null;
+    private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
     private impactSamples: number[] = [];
 
     // State tracking
@@ -526,7 +527,7 @@ class MeshEmergencyService {
     // ===========================================================================
 
     private setupAppStateListener(): void {
-        AppState.addEventListener('change', this.handleAppStateChange);
+        this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
     }
 
     private handleAppStateChange = (nextState: AppStateStatus): void => {
@@ -660,6 +661,10 @@ class MeshEmergencyService {
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer);
             this.inactivityTimer = null;
+        }
+        if (this.appStateSubscription) {
+            this.appStateSubscription.remove();
+            this.appStateSubscription = null;
         }
         this.stopImpactDetection();
     }
