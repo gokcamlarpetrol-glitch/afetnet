@@ -631,6 +631,24 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
           activeGroupIdRef.current = newGroupId;
           setFirestoreGroupId(newGroupId);
           logger.info(`✅ On-demand family group created: ${newGroupId}`);
+
+          // Backfill familyGroupChatId in the family document for auto-add support
+          try {
+            const members = useFamilyStore.getState().members;
+            const familyId = members.find((m) => m.familyId)?.familyId;
+            if (familyId) {
+              const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
+              const { doc, updateDoc } = await import('firebase/firestore');
+              const db = await getFirestoreInstanceAsync();
+              if (db) {
+                await updateDoc(doc(db, 'families', familyId), {
+                  familyGroupChatId: newGroupId,
+                }).catch(() => { /* best effort */ });
+                logger.info(`✅ Backfilled familyGroupChatId=${newGroupId} for family ${familyId}`);
+              }
+            }
+          } catch { /* non-blocking backfill */ }
+
           return newGroupId;
         }
       } catch (createErr) {

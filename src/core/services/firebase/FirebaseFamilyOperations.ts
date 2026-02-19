@@ -205,6 +205,34 @@ export async function createFamily(
     );
 
     logger.info(`✅ Family created: families/${familyId}`);
+
+    // AUTO-CREATE FAMILY GROUP CHAT
+    // When a family is created, automatically create a group chat so all members
+    // can communicate immediately. Store the groupId in the family document.
+    try {
+      const { groupChatService } = await import('../GroupChatService');
+      const { identityService } = await import('../IdentityService');
+      const myDeviceId = identityService.getMeshDeviceId?.() || identityService.getMyId?.() || myUid;
+
+      const groupId = await groupChatService.createGroup(
+        familyName,
+        [myUid],
+        { [myUid]: myDisplayName },
+        { [myUid]: myDeviceId },
+      );
+
+      if (groupId) {
+        // Store the family group chat ID in the family document for easy lookup
+        await updateDoc(doc(db, 'families', familyId), {
+          familyGroupChatId: groupId,
+        }).catch(() => { /* best effort */ });
+        logger.info(`✅ Family group chat auto-created: ${groupId} for family ${familyId}`);
+      }
+    } catch (groupError) {
+      // Non-blocking — FamilyGroupChatScreen creates on-demand as fallback
+      logger.warn('Auto-create family group chat failed (non-blocking):', groupError);
+    }
+
     return familyId;
   } catch (error) {
     logger.error('Failed to create family:', error);
@@ -392,6 +420,33 @@ export async function saveFamilyMember(
     ]);
 
     logger.info(`✅ Family member saved: families/${familyId}/members/${memberUid}`);
+
+    // AUTO-ADD TO FAMILY GROUP CHAT
+    // When a member is added to the family, automatically add them to the family group chat.
+    // This ensures all family members are in the group without manual intervention.
+    try {
+      const familyDoc = await getDoc(doc(db, 'families', familyId));
+      const familyData = familyDoc.data();
+      const familyGroupChatId = familyData?.familyGroupChatId;
+
+      if (familyGroupChatId && typeof familyGroupChatId === 'string') {
+        const { groupChatService } = await import('../GroupChatService');
+        const memberDeviceId = member.deviceId || memberUid;
+        await groupChatService.addMemberToGroup(
+          familyGroupChatId,
+          memberUid,
+          member.name,
+          memberDeviceId,
+        );
+        logger.info(`✅ Auto-added ${member.name} to family group chat ${familyGroupChatId}`);
+      } else {
+        logger.debug('No familyGroupChatId found — member will join when group is created on-demand');
+      }
+    } catch (groupError) {
+      // Non-blocking — member will see the group when FamilyGroupChatScreen reconciles
+      logger.warn('Auto-add to family group chat failed (non-blocking):', groupError);
+    }
+
     return true;
   } catch (error: unknown) {
     return handleFirestoreError(error, 'saveFamilyMember');

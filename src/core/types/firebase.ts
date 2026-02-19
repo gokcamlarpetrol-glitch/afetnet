@@ -31,7 +31,7 @@ export interface MessageData {
   /** Structured location data */
   location?: { lat: number; lng: number; address?: string };
   /** Media metadata */
-  mediaType?: 'image' | 'voice' | 'video';
+  mediaType?: 'image' | 'voice' | 'video' | 'location';
   mediaUrl?: string;
   mediaDuration?: number;
   mediaThumbnail?: string;

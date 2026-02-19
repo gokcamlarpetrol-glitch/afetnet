@@ -930,7 +930,15 @@ class HybridMessageService {
       // CRITICAL FIX: Auto-create conversation for incoming messages from unknown senders.
       // Without this, messages arrive in the stores but don't appear in the Messages screen
       // because no conversation entry exists for the sender.
-      if (!isFromMe && message.senderId && message.senderId !== 'unknown') {
+      // PHANTOM GROUP FIX: Validate senderId is a legitimate Firebase UID (20-40 alphanumeric chars).
+      // Skip broadcast/group prefixes and malformed IDs that create phantom conversations.
+      const senderIdValid = message.senderId
+        && message.senderId !== 'unknown'
+        && !message.senderId.startsWith('group:')
+        && !message.senderId.startsWith('family-')
+        && message.senderId !== 'broadcast'
+        && /^[A-Za-z0-9]{20,40}$/.test(message.senderId);
+      if (!isFromMe && senderIdValid) {
         const conversations = useMessageStore.getState().conversations;
         const existingConv = conversations.find((c: { userId: string }) => c.userId === message.senderId);
         if (!existingConv) {
@@ -1948,16 +1956,22 @@ class HybridMessageService {
               snapshot.forEach((docSnap) => {
                 const data = docSnap.data();
                 if (!data || !data.participants) return;
+
+                // CRITICAL FIX: Skip group conversations — they're managed by GroupChatService.
+                // Adding them to messageStore causes "phantom groups" in MessagesScreen
+                // because groups appear TWICE: once from GroupChatService subscription and
+                // once from this DM-oriented sync. Only sync 1-on-1 (DM) conversations here.
+                if (data.type === 'group') return;
+
                 // Find the OTHER participant's UID for DM conversations
                 const otherUid = Array.isArray(data.participants)
                   ? data.participants.find((p: string) => p !== uid)
                   : null;
-                if (!otherUid && data.type !== 'group') return;
-                const peerId = otherUid || docSnap.id;
+                if (!otherUid) return;
                 const peerName = data.participantNames?.[otherUid] || data.name || '';
                 useMessageStore.getState().addConversation({
-                  userId: peerId,
-                  userName: peerName || peerId.slice(0, 8) + '...',
+                  userId: otherUid,
+                  userName: peerName || otherUid.slice(0, 8) + '...',
                   lastMessage: data.lastMessage || data.lastMessagePreview || '',
                   lastMessageTime: data.lastMessageAt || data.updatedAt || Date.now(),
                   unreadCount: 0, // Will be updated by message processing
