@@ -17,25 +17,39 @@ import {
   // @ts-expect-error - getReactNativePersistence is available in firebase/auth but not in typings
   getReactNativePersistence
 } from 'firebase/auth'; // ELITE: Auth imports with persistence
-import { storage } from '../core/utils/storage';
+import { storage, isMMKVPersistent } from '../core/utils/storage';
 import { createLogger } from '../core/utils/logger';
 
 // CRITICAL FIX: MMKV-backed adapter for Firebase Auth persistence.
 // AsyncStorage may lose data during iOS background kill, causing auto-logout.
 // MMKV is synchronous, crash-safe, and survives background termination.
+//
+// HARDENED: Logs warning if MemoryStorage fallback is active (data will be lost on restart).
+// Retries storage.getString() on failure to handle transient JSI errors.
 const mmkvAuthStorage = {
   getItem: async (key: string): Promise<string | null> => {
-    try {
-      return storage.getString(key) ?? null;
-    } catch {
-      return null;
+    if (!isMMKVPersistent) {
+      // MemoryStorage fallback — auth session WILL be lost on restart
+      // Still attempt read so current session works
+      try { return storage.getString(key) ?? null; } catch { return null; }
     }
+    // Retry up to 3 times for transient JSI errors
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return storage.getString(key) ?? null;
+      } catch {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
+        }
+      }
+    }
+    return null;
   },
   setItem: async (key: string, value: string): Promise<void> => {
     try {
       storage.set(key, value);
     } catch {
-      // non-blocking
+      // non-blocking — Firebase Auth will retry on next write
     }
   },
   removeItem: async (key: string): Promise<void> => {

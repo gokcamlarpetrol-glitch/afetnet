@@ -97,6 +97,13 @@ try {
 export const storage = storageInstance;
 
 /**
+ * Flag indicating whether real MMKV (persistent) is active vs MemoryStorage fallback.
+ * If false, all storage operations will lose data on app restart.
+ * Critical for auth persistence checks.
+ */
+export const isMMKVPersistent = !(storageInstance instanceof MemoryStorage);
+
+/**
  * ELITE STORAGE ADAPTER
  * Connects MMKV synchronous storage to Zustand's persist middleware
  */
