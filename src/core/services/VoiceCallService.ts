@@ -92,6 +92,7 @@ interface CallState {
 class VoiceCallServiceImpl {
   private pc: any = null;
   private localStream: any = null;
+  private remoteStream: any = null;
   private unsubscribers: Unsubscribe[] = [];
   private state: CallState = {
     callId: null,
@@ -179,6 +180,18 @@ class VoiceCallServiceImpl {
         isIncoming: false,
       };
 
+      // CRITICAL FIX: Request microphone permission before getUserMedia
+      try {
+        const { Audio } = require('expo-audio');
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          throw new Error('Microphone permission denied');
+        }
+      } catch (permError: any) {
+        if (permError?.message === 'Microphone permission denied') throw permError;
+        // expo-audio not available — proceed anyway, getUserMedia will request permission
+      }
+
       // Get local audio stream
       this.localStream = await mediaDevices.getUserMedia({
         audio: true,
@@ -187,6 +200,15 @@ class VoiceCallServiceImpl {
 
       // Create peer connection
       this.pc = new RTCPeerConnection(ICE_SERVERS);
+
+      // CRITICAL FIX: Handle remote audio stream — without this, caller hears NOTHING
+      this.pc.ontrack = (event: any) => {
+        if (event.streams && event.streams[0]) {
+          this.remoteStream = event.streams[0];
+          logger.info('🔊 Remote audio stream received');
+          // react-native-webrtc automatically plays remote audio streams
+        }
+      };
 
       // Add local tracks
       this.localStream.getTracks().forEach((track: any) => {
@@ -348,6 +370,17 @@ class VoiceCallServiceImpl {
         isIncoming: true,
       };
 
+      // CRITICAL FIX: Request microphone permission before getUserMedia
+      try {
+        const { Audio } = require('expo-audio');
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          throw new Error('Microphone permission denied');
+        }
+      } catch (permError: any) {
+        if (permError?.message === 'Microphone permission denied') throw permError;
+      }
+
       // Get local audio stream
       this.localStream = await mediaDevices.getUserMedia({
         audio: true,
@@ -356,6 +389,14 @@ class VoiceCallServiceImpl {
 
       // Create peer connection
       this.pc = new RTCPeerConnection(ICE_SERVERS);
+
+      // CRITICAL FIX: Handle remote audio stream
+      this.pc.ontrack = (event: any) => {
+        if (event.streams && event.streams[0]) {
+          this.remoteStream = event.streams[0];
+          logger.info('🔊 Remote audio stream received (callee)');
+        }
+      };
 
       // Add local tracks
       this.localStream.getTracks().forEach((track: any) => {

@@ -228,11 +228,23 @@ class NotificationCenter {
                                 };
                             }
 
-                            // DUPLICATE-NOTIFICATION FIX: Suppress OS banner for ALL message
+                            // CRITICAL FIX: SOS messages MUST always show alert in foreground
+                            if (notifType === 'sos_message' || notifType === 'sos' || notifType === 'sos_alert' || notifType === 'sos_received' || notifType === 'sos_family' || notifType === 'family_sos') {
+                                return {
+                                    shouldShowAlert: true,
+                                    shouldPlaySound: true,
+                                    shouldSetBadge: true,
+                                    shouldShowBanner: true,
+                                    shouldShowList: true,
+                                    priority: Notifications.AndroidNotificationPriority?.MAX,
+                                };
+                            }
+
+                            // DUPLICATE-NOTIFICATION FIX: Suppress OS banner for regular message
                             // notifications in foreground. The foreground listener below shows
                             // an in-app Alert.alert instead — showing BOTH the OS banner AND
                             // the Alert.alert was causing double notifications while app is open.
-                            if (notifType === 'message' || notifType === 'new_message' || notifType === 'message_received' || notifType === 'sos_message') {
+                            if (notifType === 'message' || notifType === 'new_message' || notifType === 'message_received') {
                                 return {
                                     shouldShowAlert: false,
                                     shouldPlaySound: true,
@@ -289,6 +301,15 @@ class NotificationCenter {
                                     healthInfo: fgData?.healthInfo && typeof fgData.healthInfo === 'object'
                                         ? fgData.healthInfo
                                         : undefined,
+                                });
+                            }
+
+                            // === FOREGROUND VOICE CALL ===
+                            if (fgType === 'voice_call') {
+                                DeviceEventEmitter.emit('VOICE_CALL_INCOMING', {
+                                    callId: fgData?.callId,
+                                    callerUid: fgData?.callerUid,
+                                    callerName: fgData?.callerName || 'Bilinmeyen',
                                 });
                             }
 
@@ -1319,6 +1340,23 @@ class NotificationCenter {
                             break;
                         }
                         navigateTo('MainTabs', { screen: 'Messages' });
+                    }
+                    break;
+                }
+
+                // ═══ VOICE CALL — Navigate to call screen ═══
+                case 'voice_call': {
+                    const callerUid = toNonEmptyString(data.callerUid);
+                    const callerName = data.callerName || 'Bilinmeyen';
+                    const tapCallId = toNonEmptyString(data.callId);
+                    if (callerUid && tapCallId) {
+                        // Emit incoming call event for IncomingCallOverlay
+                        const { DeviceEventEmitter } = require('react-native');
+                        DeviceEventEmitter.emit('VOICE_CALL_INCOMING', {
+                            callId: tapCallId,
+                            callerUid,
+                            callerName,
+                        });
                     }
                     break;
                 }

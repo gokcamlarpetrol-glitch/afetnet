@@ -145,6 +145,12 @@ function processSOSAlert(alertId: string, alertData: any): void {
  * Handle listener errors — shared by legacy and V3 listeners.
  * Permission-denied is expected during offline-first mode.
  */
+// CRITICAL FIX: Track retry state for SOS listener recovery
+let sosRetryCount = 0;
+const SOS_MAX_RETRIES = 10;
+let sosRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let lastDeviceId: string | null = null;
+
 function handleListenerError(error: any, listenerLabel: string): void {
     const errorCode = error?.code || '';
     const errorMessage = error?.message || '';
@@ -161,6 +167,23 @@ function handleListenerError(error: any, listenerLabel: string): void {
     }
 
     logger.error(`SOS alert listener error for ${listenerLabel}:`, error);
+
+    // CRITICAL FIX: Retry with exponential backoff (like GroupChatService)
+    if (sosRetryCount < SOS_MAX_RETRIES && lastDeviceId) {
+        sosRetryCount++;
+        const delay = Math.min(2000 * Math.pow(2, sosRetryCount - 1), 30000);
+        logger.info(`🔄 SOS listener retry ${sosRetryCount}/${SOS_MAX_RETRIES} in ${delay}ms`);
+        if (sosRetryTimer) clearTimeout(sosRetryTimer);
+        sosRetryTimer = setTimeout(() => {
+            sosRetryTimer = null;
+            if (lastDeviceId) {
+                stopSOSAlertListener();
+                startSOSAlertListener(lastDeviceId).catch((e) => {
+                    logger.error('SOS listener retry failed:', e);
+                });
+            }
+        }, delay);
+    }
 }
 
 /**
@@ -172,6 +195,8 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
         logger.warn('Cannot start SOS alert listener: no device ID');
         return;
     }
+    lastDeviceId = myDeviceId;
+    sosRetryCount = 0; // Reset retry count on fresh start
 
     // Already listening — skip
     if (isListening && currentUnsubscribe) {

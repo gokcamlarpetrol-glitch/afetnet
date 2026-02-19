@@ -404,15 +404,21 @@ const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: M
       return <Text style={{ fontSize: 14, fontStyle: 'italic', color: '#94a3b8' }}>Bu mesaj silindi</Text>;
     }
 
+    // CRITICAL FIX: Resolve mediaType from top-level OR metadata fallback
+    // Old messages may have mediaType only in metadata (nested)
+    const resolvedMediaType = message.mediaType || (message as any).metadata?.mediaType;
+    const resolvedMediaUrl = message.mediaUrl || (message as any).metadata?.mediaUrl;
+    const resolvedLocation = message.location || (message as any).metadata?.location;
+
     // Image message
-    if (message.mediaType === 'image') {
-      if (message.mediaUrl) {
+    if (resolvedMediaType === 'image') {
+      if (resolvedMediaUrl) {
         return (
           <View>
             <Pressable onPress={() => setLightboxVisible(true)}>
               <View>
                 <Image
-                  source={{ uri: message.mediaUrl }}
+                  source={{ uri: resolvedMediaUrl }}
                   style={styles.mediaImage}
                   resizeMode="cover"
                 />
@@ -441,7 +447,7 @@ const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: M
                   <Ionicons name="close" size={30} color="#fff" />
                 </Pressable>
                 <Image
-                  source={{ uri: message.mediaUrl }}
+                  source={{ uri: resolvedMediaUrl }}
                   style={styles.lightboxImage}
                   resizeMode="contain"
                 />
@@ -464,8 +470,8 @@ const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: M
     }
 
     // Voice message
-    if (message.mediaType === 'voice') {
-      if (message.mediaUrl) {
+    if (resolvedMediaType === 'voice') {
+      if (resolvedMediaUrl) {
         return <VoicePlayerInline message={message} isMe={isMe} />;
       }
       // Fallback: no URL
@@ -478,8 +484,8 @@ const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: M
     }
 
     // Location message
-    if (message.mediaType === 'location' && message.location) {
-      return <LocationCard location={message.location} isMe={isMe} />;
+    if ((resolvedMediaType === 'location' && resolvedLocation) || (!resolvedMediaType && resolvedLocation)) {
+      return <LocationCard location={resolvedLocation} isMe={isMe} />;
     }
 
     // Default: text message

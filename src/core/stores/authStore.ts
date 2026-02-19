@@ -9,9 +9,36 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { getFirebaseAuth } from '../../lib/firebase';
 import { identityService, UserIdentity } from '../services/IdentityService';
 import { AuthService } from '../services/AuthService';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('AuthStore');
+
+// CRITICAL FIX: Cache auth state in MMKV so app doesn't show login screen
+// while Firebase Auth restores the session after background kill.
+const AUTH_CACHE_KEY = 'afetnet_auth_cached';
+const AUTH_CACHE_UID_KEY = 'afetnet_auth_cached_uid';
+
+function getCachedAuthState(): boolean {
+  try {
+    return DirectStorage.getBoolean(AUTH_CACHE_KEY) || false;
+  } catch {
+    return false;
+  }
+}
+
+function setCachedAuthState(authenticated: boolean, uid?: string): void {
+  try {
+    DirectStorage.setBoolean(AUTH_CACHE_KEY, authenticated);
+    if (uid) {
+      DirectStorage.setString(AUTH_CACHE_UID_KEY, uid);
+    } else if (!authenticated) {
+      DirectStorage.delete(AUTH_CACHE_UID_KEY);
+    }
+  } catch {
+    // non-blocking
+  }
+}
 
 interface AuthState {
     isAuthenticated: boolean;
@@ -33,9 +60,13 @@ let pendingSignOutTimer: ReturnType<typeof setTimeout> | null = null;
 const SIGN_OUT_GRACE_MS = 3000;
 const INITIAL_RESTORE_GRACE_MS = 8000;
 
+// CRITICAL FIX: Read cached auth state so the app shows Main (not Auth screen)
+// while Firebase restores the session. This prevents the flash-to-login bug.
+const cachedAuth = getCachedAuthState();
+
 export const useAuthStore = create<AuthState>((set, get) => ({
-    isAuthenticated: false,
-    isLoading: true,
+    isAuthenticated: cachedAuth,
+    isLoading: !cachedAuth, // If cached=true, skip loading (show Main immediately)
     user: null,
     firebaseUser: null,
 
@@ -73,6 +104,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                     try {
                         await identityService.syncFromFirebase(cachedUser);
                         const identity = identityService.getIdentity();
+                        setCachedAuthState(true, cachedUser.uid);
                         set({
                             isAuthenticated: true,
                             isLoading: false,
@@ -85,8 +117,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                     }
                 }
 
-                logger.warn('Auth listener timeout (15s) - forcing unauthenticated UI');
-                set({ isLoading: false, isAuthenticated: false });
+                // CRITICAL: Only force unauthenticated if MMKV cache also says no auth
+                if (!getCachedAuthState()) {
+                    logger.warn('Auth listener timeout (15s) - forcing unauthenticated UI');
+                    set({ isLoading: false, isAuthenticated: false });
+                } else {
+                    // MMKV says user was authenticated — keep showing Main, keep trying
+                    logger.warn('Auth listener timeout (15s) but MMKV cache says authenticated — extending wait');
+                    set({ isLoading: false }); // Stop loading spinner but keep isAuthenticated=true from cache
+                }
             }, 15000);
 
             // ELITE: Set up persistent auth state listener
@@ -113,11 +152,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                             firebaseUser: firebaseUser,
                         });
 
+                        // CRITICAL: Cache auth state in MMKV for next launch
+                        setCachedAuthState(true, firebaseUser.uid);
+
                         if (__DEV__) {
                             logger.info(`✅ User authenticated: ${identity?.uid}`);
                         }
                     } catch (error) {
                         logger.error('Failed to sync identity:', error);
+                        // Don't clear cache on sync failure — user may still be authenticated
                         set({ isLoading: false, isAuthenticated: false });
                     }
                 } else {
@@ -229,6 +272,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                                     logger.warn('Failed to clear cached identity after sign-out event:', identityError);
                                 });
 
+                                // CRITICAL: Clear cached auth state on confirmed sign-out
+                                setCachedAuthState(false);
+
                                 set({
                                     isAuthenticated: false,
                                     isLoading: false,
@@ -280,6 +326,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     logout: async () => {
         try {
+            // CRITICAL: Clear cached auth BEFORE sign-out to prevent stale cache
+            setCachedAuthState(false);
             await AuthService.signOut();
 
             set({

@@ -3081,6 +3081,96 @@ export const onFamilyStatusUpdateV3 = functions
     });
 
 // ============================================================
+// VOICE CALL NOTIFICATION — Push notification for incoming voice calls
+// Trigger: voice_calls_incoming/{recipientUid} → onCreate/update
+// ============================================================
+
+export const onIncomingVoiceCall = functions
+    .region(REGION)
+    .firestore.document('voice_calls_incoming/{recipientUid}')
+    .onWrite(async (change, context) => {
+        const recipientUid = context.params.recipientUid;
+        const callData = change.after.exists ? change.after.data() : null;
+
+        if (!callData) return; // Document deleted
+
+        const callerName = callData.callerName || 'Bilinmeyen';
+        const callerUid = callData.callerUid || '';
+        const callId = callData.callId || '';
+
+        if (!callId) {
+            functions.logger.warn('onIncomingVoiceCall: no callId');
+            return;
+        }
+
+        try {
+            const allTokens = await collectPushTokensForUid(recipientUid);
+            if (allTokens.length === 0) {
+                functions.logger.warn(`onIncomingVoiceCall: no push tokens for ${recipientUid}`);
+                return;
+            }
+
+            let totalSent = 0;
+            for (const token of allTokens) {
+                const success = await sendPushToToken(
+                    token,
+                    `📞 ${callerName}`,
+                    `${callerName} sizi arıyor...`,
+                    {
+                        type: 'voice_call',
+                        callId,
+                        callerUid,
+                        callerName,
+                    },
+                );
+                if (success) totalSent++;
+            }
+
+            functions.logger.info(`✅ Voice call push: ${totalSent} sent to ${recipientUid} from ${callerName}`);
+        } catch (error) {
+            functions.logger.error('onIncomingVoiceCall error:', error);
+        }
+    });
+
+// ============================================================
+// CALLABLE: sendCallNotification — Direct call notification
+// Used by VoiceCallService when Firestore trigger isn't fast enough
+// ============================================================
+
+export const sendCallNotification = functions
+    .region(REGION)
+    .https.onCall(async (data, context) => {
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
+        }
+
+        const { recipientUid, callerName, callId } = data;
+        if (!recipientUid || !callId) {
+            throw new functions.https.HttpsError('invalid-argument', 'recipientUid and callId required');
+        }
+
+        const allTokens = await collectPushTokensForUid(recipientUid);
+        let totalSent = 0;
+
+        for (const token of allTokens) {
+            const success = await sendPushToToken(
+                token,
+                `📞 ${callerName || 'Bilinmeyen'}`,
+                `${callerName || 'Bilinmeyen'} sizi arıyor...`,
+                {
+                    type: 'voice_call',
+                    callId,
+                    callerUid: context.auth.uid,
+                    callerName: callerName || '',
+                },
+            );
+            if (success) totalSent++;
+        }
+
+        return { success: totalSent > 0, sentCount: totalSent };
+    });
+
+// ============================================================
 // ON CONTACT REQUEST — Push notification when someone sends a contact request
 // Trigger: users/{uid}/contactRequests/{requestId} → onCreate
 // ============================================================

@@ -1478,8 +1478,14 @@ class HybridMessageService {
             priority: message.priority,
             ...(message.replyTo ? { replyTo: message.replyTo } : {}),
             ...(message.replyPreview ? { replyPreview: message.replyPreview } : {}),
-            // V3: Include structured location/media payload
+            // CRITICAL FIX: Media fields MUST be top-level for ConversationScreen to render them.
+            // Previously stored only in nested metadata — receiver UI couldn't find them.
             ...(message.location && { location: message.location }),
+            ...(message.mediaType ? { mediaType: message.mediaType } : {}),
+            ...(message.mediaUrl ? { mediaUrl: message.mediaUrl } : {}),
+            ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
+            ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
+            // Keep metadata for backwards compat
             ...(Object.keys(metadata).length > 0 && { metadata }),
             // Legacy compat fields
             fromDeviceId: senderDeviceRouteId,
