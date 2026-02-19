@@ -355,6 +355,15 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         logger.info('✅ GroupChatService');
       } catch (e: unknown) { logger.error('GroupChatService:', e); }
 
+      // CRITICAL FIX: Initialize MeshMessageBridge — bridges mesh ↔ cloud messages.
+      // Without this, offline mesh messages never appear in the unified message UI
+      // and are never synced to Firebase when the device comes back online.
+      try {
+        const { meshMessageBridge } = await import('./services/mesh/MeshMessageBridge');
+        await meshMessageBridge.initialize();
+        logger.info('✅ MeshMessageBridge');
+      } catch (e: unknown) { logger.debug('MeshMessageBridge (optional):', e); }
+
       // ELITE: Start listening for incoming voice calls
       try {
         const { voiceCallService } = await import('./services/VoiceCallService');
@@ -428,8 +437,19 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       } catch (e: unknown) { logger.error('Earthquake:', e); }
     }
 
-    // BLE Mesh deferred — Apple review compliance (no BT prompt at launch)
-    logger.info('ℹ️ BLE Mesh deferred until user action');
+    // BLE Mesh: Auto-initialize (not start) for auth users.
+    // Only call initialize() which sets up identity and queues — does NOT prompt for Bluetooth.
+    // The actual BLE scan/advertise starts when user triggers mesh or on SOS.
+    // This ensures MeshNetworkService is ready to go instantly when needed.
+    if (isAuthed) {
+      try {
+        const { meshNetworkService } = await import('./services/mesh/MeshNetworkService');
+        await meshNetworkService.initialize();
+        logger.info('✅ MeshNetworkService pre-initialized (BLE deferred until user action)');
+      } catch (e: unknown) { logger.debug('Mesh pre-init (optional):', e); }
+    } else {
+      logger.info('ℹ️ BLE Mesh deferred (not authenticated)');
+    }
 
     try {
       await backgroundTaskService?.registerTasks?.();

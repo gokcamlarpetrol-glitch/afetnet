@@ -1084,15 +1084,43 @@ class MeshNetworkService {
     // Start the main loop
     this.runLoop();
 
-    // Start heartbeat
+    // Start heartbeat (will also advertise identity)
     this.startHeartbeat();
 
-    // Start scanning
-    await highPerformanceBle.startScanning();
+    // CRITICAL FIX: Use startDualMode() which calls requestPermissions() + startAdvertising() + startScanning().
+    // Previously only startScanning() was called — devices could scan but never broadcast themselves,
+    // making peer discovery impossible between two devices side by side.
+    const identityPayload = this.buildIdentityPacket();
+    await highPerformanceBle.startDualMode(identityPayload);
     highPerformanceBle.onPeerFound(this.handleDiscoveredPeer);
 
     // Start chunk reassembly cleanup timer
     this.startChunkCleanup();
+  }
+
+  /**
+   * Build an identity advertisement packet for BLE peer discovery.
+   * Contains device ID so other peers can identify and route messages to us.
+   */
+  private buildIdentityPacket(): Uint8Array {
+    try {
+      const idPayload = Buffer.from(this.myId.substring(0, 16), 'utf-8');
+      return MeshProtocol.serialize(
+        MeshMessageType.PING,
+        this.myId,
+        idPayload,
+        1,
+        100,
+      );
+    } catch {
+      return MeshProtocol.serialize(
+        MeshMessageType.PING,
+        this.myId,
+        Buffer.from('PING'),
+        1,
+        100,
+      );
+    }
   }
 
   private async stopRealBLE(): Promise<void> {
@@ -1486,14 +1514,9 @@ class MeshNetworkService {
       if (!this.isActive) return;
 
       try {
-        const heartbeatPayload = Buffer.from('PING');
-        const packet = MeshProtocol.serialize(
-          MeshMessageType.PING,
-          this.myId,
-          heartbeatPayload,
-          1,
-          100
-        );
+        // CRITICAL FIX: Advertise identity payload (not just PING) so peers can discover us.
+        // Include truncated device ID for peer identification and message routing.
+        const packet = this.buildIdentityPacket();
         await highPerformanceBle.startAdvertising(packet);
       } catch (e) {
         logger.debug('Heartbeat error:', e);

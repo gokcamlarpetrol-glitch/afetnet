@@ -472,7 +472,14 @@ const MessageBubble = React.memo(({ message, isMe, showTail, replyToContent }: M
     // Voice message
     if (resolvedMediaType === 'voice') {
       if (resolvedMediaUrl) {
-        return <VoicePlayerInline message={message} isMe={isMe} />;
+        // CRITICAL FIX: Pass message with resolved media fields — old messages may have
+        // mediaUrl/mediaDuration only in metadata, not top-level.
+        const resolvedMsg = {
+          ...message,
+          mediaUrl: resolvedMediaUrl,
+          mediaDuration: message.mediaDuration ?? (message as any).metadata?.mediaDuration ?? 0,
+        };
+        return <VoicePlayerInline message={resolvedMsg} isMe={isMe} />;
       }
       // Fallback: no URL
       return (
@@ -1067,9 +1074,11 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
                 delivered: true,
                 read: false,
                 type: msg.type || 'CHAT',
-                ...(msg.mediaUrl ? { mediaUrl: msg.mediaUrl } : {}),
+                ...(msg.mediaUrl || msg.metadata?.mediaUrl ? { mediaUrl: msg.mediaUrl || msg.metadata?.mediaUrl } : {}),
                 ...(msg.mediaType || msg.metadata?.mediaType ? { mediaType: msg.mediaType || msg.metadata?.mediaType } : {}),
-                ...(msg.location ? { location: msg.location } : {}),
+                ...(typeof (msg.mediaDuration ?? msg.metadata?.mediaDuration) === 'number' ? { mediaDuration: msg.mediaDuration ?? msg.metadata?.mediaDuration } : {}),
+                ...(msg.mediaThumbnail || msg.metadata?.mediaThumbnail ? { mediaThumbnail: msg.mediaThumbnail || msg.metadata?.mediaThumbnail } : {}),
+                ...(msg.location || msg.metadata?.location ? { location: msg.location || msg.metadata?.location } : {}),
               });
             });
           },
