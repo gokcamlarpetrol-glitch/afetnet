@@ -78,14 +78,28 @@ export function navigateTo(screenName: string, params?: Record<string, unknown>)
         }
 
         try {
+            // Capture current route BEFORE dispatch to verify navigation actually happened.
+            // CommonActions.navigate silently drops the action when the target screen
+            // isn't registered in any navigator — it does NOT throw.
+            const routeBefore = navigationRef.getCurrentRoute()?.name;
+
             navigationRef.dispatch(
                 CommonActions.navigate({
                     name: screenName,
                     params,
                 })
             );
-            logger.info(`✅ navigateTo('${screenName}') dispatched successfully`);
-            return true;
+
+            // Verify the route actually changed (or was already on target)
+            const routeAfter = navigationRef.getCurrentRoute()?.name;
+            if (routeAfter === screenName || routeAfter !== routeBefore) {
+                logger.info(`✅ navigateTo('${screenName}') dispatched successfully (route: ${routeBefore} → ${routeAfter})`);
+                return true;
+            }
+
+            // Route didn't change — dispatch was silently dropped
+            logger.debug(`navigateTo('${screenName}'): dispatch was silently dropped (route unchanged: ${routeAfter})`);
+            return false;
         } catch (dispatchError) {
             // Screen not yet registered in any navigator — retry
             logger.debug(`navigateTo('${screenName}'): dispatch threw — screen not registered yet`, dispatchError);
