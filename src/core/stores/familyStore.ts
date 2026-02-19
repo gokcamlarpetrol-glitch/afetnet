@@ -4,14 +4,14 @@
  * Every family member is identified by Firebase Auth UID.
  * uid is the ONLY primary key. No family-* IDs, no id field.
  * 
- * Persistent storage with AsyncStorage + Firebase Firestore sync.
+ * Persistent storage with encrypted MMKV (DirectStorage) + Firebase Firestore sync.
  * Data survives app restarts and syncs across devices.
  * 
  * @version 4.0.0 — Single-UID Clean Architecture
  */
 
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { getAuth } from 'firebase/auth';
 import { initializeFirebase } from '../../lib/firebase';
 import { FamilyMember } from '../types/family';
@@ -28,7 +28,7 @@ interface FirebaseDataServiceType {
   loadFamilyMembers: (ownerUid: string) => Promise<FamilyMember[]>;
   saveFamilyMember: (ownerUid: string, member: FamilyMember) => Promise<boolean>;
   deleteFamilyMember: (ownerUid: string, memberUid: string) => Promise<boolean>;
-  subscribeToUserLocation?: (uid: string, callback: (location: unknown) => void) => Promise<() => void>;
+  subscribeToUserLocation?: (uid: string, callback: (location: unknown) => void, onError?: (error: any) => void) => Promise<() => void>;
   subscribeToFamilyMembers?: (
     ownerUid: string,
     callback: (members: FamilyMember[]) => void,
@@ -160,6 +160,8 @@ const syncStatusUpdateListeners = async (members: FamilyMember[]) => {
           } else {
             logger.warn(`Status listener error for ${member.uid}:`, error);
           }
+          // Auto-cleanup dead listener so next sync cycle re-subscribes
+          statusUpdateSubscriptions.delete(key);
         },
       );
 
@@ -288,7 +290,7 @@ const normalizeMember = (raw: unknown): FamilyMember | null => {
 
 const loadMembers = async (): Promise<FamilyMember[]> => {
   try {
-    const data = await AsyncStorage.getItem(getScopedStorageKey());
+    const data = DirectStorage.getString(getScopedStorageKey()) ?? null;
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
@@ -303,7 +305,7 @@ const loadMembers = async (): Promise<FamilyMember[]> => {
 
 const saveMembers = async (members: FamilyMember[]) => {
   try {
-    await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(members));
+    DirectStorage.setString(getScopedStorageKey(), JSON.stringify(members));
   } catch (error) {
     logger.error('Failed to save family members:', error);
   }
@@ -345,6 +347,10 @@ const syncLocationSubscriptions = async (
             useFamilyStore.getState().updateMemberStatus(member.uid, deviceStatus as FamilyMember['status'], 'remote').catch(() => { });
           }
         }
+      }, (error: any) => {
+        // Auto-cleanup dead listener so next sync cycle re-subscribes
+        logger.warn(`Location listener died for ${member.uid}, will re-subscribe on next sync`);
+        memberLocationSubscriptions.delete(key);
       });
 
       if (typeof unsub === 'function') {
@@ -810,7 +816,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
   updateMemberStatus: async (uid, status, source = 'local') => {
     const { members } = get();
     const existing = members.find(m => m.uid === uid);
-    if (existing && existing.status === status) return;
+    if (!existing) return;
+    if (existing.status === status) return;
 
     const updatedMembers = members.map(m => m.uid === uid ? { ...m, status, lastSeen: Date.now() } : m);
     const updated = updatedMembers.find(m => m.uid === uid);
@@ -862,7 +869,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const membersToDelete = get().members;
     set({ ...initialState, firebaseUnsubscribe: null });
 
-    await AsyncStorage.removeItem(getScopedStorageKey()).catch(() => { });
+    try { DirectStorage.delete(getScopedStorageKey()); } catch { /* best effort */ }
 
     try {
       const ownerUid = getOwnerUid();

@@ -76,8 +76,9 @@ class FCMTokenService {
             }
 
             // Get FCM token
+            const { APP_CONFIG } = await import('../config/app');
             const tokenData = await Notif.getExpoPushTokenAsync({
-                projectId: '072f1217-172a-40ce-af23-3fc0ad3f7f09', // From EAS_PROJECT_ID
+                projectId: APP_CONFIG.easProjectId,
             });
 
             this.token = tokenData.data;
@@ -265,7 +266,14 @@ class FCMTokenService {
             const { getAuth } = await import('firebase/auth');
             const { getApp } = await import('firebase/app');
             const auth = getAuth(getApp());
-            const uid = auth.currentUser?.uid;
+            let uid = auth.currentUser?.uid || '';
+            // CRITICAL FIX: Fallback to identityService when getAuth().currentUser is temporarily null
+            if (!uid) {
+                try {
+                    const { identityService } = await import('./IdentityService');
+                    uid = identityService.getUid?.() || '';
+                } catch { /* identity service unavailable */ }
+            }
             if (uid && this.token) {
                 const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
                 const db = await getFirestoreInstanceAsync();

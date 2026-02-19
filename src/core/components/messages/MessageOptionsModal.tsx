@@ -94,27 +94,44 @@ export default function MessageOptionsModal({
         onEdit(message.id);
     }, [message, onClose, onEdit]);
 
-    // Handle delete
+    // Handle delete — "Benim için sil" or "Herkes için sil"
     const handleDelete = useCallback(() => {
         if (!message) return;
 
+        const buttons: any[] = [
+            { text: 'İptal', style: 'cancel' },
+            {
+                text: 'Benim İçin Sil',
+                onPress: () => {
+                    haptics.notificationWarning();
+                    onClose();
+                    onDelete(message.id);
+                },
+            },
+        ];
+
+        // Only show "delete for everyone" for own messages
+        if (isOwnMessage) {
+            buttons.push({
+                text: 'Herkes İçin Sil',
+                style: 'destructive',
+                onPress: () => {
+                    haptics.notificationWarning();
+                    onClose();
+                    // Pass special flag to indicate "delete for everyone"
+                    onDelete(`EVERYONE:${message.id}`);
+                },
+            });
+        }
+
         Alert.alert(
             'Mesajı Sil',
-            'Bu mesajı silmek istediğinizden emin misiniz?',
-            [
-                { text: 'İptal', style: 'cancel' },
-                {
-                    text: 'Sil',
-                    style: 'destructive',
-                    onPress: () => {
-                        haptics.notificationWarning();
-                        onClose();
-                        onDelete(message.id);
-                    },
-                },
-            ]
+            isOwnMessage
+                ? 'Bu mesajı nasıl silmek istiyorsunuz?'
+                : 'Bu mesaj sadece sizin ekranınızdan silinecektir.',
+            buttons,
         );
-    }, [message, onClose, onDelete]);
+    }, [message, onClose, onDelete, isOwnMessage]);
 
     // Handle forward
     const handleForward = useCallback(() => {

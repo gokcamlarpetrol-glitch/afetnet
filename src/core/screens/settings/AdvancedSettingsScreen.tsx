@@ -24,7 +24,7 @@ import { storageManagementService } from '../../services/StorageManagementServic
 import { useRescueStore } from '../../stores/rescueStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { ENV } from '../../config/env';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 // ELITE: Proper navigation typing for type safety
@@ -100,7 +100,7 @@ export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsS
           text: 'Sıfırla',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.clear();
+            DirectStorage.clearAll();
             Alert.alert('Başarılı', 'Uygulama sıfırlandı. Lütfen yeniden başlatın.');
           },
         },

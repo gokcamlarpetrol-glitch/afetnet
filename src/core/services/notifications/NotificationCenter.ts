@@ -214,9 +214,10 @@ class NotificationCenter {
                     Notifications.setNotificationHandler({
                         handleNotification: async (notification: any) => {
                             const data = notification?.request?.content?.data;
+                            const notifType = (data?.type || '').toLowerCase();
 
-                            // EEW notifications get MAX priority
-                            if (data?.type === 'EEW' || data?.type === 'eew') {
+                            // EEW notifications get MAX priority — always show
+                            if (notifType === 'eew') {
                                 return {
                                     shouldShowAlert: true,
                                     shouldPlaySound: true,
@@ -224,6 +225,20 @@ class NotificationCenter {
                                     shouldShowBanner: true,
                                     shouldShowList: true,
                                     priority: Notifications.AndroidNotificationPriority?.MAX,
+                                };
+                            }
+
+                            // DUPLICATE-NOTIFICATION FIX: Suppress OS banner for ALL message
+                            // notifications in foreground. The foreground listener below shows
+                            // an in-app Alert.alert instead — showing BOTH the OS banner AND
+                            // the Alert.alert was causing double notifications while app is open.
+                            if (notifType === 'message' || notifType === 'new_message' || notifType === 'message_received' || notifType === 'sos_message') {
+                                return {
+                                    shouldShowAlert: false,
+                                    shouldPlaySound: true,
+                                    shouldSetBadge: true,
+                                    shouldShowBanner: false,
+                                    shouldShowList: true,
                                 };
                             }
 
@@ -352,12 +367,28 @@ class NotificationCenter {
                             }
 
                             // === IN-APP MESSAGE NOTIFICATION BANNER ===
-                            const isMessage = fgType === 'message' || fgType === 'new_message';
+                            const isMessage = fgType === 'message' || fgType === 'new_message' || fgType === 'message_received' || fgType === 'sos_message';
                             if (isMessage) {
                                 const msgSenderName = fgData?.senderName || fgData?.from || 'Yeni Mesaj';
                                 const msgPreview = fgData?.message || 'Yeni mesaj geldi';
                                 const msgConversationId = fgData?.conversationId;
                                 const msgSenderId = fgData?.senderUid || fgData?.userId || fgData?.senderId;
+
+                                // Suppress in-app alert if user is already viewing this conversation
+                                try {
+                                    const { getCurrentRouteName } = require('../../navigation/navigationRef');
+                                    const currentRoute = getCurrentRouteName();
+                                    if (currentRoute === 'Conversation' && msgSenderId) {
+                                        // User is already on a conversation screen — skip disruptive alert
+                                        // OS banner still shows in notification tray for later
+                                        logger.debug(`Suppressing in-app alert: already on Conversation screen`);
+                                        return;
+                                    }
+                                    if (currentRoute === 'FamilyGroupChat' && msgConversationId) {
+                                        logger.debug(`Suppressing in-app alert: already on FamilyGroupChat screen`);
+                                        return;
+                                    }
+                                } catch { /* navigation not ready — show alert */ }
 
                                 // Light haptic for message
                                 haptics.impactLight();
@@ -370,12 +401,13 @@ class NotificationCenter {
                                             text: 'Mesaja Git',
                                             onPress: () => {
                                                 import('../../navigation/navigationRef').then(({ navigateTo }) => {
-                                                    if (msgConversationId?.startsWith('grp_') || fgData?.isGroup) {
+                                                    if (msgConversationId?.startsWith('grp_') || fgData?.isGroup === true || fgData?.isGroup === 'true') {
                                                         navigateTo('FamilyGroupChat', { groupId: msgConversationId });
                                                     } else if (msgSenderId) {
                                                         navigateTo('Conversation', {
                                                             userId: msgSenderId,
                                                             userName: msgSenderName,
+                                                            conversationId: msgConversationId,
                                                         });
                                                     } else {
                                                         navigateTo('MainTabs', { screen: 'Messages' });
@@ -399,6 +431,26 @@ class NotificationCenter {
             }
 
             // CRITICAL: Register tap listener — the SINGLE place for notification taps
+            // Dedup: track processed notification IDs to prevent double handling
+            // (getLastNotificationResponseAsync + addNotificationResponseReceivedListener can both fire)
+            const processedTapIds = new Set<string>();
+            const dedupAndHandle = (response: any) => {
+                const notifId =
+                    response?.notification?.request?.identifier
+                    || response?.notification?.request?.content?.data?.messageId
+                    || '';
+                if (notifId && processedTapIds.has(notifId)) {
+                    logger.debug(`Notification tap dedup: skipping already-handled ${notifId}`);
+                    return;
+                }
+                if (notifId) processedTapIds.add(notifId);
+                // Cleanup old entries after 60s to prevent memory leak
+                if (notifId) setTimeout(() => processedTapIds.delete(notifId), 60_000);
+                this.handleNotificationTap(response).catch(e =>
+                    logger.debug('Tap handler error:', e)
+                );
+            };
+
             try {
                 const Notifications = await getNotificationsAsync();
                 if (Notifications) {
@@ -406,21 +458,37 @@ class NotificationCenter {
                     if (typeof Notifications.addNotificationResponseReceivedListener === 'function') {
                         const subscription = Notifications.addNotificationResponseReceivedListener(
                             (response: any) => {
-                                this.handleNotificationTap(response).catch(e =>
-                                    logger.debug('Tap handler error:', e)
-                                );
+                                dedupAndHandle(response);
                             }
                         );
                         this.responseListenerCleanup = () => subscription.remove();
                     }
 
                     // Cold-start tap (app was killed, user tapped notification to open)
+                    // CRITICAL FIX: Retry getLastNotificationResponseAsync with a delay.
+                    // On some iOS versions, the response isn't available immediately after
+                    // app launch — it needs a brief delay for the system to populate it.
                     if (typeof Notifications.getLastNotificationResponseAsync === 'function') {
-                        Notifications.getLastNotificationResponseAsync().then((response: any) => {
-                            if (response) {
-                                this.handleNotificationTap(response).catch(() => { });
+                        const MAX_COLD_START_ATTEMPTS = 5; // 5 attempts × 500ms = 2.5s total window
+                        const checkColdStartTap = async (attempt: number) => {
+                            try {
+                                const response = await Notifications.getLastNotificationResponseAsync();
+                                if (response) {
+                                    logger.info(`📱 Cold-start notification tap detected (attempt ${attempt + 1}/${MAX_COLD_START_ATTEMPTS})`);
+                                    dedupAndHandle(response);
+                                } else if (attempt < MAX_COLD_START_ATTEMPTS - 1) {
+                                    // Retry after a short delay — iOS may not have the response ready yet
+                                    setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                } else {
+                                    logger.debug(`Cold-start tap check: no response after ${MAX_COLD_START_ATTEMPTS} attempts`);
+                                }
+                            } catch {
+                                if (attempt < MAX_COLD_START_ATTEMPTS - 1) {
+                                    setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                }
                             }
-                        }).catch(() => { });
+                        };
+                        checkColdStartTap(0);
                     }
                 }
             } catch (e) {
@@ -964,6 +1032,12 @@ class NotificationCenter {
      */
     async handleNotificationTap(notification: any): Promise<void> {
         try {
+            // PRODUCTION LOGGING: Log raw notification structure for delivery debugging
+            const notifTitle = notification?.notification?.request?.content?.title
+                || notification?.request?.content?.title
+                || '';
+            logger.info(`📱 handleNotificationTap: title="${notifTitle}"`);
+
             // Extract data from Expo notification response structure
             const rawData = notification?.notification?.request?.content?.data
                 || notification?.request?.content?.data
@@ -996,6 +1070,11 @@ class NotificationCenter {
                 || parseObjectLike(baseData.notification)
                 || parseObjectLike(baseData.body);
             const data = nestedData ? { ...baseData, ...nestedData } : baseData;
+
+            // PRODUCTION LOGGING: Log parsed data for debugging notification routing
+            const dataKeys = Object.keys(data);
+            logger.info(`📱 handleNotificationTap: parsed data keys=[${dataKeys.join(',')}], type="${data.type}", signalId="${data.signalId || ''}", conversationId="${data.conversationId || ''}", senderUid="${data.senderUid || ''}", senderName="${data.senderName || ''}"`);
+
             const toNonEmptyString = (value: unknown): string | undefined => {
                 if (typeof value !== 'string') return undefined;
                 const trimmed = value.trim();
@@ -1007,6 +1086,8 @@ class NotificationCenter {
                 || toNonEmptyString(data.notificationType)
                 || '';
             const type = rawType.toLowerCase();
+
+            logger.info(`📱 handleNotificationTap: resolved type="${type}" (raw="${rawType}")`);
 
             const toFiniteNumber = (value: unknown): number | null => {
                 if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -1020,9 +1101,47 @@ class NotificationCenter {
             const locationPayload = parseObjectLike(data.location) || {};
 
             if (!type) {
-                // FIX: Instead of silently returning, navigate to Home
-                // User tapped a notification and expects something to happen
-                logger.debug('Notification tap: no type — navigating to Home');
+                // ELITE FIX: Infer type from SOS-specific fields before falling back to Home.
+                // Push notifications from Cloud Functions may lose the `type` field on some iOS versions.
+                const hasSosFields = data.signalId || data.senderDeviceId || data.trapped !== undefined;
+                const titleHintsSos = (notification?.notification?.request?.content?.title || '').includes('SOS')
+                    || (notification?.notification?.request?.content?.title || '').includes('ENKAZ')
+                    || (notification?.notification?.request?.content?.title || '').includes('ACİL');
+                const hasMessageFields = data.conversationId || data.messageId;
+
+                if (hasSosFields || titleHintsSos) {
+                    logger.info('Notification tap: no type but SOS fields detected — treating as sos_family');
+                    // Fall through to the SOS case by assigning type
+                    const { navigateTo: nav } = await import('../../navigation/navigationRef');
+                    const healthInfoRaw = data.healthInfo && typeof data.healthInfo === 'object'
+                        ? data.healthInfo as Record<string, string>
+                        : undefined;
+                    nav('SOSHelp', {
+                        signalId: toNonEmptyString(data.signalId),
+                        senderUid: toNonEmptyString(data.senderUid) || toNonEmptyString(data.userId),
+                        senderDeviceId: toNonEmptyString(data.senderDeviceId),
+                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from) || 'SOS',
+                        message: toNonEmptyString(data.message),
+                        latitude: toFiniteNumber(locationPayload.latitude ?? data.latitude),
+                        longitude: toFiniteNumber(locationPayload.longitude ?? data.longitude),
+                        trapped: data.trapped === 'true' || data.trapped === true,
+                        healthInfo: healthInfoRaw,
+                    });
+                    return;
+                }
+
+                if (hasMessageFields) {
+                    logger.info('Notification tap: no type but message fields detected — treating as new_message');
+                    const { navigateTo: nav } = await import('../../navigation/navigationRef');
+                    nav('Conversation', {
+                        userId: toNonEmptyString(data.senderUid) || toNonEmptyString(data.senderId),
+                        userName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from),
+                        conversationId: toNonEmptyString(data.conversationId),
+                    });
+                    return;
+                }
+
+                logger.debug('Notification tap: no type and no recognizable fields — navigating to Home');
                 const { navigateTo } = await import('../../navigation/navigationRef');
                 navigateTo('MainTabs', { screen: 'Home' });
                 return;
@@ -1130,7 +1249,7 @@ class NotificationCenter {
                         ? data.healthInfo as Record<string, string>
                         : undefined;
 
-                    navigateTo('SOSHelp', {
+                    const sosParams = {
                         signalId: toNonEmptyString(data.signalId),
                         senderUid: toNonEmptyString(data.senderUid) || toNonEmptyString(data.userId),
                         senderDeviceId: toNonEmptyString(data.senderDeviceId),
@@ -1141,7 +1260,15 @@ class NotificationCenter {
                         trapped: data.trapped === 'true' || data.trapped === true,
                         battery: toFiniteNumber(data.battery) ?? undefined,
                         healthInfo: healthInfoRaw,
+                    };
+                    logger.info(`🚨 SOS notification tap → navigating to SOSHelp`, {
+                        signalId: sosParams.signalId,
+                        senderName: sosParams.senderName,
+                        senderUid: sosParams.senderUid,
+                        lat: sosParams.latitude,
+                        lng: sosParams.longitude,
                     });
+                    navigateTo('SOSHelp', sosParams);
                     break;
                 }
 
@@ -1173,9 +1300,14 @@ class NotificationCenter {
                         || toNonEmptyString(data.senderId)
                         || toNonEmptyString(data.senderDeviceId);
                     if (userId) {
+                        // CRITICAL FIX: Always pass conversationId alongside userId.
+                        // ConversationScreen will use conversationId directly (no pairKey
+                        // lookup needed) — prevents opening a wrong/empty conversation on
+                        // cold-start or when the Firestore composite index query fails.
                         navigateTo('Conversation', {
                             userId,
                             userName: data.senderName || data.userName || data.from,
+                            conversationId: toNonEmptyString(data.conversationId),
                         });
                     } else {
                         if (conversationId) {

@@ -16,7 +16,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StatusBar, ImageBackground, Alert,
-  Image, Linking, Keyboard, Modal, ActivityIndicator,
+  Image, Linking, Keyboard, Modal, ActivityIndicator, AppState,
 } from 'react-native';
 import { styles } from './ConversationScreen.styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -636,13 +636,15 @@ const bubbleStyles = StyleSheet.create({
 });
 
 export default function ConversationScreen({ navigation, route }: ConversationScreenProps) {
-  const { userId, userName } = route.params || {};
+  const { userId, userName, conversationId: paramConversationId } = route.params || {};
 
   // CRITICAL FIX: ALL hooks MUST be declared BEFORE any early return
   // to comply with React Rules of Hooks (same hook count on every render)
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [peerLastSeen, setPeerLastSeen] = useState<number | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<'online' | 'mesh' | 'offline'>('offline');
   const [, setPhysicalDeviceId] = useState<string | null>(null);
   // ELITE FIX: Track identity ID in state so selfIds recalculates when identity loads
@@ -671,16 +673,19 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   // ELITE: InViewPort auto-read receipts — marks messages as read when scrolled into view
   const selfIdsRef = useRef<Set<string>>(new Set());
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 1000 }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: MeshMessage; isViewable: boolean }> }) => {
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: ListItem; isViewable: boolean }> }) => {
     const myUid = identityService.getUid();
     if (!myUid) return;
     const currentSelfIds = selfIdsRef.current;
     for (const { item, isViewable } of viewableItems) {
       if (!isViewable) continue;
-      if (currentSelfIds.has(item.senderId)) continue;
-      if (item.status === 'read') continue;
-      useMessageStore.getState().syncReadReceipt(item.id, item.senderId);
-      useMeshStore.getState().updateMessage(item.id, { status: 'read' });
+      // Skip date separator items — they have no message data
+      if (item.kind !== 'message') continue;
+      const msg = item.data;
+      if (currentSelfIds.has(msg.senderId)) continue;
+      if (msg.status === 'read') continue;
+      useMessageStore.getState().syncReadReceipt(msg.id, msg.senderId);
+      useMeshStore.getState().updateMessage(msg.id, { status: 'read' });
     }
   }).current;
 
@@ -939,17 +944,17 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       });
   }, []);
 
-  // FIX: Auto-mark conversation as read ONLY on mount (not on every message arrival).
+  // FIX: Auto-mark conversation as read when peerIdCandidates resolve.
   // Per-message read receipts are handled by onViewableItemsChanged (InViewPort mechanism).
-  // Bulk marking all on every new message would wrongly mark unread future messages.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Runs once when peer IDs are available (may be async due to UID resolution).
+  const hasMarkedReadRef = useRef(false);
   useEffect(() => {
-    if (peerIdCandidates.size === 0) return;
-    // Mark conversation-level unread count on mount only
+    if (peerIdCandidates.size === 0 || hasMarkedReadRef.current) return;
+    hasMarkedReadRef.current = true;
     peerIdCandidates.forEach((peerId) => {
       useMessageStore.getState().markConversationRead(peerId);
     });
-  }, []); // Run only on mount — intentionally omitting peerIdCandidates
+  }, [peerIdCandidates]);
 
   // Keep hybrid inbox bridge active while conversation is open (cloud + mesh)
   useEffect(() => {
@@ -1002,14 +1007,28 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
         // Resolve peer UID for V3 conversation lookup
         const peerUid = await firebaseDataService.resolveRecipientUid(activeRecipientId);
-        if (!peerUid || disposed) return;
 
-        // Find existing DM conversation (don't create one just by opening the screen)
-        const { findOrCreateDMConversation } = await import('../../services/firebase/FirebaseMessageOperations');
-        const conversation = await findOrCreateDMConversation(uid, peerUid);
+        // CRITICAL FIX: If conversationId was passed from notification tap, use it directly.
+        // This bypasses the pairKey Firestore query (which requires a composite index and can
+        // fail) and subscribes to the exact conversation the sender wrote the message to.
+        // Without this fix, cold-start taps always opened a NEW empty conversation.
+        let conversationId: string | null = null;
+        if (paramConversationId && paramConversationId.length > 0) {
+          conversationId = paramConversationId;
+          logger.info(`Using conversationId from notification params: ${conversationId}`);
+        } else if (peerUid) {
+          const { findOrCreateDMConversation } = await import('../../services/firebase/FirebaseMessageOperations');
+          const conv = await findOrCreateDMConversation(uid, peerUid);
+          conversationId = conv?.id || null;
+        } else {
+          logger.warn('Cannot resolve conversation: no paramConversationId and peerUid is null');
+          return;
+        }
+        const conversation = conversationId ? { id: conversationId } : null;
         if (!conversation?.id || disposed) return;
 
         logger.info(`Direct V3 subscription for conversation ${conversation.id}`);
+        if (!disposed) setActiveConversationId(conversation.id);
         const unsub = await firebaseDataService.subscribeToConversationMessages(
           conversation.id,
           (msgs: any[]) => {
@@ -1057,16 +1076,90 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       }
     };
 
-    setupDirectConversationSubscription().catch((error) => {
-      logger.warn('Direct conversation subscription setup error:', error);
+    // Retry helper — max 3 attempts, 2s delay between each
+    const setupWithRetry = async (attempt = 0): Promise<void> => {
+      if (disposed) return;
+      try {
+        await setupDirectConversationSubscription();
+      } catch (error) {
+        if (!disposed && attempt < 2) {
+          logger.warn(`Direct conversation subscription retry ${attempt + 1}/2`);
+          await new Promise(r => setTimeout(r, 2000));
+          return setupWithRetry(attempt + 1);
+        }
+        logger.warn('Direct conversation subscription permanently failed:', error);
+      }
+    };
+    setupWithRetry();
+
+    // Re-setup subscription on foreground if screen is open
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && !disposed) {
+        // HybridMessageService handles resubscription, but also ensure our
+        // direct subscription is active (belt-and-suspenders)
+        if (!unsubConversation) {
+          setupWithRetry().catch(() => {});
+        }
+      }
     });
 
     return () => {
       disposed = true;
+      appStateSub.remove();
       if (unsubConversation) {
         unsubConversation();
       }
     };
+  }, [activeRecipientId]);
+
+  // ELITE: Typing indicator subscription — Firestore-based for remote users
+  useEffect(() => {
+    if (!activeConversationId) return;
+    const myUid = identityService.getUid();
+    if (!myUid) return;
+
+    let unsubTyping: (() => void) | null = null;
+    let typingClearTimer: NodeJS.Timeout | null = null;
+
+    (async () => {
+      try {
+        const { subscribeToTyping } = await import('../../services/firebase/FirebaseMessageOperations');
+        unsubTyping = subscribeToTyping(activeConversationId, myUid, (typingUsers) => {
+          const peerIsTyping = typingUsers.size > 0;
+          setIsTyping(peerIsTyping);
+
+          // Auto-clear typing after 6 seconds even if Firestore doesn't update
+          if (peerIsTyping) {
+            if (typingClearTimer) clearTimeout(typingClearTimer);
+            typingClearTimer = setTimeout(() => setIsTyping(false), 6000);
+          }
+        });
+      } catch { /* non-critical */ }
+    })();
+
+    return () => {
+      unsubTyping?.();
+      if (typingClearTimer) clearTimeout(typingClearTimer);
+    };
+  }, [activeConversationId]);
+
+  // ELITE: Last seen subscription — show "Son görülme: X dk önce" in header
+  useEffect(() => {
+    const peerId = activeRecipientId;
+    if (!peerId) return;
+
+    let unsubLastSeen: (() => void) | null = null;
+
+    (async () => {
+      try {
+        const { subscribeToLastSeen } = await import('../../services/firebase/FirebaseMessageOperations');
+        unsubLastSeen = subscribeToLastSeen(peerId, (lastSeen) => {
+          setPeerLastSeen(lastSeen);
+        });
+      } catch { /* non-critical */ }
+    })();
+
+    return () => { unsubLastSeen?.(); };
   }, [activeRecipientId]);
 
   // ELITE: Cleanup voice recording interval on unmount
@@ -1090,6 +1183,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   }, []);
 
   useEffect(() => {
+    // iOS: use "will" events for snappy response. "Did" events are redundant and cause
+    // double scrollToEnd. Interactive dismiss is handled by KeyboardAvoidingView.
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, () => {
@@ -1100,24 +1195,10 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
       }, 100);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
-    // iOS interactive dismiss may skip "will" callbacks on some builds.
-    const showDidSub = Platform.OS === 'ios'
-      ? Keyboard.addListener('keyboardDidShow', () => {
-          setKeyboardVisible(true);
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        })
-      : null;
-    const hideDidSub = Platform.OS === 'ios'
-      ? Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))
-      : null;
 
     return () => {
       showSub.remove();
       hideSub.remove();
-      showDidSub?.remove();
-      hideDidSub?.remove();
     };
   }, []);
 
@@ -1132,29 +1213,14 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     return () => unsubscribe();
   }, [peerIdCandidates]);
 
-  // Subscribe to new messages and auto-scroll
+  // Auto-scroll only when user is near the bottom (don't disrupt history reading)
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && !showScrollFab) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
-  }, [messages.length]);
-
-  // DEFENSIVE: If userId is missing, prevent crash (AFTER all hooks)
-  if (!userId || typeof userId !== 'string') {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' }}>
-        <Text style={{ fontSize: 16, color: '#64748b', marginBottom: 16 }}>Konuşma bulunamadı</Text>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={{ paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#3b82f6', borderRadius: 12 }}
-        >
-          <Text style={{ color: '#fff', fontWeight: '600' }}>Geri Dön</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  }, [messages.length, showScrollFab]);
 
   // Handle text change with typing indicator (throttled to max once per 3 seconds)
   const handleTextChange = useCallback((newText: string) => {
@@ -1164,7 +1230,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     if (newText.length > 0) {
       const now = Date.now();
       if (now - lastTypingBroadcastRef.current >= 3000) {
-        const typingConversationId = activeRecipientId || userId;
+        // Use real Firestore conversationId for cloud delivery, fall back to peer ID for mesh
+        const typingConversationId = activeConversationId || activeRecipientId || userId;
         if (typingConversationId) {
           hybridMessageService.broadcastTyping(typingConversationId);
           lastTypingBroadcastRef.current = now;
@@ -1300,15 +1367,29 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
   // ELITE: Handle delete message — local + cloud sync
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    // Update MeshStore locally: mark content as deleted
-    updateMeshMessage(messageId, { content: 'Bu mesaj silindi' });
+    // Check if "delete for everyone" was requested
+    const isDeleteForEveryone = messageId.startsWith('EVERYONE:');
+    const actualMessageId = isDeleteForEveryone ? messageId.slice(9) : messageId;
 
-    // Sync to messageStore (handles Firebase cloud sync internally)
-    useMessageStore.getState().deleteMessage(messageId).catch(() => {});
+    if (isDeleteForEveryone && activeConversationId) {
+      // Cloud delete: mark message as deleted in Firestore for all participants
+      try {
+        const { deleteMessageForEveryone } = await import('../../services/firebase/FirebaseMessageOperations');
+        await deleteMessageForEveryone(activeConversationId, actualMessageId);
+      } catch {
+        // Fall back to local-only deletion
+      }
+    }
+
+    // Local: Update MeshStore — mark content as deleted
+    updateMeshMessage(actualMessageId, { content: 'Bu mesaj silindi' });
+
+    // Local: Sync to messageStore
+    useMessageStore.getState().deleteMessage(actualMessageId).catch(() => {});
 
     haptics.notificationWarning();
     setOptionsModalVisible(false);
-  }, [updateMeshMessage]);
+  }, [updateMeshMessage, activeConversationId]);
 
   // ELITE: Handle forward message — WhatsApp-style contact picker
   const handleForwardMessage = useCallback(async (messageId: string) => {
@@ -1688,6 +1769,18 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     return map;
   }, [messages]);
 
+  // Pre-built index: message ID → next ListItem in listData (O(1) tail detection)
+  const nextItemMap = useMemo(() => {
+    const map = new Map<string, ListItem | undefined>();
+    for (let i = 0; i < listData.length; i++) {
+      const item = listData[i];
+      if (item.kind === 'message') {
+        map.set(item.data.id, listData[i + 1]);
+      }
+    }
+    return map;
+  }, [listData]);
+
   // Extract renderItem to useCallback for FlatList perf
   const renderItem = useCallback(({ item }: { item: ListItem }) => {
     if (item.kind === 'separator') {
@@ -1699,8 +1792,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     }
     const msg = item.data;
     const isMe = selfIds.has(msg.senderId);
-    const nextIndex = listData.findIndex(i => i.kind === 'message' && (i as { kind: 'message'; data: MeshMessage }).data.id === msg.id) + 1;
-    const nextItem = listData[nextIndex];
+    // O(1) tail detection via pre-built index map (was O(n) findIndex per item)
+    const nextItem = nextItemMap.get(msg.id);
     const nextMsg = nextItem?.kind === 'message' ? nextItem.data : undefined;
     const isLast = !nextMsg || nextMsg.senderId !== msg.senderId;
     const replyToContent = msg.replyTo ? (messageContentMap.get(msg.replyTo) || msg.replyPreview) : undefined;
@@ -1732,7 +1825,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         />
       </Pressable>
     );
-  }, [listData, selfIds, messageContentMap, retryMessage, handleMessageLongPress]);
+  }, [nextItemMap, selfIds, messageContentMap, retryMessage, handleMessageLongPress]);
 
   const keyExtractor = useCallback((item: ListItem) =>
     item.kind === 'separator' ? item.id : item.data.id,
@@ -1748,6 +1841,21 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     flatListRef.current?.scrollToEnd({ animated: true });
     setShowScrollFab(false);
   }, []);
+
+  // DEFENSIVE: If userId is missing, prevent crash (MUST be AFTER all hooks)
+  if (!userId || typeof userId !== 'string') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' }}>
+        <Text style={{ fontSize: 16, color: '#64748b', marginBottom: 16 }}>Konuşma bulunamadı</Text>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{ paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#3b82f6', borderRadius: 12 }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '600' }}>Geri Dön</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <ImageBackground
@@ -1771,12 +1879,39 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
           <View style={styles.headerInfo}>
             <Text style={styles.headerName}>{conversationTitle}</Text>
             <View style={styles.statusBadge}>
-              <NetworkBanner status={connectionState} />
+              {isTyping ? (
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#22c55e' }}>yazıyor...</Text>
+              ) : peerLastSeen ? (
+                <Text style={{ fontSize: 11, color: '#94a3b8' }}>
+                  {(() => {
+                    const diff = Date.now() - peerLastSeen;
+                    if (diff < 60_000) return 'şimdi aktif';
+                    if (diff < 3600_000) return `${Math.floor(diff / 60_000)} dk önce`;
+                    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} saat önce`;
+                    return `${Math.floor(diff / 86400_000)} gün önce`;
+                  })()}
+                </Text>
+              ) : (
+                <NetworkBanner status={connectionState} />
+              )}
             </View>
           </View>
 
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable style={styles.callBtn} onPress={() => Alert.alert('Arama', 'Mesh araması başlatılıyor...')}>
+            <Pressable
+              style={styles.callBtn}
+              onPress={() => {
+                if (!activeRecipientId) {
+                  Alert.alert('Hata', 'Arama yapılacak kişi bulunamadı.');
+                  return;
+                }
+                haptics.impactMedium();
+                navigation.navigate('VoiceCall', {
+                  recipientUid: activeRecipientId,
+                  recipientName: conversationTitle,
+                });
+              }}
+            >
               <Ionicons name="call" size={20} color="#334155" />
             </Pressable>
 

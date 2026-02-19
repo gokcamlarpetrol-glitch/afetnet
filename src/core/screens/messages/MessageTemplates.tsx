@@ -177,48 +177,21 @@ export default function MessageTemplates() {
           read: true,
         });
 
-        // ELITE: Ensure a conversation entry exists so broadcast messages appear in the list
-        const existingConversations = useMessageStore.getState().conversations;
-        const broadcastConv = existingConversations.find(c => c.userId === BROADCAST_CONVERSATION_ID);
-        if (broadcastConv) {
-          // Update the existing broadcast conversation with the latest message
-          useMessageStore.getState().addConversation({
-            userId: BROADCAST_CONVERSATION_ID,
-            userName: 'Acil Durum Yayini',
-            lastMessage: template.message.substring(0, 80),
-            lastMessageTime: timestamp,
-            unreadCount: 0,
-          });
-        } else {
-          // Create the broadcast conversation entry
-          useMessageStore.getState().addConversation({
-            userId: BROADCAST_CONVERSATION_ID,
-            userName: 'Acil Durum Yayini',
-            lastMessage: template.message.substring(0, 80),
-            lastMessageTime: timestamp,
-            unreadCount: 0,
-          });
-        }
+        // Ensure a conversation entry exists so broadcast messages appear in the list
+        // addConversation handles both create and update (merge) internally
+        await useMessageStore.getState().addConversation({
+          userId: BROADCAST_CONVERSATION_ID,
+          userName: 'Acil Durum Yayini',
+          lastMessage: template.message.substring(0, 80),
+          lastMessageTime: timestamp,
+          unreadCount: 0,
+        });
 
-        // ELITE: Update conversations (sync operation, no await needed)
+        // Update conversations (sync operation, no await needed)
         useMessageStore.getState().updateConversations();
 
-        // ELITE: Send push notification for critical templates (hayati önem)
-        if (template.priority === 'critical' || template.priority === 'high') {
-          try {
-            const { notificationCenter } = await import('../../services/notifications/NotificationCenter');
-            await notificationCenter.notify('message', {
-              from: 'Acil Durum Mesajı',
-              senderName: 'Acil Durum Mesajı',
-              message: template.message,
-              messageId,
-              senderId: 'self',
-              isSOS: template.priority === 'critical',
-            }, 'MessageTemplates');
-          } catch (notifError) {
-            logger.error('Failed to send template notification:', notifError);
-          }
-        }
+        // NOTE: No self-notification here — user just sent the template themselves.
+        // Recipients will receive notifications via BLE mesh broadcast.
 
         logger.info(`Template "${template.title}" sent successfully`);
 

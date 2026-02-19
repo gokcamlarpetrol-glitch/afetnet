@@ -1,7 +1,7 @@
 import { getErrorMessage } from '../../utils/errorUtils';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../../utils/storage';
 import { PreparednessPlanService } from '../services/PreparednessPlanService';
 import { PreparednessPlan, PlanItem, PlanSection } from '../types/ai.types'; // Use centralized types
 import { createLogger } from '../../utils/logger';
@@ -151,7 +151,7 @@ export const usePreparednessStore = create<PreparednessState>()(
     }),
     {
       name: 'preparedness-storage-elite', // Changed name to reset old incompatible storage
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => eliteStorage),
       partialize: (state) => ({
         // Persist plan and ID, but not loading/error states
         plan: state.plan,

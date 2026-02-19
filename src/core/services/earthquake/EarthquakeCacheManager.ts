@@ -3,7 +3,7 @@
  * Manages caching of earthquake data
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Earthquake } from '../../stores/earthquakeStore';
 import { createLogger } from '../../utils/logger';
 
@@ -20,8 +20,8 @@ const OFFLINE_CACHE_MAX_AGE_HOURS = 24; // Maximum cache age for offline mode
  */
 export async function saveToCache(earthquakes: Earthquake[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(earthquakes));
-    await AsyncStorage.setItem(LAST_FETCH_KEY, String(Date.now()));
+    DirectStorage.setString(CACHE_KEY, JSON.stringify(earthquakes));
+    DirectStorage.setString(LAST_FETCH_KEY, String(Date.now()));
   } catch (error) {
     logger.error('Cache save error:', error);
   }
@@ -32,8 +32,8 @@ export async function saveToCache(earthquakes: Earthquake[]): Promise<void> {
  */
 export async function loadFromCache(): Promise<Earthquake[] | null> {
   try {
-    const cached = await AsyncStorage.getItem(CACHE_KEY);
-    const lastFetch = await AsyncStorage.getItem(LAST_FETCH_KEY);
+    const cached = DirectStorage.getString(CACHE_KEY);
+    const lastFetch = DirectStorage.getString(LAST_FETCH_KEY);
     
     if (!cached || !lastFetch) {
       return null;
@@ -51,8 +51,8 @@ export async function loadFromCache(): Promise<Earthquake[] | null> {
         logger.warn(`⚠️ Cache is ${cacheAgeHours.toFixed(1)} hours old (${OFFLINE_CACHE_MAX_AGE_HOURS}+ hours) - too old even for offline mode`);
       }
       // Clear very old cache
-      await AsyncStorage.removeItem(CACHE_KEY);
-      await AsyncStorage.removeItem(LAST_FETCH_KEY);
+      DirectStorage.delete(CACHE_KEY);
+      DirectStorage.delete(LAST_FETCH_KEY);
       return null;
     }
     
@@ -81,8 +81,8 @@ export async function loadFromCache(): Promise<Earthquake[] | null> {
     logger.error('Cache load error:', error);
     // Clear corrupted cache
     try {
-      await AsyncStorage.removeItem(CACHE_KEY);
-      await AsyncStorage.removeItem(LAST_FETCH_KEY);
+      DirectStorage.delete(CACHE_KEY);
+      DirectStorage.delete(LAST_FETCH_KEY);
     } catch (error) {
       // ELITE: Log cache errors but don't crash the app
       if (__DEV__) {
@@ -98,7 +98,7 @@ export async function loadFromCache(): Promise<Earthquake[] | null> {
  */
 export async function getCacheAge(): Promise<number | null> {
   try {
-    const lastFetch = await AsyncStorage.getItem(LAST_FETCH_KEY);
+    const lastFetch = DirectStorage.getString(LAST_FETCH_KEY);
     if (!lastFetch) {
       return null;
     }
@@ -114,8 +114,8 @@ export async function getCacheAge(): Promise<number | null> {
  */
 export async function clearCache(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(CACHE_KEY);
-    await AsyncStorage.removeItem(LAST_FETCH_KEY);
+    DirectStorage.delete(CACHE_KEY);
+    DirectStorage.delete(LAST_FETCH_KEY);
   } catch (error) {
     logger.error('Cache clear error:', error);
   }

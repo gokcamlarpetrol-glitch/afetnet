@@ -17,6 +17,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
 import SOSFullScreenAlert from './components/SOSFullScreenAlert';
+import IncomingCallOverlay from './components/IncomingCallOverlay';
 import { EULAModal } from './components/compliance/EULAModal';
 import { useTrialStore } from './stores/trialStore';
 import { useOnboardingStore } from './stores/onboardingStore';
@@ -193,6 +194,9 @@ export default function CoreApp() {
 
             {/* ELITE V4: Full-screen SOS alert for foreground notifications */}
             <SOSFullScreenAlert />
+
+            {/* ELITE: Incoming voice call overlay */}
+            <IncomingCallOverlay />
           </NavigationContainer>
         </ErrorBoundary>
       </SafeAreaProvider>

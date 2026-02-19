@@ -10,7 +10,7 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../core/utils/storage';
 import * as Crypto from 'expo-crypto';
 import { createLogger } from '../core/utils/logger';
 
@@ -58,8 +58,8 @@ export async function getInstallationId(): Promise<string> {
             // SecureStore unavailable (Expo Go, simulator) — fall through
         }
 
-        // 2. Try AsyncStorage fallback
-        const asyncId = await AsyncStorage.getItem(INSTALLATION_ID_KEY);
+        // 2. Try DirectStorage fallback
+        const asyncId = DirectStorage.getString(INSTALLATION_ID_KEY);
         if (asyncId && asyncId.startsWith('inst-')) {
             cachedInstallationId = asyncId;
             // Replicate to SecureStore for durability
@@ -75,7 +75,7 @@ export async function getInstallationId(): Promise<string> {
         try {
             await SecureStore.setItemAsync(INSTALLATION_ID_SECURE_KEY, newId);
         } catch { /* best-effort */ }
-        await AsyncStorage.setItem(INSTALLATION_ID_KEY, newId);
+        DirectStorage.setString(INSTALLATION_ID_KEY, newId);
 
         cachedInstallationId = newId;
         logger.info(`🆔 New installation ID generated: ${newId}`);
@@ -96,7 +96,7 @@ export async function clearInstallationId(): Promise<void> {
         await SecureStore.deleteItemAsync(INSTALLATION_ID_SECURE_KEY);
     } catch { /* best-effort */ }
     try {
-        await AsyncStorage.removeItem(INSTALLATION_ID_KEY);
+        DirectStorage.delete(INSTALLATION_ID_KEY);
     } catch { /* best-effort */ }
     cachedInstallationId = null;
     logger.info('🗑️ Installation ID cleared');

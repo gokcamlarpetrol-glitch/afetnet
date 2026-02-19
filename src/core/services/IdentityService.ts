@@ -13,7 +13,7 @@
  * @version 4.0.0 — Single-UID Clean Architecture
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { User } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import { getDeviceId as getHardwareDeviceId } from '../../lib/device';
@@ -312,7 +312,8 @@ class IdentityService {
       for (const param of ['payload', 'data', 'qr', 'uid', 'id']) {
         const val = trim(url.searchParams.get(param));
         if (val) {
-          const result = this.parseQRPayload(val);
+          // CRITICAL FIX: parseQRPayload is async — must await recursive call
+          const result = await this.parseQRPayload(val);
           if (result) return result;
         }
       }
@@ -463,7 +464,7 @@ class IdentityService {
   async clearIdentity(): Promise<void> {
     this.identity = null;
     this.isInitialized = false;
-    await AsyncStorage.removeItem(IDENTITY_CACHE_KEY);
+    try { DirectStorage.delete(IDENTITY_CACHE_KEY); } catch { /* best effort */ }
     logger.info('🗑️ Identity cleared');
   }
 
@@ -479,7 +480,7 @@ class IdentityService {
   private async cacheIdentity(): Promise<void> {
     if (!this.identity) return;
     try {
-      await AsyncStorage.setItem(IDENTITY_CACHE_KEY, JSON.stringify(this.identity));
+      DirectStorage.setString(IDENTITY_CACHE_KEY, JSON.stringify(this.identity));
     } catch (error) {
       logger.error('Failed to cache identity:', error);
     }
@@ -487,7 +488,7 @@ class IdentityService {
 
   private async loadCachedIdentity(): Promise<UserIdentity | null> {
     try {
-      const cached = await AsyncStorage.getItem(IDENTITY_CACHE_KEY);
+      const cached = DirectStorage.getString(IDENTITY_CACHE_KEY) ?? null;
       if (cached) return JSON.parse(cached) as UserIdentity;
     } catch (error) {
       logger.error('Failed to load cached identity:', error);

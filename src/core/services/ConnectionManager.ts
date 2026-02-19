@@ -16,8 +16,8 @@ const logger = createLogger('ConnectionManager');
 export type ConnectionMode = 'ONLINE' | 'MESH' | 'DISCONNECTED';
 
 class ConnectionManager {
-  private _isConnected: boolean = false;
-  private _isInternetReachable: boolean = false;
+  private _isConnected: boolean = true;
+  private _isInternetReachable: boolean | null = null;
   private _connectionType: string | null = null;
   private listeners: ((mode: ConnectionMode) => void)[] = [];
   // ELITE: Track NetInfo subscription for cleanup
@@ -28,23 +28,19 @@ class ConnectionManager {
   }
 
   private startMonitoring() {
-    // CRITICAL FIX: Eagerly fetch initial network state.
-    // Without this, _isConnected and _isInternetReachable start as false,
-    // and any code that checks isOnline before the first listener callback
-    // (e.g., ensureCloudSubscriptions in init.ts) incorrectly thinks we're offline.
     NetInfo.fetch().then((state: NetInfoState) => {
-      this._isConnected = state.isConnected ?? false;
-      this._isInternetReachable = state.isInternetReachable ?? false;
+      this._isConnected = state.isConnected ?? true;
+      this._isInternetReachable = state.isInternetReachable;
       this._connectionType = state.type;
     }).catch(() => {
-      // Ignore — listener will pick up the state eventually
+      // Assume online until proven otherwise
     });
 
     this.netInfoSubscription = NetInfo.addEventListener((state: NetInfoState) => {
       const prevMode = this.getConnectionMode();
 
-      this._isConnected = state.isConnected ?? false;
-      this._isInternetReachable = state.isInternetReachable ?? false;
+      this._isConnected = state.isConnected ?? true;
+      this._isInternetReachable = state.isInternetReachable;
       this._connectionType = state.type;
 
       const newMode = this.getConnectionMode();
@@ -57,14 +53,22 @@ class ConnectionManager {
   }
 
   /**
-     * Get the current high-level connection mode
+     * Get the current high-level connection mode.
+     * CRITICAL: isInternetReachable is often null on iOS (unknown state).
+     * Treat null as ONLINE (optimistic) — Firestore handles offline queuing
+     * automatically. The old behavior (null → false → MESH) silently blocked
+     * ALL cloud message writes, breaking messaging completely.
      */
   getConnectionMode(): ConnectionMode {
-    if (this._isConnected && this._isInternetReachable) {
+    // If connected AND reachable (or reachability unknown), assume ONLINE.
+    // Only go to MESH/DISCONNECTED when we KNOW we're offline.
+    if (this._isConnected && this._isInternetReachable !== false) {
       return 'ONLINE';
     }
-    // If no internet, check if Mesh Service is active/running
-    // (Assuming MeshService is always 'available' as an offline fallback if enabled)
+    if (this._isConnected) {
+      // Connected but explicitly not reachable — try mesh
+      return 'MESH';
+    }
     return 'MESH';
   }
 

@@ -18,7 +18,7 @@ import AudioModule from 'expo-audio/build/AudioModule';
 import * as FileSystem from 'expo-file-system';
 import { createLogger } from '../utils/logger';
 import { bleMeshService } from './BLEMeshService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { identityService } from './IdentityService';
 import { firebaseStorageService } from './FirebaseStorageService';
 import { Buffer } from 'buffer';
@@ -456,7 +456,7 @@ class VoiceMessageService {
 
   private async loadMessages() {
     try {
-      const data = await AsyncStorage.getItem(VOICE_MESSAGE_STORAGE);
+      const data = DirectStorage.getString(VOICE_MESSAGE_STORAGE) ?? null;
       if (data) {
         this.voiceMessages = JSON.parse(data);
       }
@@ -469,7 +469,7 @@ class VoiceMessageService {
     try {
       // Keep only last 50 messages
       const toSave = this.voiceMessages.slice(-50);
-      await AsyncStorage.setItem(VOICE_MESSAGE_STORAGE, JSON.stringify(toSave));
+      DirectStorage.setString(VOICE_MESSAGE_STORAGE, JSON.stringify(toSave));
     } catch (e) {
       logger.warn('Failed to save voice messages');
     }

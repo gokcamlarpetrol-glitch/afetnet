@@ -19,7 +19,7 @@
  */
 
 import { AccessibilityInfo, Platform, I18nManager } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('AccessibilityServiceElite');
@@ -221,7 +221,7 @@ class AccessibilityServiceElite {
      */
     private async loadSettings(): Promise<void> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEY);
+            const saved = DirectStorage.getString(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
                 this.settings = { ...DEFAULT_SETTINGS, ...parsed };
@@ -236,7 +236,7 @@ class AccessibilityServiceElite {
      */
     private async saveSettings(): Promise<void> {
         try {
-            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
+            DirectStorage.setString(STORAGE_KEY, JSON.stringify(this.settings));
         } catch (error) {
             logger.error('Failed to save accessibility settings:', error);
         }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, Image, ActionSheetIOS, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -82,6 +82,36 @@ export const MemberCard = React.memo(function MemberCard({
     );
   };
 
+  // Long-press: show Edit/Delete options
+  const handleLongPress = () => {
+    haptics.impactMedium();
+    if (Platform.OS === 'ios') {
+      const options = ['İptal', 'Düzenle', 'Sil'];
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 2,
+          title: member.name,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) onEdit?.(member);
+          else if (buttonIndex === 2) handleDelete();
+        },
+      );
+    } else {
+      Alert.alert(
+        member.name,
+        'Ne yapmak istersiniz?',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Düzenle', onPress: () => onEdit?.(member) },
+          { text: 'Sil', style: 'destructive', onPress: handleDelete },
+        ],
+      );
+    }
+  };
+
   // Location check (live -> legacy -> lastKnown fallback)
   const resolvedLocation = resolveFamilyMemberLocation(member);
   const hasLocation = !!resolvedLocation;
@@ -121,6 +151,7 @@ export const MemberCard = React.memo(function MemberCard({
     <Animated.View entering={FadeInDown.delay(index * 60).springify()} style={animatedStyle}>
       <Pressable
         onPress={handlePress}
+        onLongPress={handleLongPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         style={styles.cardOuter}
@@ -211,62 +242,51 @@ export const MemberCard = React.memo(function MemberCard({
             </View>
           </View>
 
-          {/* Bottom: Quick action icons */}
-          <View style={styles.actionsRow}>
-            {onMessage && (
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  haptics.impactLight();
-                  onMessage(member);
-                }}
-              >
-                <View style={[styles.actionIconCircle, { backgroundColor: '#ede9fe' }]}>
-                  <Ionicons name="chatbubble" size={15} color="#7c3aed" />
-                </View>
-                <Text style={[styles.actionLabel, { color: '#7c3aed' }]}>Mesaj</Text>
-              </Pressable>
-            )}
-            {onLocate && (
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  haptics.impactLight();
-                  onLocate(member);
-                }}
-              >
-                <View style={[styles.actionIconCircle, { backgroundColor: '#dbeafe' }]}>
-                  <Ionicons name="navigate" size={15} color="#2563eb" />
-                </View>
-                <Text style={[styles.actionLabel, { color: '#2563eb' }]}>Konum</Text>
-              </Pressable>
-            )}
-            {onEdit && (
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  haptics.impactLight();
-                  onEdit(member);
-                }}
-              >
-                <View style={[styles.actionIconCircle, { backgroundColor: '#fef3c7' }]}>
-                  <Ionicons name="create-outline" size={15} color="#d97706" />
-                </View>
-                <Text style={[styles.actionLabel, { color: '#d97706' }]}>Düzenle</Text>
-              </Pressable>
-            )}
-            {onDelete && (
-              <Pressable
-                style={styles.actionBtn}
-                onPress={handleDelete}
-              >
-                <View style={[styles.actionIconCircle, { backgroundColor: '#fee2e2' }]}>
-                  <Ionicons name="trash-outline" size={15} color="#dc2626" />
-                </View>
-                <Text style={[styles.actionLabel, { color: '#dc2626' }]}>Sil</Text>
-              </Pressable>
-            )}
-          </View>
+          {/* Bottom: Quick action icons (Edit/Delete via long-press) */}
+          {(onMessage || onLocate) && (
+            <View style={styles.actionsRow}>
+              {onMessage && (
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onMessage(member);
+                  }}
+                >
+                  <View style={[styles.actionIconCircle, { backgroundColor: '#ede9fe' }]}>
+                    <Ionicons name="chatbubble" size={15} color="#7c3aed" />
+                  </View>
+                  <Text style={[styles.actionLabel, { color: '#7c3aed' }]}>Mesaj</Text>
+                </Pressable>
+              )}
+              {onLocate && (
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onLocate(member);
+                  }}
+                >
+                  <View style={[styles.actionIconCircle, { backgroundColor: '#dbeafe' }]}>
+                    <Ionicons name="navigate" size={15} color="#2563eb" />
+                  </View>
+                  <Text style={[styles.actionLabel, { color: '#2563eb' }]}>Konum</Text>
+                </Pressable>
+              )}
+              {/* Hint for long-press */}
+              {(onEdit || onDelete) && (
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={handleLongPress}
+                >
+                  <View style={[styles.actionIconCircle, { backgroundColor: '#f1f5f9' }]}>
+                    <Ionicons name="ellipsis-horizontal" size={15} color="#64748b" />
+                  </View>
+                  <Text style={[styles.actionLabel, { color: '#64748b' }]}>Daha</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
       </Pressable>
     </Animated.View>

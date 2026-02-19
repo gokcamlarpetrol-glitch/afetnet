@@ -11,7 +11,7 @@
  */
 
 import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { useMeshStore } from './mesh/MeshStore';
 
@@ -262,14 +262,17 @@ class OfflineSyncService {
 
   private async loadQueue() {
     try {
-      const data = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
-      if (data) this.queue = JSON.parse(data);
+      const data = DirectStorage.getString(SYNC_QUEUE_KEY) ?? null;
+      if (data) {
+        const parsed = JSON.parse(data);
+        this.queue = Array.isArray(parsed) ? parsed : [];
+      }
     } catch { /* Storage read may fail silently */ }
   }
 
   private async saveQueue() {
     try {
-      await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(this.queue));
+      DirectStorage.setString(SYNC_QUEUE_KEY, JSON.stringify(this.queue));
     } catch { /* Storage write may fail silently */ }
   }
 

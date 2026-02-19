@@ -9,10 +9,6 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "type",
-          "order": "ASCENDING"
-        },
-        {
           "fieldPath": "participants",
           "arrayConfig": "CONTAINS"
         }

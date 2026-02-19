@@ -163,18 +163,18 @@ export default function SOSFullScreenAlert() {
 
     const handleOpenMaps = useCallback(() => {
         if (!alertData?.latitude || !alertData?.longitude) return;
+        handleDismiss();
 
-        const { latitude: lat, longitude: lng } = alertData;
-        const url = Platform.select({
-            ios: `maps:0,0?q=${lat},${lng}`,
-            default: `https://maps.google.com/?q=${lat},${lng}`,
-        });
-        if (url) {
-            Linking.openURL(url).catch(() => {
-                Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch(() => {});
+        // Navigate to in-app DisasterMap with SOS focus instead of external maps
+        import('../navigation/navigationRef').then(({ navigateTo }) => {
+            navigateTo('DisasterMap', {
+                focusOnSOS: true,
+                sosLatitude: alertData.latitude,
+                sosLongitude: alertData.longitude,
+                sosSenderName: alertData.senderName || 'SOS',
             });
-        }
-    }, [alertData]);
+        }).catch(() => { });
+    }, [alertData, handleDismiss]);
 
     const handleCall112 = useCallback(() => {
         haptics.impactHeavy();

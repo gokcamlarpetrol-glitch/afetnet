@@ -32,7 +32,7 @@ import { cryptoService } from './CryptoService';
 import { validateMessage, sanitizeMessage } from '../utils/messageSanitizer';
 import { LRUSet } from '../utils/LRUCache';
 import { Mutex, Debouncer, Throttle } from '../utils/Mutex';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { useMeshStore, type MeshMessage } from './mesh/MeshStore';
 import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import { AppState, AppStateStatus } from 'react-native';
@@ -148,6 +148,13 @@ class HybridMessageService {
   // P8: AppState subscription
   private appStateSubscription: { remove: () => void } | null = null;
 
+  // FOREGROUND RE-ENSURE: Reference to active cloud subscription handler
+  // Stored so handleAppStateChange can re-invoke it on foreground resume
+  private cloudEnsureRefresher: (() => Promise<void>) | null = null;
+
+  // CRITICAL FIX: Prevent concurrent initialize() race condition
+  private _initPromise: Promise<void> | null = null;
+
   constructor() {
     this.seenMessageIds = new LRUSet<string>(MAX_SEEN_MESSAGE_IDS);
     this.saveDebouncer = new Debouncer(QUEUE_SAVE_DEBOUNCE_MS);
@@ -157,7 +164,17 @@ class HybridMessageService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    // CRITICAL FIX: Prevent concurrent initialize() calls from racing
+    if (this._initPromise) return this._initPromise;
+    this._initPromise = this._doInitialize();
+    try {
+      await this._initPromise;
+    } finally {
+      this._initPromise = null;
+    }
+  }
 
+  private async _doInitialize(): Promise<void> {
     // CRITICAL FIX: Verify identity before registering device or setting up message processing
     const uid = identityService.getUid();
     if (!uid) {
@@ -229,19 +246,39 @@ class HybridMessageService {
       // Initialize Firebase service if needed
       await firebaseDataService.initialize();
 
-      // 1. Get active conversations (Inbox Threads)
+      // 1. Get active conversations — query conversations directly (not inbox)
+      // This matches the WhatsApp-style architecture: conversations are the source of truth
       const uid = identityService.getUid?.();
       if (!uid) {
         logger.debug('Cloud sync: No UID available, skipping.');
         return;
       }
-      const threads = await firebaseDataService.loadInboxThreads(uid);
+
+      // Try direct conversations query first, fall back to inbox threads
+      let threads: Array<{ conversationId: string }> = [];
+      try {
+        const { collection, query: firestoreQuery, where, getDocs } = await import('firebase/firestore');
+        const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (db) {
+          const q = firestoreQuery(
+            collection(db, 'conversations'),
+            where('participants', 'array-contains', uid),
+          );
+          const snapshot = await getDocs(q);
+          snapshot.forEach((docSnap) => threads.push({ conversationId: docSnap.id }));
+        }
+      } catch {
+        // Fallback to inbox threads if conversations query fails
+        threads = await firebaseDataService.loadInboxThreads(uid);
+      }
+
       if (!threads || threads.length === 0) {
-        logger.debug('Cloud sync: No inbox threads found.');
+        logger.debug('Cloud sync: No conversations found.');
         return;
       }
 
-      logger.info(`Cloud sync: Found ${threads.length} active threads. Hydrating...`);
+      logger.info(`Cloud sync: Found ${threads.length} active conversations. Hydrating...`);
 
       // 2. Fetch last 20 messages for each thread
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -262,8 +299,8 @@ class HybridMessageService {
               thread.conversationId
             );
 
-            // Take recent 20 locally
-            const recentMessages = Array.isArray(threadMessages) ? threadMessages.slice(0, 20) : [];
+            // Take recent messages — load generously to preserve full history on restart
+            const recentMessages = Array.isArray(threadMessages) ? threadMessages.slice(0, 200) : [];
 
             if (recentMessages && recentMessages.length > 0) {
               const selfIds = this.getSelfIdentityIds();
@@ -371,6 +408,13 @@ class HybridMessageService {
       this.appStateSubscription = null;
     }
 
+    // CRITICAL FIX: Clear delivery callbacks to prevent memory leak
+    this.deliveryCallbacks.clear();
+
+    // Clear typing and connection callbacks
+    this.typingCallbacks.clear();
+    this.connectionCallbacks.clear();
+
     // Force save queue
     this.saveQueueImmediate();
 
@@ -401,6 +445,13 @@ class HybridMessageService {
       // Process queued messages immediately on foreground resume (don't wait 10s)
       if (this.queue.length > 0) {
         this.processQueue();
+      }
+      // CRITICAL: Re-ensure cloud subscriptions on foreground resume.
+      // Firestore listeners may have died during backgrounding (auth token refresh,
+      // network interruption). Without this, messages are missed until the next
+      // online connection event.
+      if (this.cloudEnsureRefresher) {
+        this.cloudEnsureRefresher().catch(() => {});
       }
       logger.debug('HybridMessageService resumed (foreground)');
     }
@@ -646,12 +697,18 @@ class HybridMessageService {
   }
 
   private async resolveRecipientIdForSend(recipientId?: string): Promise<string | undefined> {
+    if (!recipientId) return undefined;
+    const trimmed = recipientId.trim();
+    if (!trimmed) return undefined;
+
     const resolved = this.resolveRecipientId(recipientId);
     logger.info(`🔍 resolveRecipientIdForSend: input="${recipientId}", after resolveRecipientId="${resolved}"`);
-    if (!resolved || resolved === 'broadcast' || UID_REGEX.test(resolved)) {
+
+    // Already a valid UID — return directly (with self-UID alias detection)
+    if (resolved && UID_REGEX.test(resolved)) {
       // If alias resolution collapsed to current user's UID, preserve the original
       // non-UID recipient alias for mesh routing (multi-device/same-account safety).
-      if (resolved && UID_REGEX.test(resolved) && recipientId) {
+      if (recipientId) {
         const rawRecipient = recipientId.trim();
         const selfIds = this.getSelfIdentityIds();
         if (
@@ -667,6 +724,16 @@ class HybridMessageService {
       return resolved;
     }
 
+    // Broadcast — return as-is
+    if (resolved === 'broadcast') return 'broadcast';
+
+    // Non-routable (me, group:*) — no point in Firestore lookup
+    if (isNonRoutableRecipientId(trimmed)) return undefined;
+
+    // CRITICAL FIX: For non-UID inputs (AFN codes, device IDs, etc.),
+    // attempt Firestore resolution. Previously this code was unreachable
+    // because resolveRecipientId() returned undefined for non-UIDs,
+    // and the !resolved check returned early before reaching this block.
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
       try {
@@ -674,17 +741,17 @@ class HybridMessageService {
       } catch {
         // best effort
       }
-      const resolvedUid = await firebaseDataService.resolveRecipientUid(resolved);
+      const resolvedUid = await firebaseDataService.resolveRecipientUid(trimmed);
       if (resolvedUid && UID_REGEX.test(resolvedUid)) {
-        logger.info(`🔍 resolveRecipientIdForSend: Firestore resolved "${resolved}" → UID ${resolvedUid}`);
+        logger.info(`🔍 resolveRecipientIdForSend: Firestore resolved "${trimmed}" → UID ${resolvedUid}`);
         return resolvedUid;
       }
-      logger.warn(`⚠️ resolveRecipientIdForSend: Firestore could NOT resolve "${resolved}" to UID — using raw value`);
+      logger.warn(`⚠️ resolveRecipientIdForSend: Firestore could NOT resolve "${trimmed}" to UID`);
     } catch (error) {
-      logger.debug(`resolveRecipientIdForSend fallback failed for "${resolved}"`, error);
+      logger.debug(`resolveRecipientIdForSend Firestore lookup failed for "${trimmed}"`, error);
     }
 
-    return resolved;
+    return undefined;
   }
 
   private normalizeIdentity(value: string | null | undefined): string {
@@ -784,7 +851,7 @@ class HybridMessageService {
     }
   }
 
-  private pushCloudMessageToMeshStore(message: HybridMessage): void {
+  private pushCloudMessageToMeshStore(message: HybridMessage, conversationId?: string): void {
     if (this.isSystemPayloadForConversation(message)) {
       if (__DEV__) {
         logger.debug('Skipping system payload bridge push', {
@@ -865,7 +932,8 @@ class HybridMessageService {
       // because no conversation entry exists for the sender.
       if (!isFromMe && message.senderId && message.senderId !== 'unknown') {
         const conversations = useMessageStore.getState().conversations;
-        if (!conversations.some((c: { userId: string }) => c.userId === message.senderId)) {
+        const existingConv = conversations.find((c: { userId: string }) => c.userId === message.senderId);
+        if (!existingConv) {
           // ELITE FIX: Look up contact display name before falling back to generic name
           let displayName = message.senderName || '';
           if (!displayName) {
@@ -883,28 +951,30 @@ class HybridMessageService {
             lastMessage: (message.content || '').substring(0, 100),
             lastMessageTime: message.timestamp,
             unreadCount: 1,
+            // Store conversationId so MessagesScreen can pass it directly to ConversationScreen
+            // (bypasses pairKey lookup which requires a Firestore composite index)
+            ...(conversationId ? { conversationId } : {}),
+          });
+        } else if (conversationId && !existingConv.conversationId) {
+          // CRITICAL FIX: Backfill conversationId for conversations that were
+          // created before V3 (e.g., via mesh) and don't have a conversationId yet.
+          // Without this, tapping on the conversation in MessagesScreen doesn't
+          // pass conversationId to ConversationScreen → forces a pairKey lookup
+          // which may fail if the composite index isn't deployed.
+          useMessageStore.getState().addConversation({
+            ...existingConv,
+            conversationId,
+            lastMessage: (message.content || '').substring(0, 100),
+            lastMessageTime: message.timestamp,
+            unreadCount: (existingConv.unreadCount || 0) + 1,
           });
         }
 
-        // RC-1 FIX: Trigger notification for incoming messages.
-        // This was COMPLETELY MISSING — no code path ever called notificationCenter
-        // for cloud messages, so users never received any message notifications.
-        try {
-          const { notificationCenter } = require('./notifications/NotificationCenter');
-          notificationCenter.notify('message', {
-            from: message.senderId,
-            senderName: message.senderName || message.senderId,
-            message: message.content || '',
-            messageId: message.id,
-            senderId: message.senderId,
-            senderUid: message.senderId,
-            conversationId: message.senderId,
-            isSOS: message.type === 'SOS',
-            isCritical: message.priority === 'critical',
-          }, 'HybridMessageService').catch(() => { /* best-effort */ });
-        } catch {
-          // NotificationCenter not available — silent fail
-        }
+        // DUPLICATE-NOTIFICATION FIX: Local notify() removed.
+        // Cloud Function onNewConversationMessageV3 already sends FCM push for every
+        // incoming message. Calling notificationCenter.notify() here was firing a
+        // SECOND (local) notification on top of the FCM banner → user saw 2 alerts.
+        // The FCM push is the authoritative notification; this local call is redundant.
       }
     } catch (error) {
       // messageStore push is best-effort — MeshStore is still the backup display
@@ -953,7 +1023,9 @@ class HybridMessageService {
     const messageId = await this.generateId();
     const localId = await this.generateId();
 
-    const senderUid = identityService.getUid();
+    // CRITICAL FIX: Use myIdentity.uid directly (already validated above) instead of
+    // re-calling getUid() which could theoretically return null in a race condition
+    const senderUid = myIdentity.uid;
     const requestedRecipientId = typeof recipientId === 'string' ? recipientId.trim() : '';
     const resolvedRecipientId = await this.resolveRecipientIdForSend(recipientId);
     if (
@@ -1073,6 +1145,10 @@ class HybridMessageService {
     if (options.mediaLocalUri && !mediaUrl) {
       try {
         const { firebaseStorageService } = await import('./FirebaseStorageService');
+        // CRITICAL FIX: Initialize storage service before upload.
+        // Without this, uploadFile() returns null because _isInitialized is false,
+        // causing ALL image/voice messages to be sent without media URL.
+        await firebaseStorageService.initialize();
         const extension = mediaType === 'image' ? 'jpg' : 'm4a';
         const storageOwnerId = myIdentity.uid;
         if (!storageOwnerId) {
@@ -1088,12 +1164,17 @@ class HybridMessageService {
         });
         const { Buffer } = await import('buffer');
         const bytes = Uint8Array.from(Buffer.from(base64Data, 'base64'));
-        mediaUrl = await firebaseStorageService.uploadFile(storagePath, bytes, {
+        const uploadResult = await firebaseStorageService.uploadFile(storagePath, bytes, {
           contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
           customMetadata: {
             userId: storageOwnerId,
           },
-        }) ?? undefined;
+        });
+        if (uploadResult) {
+          mediaUrl = uploadResult;
+        } else {
+          logger.error(`🚨 Media upload returned null for ${messageId} — storage may not be initialized or upload failed silently`);
+        }
       } catch (error) {
         logger.error('Media upload failed:', error);
         // Continue without URL - binary mesh fallback below can still deliver media.
@@ -1113,7 +1194,7 @@ class HybridMessageService {
             caption: options.caption,
             timestamp,
             senderName: myIdentity.displayName,
-            senderId: identityService.getUid() || 'unknown',
+            senderId: myIdentity.uid || identityService.getUid() || 'unknown',
           });
         } else {
           await meshMediaService.sendVoice(
@@ -1124,7 +1205,7 @@ class HybridMessageService {
               transferId: messageId,
               timestamp,
               senderName: myIdentity.displayName,
-              senderId: identityService.getUid() || 'unknown',
+              senderId: myIdentity.uid || identityService.getUid() || 'unknown',
             },
           );
         }
@@ -1134,7 +1215,12 @@ class HybridMessageService {
       }
     }
 
-    const senderUid = identityService.getUid();
+    // CRITICAL: Warn if both cloud upload and mesh fallback failed — media may not reach recipient
+    if (!mediaUrl && !meshBinaryFallbackStarted && options.mediaLocalUri) {
+      logger.error(`🚨 CRITICAL: Media for message ${messageId} has NO cloud URL and NO mesh fallback — recipient will not receive ${mediaType} content`);
+    }
+
+    const senderUid = myIdentity.uid || identityService.getUid();
 
     // Content is caption or type description
     const content = options.caption ||
@@ -1349,8 +1435,11 @@ class HybridMessageService {
         logger.warn('Mesh broadcast failed:', meshError);
       }
 
-      // 2. CLOUD LAYER: Try if online — V3 Conversation Model
-      if (isOnline) {
+      // 2. CLOUD LAYER: Always attempt cloud write.
+      // Firestore SDK handles offline queuing automatically.
+      // Previously gated on isOnline which was unreliable on iOS
+      // (isInternetReachable=null → isOnline=false → cloud writes silently skipped).
+      {
         try {
           const { firebaseDataService } = await import('./FirebaseDataService');
 
@@ -1415,13 +1504,11 @@ class HybridMessageService {
           if (cloudSuccess) {
             logger.info(`✅ V3 Cloud send successful: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}`);
           } else {
-            logger.warn(`❌ V3 Cloud save FAILED: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId} — recipient UID may not be resolvable`);
+            logger.error(`🚨 V3 Cloud save FAILED: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}, senderUid=${authUid} — message will NOT be delivered until retry succeeds`);
           }
         } catch (cloudError) {
           logger.warn('❌ Cloud send failed:', cloudError);
         }
-      } else {
-        logger.info(`📡 Device offline — cloud layer skipped for msg ${message.id}`);
       }
 
       // V5: SOS Special Handling - must succeed on at least one channel
@@ -1475,6 +1562,10 @@ class HybridMessageService {
     const callbacks = this.deliveryCallbacks.get(messageId);
     if (callbacks) {
       callbacks.forEach(cb => cb(messageId, status));
+      // CRITICAL FIX: Clean up callbacks for terminal states to prevent memory leak
+      if (status === 'delivered' || status === 'read' || status === 'sent' || status === 'failed') {
+        this.deliveryCallbacks.delete(messageId);
+      }
     }
   }
 
@@ -1499,14 +1590,16 @@ class HybridMessageService {
   }
 
   /**
-   * P1: Broadcast typing indicator with proper throttle and debounce
+   * P1: Broadcast typing indicator with proper throttle and debounce.
+   * Sends via both Mesh (BLE) and Firestore (cloud) for universal delivery.
    */
   broadcastTyping(conversationId: string): void {
     // Throttle: max 1 broadcast per TYPING_THROTTLE_MS
     this.typingThrottle.execute(() => {
       const myIdentity = identityService.getIdentity();
-      if (!myIdentity) return;
+      if (!myIdentity?.uid) return;
 
+      // Mesh broadcast (BLE nearby)
       try {
         meshNetworkService.broadcastMessage(
           JSON.stringify({
@@ -1520,6 +1613,11 @@ class HybridMessageService {
       } catch {
         // Silent fail for typing indicators
       }
+
+      // Firestore broadcast (cloud — remote users)
+      import('./firebase/FirebaseMessageOperations').then(({ setTypingIndicator }) => {
+        setTypingIndicator(conversationId, myIdentity.uid!, true);
+      }).catch(() => {});
     });
 
     // P1: Debounce stop-typing (send stop after TYPING_DEBOUNCE_MS of no typing)
@@ -1528,8 +1626,15 @@ class HybridMessageService {
       debouncer = new Debouncer(TYPING_DEBOUNCE_MS);
       this.typingDebouncers.set(conversationId, debouncer);
     }
-    // Note: We don't need to send stop-typing in most cases
-    // The receiver auto-clears after TYPING_AUTO_CLEAR_MS
+    debouncer.schedule(() => {
+      // Clear typing indicator from Firestore after debounce
+      const uid = identityService.getUid();
+      if (uid) {
+        import('./firebase/FirebaseMessageOperations').then(({ setTypingIndicator }) => {
+          setTypingIndicator(conversationId, uid, false);
+        }).catch(() => {});
+      }
+    });
   }
 
   /**
@@ -1618,7 +1723,7 @@ class HybridMessageService {
     // 2. Subscribe to Cloud messages via V3 inbox model:
     //    user_inbox/{uid}/threads → discover conversationIds → subscribe to each conversation's messages
     const conversationUnsubscribers = new Map<string, () => void>();
-    let inboxUnsubscriber: (() => void) | null = null;
+    let conversationsListUnsubscriber: (() => void) | null = null;
     let isDisposed = false;
     let isCloudSyncInProgress = false;
 
@@ -1627,9 +1732,9 @@ class HybridMessageService {
         try { unsubscribe(); } catch { /* no-op */ }
       });
       conversationUnsubscribers.clear();
-      if (inboxUnsubscriber) {
-        try { inboxUnsubscriber(); } catch { /* no-op */ }
-        inboxUnsubscriber = null;
+      if (conversationsListUnsubscriber) {
+        try { conversationsListUnsubscriber(); } catch { /* no-op */ }
+        conversationsListUnsubscriber = null;
       }
     };
 
@@ -1641,7 +1746,7 @@ class HybridMessageService {
       return selfIds;
     };
 
-    const processCloudMessage = (msg: any) => {
+    const processCloudMessage = (msg: any, conversationId?: string) => {
       const selfIds = getSelfIds();
       const fromDeviceId = typeof msg.fromDeviceId === 'string' ? msg.fromDeviceId.trim() : '';
       const senderUid = typeof msg.senderUid === 'string' ? msg.senderUid.trim() : '';
@@ -1710,7 +1815,7 @@ class HybridMessageService {
       if (this.isSystemPayloadForConversation(hybridMsg)) {
         return;
       }
-      this.pushCloudMessageToMeshStore(hybridMsg);
+      this.pushCloudMessageToMeshStore(hybridMsg, conversationId);
       callback(hybridMsg);
     };
 
@@ -1724,7 +1829,7 @@ class HybridMessageService {
         const unsubscribe = await firebaseDataService.subscribeToConversationMessages(
           conversationId,
           (cloudMsgs: any[]) => {
-            cloudMsgs.forEach(processCloudMessage);
+            cloudMsgs.forEach((msg) => processCloudMessage(msg, conversationId));
           },
         );
         if (unsubscribe && !isDisposed) {
@@ -1734,6 +1839,32 @@ class HybridMessageService {
       } catch (err) {
         logger.warn(`Failed to subscribe to conversation ${conversationId}:`, err);
       }
+    };
+
+    // CRITICAL FIX: Retry cloud subscriptions when auth is not ready.
+    // Without this, if Firebase Auth isn't ready during Phase B init,
+    // cloud subscriptions die permanently and messages are NEVER received.
+    let cloudRetryCount = 0;
+    const MAX_CLOUD_RETRIES = 15; // ~8 min total with exponential backoff (was 8 / ~4min — too short for cold-start auth)
+    let cloudRetryTimer: NodeJS.Timeout | null = null;
+
+    const scheduleCloudRetry = (reason: string) => {
+      if (isDisposed || cloudRetryCount >= MAX_CLOUD_RETRIES) {
+        if (cloudRetryCount >= MAX_CLOUD_RETRIES) {
+          logger.error(`📨 Cloud subscription EXHAUSTED ${MAX_CLOUD_RETRIES} retries (${reason})`);
+        }
+        return;
+      }
+      cloudRetryCount++;
+      const delay = Math.min(2000 * Math.pow(2, cloudRetryCount - 1), 30000); // 2s, 4s, 8s, 16s, 30s, 30s, 30s, 30s
+      logger.info(`📨 Cloud subscription retry ${cloudRetryCount}/${MAX_CLOUD_RETRIES} in ${delay}ms (${reason})`);
+      if (cloudRetryTimer) clearTimeout(cloudRetryTimer);
+      cloudRetryTimer = setTimeout(() => {
+        cloudRetryTimer = null;
+        if (!isDisposed) {
+          ensureCloudSubscriptions().catch(() => {});
+        }
+      }, delay);
     };
 
     const ensureCloudSubscriptions = async () => {
@@ -1747,85 +1878,130 @@ class HybridMessageService {
 
         const uid = identityService.getUid();
         if (!uid) {
-          logger.warn('📨 Cloud subscription skipped: no UID');
+          logger.warn('📨 Cloud subscription skipped: no UID — scheduling retry');
+          scheduleCloudRetry('UID not available');
           return;
         }
 
-        logger.info(`📨 Setting up V3 inbox subscription for uid=${uid}`);
+        // ─────────────────────────────────────────────────────────
+        // WHATSAPP-STYLE ARCHITECTURE: Direct conversations onSnapshot
+        //
+        // OLD (broken): user_inbox → discover conversations → subscribe to each
+        //   Problem: inbox write race conditions, fallback scan hacks, dropped messages
+        //
+        // NEW (reliable): Single onSnapshot on conversations where user is participant
+        //   - Firestore automatically notifies when new conversations appear
+        //   - No inbox layer needed for message delivery
+        //   - Same pattern that GroupChatService uses (proven to work)
+        //   - Inbox still written for UI (unread counts) but NOT for delivery
+        // ─────────────────────────────────────────────────────────
+        logger.info(`📨 Setting up WhatsApp-style conversations subscription for uid=${uid}`);
 
-        // Subscribe to inbox threads → when new threads appear, subscribe to their messages
-        if (inboxUnsubscriber) {
-          try { inboxUnsubscriber(); } catch { /* no-op */ }
+        // Clean up previous subscription
+        if (conversationsListUnsubscriber) {
+          try { conversationsListUnsubscriber(); } catch { /* no-op */ }
+          conversationsListUnsubscriber = null;
         }
 
-        const inboxUnsub = await firebaseDataService.subscribeToInbox(
-          uid,
-          async (threads: Array<{ conversationId: string }>) => {
+        const { collection, query: firestoreQuery, where, onSnapshot } = await import('firebase/firestore');
+        const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (!db || isDisposed) {
+          scheduleCloudRetry('Firestore not available');
+          return;
+        }
+
+        // Single onSnapshot on ALL conversations where user is a participant.
+        // This fires immediately with existing conversations AND whenever
+        // a new conversation is created with user as participant.
+        const conversationsRef = collection(db, 'conversations');
+        const q = firestoreQuery(
+          conversationsRef,
+          where('participants', 'array-contains', uid),
+        );
+
+        conversationsListUnsubscriber = onSnapshot(
+          q,
+          async (snapshot) => {
             if (isDisposed) return;
 
-            // Subscribe to any new conversations we haven't subscribed to yet
-            const currentConvIds = new Set(conversationUnsubscribers.keys());
-            const inboxConvIds = new Set(threads.map(t => t.conversationId));
+            // Reset retry count — subscription is alive
+            cloudRetryCount = 0;
 
-            // Remove subscriptions for conversations no longer in inbox
+            const activeConvIds = new Set<string>();
+            snapshot.forEach((docSnap) => activeConvIds.add(docSnap.id));
+
+            // CRITICAL FIX: Sync conversation metadata to messageStore.
+            // Previously, only conversation IDs were used (to set up message subscriptions),
+            // but the conversation's metadata (participant names, last message) was discarded.
+            // This meant new conversations didn't appear in MessagesScreen until a message
+            // arrived AND was processed by pushCloudMessageToMeshStore. Now we proactively
+            // create/update conversation entries from the Firestore snapshot.
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (!data || !data.participants) return;
+                // Find the OTHER participant's UID for DM conversations
+                const otherUid = Array.isArray(data.participants)
+                  ? data.participants.find((p: string) => p !== uid)
+                  : null;
+                if (!otherUid && data.type !== 'group') return;
+                const peerId = otherUid || docSnap.id;
+                const peerName = data.participantNames?.[otherUid] || data.name || '';
+                useMessageStore.getState().addConversation({
+                  userId: peerId,
+                  userName: peerName || peerId.slice(0, 8) + '...',
+                  lastMessage: data.lastMessage || data.lastMessagePreview || '',
+                  lastMessageTime: data.lastMessageAt || data.updatedAt || Date.now(),
+                  unreadCount: 0, // Will be updated by message processing
+                  conversationId: docSnap.id,
+                });
+              });
+            } catch (syncError) {
+              logger.debug('Conversation metadata sync to messageStore failed (non-critical):', syncError);
+            }
+
+            // Subscribe to new conversations' messages
+            for (const convId of activeConvIds) {
+              if (!conversationUnsubscribers.has(convId)) {
+                await subscribeToConversation(convId, firebaseDataService);
+              }
+            }
+
+            // Unsubscribe from conversations user is no longer part of
             for (const [convId, unsub] of conversationUnsubscribers) {
-              if (!inboxConvIds.has(convId)) {
+              if (!activeConvIds.has(convId)) {
                 try { unsub(); } catch { /* no-op */ }
                 conversationUnsubscribers.delete(convId);
               }
             }
 
-            // Subscribe to new conversations
-            for (const thread of threads) {
-              if (!currentConvIds.has(thread.conversationId)) {
-                await subscribeToConversation(thread.conversationId, firebaseDataService);
-              }
+            logger.info(`📨 Conversations sync: ${activeConvIds.size} active, ${conversationUnsubscribers.size} subscribed`);
+          },
+          (error: any) => {
+            const code = error?.code || '';
+            if (code === 'permission-denied' || code === 'unauthenticated') {
+              logger.error(`📨 Conversations subscription PERMANENT error (${code}) — will not retry`);
+              conversationsListUnsubscriber = null;
+              return;
             }
+            logger.error('📨 Conversations subscription error:', error);
+            conversationsListUnsubscriber = null;
+            scheduleCloudRetry('conversations onSnapshot error');
           },
         );
 
-        if (inboxUnsub && !isDisposed) {
-          inboxUnsubscriber = inboxUnsub;
-        }
-
-        // FALLBACK: Scan for conversations where user is a participant
-        // but no inbox entry exists (e.g., inbox write failed due to security rules).
-        // This ensures messages are still received even if the inbox is incomplete.
-        try {
-          if (!isDisposed) {
-            const { collection, query: firestoreQuery, where, getDocs } = await import('firebase/firestore');
-            const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
-            const db = await getFirestoreInstanceAsync();
-            if (db && !isDisposed) {
-              const conversationsRef = collection(db, 'conversations');
-              const q = firestoreQuery(
-                conversationsRef,
-                where('participants', 'array-contains', uid),
-              );
-              const snapshot = await getDocs(q);
-              let discoveredCount = 0;
-              for (const docSnap of snapshot.docs) {
-                if (isDisposed) break;
-                const convId = docSnap.id;
-                if (!conversationUnsubscribers.has(convId)) {
-                  await subscribeToConversation(convId, firebaseDataService);
-                  discoveredCount++;
-                }
-              }
-              if (discoveredCount > 0) {
-                logger.info(`Fallback scan discovered ${discoveredCount} conversations not in inbox`);
-              }
-            }
-          }
-        } catch (fallbackError) {
-          logger.debug('Fallback conversation scan failed (non-critical):', fallbackError);
-        }
       } catch (error) {
         logger.warn('Cloud subscription failed:', error);
+        scheduleCloudRetry('ensureCloudSubscriptions threw');
       } finally {
         isCloudSyncInProgress = false;
       }
     };
+
+    // Store reference for foreground re-ensure (handleAppStateChange uses this)
+    this.cloudEnsureRefresher = ensureCloudSubscriptions;
 
     const unsubscribeConnection = this.onConnectionChange((state) => {
       if (isDisposed) {
@@ -1848,9 +2024,14 @@ class HybridMessageService {
 
     return () => {
       isDisposed = true;
+      this.cloudEnsureRefresher = null;
       unsubscribeMesh();
       unsubscribeConnection();
       clearCloudSubscriptions();
+      if (cloudRetryTimer) {
+        clearTimeout(cloudRetryTimer);
+        cloudRetryTimer = null;
+      }
     };
   }
 
@@ -1871,6 +2052,8 @@ class HybridMessageService {
     const timer = setTimeout(() => {
       this.typingCallbacks.forEach(cb => cb(userId, userName, false));
       this.activeTypingUsers.delete(userId);
+      // CRITICAL FIX: Remove from cleanupTimers when fired naturally (prevents set growth)
+      this.cleanupTimers.delete(timer);
     }, TYPING_AUTO_CLEAR_MS);
 
     this.activeTypingUsers.set(userId, timer);
@@ -1972,7 +2155,7 @@ class HybridMessageService {
 
   private async saveQueueImmediate(): Promise<void> {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.MESSAGE_QUEUE, JSON.stringify(this.queue));
+      DirectStorage.setString(STORAGE_KEYS.MESSAGE_QUEUE, JSON.stringify(this.queue));
     } catch (e) {
       logger.error('Failed to save queue', e);
     }
@@ -1980,8 +2163,11 @@ class HybridMessageService {
 
   private async loadQueue(): Promise<void> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.MESSAGE_QUEUE);
-      if (data) this.queue = JSON.parse(data);
+      const data = DirectStorage.getString(STORAGE_KEYS.MESSAGE_QUEUE) ?? null;
+      if (data) {
+        const parsed = JSON.parse(data);
+        this.queue = Array.isArray(parsed) ? parsed : [];
+      }
     } catch (e) {
       logger.error('Failed to load queue', e);
     }
@@ -1994,7 +2180,7 @@ class HybridMessageService {
 
   private async saveSeenIdsImmediate(): Promise<void> {
     try {
-      await AsyncStorage.setItem(
+      DirectStorage.setString(
         STORAGE_KEYS.SEEN_MESSAGE_IDS,
         JSON.stringify(this.seenMessageIds.toArray())
       );
@@ -2005,9 +2191,10 @@ class HybridMessageService {
 
   private async loadSeenIds(): Promise<void> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.SEEN_MESSAGE_IDS);
+      const data = DirectStorage.getString(STORAGE_KEYS.SEEN_MESSAGE_IDS) ?? null;
       if (data) {
-        const ids: string[] = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        const ids: string[] = Array.isArray(parsed) ? parsed : [];
         this.seenMessageIds.fromArray(ids);
       }
     } catch (e) {

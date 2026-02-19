@@ -3,7 +3,7 @@
  * Handles notifications for new earthquakes
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Earthquake } from '../../stores/earthquakeStore';
 import { createLogger } from '../../utils/logger';
 import { autoCheckinService } from '../AutoCheckinService';
@@ -41,7 +41,7 @@ export async function processEarthquakeNotifications(
   }
 
   const latestEq = earthquakes[0];
-  const lastCheckedEq = await AsyncStorage.getItem(LAST_CHECKED_KEY);
+  const lastCheckedEq = DirectStorage.getString(LAST_CHECKED_KEY) ?? null;
 
   // NOTIFICATION GATEWAY FIX: Skip stale earthquakes (older than 15 minutes)
   // This prevents the notification flood when the app is reopened and
@@ -53,7 +53,7 @@ export async function processEarthquakeNotifications(
       logger.info(`⏭️ Stale earthquake skipped: M${latestEq.magnitude.toFixed(1)} ${latestEq.location} (${Math.round(earthquakeAge / 60000)}min old)`);
     }
     // Still update the last-checked marker so we don't re-check it
-    await AsyncStorage.setItem(LAST_CHECKED_KEY, latestEq.id);
+    DirectStorage.setString(LAST_CHECKED_KEY, latestEq.id);
     return;
   }
 
@@ -67,7 +67,7 @@ export async function processEarthquakeNotifications(
 
   // Check if this is a new earthquake
   if (latestEq.id !== lastCheckedEq) {
-    await AsyncStorage.setItem(LAST_CHECKED_KEY, latestEq.id);
+    DirectStorage.setString(LAST_CHECKED_KEY, latestEq.id);
     let epicenterDistanceKm: number | null = null;
 
     // Send notification if magnitude meets threshold

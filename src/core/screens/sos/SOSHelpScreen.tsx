@@ -28,7 +28,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import Animated, {
+    FadeInDown, FadeInUp,
+    useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, Easing,
+} from 'react-native-reanimated';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio';
@@ -87,11 +90,43 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     const [ackSending, setAckSending] = useState(false);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const mapRef = useRef<MapView | null>(null);
     const soundRef = useRef<AudioPlayer | null>(null);
     const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
     const firestoreUnsubRef = useRef<(() => void) | null>(null);
     const audioUnsubRef = useRef<(() => void) | null>(null);
+
+    // Pulse animation for SOS marker
+    const pulseScale = useSharedValue(1);
+    useEffect(() => {
+        pulseScale.value = withRepeat(
+            withSequence(
+                withTiming(1.4, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+                withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+            ),
+            -1,
+            true,
+        );
+    }, [pulseScale]);
+    const pulseStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: pulseScale.value }],
+        opacity: 2 - pulseScale.value, // fades as it grows
+    }));
+
+    // Elapsed time counter
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setElapsedSeconds(prev => prev + 1);
+        }, 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const formatElapsed = (sec: number) => {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    };
 
     // Start watching my own location
     useEffect(() => {
@@ -328,39 +363,62 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         }
     }, [ackSent, ackSending, signalId, senderDeviceId, senderUid, senderName]);
 
-    // Open directions in Maps (full turn-by-turn navigation)
+    // Open directions with walking/driving choice
     const handleOpenDirections = useCallback(() => {
         if (!senderLocation) return;
         haptics.impactLight();
 
         const { latitude: lat, longitude: lng } = senderLocation;
-        const url = Platform.select({
-            ios: `maps:0,0?daddr=${lat},${lng}`,
-            android: `google.navigation:q=${lat},${lng}`,
-        });
-        if (url) {
-            Linking.openURL(url).catch(() => {
-                Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
-            });
-        }
+
+        Alert.alert(
+            'Yol Tarifi',
+            'Nasıl gitmek istiyorsunuz?',
+            [
+                {
+                    text: 'Yürüyerek',
+                    onPress: () => {
+                        const url = Platform.select({
+                            ios: `maps:0,0?daddr=${lat},${lng}&dirflg=w`,
+                            android: `google.navigation:q=${lat},${lng}&mode=w`,
+                        });
+                        if (url) {
+                            Linking.openURL(url).catch(() => {
+                                Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`);
+                            });
+                        }
+                    },
+                },
+                {
+                    text: 'Araçla',
+                    onPress: () => {
+                        const url = Platform.select({
+                            ios: `maps:0,0?daddr=${lat},${lng}&dirflg=d`,
+                            android: `google.navigation:q=${lat},${lng}&mode=d`,
+                        });
+                        if (url) {
+                            Linking.openURL(url).catch(() => {
+                                Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`);
+                            });
+                        }
+                    },
+                },
+                { text: 'İptal', style: 'cancel' },
+            ],
+        );
     }, [senderLocation]);
 
-    // Quick open location in Apple Maps (pin drop)
+    // Open location in the app's DisasterMap screen
     const handleOpenLocationOnMap = useCallback(() => {
         if (!senderLocation) return;
         haptics.impactMedium();
 
-        const { latitude: lat, longitude: lng } = senderLocation;
-        const url = Platform.select({
-            ios: `maps:0,0?q=${lat},${lng}`,
-            default: `https://maps.google.com/?q=${lat},${lng}`,
+        navigation.navigate('DisasterMap', {
+            focusOnSOS: true,
+            sosLatitude: senderLocation.latitude,
+            sosLongitude: senderLocation.longitude,
+            sosSenderName: senderName || 'SOS',
         });
-        if (url) {
-            Linking.openURL(url).catch(() => {
-                Linking.openURL(`https://maps.google.com/?q=${lat},${lng}`).catch(() => {});
-            });
-        }
-    }, [senderLocation]);
+    }, [senderLocation, navigation, senderName]);
 
     // Call 112
     const handleCallEmergency = useCallback(() => {
@@ -404,8 +462,17 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                 <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={24} color="#fff" />
                 </Pressable>
-                <Text style={styles.headerTitle}>Yardım Sayfası</Text>
-                <View style={{ width: 40 }} />
+                <View style={styles.headerCenter}>
+                    <View style={styles.liveIndicator}>
+                        <View style={styles.liveDot} />
+                        <Text style={styles.liveText}>CANLI</Text>
+                    </View>
+                    <Text style={styles.headerTitle}>SOS Yardım</Text>
+                </View>
+                <View style={styles.timerBadge}>
+                    <Ionicons name="time-outline" size={14} color="#fbbf24" />
+                    <Text style={styles.timerText}>{formatElapsed(elapsedSeconds)}</Text>
+                </View>
             </Animated.View>
 
             <ScrollView
@@ -441,7 +508,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                             showsMyLocationButton={false}
                             loadingEnabled
                         >
-                            {/* SOS Sender Marker - Red */}
+                            {/* SOS Sender Marker - Red with pulse */}
                             <Marker
                                 coordinate={{
                                     latitude: senderLocation.latitude,
@@ -452,7 +519,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                                 anchor={{ x: 0.5, y: 0.5 }}
                             >
                                 <View style={styles.senderMarker}>
-                                    <View style={styles.senderMarkerPulse} />
+                                    <Animated.View style={[styles.senderMarkerPulse, pulseStyle]} />
                                     <View style={styles.senderMarkerCore}>
                                         <Ionicons name="alert-circle" size={20} color="#fff" />
                                     </View>
@@ -511,8 +578,8 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                                 ]}
                                 onPress={handleOpenLocationOnMap}
                             >
-                                <Ionicons name="open-outline" size={18} color="#fff" />
-                                <Text style={styles.mapOverlayButtonText}>Haritada Aç</Text>
+                                <Ionicons name="map" size={18} color="#fff" />
+                                <Text style={styles.mapOverlayButtonText}>Uygulama Haritası</Text>
                             </Pressable>
                         </View>
                     </Animated.View>
@@ -613,39 +680,15 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                     </Animated.View>
                 )}
 
-                {/* Location Card */}
-                <Animated.View entering={FadeInUp.delay(400)} style={styles.card}>
-                    <Text style={styles.cardTitle}>Konum Takibi</Text>
-                    {senderLocation ? (
-                        <View>
-                            <View style={styles.locationRow}>
-                                <Ionicons name="navigate" size={20} color="#3b82f6" />
-                                <View style={styles.locationInfo}>
-                                    <Text style={styles.locationCoord}>
-                                        {senderLocation.latitude.toFixed(6)}, {senderLocation.longitude.toFixed(6)}
-                                    </Text>
-                                    {senderLocation.accuracy != null && (
-                                        <Text style={styles.locationAccuracy}>
-                                            Doğruluk: ~{Math.round(senderLocation.accuracy)}m
-                                        </Text>
-                                    )}
-                                </View>
-                            </View>
-                            <Pressable
-                                style={({ pressed }) => [styles.directionsButton, pressed && { opacity: 0.7 }]}
-                                onPress={handleOpenDirections}
-                            >
-                                <Ionicons name="navigate-circle" size={22} color="#fff" />
-                                <Text style={styles.directionsText}>Yol Tarifi Al</Text>
-                            </Pressable>
-                        </View>
-                    ) : (
+                {/* Konum bekleniyor (harita yoksa) */}
+                {!senderLocation && (
+                    <Animated.View entering={FadeInUp.delay(400)} style={styles.card}>
                         <View style={styles.noLocationBox}>
                             <ActivityIndicator size="small" color="#94a3b8" />
                             <Text style={styles.noLocationText}>Konum bekleniyor...</Text>
                         </View>
-                    )}
-                </Animated.View>
+                    </Animated.View>
+                )}
 
                 {/* Action Buttons */}
                 <Animated.View entering={FadeInUp.delay(500)} style={styles.actionsCard}>
@@ -672,6 +715,23 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                             {ackSent ? 'Yardım Bildirimi Gönderildi' : 'Yardıma Geliyorum'}
                         </Text>
                     </Pressable>
+
+                    {/* Directions with walking/driving */}
+                    {senderLocation && (
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.actionButton,
+                                styles.actionButtonDirections,
+                                pressed && { opacity: 0.8 },
+                            ]}
+                            onPress={handleOpenDirections}
+                        >
+                            <Ionicons name="navigate" size={24} color="#fff" />
+                            <Text style={styles.actionButtonText}>
+                                Yol Tarifi {distanceText ? `(${distanceText})` : ''}
+                            </Text>
+                        </Pressable>
+                    )}
 
                     {/* Open Chat */}
                     <Pressable
@@ -713,7 +773,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.md,
+        paddingVertical: spacing.sm,
     },
     backButton: {
         width: 40,
@@ -723,10 +783,48 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    headerCenter: {
+        alignItems: 'center',
+    },
+    liveIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 2,
+    },
+    liveDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#ef4444',
+    },
+    liveText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#ef4444',
+        letterSpacing: 1,
+    },
     headerTitle: {
-        fontSize: typography.h2.fontSize,
+        fontSize: typography.h3.fontSize,
         fontWeight: '700',
         color: '#fff',
+    },
+    timerBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(251, 191, 36, 0.15)',
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(251, 191, 36, 0.3)',
+    },
+    timerText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#fbbf24',
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     },
     scrollContent: {
         paddingHorizontal: spacing.md,
@@ -854,45 +952,6 @@ const styles = StyleSheet.create({
         color: '#94a3b8',
         marginTop: 2,
     },
-    cardTitle: {
-        fontSize: typography.body.fontSize,
-        fontWeight: '700',
-        color: '#fff',
-        marginBottom: spacing.sm,
-    },
-    locationRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-    },
-    locationInfo: {
-        flex: 1,
-    },
-    locationCoord: {
-        fontSize: typography.bodySmall.fontSize,
-        color: '#93c5fd',
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    locationAccuracy: {
-        fontSize: typography.caption.fontSize,
-        color: '#64748b',
-        marginTop: 2,
-    },
-    directionsButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#3b82f6',
-        borderRadius: borderRadius.md,
-        paddingVertical: 12,
-        marginTop: spacing.sm,
-        gap: spacing.xs,
-    },
-    directionsText: {
-        fontSize: typography.body.fontSize,
-        fontWeight: '600',
-        color: '#fff',
-    },
     noLocationBox: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -920,6 +979,9 @@ const styles = StyleSheet.create({
     },
     actionButtonDisabled: {
         backgroundColor: '#374151',
+    },
+    actionButtonDirections: {
+        backgroundColor: '#1e40af',
     },
     actionButtonChat: {
         backgroundColor: '#0ea5e9',

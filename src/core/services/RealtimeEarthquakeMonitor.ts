@@ -29,7 +29,7 @@
  */
 
 import { AppState, AppStateStatus, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
 import { notificationCenter } from './notifications/NotificationCenter';
@@ -806,9 +806,10 @@ class RealtimeEarthquakeMonitorService {
      */
     private async loadSeenEvents(): Promise<void> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.SEEN_EVENTS);
+            const saved = DirectStorage.getString(STORAGE_KEYS.SEEN_EVENTS);
             if (saved) {
-                const events = JSON.parse(saved) as [string, EarthquakeEvent][];
+                const parsed = JSON.parse(saved);
+                const events = Array.isArray(parsed) ? parsed as [string, EarthquakeEvent][] : [];
                 // Only load recent events (last 1 hour)
                 const recent = events.filter(([_, e]) => Date.now() - e.time < 60 * 60 * 1000);
                 this.seenEvents = new Map(recent);
@@ -826,7 +827,7 @@ class RealtimeEarthquakeMonitorService {
             // ELITE: Only save last 100 events to prevent AsyncStorage bloat (OOM fix)
             const allEntries = Array.from(this.seenEvents.entries());
             const recentEntries = allEntries.slice(-100);
-            await AsyncStorage.setItem(STORAGE_KEYS.SEEN_EVENTS, JSON.stringify(recentEntries));
+            DirectStorage.setString(STORAGE_KEYS.SEEN_EVENTS, JSON.stringify(recentEntries));
         } catch (e) {
             logger.debug('Failed to save seen events:', e);
         }

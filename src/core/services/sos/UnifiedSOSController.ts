@@ -212,6 +212,12 @@ class UnifiedSOSController {
             // Stop active SOS
             sosBeaconService.stop();
 
+            // CRITICAL FIX: Stop location precache timer to prevent battery drain
+            if (this.locationPrecacheTimer) {
+                clearInterval(this.locationPrecacheTimer);
+                this.locationPrecacheTimer = null;
+            }
+
             // ELITE V4: Stop alarm sound + vibration + ambient recording
             this.stopAlarmAndVibration();
             this.stopAmbientRecording();
@@ -234,6 +240,9 @@ class UnifiedSOSController {
             store.stopSOS();
             haptics.notificationSuccess();
             logger.info('Active SOS stopped + cancellation broadcast sent');
+
+            // Restart location precache for future SOS readiness
+            this.startLocationPrecache();
         }
     }
 
@@ -267,6 +276,12 @@ class UnifiedSOSController {
         this.userId = await this.resolveCurrentUserId();
 
         const store = useSOSStore.getState();
+
+        // Guard: don't create duplicate signal if SOS is already active
+        if (store.isActive) {
+            logger.warn('SOS already active, skipping forceActivate');
+            return;
+        }
 
         // Cancel any existing countdown
         if (store.isCountingDown) {
@@ -329,7 +344,21 @@ class UnifiedSOSController {
     // SOS ACTIVATION
     // ============================================================================
 
+    private isActivating = false;
+
     private async activateSOS(): Promise<void> {
+        // Guard against double activation (countdown race condition)
+        if (this.isActivating) return;
+        this.isActivating = true;
+
+        try {
+            await this.activateSOSInternal();
+        } finally {
+            this.isActivating = false;
+        }
+    }
+
+    private async activateSOSInternal(): Promise<void> {
         const store = useSOSStore.getState();
         const signal = store.currentSignal;
 
@@ -344,11 +373,14 @@ class UnifiedSOSController {
         haptics.impactHeavy();
         haptics.notificationError();
 
-        // Activate in store
+        // Activate in store (sets status to 'broadcasting')
         store.activateSOS(signal);
 
-        // Broadcast through all channels
-        await sosChannelRouter.broadcastSOS(signal);
+        // Re-read signal from store AFTER activation to get correct status
+        const activatedSignal = useSOSStore.getState().currentSignal;
+
+        // Broadcast through all channels with correct status
+        await sosChannelRouter.broadcastSOS(activatedSignal || signal);
 
         // Start beacon service
         await sosBeaconService.start();

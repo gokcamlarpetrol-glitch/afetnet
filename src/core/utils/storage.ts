@@ -1,5 +1,6 @@
 import { MMKV } from 'react-native-mmkv';
 import { StateStorage } from 'zustand/middleware';
+import * as SecureStore from 'expo-secure-store';
 import { createLogger } from './logger';
 
 const logger = createLogger('EliteStorage');
@@ -38,16 +39,55 @@ class MemoryStorage {
   }
 }
 
-// MMKV instance with static encryption key
-// TODO: In a future update, migrate to SecureStore-backed dynamic key
-// with proper testing and gradual rollout
+// SECURITY FIX: Generate/retrieve encryption key from Secure Enclave (iOS) / Keystore (Android)
+// instead of hardcoding in source code.
+const SECURE_STORE_KEY = 'afetnet_mmkv_enc_key';
+const LEGACY_ENCRYPTION_KEY = 'afetnet-elite-secure-key';
+
+function getOrCreateEncryptionKey(): string {
+  try {
+    // SecureStore.getItem is sync on native (JSI) — safe to call during module init
+    const existingKey = SecureStore.getItem(SECURE_STORE_KEY);
+    if (existingKey) return existingKey;
+
+    // Generate a random 32-char hex key
+    const randomBytes = new Array(16);
+    for (let i = 0; i < 16; i++) {
+      randomBytes[i] = Math.floor(Math.random() * 256);
+    }
+    const newKey = randomBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+    SecureStore.setItem(SECURE_STORE_KEY, newKey);
+    return newKey;
+  } catch {
+    // Fallback: If SecureStore unavailable (simulator), use legacy key for backward compat
+    return LEGACY_ENCRYPTION_KEY;
+  }
+}
+
 let storageInstance: MMKV | MemoryStorage;
 
 try {
-  storageInstance = new MMKV({
-    id: 'afetnet-elite-storage',
-    encryptionKey: 'afetnet-elite-secure-key',
-  });
+  const encryptionKey = getOrCreateEncryptionKey();
+  try {
+    storageInstance = new MMKV({
+      id: 'afetnet-elite-storage',
+      encryptionKey,
+    });
+  } catch {
+    // Migration: If key changed (first upgrade), try legacy key then re-encrypt
+    storageInstance = new MMKV({
+      id: 'afetnet-elite-storage',
+      encryptionKey: LEGACY_ENCRYPTION_KEY,
+    });
+    // Re-create with new key (MMKV handles migration internally on next recrypt call)
+    try {
+      (storageInstance as MMKV).recrypt(encryptionKey);
+      logger.info('✅ MMKV re-encrypted with SecureStore key');
+    } catch {
+      // If recrypt fails, continue with legacy key — data is still accessible
+      logger.info('ℹ️ MMKV recrypt deferred, using legacy key');
+    }
+  }
   logger.info('✅ MMKV initialized successfully');
 } catch (error) {
   logger.info('ℹ️ MMKV initialization failed (expected in Debug/Simulator), falling back to MemoryStorage.');
@@ -98,5 +138,7 @@ export const DirectStorage = {
   getBoolean: (key: string) => storage.getBoolean(key),
   setBoolean: (key: string, value: boolean) => storage.set(key, value),
   delete: (key: string) => storage.delete(key),
+  contains: (key: string) => storage.contains(key),
+  getAllKeys: () => storage.getAllKeys(),
   clearAll: () => storage.clearAll(),
 };

@@ -15,7 +15,7 @@ import { createLogger } from '../../utils/logger';
 import { useMeshStore, MeshMessage } from './MeshStore';
 import { MeshMessageType } from './MeshProtocol';
 import { Buffer } from 'buffer';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import * as FileSystem from 'expo-file-system';
 import { getDeviceId } from '../../utils/device';
 
@@ -680,11 +680,11 @@ class MeshMediaService {
     private async loadPendingTransfers(): Promise<void> {
         // Load any incomplete transfers from storage
         try {
-            const keys = await AsyncStorage.getAllKeys();
+            const keys = DirectStorage.getAllKeys();
             const transferKeys = keys.filter(k => k.startsWith(MEDIA_CONFIG.STORAGE_PREFIX));
 
             for (const key of transferKeys) {
-                const data = await AsyncStorage.getItem(key);
+                const data = DirectStorage.getString(key);
                 if (data) {
                     const parsedTransfer = JSON.parse(data);
                     if (parsedTransfer.status === 'transferring') {

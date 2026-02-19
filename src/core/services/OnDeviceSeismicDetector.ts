@@ -29,7 +29,7 @@
 
 import { Accelerometer, AccelerometerMeasurement } from 'expo-sensors';
 import { Platform, Vibration } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 // NotificationCenter handles all notifications now
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
@@ -197,7 +197,7 @@ class OnDeviceSeismicDetectorService {
     private async calibrate(): Promise<void> {
         // Load saved calibration or use default
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.CALIBRATION);
+            const saved = DirectStorage.getString(STORAGE_KEYS.CALIBRATION) ?? null;
             if (saved) {
                 this.baselineNoise = parseFloat(saved);
                 logger.debug(`Loaded calibration: ${this.baselineNoise.toFixed(4)}g`);
@@ -450,7 +450,7 @@ class OnDeviceSeismicDetectorService {
 
     private async loadConfig(): Promise<void> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.CONFIG);
+            const saved = DirectStorage.getString(STORAGE_KEYS.CONFIG) ?? null;
             if (saved) {
                 this.config = { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
             }
@@ -461,13 +461,14 @@ class OnDeviceSeismicDetectorService {
 
     private async saveEvent(event: SeismicEvent): Promise<void> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.EVENTS);
-            const events: SeismicEvent[] = saved ? JSON.parse(saved) : [];
+            const saved = DirectStorage.getString(STORAGE_KEYS.EVENTS) ?? null;
+            const parsed = saved ? JSON.parse(saved) : [];
+            const events: SeismicEvent[] = Array.isArray(parsed) ? parsed : [];
             events.push(event);
 
             // Keep last 100 events
             const trimmed = events.slice(-100);
-            await AsyncStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(trimmed));
+            DirectStorage.setString(STORAGE_KEYS.EVENTS, JSON.stringify(trimmed));
         } catch (e) {
             logger.debug('Failed to save event');
         }
@@ -487,8 +488,9 @@ class OnDeviceSeismicDetectorService {
      */
     async getRecentEvents(): Promise<SeismicEvent[]> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.EVENTS);
-            return saved ? JSON.parse(saved) : [];
+            const saved = DirectStorage.getString(STORAGE_KEYS.EVENTS) ?? null;
+            const parsed = saved ? JSON.parse(saved) : [];
+            return Array.isArray(parsed) ? parsed : [];
         } catch (e) {
             return [];
         }
@@ -499,7 +501,7 @@ class OnDeviceSeismicDetectorService {
      */
     async updateConfig(newConfig: Partial<DetectorConfig>): Promise<void> {
         this.config = { ...this.config, ...newConfig };
-        await AsyncStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(this.config));
+        DirectStorage.setString(STORAGE_KEYS.CONFIG, JSON.stringify(this.config));
         logger.info('Config updated:', this.config);
     }
 
@@ -530,7 +532,7 @@ class OnDeviceSeismicDetectorService {
             setTimeout(async () => {
                 const noise = this.calculateAverage(this.ltaBuffer);
                 this.baselineNoise = noise;
-                await AsyncStorage.setItem(STORAGE_KEYS.CALIBRATION, noise.toString());
+                DirectStorage.setString(STORAGE_KEYS.CALIBRATION, noise.toString());
                 logger.info(`Calibration complete: baseline noise = ${noise.toFixed(4)}g`);
                 resolve(noise);
             }, 5000);

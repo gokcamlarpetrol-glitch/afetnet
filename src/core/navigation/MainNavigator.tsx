@@ -59,6 +59,7 @@ import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
 import SecurityScreen from '../screens/settings/SecurityScreen';
 import EEWSettingsScreen from '../screens/settings/EEWSettingsScreen';
 import RescueTeamScreen from '../screens/rescue/RescueTeamScreen';
+import VoiceCallScreen from '../screens/messages/VoiceCallScreen';
 
 const Stack = createStackNavigator();
 
@@ -143,8 +144,7 @@ export default function MainNavigator() {
         <Stack.Screen name="Security" component={SecurityScreen} options={{ headerShown: false }} />
         <Stack.Screen name="EEWSettings" component={EEWSettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="RescueTeam" component={RescueTeamScreen} options={{ headerShown: false }} />
-
-
+        <Stack.Screen name="VoiceCall" component={VoiceCallScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     </Suspense>
   );

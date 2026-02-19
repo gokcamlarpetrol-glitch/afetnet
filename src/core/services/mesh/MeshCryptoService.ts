@@ -15,6 +15,10 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
 import { getDeviceId } from '../../utils/device';
+// SECURITY FIX: Use tweetnacl for authenticated encryption (XSalsa20-Poly1305)
+// instead of broken XOR cipher
+import nacl from 'tweetnacl';
+import naclUtil from 'tweetnacl-util';
 
 const logger = createLogger('MeshCryptoService');
 
@@ -133,18 +137,10 @@ class MeshCryptoService {
     private async generateKeyPair(): Promise<void> {
         logger.info('Generating new key pair...');
 
-        // Generate random bytes for private key (32 bytes = 256 bits)
-        const privateKeyBytes = await Crypto.getRandomBytesAsync(32);
-        const privateKey = Buffer.from(privateKeyBytes).toString('base64');
-
-        // SECURITY WARNING: This is NOT real ECDH. Public key is SHA-256 hash of private key.
-        // In production, implement proper ECDH curve multiplication.
-        // This provides NO actual asymmetric security — only a placeholder.
-        const publicKeyDigest = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            privateKey
-        );
-        const publicKey = publicKeyDigest;
+        // SECURITY FIX: Use nacl.box.keyPair() for real Curve25519 ECDH key generation
+        const keyPair = nacl.box.keyPair();
+        const privateKey = naclUtil.encodeBase64(keyPair.secretKey);
+        const publicKey = naclUtil.encodeBase64(keyPair.publicKey);
 
         this.myKeyPair = {
             privateKey,
@@ -159,7 +155,7 @@ class MeshCryptoService {
         );
         await SecureStore.setItemAsync(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY, publicKey);
 
-        logger.info('New key pair generated');
+        logger.info('New key pair generated (Curve25519)');
     }
 
     private async loadPeerKeys(): Promise<void> {
@@ -239,13 +235,16 @@ class MeshCryptoService {
     private async computeSharedSecret(peerPublicKey: string): Promise<string> {
         if (!this.myKeyPair) throw new Error('No key pair');
 
-        // SECURITY WARNING: This is NOT real ECDH shared secret derivation.
-        // It concatenates private + peer public key and hashes.
-        // In production, use proper ECDH (e.g. react-native-sodium or webcrypto).
-        const combined = this.myKeyPair.privateKey + peerPublicKey;
+        // SECURITY FIX: Use nacl.box.before() for real Curve25519 ECDH shared secret
+        const mySecretKey = naclUtil.decodeBase64(this.myKeyPair.privateKey);
+        const theirPublicKey = naclUtil.decodeBase64(peerPublicKey);
+        const sharedKey = nacl.box.before(theirPublicKey, mySecretKey);
+
+        // Hash the shared key for extra security (key stretching)
+        const sharedKeyHex = Buffer.from(sharedKey).toString('hex');
         const secret = await Crypto.digestStringAsync(
             Crypto.CryptoDigestAlgorithm.SHA256,
-            combined
+            sharedKeyHex
         );
 
         return secret;
@@ -289,29 +288,30 @@ class MeshCryptoService {
         }
 
         try {
-            // Generate IV
-            const ivBytes = await Crypto.getRandomBytesAsync(12);
-            const iv = Buffer.from(ivBytes).toString('base64');
-
-            // Create encryption key from shared secret
+            // SECURITY FIX: Use nacl.secretbox (XSalsa20-Poly1305) authenticated encryption
+            // Derive 32-byte key from shared secret
             const keyDigest = await Crypto.digestStringAsync(
                 Crypto.CryptoDigestAlgorithm.SHA256,
                 peer.sharedSecret
             );
+            const keyBytes = Buffer.from(keyDigest, 'hex').slice(0, nacl.secretbox.keyLength);
 
-            // SECURITY WARNING: XOR encryption is NOT secure. Easily broken with known-plaintext attack.
-            // TODO: Replace with AES-256-GCM via SubtleCrypto or react-native-sodium
-            const plaintextBuffer = Buffer.from(plaintext, 'utf-8');
-            const keyBuffer = Buffer.from(keyDigest, 'hex');
-            const cipherBuffer = Buffer.alloc(plaintextBuffer.length);
+            // Generate random nonce (24 bytes for XSalsa20)
+            const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
 
-            for (let i = 0; i < plaintextBuffer.length; i++) {
-                cipherBuffer[i] = plaintextBuffer[i] ^ keyBuffer[i % keyBuffer.length];
+            // Encrypt with authenticated encryption (XSalsa20-Poly1305)
+            const plaintextBytes = naclUtil.decodeUTF8(plaintext);
+            const ciphertextBytes = nacl.secretbox(plaintextBytes, nonce, keyBytes);
+
+            if (!ciphertextBytes) {
+                logger.error('nacl.secretbox returned null');
+                return null;
             }
 
-            const ciphertext = cipherBuffer.toString('base64');
+            const ciphertext = naclUtil.encodeBase64(ciphertextBytes);
+            const iv = naclUtil.encodeBase64(nonce);
 
-            // Generate auth tag (HMAC)
+            // Auth tag is built into nacl.secretbox (Poly1305 MAC) — use hash for extra verification
             const authTag = await Crypto.digestStringAsync(
                 Crypto.CryptoDigestAlgorithm.SHA256,
                 ciphertext + iv + peer.sharedSecret
@@ -322,7 +322,7 @@ class MeshCryptoService {
                 iv,
                 authTag: authTag.slice(0, 32),
                 senderId: this.myDeviceId,
-                keyVersion: 1,
+                keyVersion: 2, // Version 2 = nacl.secretbox
             };
         } catch (error) {
             logger.error('Encryption failed:', error);
@@ -341,7 +341,7 @@ class MeshCryptoService {
         }
 
         try {
-            // Verify auth tag
+            // Verify auth tag (extra layer on top of Poly1305)
             const expectedAuthTag = await Crypto.digestStringAsync(
                 Crypto.CryptoDigestAlgorithm.SHA256,
                 payload.ciphertext + payload.iv + peer.sharedSecret
@@ -352,22 +352,25 @@ class MeshCryptoService {
                 return null;
             }
 
-            // Create decryption key
+            // Derive 32-byte key from shared secret
             const keyDigest = await Crypto.digestStringAsync(
                 Crypto.CryptoDigestAlgorithm.SHA256,
                 peer.sharedSecret
             );
+            const keyBytes = Buffer.from(keyDigest, 'hex').slice(0, nacl.secretbox.keyLength);
 
-            // SECURITY WARNING: XOR decryption — same weakness as encryption
-            const cipherBuffer = Buffer.from(payload.ciphertext, 'base64');
-            const keyBuffer = Buffer.from(keyDigest, 'hex');
-            const plaintextBuffer = Buffer.alloc(cipherBuffer.length);
+            // SECURITY FIX: Use nacl.secretbox.open (XSalsa20-Poly1305) authenticated decryption
+            const ciphertextBytes = naclUtil.decodeBase64(payload.ciphertext);
+            const nonce = naclUtil.decodeBase64(payload.iv);
 
-            for (let i = 0; i < cipherBuffer.length; i++) {
-                plaintextBuffer[i] = cipherBuffer[i] ^ keyBuffer[i % keyBuffer.length];
+            const plaintextBytes = nacl.secretbox.open(ciphertextBytes, nonce, keyBytes);
+
+            if (!plaintextBytes) {
+                logger.error('nacl.secretbox.open failed — message tampered or wrong key');
+                return null;
             }
 
-            return plaintextBuffer.toString('utf-8');
+            return naclUtil.encodeUTF8(plaintextBytes);
         } catch (error) {
             logger.error('Decryption failed:', error);
             return null;
@@ -379,21 +382,22 @@ class MeshCryptoService {
      */
     async encryptBroadcast(plaintext: string): Promise<{ ciphertext: string; key: string } | null> {
         try {
-            // Generate message-specific key
-            const keyBytes = await Crypto.getRandomBytesAsync(32);
-            const messageKey = Buffer.from(keyBytes).toString('base64');
+            // SECURITY FIX: Use nacl.secretbox for broadcast encryption
+            const keyBytes = nacl.randomBytes(nacl.secretbox.keyLength);
+            const messageKey = naclUtil.encodeBase64(keyBytes);
+            const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
 
-            // Encrypt
-            const plaintextBuffer = Buffer.from(plaintext, 'utf-8');
-            const keyBuffer = Buffer.from(keyBytes);
-            const cipherBuffer = Buffer.alloc(plaintextBuffer.length);
+            const plaintextBytes = naclUtil.decodeUTF8(plaintext);
+            const ciphertextBytes = nacl.secretbox(plaintextBytes, nonce, keyBytes);
 
-            for (let i = 0; i < plaintextBuffer.length; i++) {
-                cipherBuffer[i] = plaintextBuffer[i] ^ keyBuffer[i % keyBuffer.length];
+            if (!ciphertextBytes) {
+                logger.error('Broadcast encryption failed');
+                return null;
             }
 
+            // Prepend nonce to ciphertext for self-contained decryption
             return {
-                ciphertext: cipherBuffer.toString('base64'),
+                ciphertext: naclUtil.encodeBase64(nonce) + ':' + naclUtil.encodeBase64(ciphertextBytes),
                 key: messageKey,
             };
         } catch (error) {

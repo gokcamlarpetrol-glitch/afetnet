@@ -44,6 +44,9 @@ class GroupChatService {
     private groups: GroupConversation[] = [];
     private groupUnreadCounts = new Map<string, number>();
     private onGroupsChangedCallbacks: Array<(groups: GroupConversation[]) => void> = [];
+    private subscriptionRetryCount = 0;
+    private subscriptionRetryTimer: NodeJS.Timeout | null = null;
+    private static readonly MAX_SUBSCRIPTION_RETRIES = 6;
 
     private getCurrentUserSafe() {
         try {
@@ -123,18 +126,25 @@ class GroupChatService {
 
     /**
      * Internal: Start the Firestore group subscription.
+     * CRITICAL FIX: Retry with exponential backoff when subscription dies.
      */
     private startSubscription(): void {
         if (this.groupListSubscription) return;
 
         this.groupListSubscription = subscribeToMyGroupConversations(
             (groups) => {
+                // Subscription alive — reset retry counter
+                this.subscriptionRetryCount = 0;
                 this.groups = groups;
                 this.saveGroups(); // ELITE: Persist updates
                 this.onGroupsChangedCallbacks.forEach((cb) => cb(groups));
             },
             (error) => {
                 logger.error('Group list subscription error:', error);
+                // Reset ref so startSubscription() can re-run
+                this.groupListSubscription = null;
+                // Schedule retry with exponential backoff
+                this.scheduleSubscriptionRetry('subscription error');
             },
         );
 
@@ -142,9 +152,36 @@ class GroupChatService {
     }
 
     /**
+     * Schedule a subscription retry with exponential backoff.
+     */
+    private scheduleSubscriptionRetry(reason: string): void {
+        if (this.subscriptionRetryCount >= GroupChatService.MAX_SUBSCRIPTION_RETRIES) {
+            logger.error(`GroupChatService: exhausted ${GroupChatService.MAX_SUBSCRIPTION_RETRIES} retries (${reason})`);
+            return;
+        }
+        if (this.subscriptionRetryTimer) {
+            clearTimeout(this.subscriptionRetryTimer);
+        }
+        this.subscriptionRetryCount++;
+        const delay = Math.min(2000 * Math.pow(2, this.subscriptionRetryCount - 1), 30000);
+        logger.info(`GroupChatService: retry ${this.subscriptionRetryCount}/${GroupChatService.MAX_SUBSCRIPTION_RETRIES} in ${delay}ms (${reason})`);
+        this.subscriptionRetryTimer = setTimeout(() => {
+            this.subscriptionRetryTimer = null;
+            if (!this.groupListSubscription) {
+                this.startSubscription();
+            }
+        }, delay);
+    }
+
+    /**
      * Cleanup all subscriptions.
      */
     destroy(): void {
+        if (this.subscriptionRetryTimer) {
+            clearTimeout(this.subscriptionRetryTimer);
+            this.subscriptionRetryTimer = null;
+        }
+
         if (this.authUnsubscribe) {
             this.authUnsubscribe();
             this.authUnsubscribe = null;
@@ -291,6 +328,11 @@ class GroupChatService {
         const myUid = this.getCurrentUserSafe()?.uid;
         if (!myUid) return false;
 
+        // Send system message BEFORE removal — Firestore rules require participant membership
+        await this.sendSystemMessage(groupId, 'Bir üye gruptan ayrıldı').catch(() => {
+            // Non-critical: message may fail if already removed
+        });
+
         const success = await removeGroupMember(groupId, myUid);
         if (success) {
             // Unsubscribe from messages
@@ -299,7 +341,6 @@ class GroupChatService {
                 unsub();
                 this.activeSubscriptions.delete(groupId);
             }
-            await this.sendSystemMessage(groupId, 'Bir üye gruptan ayrıldı');
         }
         return success;
     }
@@ -326,8 +367,18 @@ class GroupChatService {
         } = {},
     ): Promise<GroupMessage | null> {
         const user = this.getCurrentUserSafe();
-        if (!user) {
-            logger.error('Cannot send group message: not authenticated');
+        // CRITICAL FIX: getAuth().currentUser can be null during cold start / token refresh
+        // even though the user IS authenticated. Use identityService.getUid() as fallback
+        // since it reads from MMKV cache which survives auth state transitions.
+        let uid = user?.uid || '';
+        if (!uid) {
+            try {
+                const { identityService } = require('./IdentityService');
+                uid = typeof identityService.getUid === 'function' ? (identityService.getUid() || '') : '';
+            } catch { /* identity service unavailable */ }
+        }
+        if (!uid) {
+            logger.error('Cannot send group message: not authenticated (both getAuth().currentUser and identityService.getUid() returned null)');
             return null;
         }
 
@@ -362,28 +413,28 @@ class GroupChatService {
             // Identity service unavailable
         }
         if (!deviceId) {
-            deviceId = user.uid;
+            deviceId = uid;
         }
 
         // Get display name
-        let displayName = user.displayName || '';
+        let displayName = user?.displayName || '';
         if (!displayName) {
             // Lookup from group metadata
             const group = this.groups.find((g) => g.id === groupId);
-            displayName = group?.participantNames[user.uid] || 'Kullanıcı';
+            displayName = group?.participantNames[uid] || 'Kullanıcı';
         }
 
         const message: GroupMessage = {
             id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            from: user.uid,
-            senderUid: user.uid,
+            from: uid,
+            senderUid: uid,
             fromName: displayName,
             fromDeviceId: deviceId,
             content,
             timestamp: Date.now(),
             type: options.type || 'CHAT',
             status: 'sent',
-            readBy: { [user.uid]: Date.now() }, // Sender has already "read" it
+            readBy: { [uid]: Date.now() }, // Sender has already "read" it
             ...(options.replyTo ? { replyTo: options.replyTo } : {}),
             ...(options.replyPreview ? { replyPreview: options.replyPreview } : {}),
             ...(options.location ? { location: options.location } : {}),
@@ -406,11 +457,11 @@ class GroupChatService {
         let meshSuccess = false;
         // Always attempt mesh broadcast for offline/partial-connectivity members.
         try {
-            const meshSenderId = message.fromDeviceId || user.uid;
+            const meshSenderId = message.fromDeviceId || uid;
             const meshPayload = JSON.stringify({
                 id: message.id,
                 from: meshSenderId,
-                senderUid: user.uid,
+                senderUid: uid,
                 senderPublicCode,
                 to: `group:${groupId}`,
                 type: message.type,
@@ -513,8 +564,17 @@ class GroupChatService {
         // Track seen message IDs to only notify on truly new messages
         const seenMessageIds = new Set<string>();
         let isInitialLoad = true;
+        let isDisposed = false;
+        let retryCount = 0;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+        let currentUnsub: (() => void) | null = null;
 
-        const unsub = subscribeToGroupMessages(groupId, (messages) => {
+        const MAX_RETRIES = 5;
+
+        const handleMessages = (messages: GroupMessage[]) => {
+            // Reset retry count on successful update
+            retryCount = 0;
+
             // Forward messages to the original callback
             callback(messages);
 
@@ -561,15 +621,49 @@ class GroupChatService {
                     }, 'GroupChatService').catch(() => { /* best-effort */ });
                 } catch { /* NotificationCenter not available */ }
             }
-        }, (error) => {
-            logger.error(`Message subscription error for group ${groupId}:`, error);
-        });
+        };
 
-        this.activeSubscriptions.set(groupId, unsub);
-        return () => {
-            unsub();
+        const handleError = (error: Error) => {
+            const code = (error as any)?.code || '';
+            if (code === 'permission-denied' || error.message?.includes('permission')) {
+                logger.warn(`Group message subscription permission denied for ${groupId} — not retrying`);
+                return;
+            }
+
+            logger.error(`Message subscription error for group ${groupId}:`, error);
+
+            // Retry with exponential backoff (non-permission errors)
+            if (isDisposed || retryCount >= MAX_RETRIES) {
+                if (retryCount >= MAX_RETRIES) {
+                    logger.error(`Group message subscription exhausted retries for ${groupId}`);
+                }
+                return;
+            }
+
+            retryCount++;
+            const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
+            logger.info(`Group message subscription retry ${retryCount}/${MAX_RETRIES} in ${delay}ms for ${groupId}`);
+
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                if (!isDisposed) {
+                    if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+                    currentUnsub = subscribeToGroupMessages(groupId, handleMessages, handleError);
+                }
+            }, delay);
+        };
+
+        currentUnsub = subscribeToGroupMessages(groupId, handleMessages, handleError);
+
+        const cleanupFn = () => {
+            isDisposed = true;
+            if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+            if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } currentUnsub = null; }
             this.activeSubscriptions.delete(groupId);
         };
+
+        this.activeSubscriptions.set(groupId, cleanupFn);
+        return cleanupFn;
     }
 
     /**

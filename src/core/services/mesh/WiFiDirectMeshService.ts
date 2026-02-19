@@ -25,7 +25,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Platform, NativeModules, NativeEventEmitter, DeviceEventEmitter } from 'react-native';
 import { LRUSet } from '../../utils/LRUCache';
 import { meshCompressionService } from './MeshCompressionService';
@@ -851,22 +851,22 @@ class WiFiDirectMeshService {
     // ============================================================================
 
     private async loadDeviceName(): Promise<string | null> {
-        return AsyncStorage.getItem(STORAGE_KEYS.MY_DEVICE_NAME);
+        return DirectStorage.getString(STORAGE_KEYS.MY_DEVICE_NAME) ?? null;
     }
 
     async setDeviceName(name: string): Promise<void> {
         this.myDeviceName = name;
-        await AsyncStorage.setItem(STORAGE_KEYS.MY_DEVICE_NAME, name);
+        DirectStorage.setString(STORAGE_KEYS.MY_DEVICE_NAME, name);
     }
 
     private async saveKnownPeers(): Promise<void> {
         const data = Array.from(this.knownPeers.entries());
-        await AsyncStorage.setItem(STORAGE_KEYS.KNOWN_PEERS, JSON.stringify(data));
+        DirectStorage.setString(STORAGE_KEYS.KNOWN_PEERS, JSON.stringify(data));
     }
 
     private async loadKnownPeers(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEYS.KNOWN_PEERS);
+            const data = DirectStorage.getString(STORAGE_KEYS.KNOWN_PEERS);
             if (data) {
                 const entries = JSON.parse(data) as Array<[string, WiFiDirectPeer]>;
                 this.knownPeers = new Map(entries);

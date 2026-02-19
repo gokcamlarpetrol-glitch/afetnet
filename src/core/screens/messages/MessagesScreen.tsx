@@ -18,6 +18,7 @@ import {
   Platform,
   ImageBackground,
   RefreshControl,
+  AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,6 +39,9 @@ import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 import { groupChatService, type GroupConversation } from '../../services/GroupChatService';
 
 const logger = createLogger('MessagesScreen');
+// Stable separator component — avoids re-creating on every render
+const ConversationSeparator = () => <View style={{ height: 12 }} />;
+
 const isRoutableConversationId = (value?: string | null): value is string => {
   if (typeof value !== 'string') return false;
   const normalized = value.trim();
@@ -107,6 +111,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // ── Store selectors — only subscribe to what is needed ───────────────────
@@ -418,6 +423,17 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     };
   }, []);
 
+  // Refresh conversation list when app comes to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        // Reload from MMKV to pick up any messages delivered while in background
+        useMessageStore.getState().initialize().catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const renderConversation = useCallback(({ item, index }: { item: Conversation; index: number }) => {
     try {
       const isGroup = item.userId.startsWith('group:');
@@ -439,7 +455,11 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
                 const groupId = item.userId.replace(/^group:/, '');
                 navigation?.navigate('FamilyGroupChat', { groupId });
               } else {
-                navigation?.navigate('Conversation', { userId: item.userId, userName: item.userName });
+                navigation?.navigate('Conversation', {
+                  userId: item.userId,
+                  userName: item.userName,
+                  ...(item.conversationId ? { conversationId: item.conversationId } : {}),
+                });
               }
             } catch (error) {
               logger.error('Error navigating to conversation:', error);
@@ -609,8 +629,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
         {/* Search Bar - Fixed outside FlatList to prevent re-mounting */}
         <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={20} color="#64748b" />
+          <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
+            <Ionicons name="search" size={20} color={searchFocused ? '#3b82f6' : '#64748b'} />
             <TextInput
               ref={searchInputRef}
               style={styles.searchInput}
@@ -627,11 +647,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
               textContentType="none"
               accessibilityLabel="Mesajlarda ara"
               accessibilityHint="Kişi veya mesaj içeriğinde arama yapar"
-              onFocus={() => {
-                if (searchInputRef.current) {
-                  searchInputRef.current.focus();
-                }
-              }}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
             />
             {searchQuery.length > 0 && (
               <Pressable
@@ -684,7 +701,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             keyExtractor={(item) => item.userId}
             ListHeaderComponent={ListHeaderComponent}
             contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+            ItemSeparatorComponent={ConversationSeparator}
             showsVerticalScrollIndicator={true}
             keyboardShouldPersistTaps="always"
             keyboardDismissMode="on-drag"
@@ -826,15 +843,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderColor: 'rgba(148, 163, 184, 0.3)',
     gap: 8,
     shadowColor: '#64748b',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.08,
     shadowRadius: 10,
-    elevation: 2,
+    elevation: 3,
+  },
+  searchBarFocused: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(255, 255, 255, 1)',
+    shadowOpacity: 0.12,
   },
   searchInput: {
     flex: 1,

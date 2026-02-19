@@ -444,6 +444,39 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         return;
       }
 
+      // Verify the UID actually exists as a user in Firebase (prevent ghost members)
+      try {
+        const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (db) {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const userDoc = await Promise.race([
+            getDoc(doc(db, 'users', uidToSave)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+          ]);
+          if (userDoc && typeof userDoc === 'object' && 'exists' in userDoc && !userDoc.exists()) {
+            Alert.alert(
+              'Kullanıcı Bulunamadı',
+              'Bu ID ile kayıtlı bir AfetNet kullanıcısı bulunamadı. Lütfen kodu kontrol edip tekrar deneyin.',
+            );
+            haptics.notificationError();
+            setIsSubmitting(false);
+            return;
+          }
+          // If userDoc has a displayName, use it as fallback name
+          if (userDoc && typeof userDoc === 'object' && 'exists' in userDoc && userDoc.exists()) {
+            const userData = (userDoc as any).data();
+            if (userData?.displayName && !memberName.trim()) {
+              setMemberName(userData.displayName);
+            }
+          }
+        }
+        // If db is null (offline), skip verification — offline-first is important
+      } catch (verifyError) {
+        // Offline or permission error — allow adding (will sync later)
+        logger.debug('UID existence check skipped (offline/error):', verifyError);
+      }
+
       // ELITE: Add member with comprehensive data
       // Do NOT seed new member location with inviter's GPS. Member will publish own location.
       await useFamilyStore.getState().addMember({

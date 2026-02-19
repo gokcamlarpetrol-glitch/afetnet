@@ -20,7 +20,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { meshCryptoService } from './MeshCryptoService';
 import { LRUSet } from '../../utils/LRUCache';
 import { Buffer } from 'buffer';
@@ -715,12 +715,12 @@ class GroupKeyService {
 
     private async saveGroups(): Promise<void> {
         const data = Array.from(this.groups.entries());
-        await AsyncStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(data));
+        DirectStorage.setString(STORAGE_KEYS.GROUPS, JSON.stringify(data));
     }
 
     private async loadGroups(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEYS.GROUPS);
+            const data = DirectStorage.getString(STORAGE_KEYS.GROUPS) ?? null;
             if (data) {
                 const entries = JSON.parse(data) as Array<[string, GroupKeyInfo]>;
                 this.groups = new Map(entries);
@@ -732,12 +732,12 @@ class GroupKeyService {
 
     private async savePendingInvites(): Promise<void> {
         const data = Array.from(this.pendingInvites.entries());
-        await AsyncStorage.setItem(STORAGE_KEYS.PENDING_INVITES, JSON.stringify(data));
+        DirectStorage.setString(STORAGE_KEYS.PENDING_INVITES, JSON.stringify(data));
     }
 
     private async loadPendingInvites(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_INVITES);
+            const data = DirectStorage.getString(STORAGE_KEYS.PENDING_INVITES) ?? null;
             if (data) {
                 const entries = JSON.parse(data) as Array<[string, GroupInvite]>;
                 this.pendingInvites = new Map(entries);

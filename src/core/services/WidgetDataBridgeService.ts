@@ -15,7 +15,7 @@
  */
 
 import { Platform, NativeModules } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('WidgetDataBridgeService');
@@ -105,7 +105,7 @@ class WidgetDataBridgeService {
             };
 
             // Save to AsyncStorage (fallback)
-            await AsyncStorage.setItem(
+            DirectStorage.setString(
                 STORAGE_KEYS.LAST_EARTHQUAKE,
                 JSON.stringify(widgetData)
             );
@@ -136,7 +136,7 @@ class WidgetDataBridgeService {
     async updateFamilySafeCount(count: number): Promise<void> {
         try {
             // Save to AsyncStorage (fallback)
-            await AsyncStorage.setItem(
+            DirectStorage.setString(
                 STORAGE_KEYS.FAMILY_SAFE_COUNT,
                 count.toString()
             );
@@ -175,7 +175,7 @@ class WidgetDataBridgeService {
                 await SharedGroupPreferences.setItem(key, jsonValue, APP_GROUP_ID);
             } else {
                 // Fallback: Save to AsyncStorage with special prefix
-                await AsyncStorage.setItem(
+                DirectStorage.setString(
                     `${APP_GROUP_ID}:${key}`,
                     typeof value === 'string' ? value : JSON.stringify(value)
                 );
@@ -210,8 +210,8 @@ class WidgetDataBridgeService {
      */
     private async loadCachedData(): Promise<void> {
         try {
-            const earthquakeData = await AsyncStorage.getItem(STORAGE_KEYS.LAST_EARTHQUAKE);
-            const familyCount = await AsyncStorage.getItem(STORAGE_KEYS.FAMILY_SAFE_COUNT);
+            const earthquakeData = DirectStorage.getString(STORAGE_KEYS.LAST_EARTHQUAKE);
+            const familyCount = DirectStorage.getString(STORAGE_KEYS.FAMILY_SAFE_COUNT);
 
             this.cachedData = {
                 latestEarthquake: earthquakeData ? JSON.parse(earthquakeData) : null,
@@ -240,11 +240,9 @@ class WidgetDataBridgeService {
      */
     async clearWidgetData(): Promise<void> {
         try {
-            await AsyncStorage.multiRemove([
-                STORAGE_KEYS.LAST_EARTHQUAKE,
-                STORAGE_KEYS.FAMILY_SAFE_COUNT,
-                STORAGE_KEYS.WIDGET_DATA,
-            ]);
+            DirectStorage.delete(STORAGE_KEYS.LAST_EARTHQUAKE);
+            DirectStorage.delete(STORAGE_KEYS.FAMILY_SAFE_COUNT);
+            DirectStorage.delete(STORAGE_KEYS.WIDGET_DATA);
 
             if (Platform.OS === 'ios') {
                 await this.refreshWidget();

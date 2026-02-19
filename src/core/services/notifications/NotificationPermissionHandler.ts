@@ -168,8 +168,9 @@ export async function getExpoPushToken(): Promise<string | null> {
     }
 
     // Get Expo push token
+    const { APP_CONFIG } = await import('../../config/app');
     const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: '072f1217-172a-40ce-af23-3fc0ad3f7f09', // EAS Project ID
+      projectId: APP_CONFIG.easProjectId,
     });
 
     return tokenData.data;

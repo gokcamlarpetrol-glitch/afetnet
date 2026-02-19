@@ -11,7 +11,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('SOSStateManager');
@@ -141,6 +141,7 @@ interface SOSState {
     addAck: (ack: SOSAck) => void;
     incrementBeaconCount: () => void;
     addIncomingSOSAlert: (alert: IncomingSOSAlert) => void;
+    removeIncomingSOSAlertBySignalId: (signalId: string) => void;
     clearIncomingSOSAlerts: () => void;
     stopSOS: () => void;
     reset: () => void;
@@ -344,6 +345,16 @@ export const useSOSStore = create<SOSState>()(
                 logger.info(`🆘 Incoming SOS alert added: ${alert.senderName}`);
             },
 
+            // Remove a single incoming SOS alert by signalId (used when SOS is cancelled)
+            removeIncomingSOSAlertBySignalId: (signalId: string) => {
+                const { incomingSOSAlerts } = get();
+                const filtered = incomingSOSAlerts.filter(a => a.signalId !== signalId);
+                if (filtered.length !== incomingSOSAlerts.length) {
+                    set({ incomingSOSAlerts: filtered });
+                    logger.info(`🗑️ Removed cancelled SOS alert: ${signalId}`);
+                }
+            },
+
             // Clear all incoming SOS alerts
             clearIncomingSOSAlerts: () => {
                 set({ incomingSOSAlerts: [] });
@@ -380,7 +391,7 @@ export const useSOSStore = create<SOSState>()(
         }),
         {
             name: 'afetnet-sos-store',
-            storage: createJSONStorage(() => AsyncStorage),
+            storage: createJSONStorage(() => eliteStorage),
             partialize: (state) => ({
                 signalHistory: state.signalHistory,
                 stats: state.stats,

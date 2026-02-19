@@ -4,7 +4,7 @@
  * Critical for preventing data loss and app crashes
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { createLogger } from '../utils/logger';
 import { Alert } from 'react-native';
@@ -160,11 +160,11 @@ class StorageManagementService {
    */
   private async getAsyncStorageSize(): Promise<number> {
     try {
-      const keys = await AsyncStorage.getAllKeys();
+      const keys = DirectStorage.getAllKeys();
       let totalSize = 0;
 
       for (const key of keys) {
-        const value = await AsyncStorage.getItem(key);
+        const value = DirectStorage.getString(key);
         if (value) {
           totalSize += new Blob([value]).size;
         }
@@ -272,21 +272,21 @@ class StorageManagementService {
       // Clean AI cache
       const aiCacheKeys = await this.getKeysByPrefix('@afetnet:ai_cache:');
       for (const key of aiCacheKeys) {
-        const value = await AsyncStorage.getItem(key);
+        const value = DirectStorage.getString(key);
         if (value) {
           cleanedBytes += new Blob([value]).size;
         }
-        await AsyncStorage.removeItem(key);
+        DirectStorage.delete(key);
       }
 
       // Clean news cache
       const newsKeys = await this.getKeysByPrefix('@afetnet:news:');
       for (const key of newsKeys) {
-        const value = await AsyncStorage.getItem(key);
+        const value = DirectStorage.getString(key);
         if (value) {
           cleanedBytes += new Blob([value]).size;
         }
-        await AsyncStorage.removeItem(key);
+        DirectStorage.delete(key);
       }
 
       logger.info(`Cleaned ${(cleanedBytes / 1024 / 1024).toFixed(2)}MB of low priority data`);
@@ -308,14 +308,14 @@ class StorageManagementService {
 
       // Keep only last 100 earthquakes
       const earthquakesKey = '@afetnet:earthquakes';
-      const earthquakesData = await AsyncStorage.getItem(earthquakesKey);
+      const earthquakesData = DirectStorage.getString(earthquakesKey);
       if (earthquakesData) {
         const earthquakes = JSON.parse(earthquakesData);
         if (Array.isArray(earthquakes) && earthquakes.length > 100) {
           const oldSize = new Blob([earthquakesData]).size;
           const trimmed = earthquakes.slice(0, 100);
-          await AsyncStorage.setItem(earthquakesKey, JSON.stringify(trimmed));
-          const newData = await AsyncStorage.getItem(earthquakesKey);
+          DirectStorage.setString(earthquakesKey, JSON.stringify(trimmed));
+          const newData = DirectStorage.getString(earthquakesKey);
           const newSize = newData ? new Blob([newData]).size : 0;
           cleanedBytes += oldSize - newSize;
         }
@@ -323,14 +323,15 @@ class StorageManagementService {
 
       // Clean old messages (older than 30 days)
       const messagesKey = '@afetnet:messages';
-      const messagesData = await AsyncStorage.getItem(messagesKey);
+      const messagesData = DirectStorage.getString(messagesKey);
       if (messagesData) {
         const messages = JSON.parse(messagesData);
+        if (!Array.isArray(messages)) return cleanedBytes;
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
         const oldSize = new Blob([messagesData]).size;
         const filtered = messages.filter((msg: any) => msg.timestamp > thirtyDaysAgo);
-        await AsyncStorage.setItem(messagesKey, JSON.stringify(filtered));
-        const newData = await AsyncStorage.getItem(messagesKey);
+        DirectStorage.setString(messagesKey, JSON.stringify(filtered));
+        const newData = DirectStorage.getString(messagesKey);
         const newSize = newData ? new Blob([newData]).size : 0;
         cleanedBytes += oldSize - newSize;
       }
@@ -348,7 +349,7 @@ class StorageManagementService {
    */
   private async getKeysByPrefix(prefix: string): Promise<string[]> {
     try {
-      const allKeys = await AsyncStorage.getAllKeys();
+      const allKeys = DirectStorage.getAllKeys();
       return allKeys.filter(key => key.startsWith(prefix));
     } catch (error) {
       logger.error('Failed to get keys by prefix:', error);

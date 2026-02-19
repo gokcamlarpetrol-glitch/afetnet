@@ -56,18 +56,12 @@ interface NewsDetailScreenProps {
 
 export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   const navigation = useNavigation();
-
-  // CRITICAL: Validate route params and article
-  const article = route?.params?.article;
-  if (!article || typeof article !== 'object') {
-    logger.error('Invalid article in route params:', route?.params);
-    // Navigate back if article is invalid
-    if (navigation && 'goBack' in navigation) {
-      navigation.goBack();
-    }
-    return null;
-  }
   const insets = useSafeAreaInsets();
+
+  // CRITICAL FIX: Extract article BEFORE hooks but validate AFTER hooks
+  // Rules of Hooks: hooks must be called unconditionally, in the same order every render.
+  // Previous code returned null here, skipping 30+ hooks below → crash.
+  const article = route?.params?.article;
 
   // CRITICAL: Validate URL with comprehensive type check
   const hasValidUrl = Boolean(
@@ -442,9 +436,20 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       }
       setArticleContentLoading(false);
     }
-  }, [article.url]);
+  }, [article?.url]);
+
+  // CRITICAL: Navigate back if article is invalid (after hooks are called)
+  useEffect(() => {
+    if (!article || typeof article !== 'object') {
+      logger.error('Invalid article — navigating back');
+      if (navigation && 'goBack' in navigation) {
+        (navigation as any).goBack();
+      }
+    }
+  }, [article, navigation]);
 
   useEffect(() => {
+    if (!article) return;
     // Load AI summary when component mounts or article changes
     loadAISummary();
 
@@ -456,7 +461,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     }, 50);
     // ELITE: loadAISummary is memoized via useCallback with article dependency,
     // adding it to deps would cause unnecessary re-runs
-  }, [article.id]); // Re-load if article changes (loadAISummary is memoized with article dependency)
+  }, [article?.id]); // Re-load if article changes (loadAISummary is memoized with article dependency)
 
   // ELITE: Orijinal haber sekmesine geçildiğinde inline WebView için URL ayarla (modal değil, sekme içinde göster)
   useEffect(() => {
@@ -482,7 +487,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       // If URL is invalid, HTML fallback is already loaded by primary effect
     }
     // ELITE: loadArticleContent is memoized, excluding from deps to prevent infinite loops
-  }, [activeTab, hasValidUrl, article.url]);
+  }, [activeTab, hasValidUrl, article?.url]);
 
   useEffect(() => {
     // ELITE: Scroll to top when tab changes to summary - ensure content starts from top
@@ -681,7 +686,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     };
     // ELITE PRELOAD: webViewStatus excluded to prevent infinite render loop
     // activeTab REMOVED - WebView now loads on mount for instant availability
-  }, [hasValidUrl, article.url]);
+  }, [hasValidUrl, article?.url]);
 
   // ELITE: Modal açıldığında WebView'i yükle
   useEffect(() => {
@@ -760,7 +765,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       setArticlePlainText('');
       setArticleContentError('Bu haber için tam metin bağlantısı sağlanmamış.');
     }
-  }, [article.url, loadArticleContent]);
+  }, [article?.url, loadArticleContent]);
 
   useEffect(() => {
     // CRITICAL: Modal açıldığında içeriği garantili olarak yükle
@@ -1308,6 +1313,12 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
       setIsFullScreen(false);
     }
   };
+
+  // CRITICAL: Validate article after all hooks (Rules of Hooks compliance)
+  if (!article || typeof article !== 'object') {
+    logger.error('Invalid article in route params:', route?.params);
+    return null;
+  }
 
   return (
     <View style={styles.container}>

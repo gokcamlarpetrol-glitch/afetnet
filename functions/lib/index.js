@@ -55,9 +55,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onContactRequest = exports.onFamilyStatusUpdateV3 = exports.onFamilyStatusUpdate = exports.onNewConversationMessageV3 = exports.onNewMessage = exports.sendCustomEmail = exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.onSOSBroadcast = exports.onSOSAlert = exports.tokenCleanup = exports.dailyAnalytics = exports.openAIChatProxy = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
+exports.onContactRequest = exports.onFamilyStatusUpdateV3 = exports.onFamilyStatusUpdate = exports.onNewConversationMessageV3 = exports.onNewMessage = exports.sendCustomEmail = exports.cleanupSeismicReports = exports.onSeismicReportCreated = exports.onSOSBroadcast = exports.onSOSAlertV3 = exports.onSOSAlert = exports.tokenCleanup = exports.dailyAnalytics = exports.openAIChatProxy = exports.eewWebhook = exports.broadcastEEW = exports.registerFCMToken = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
+const crypto = __importStar(require("crypto"));
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
@@ -162,8 +163,10 @@ function isExpoPushToken(token) {
 /**
  * Send push notification that works with BOTH Expo and FCM tokens.
  * Routes to the correct API based on token type.
+ * Retries up to 2 times on transient failures; cleans up permanently invalid FCM tokens.
  */
-async function sendPushToToken(token, title, body, data) {
+async function sendPushToToken(token, title, body, data, _retryCount = 0) {
+    var _a;
     try {
         const channelId = resolveAndroidChannelId(data);
         const rawType = ((data === null || data === void 0 ? void 0 : data.type) || '').toLowerCase();
@@ -191,6 +194,11 @@ async function sendPushToToken(token, title, body, data) {
         }
         else {
             // Native FCM token — use Firebase Admin SDK
+            // CRITICAL FIX: Include data fields in APNS payload explicitly.
+            // When apns.payload is specified, Firebase Admin SDK does NOT auto-merge
+            // the top-level data fields into the APNS payload. Without this, iOS
+            // notification taps have EMPTY data → handleNotificationTap falls through
+            // to "navigate to Home" instead of the target screen.
             await messaging.send({
                 token,
                 notification: { title, body },
@@ -200,14 +208,37 @@ async function sendPushToToken(token, title, body, data) {
                     notification: { sound: 'default', priority: 'max', channelId },
                 },
                 apns: {
-                    payload: { aps: { alert: { title, body }, sound: 'default', badge: 1, 'interruption-level': iosInterruptionLevel } },
+                    payload: Object.assign({ aps: { alert: { title, body }, sound: 'default', badge: 1, 'interruption-level': iosInterruptionLevel, 'content-available': 1 } }, (data || {})),
                 },
             });
             return true;
         }
     }
     catch (error) {
-        functions.logger.debug(`Push to token failed: ${error}`);
+        const code = (error === null || error === void 0 ? void 0 : error.code) || ((_a = error === null || error === void 0 ? void 0 : error.errorInfo) === null || _a === void 0 ? void 0 : _a.code) || '';
+        // Permanent errors — don't retry, optionally cleanup token
+        const isPermanent = code === 'messaging/invalid-argument' ||
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token';
+        if (!isPermanent && _retryCount < 2) {
+            await new Promise(r => setTimeout(r, 500 * (_retryCount + 1)));
+            return sendPushToToken(token, title, body, data, _retryCount + 1);
+        }
+        functions.logger.warn(`Push to token failed (attempt ${_retryCount + 1}): ${error}`);
+        // Best-effort cleanup of permanently invalid native FCM tokens
+        if (isPermanent && !isExpoPushToken(token)) {
+            try {
+                const tokenSnap = await db.collectionGroup('devices')
+                    .where('token', '==', token).limit(5).get();
+                if (!tokenSnap.empty) {
+                    const batch = db.batch();
+                    tokenSnap.docs.forEach(d => batch.delete(d.ref));
+                    await batch.commit();
+                    functions.logger.info(`Cleaned up invalid FCM token from ${tokenSnap.size} device doc(s)`);
+                }
+            }
+            catch ( /* non-critical, best effort */_b) { /* non-critical, best effort */ }
+        }
         return false;
     }
 }
@@ -222,7 +253,7 @@ const EMSC_API = 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&
 // Thresholds
 const MIN_MAGNITUDE_ALERT = 4.0;
 const MIN_MAGNITUDE_CRITICAL = 5.5;
-const CONSENSUS_THRESHOLD = 3;
+const CONSENSUS_THRESHOLD = 5;
 const CONSENSUS_CONFIDENCE = 80;
 // Location-based push radius (km)
 const NEARBY_RADIUS_CRITICAL = 500; // M5.5+ -> 500km radius
@@ -351,7 +382,10 @@ exports.eewEmergencyTrigger = functions
         res.status(500).json({ error: 'Server configuration error' });
         return;
     }
-    if (!apiKey || apiKey !== validKey) {
+    // SECURITY FIX: Timing-safe comparison to prevent timing attacks
+    if (!apiKey || typeof apiKey !== 'string' ||
+        apiKey.length !== validKey.length ||
+        !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(validKey))) {
         res.status(403).json({ error: 'Invalid API key' });
         return;
     }
@@ -396,7 +430,7 @@ exports.eewEmergencyTrigger = functions
 exports.onPWaveDetection = functions
     .region(REGION)
     .firestore.document('eew_pwave_detections/{detectionId}')
-    .onCreate(async (snap, context) => {
+    .onCreate(async (snap, _context) => {
     const detection = snap.data();
     functions.logger.info('🌊 New P-wave detection:', detection);
     // Find nearby detections in last 30 seconds
@@ -530,7 +564,10 @@ exports.eewWebhook = functions
         res.status(500).json({ error: 'Server configuration error' });
         return;
     }
-    if (!apiKey || apiKey !== validKey) {
+    // SECURITY FIX: Timing-safe comparison to prevent timing attacks
+    if (!apiKey || typeof apiKey !== 'string' ||
+        apiKey.length !== validKey.length ||
+        !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(validKey))) {
         res.status(403).json({ error: 'Invalid API key' });
         return;
     }
@@ -555,6 +592,10 @@ exports.eewWebhook = functions
             res.status(400).json({ error: 'Invalid latitude/longitude range' });
             return;
         }
+        // SECURITY FIX: Validate source against known list to prevent arbitrary values
+        const VALID_SOURCES = ['AFAD', 'KANDILLI', 'USGS', 'EMSC', 'CROWDSOURCED'];
+        const rawSource = typeof req.body.source === 'string' ? req.body.source.toUpperCase() : 'AFAD';
+        const source = (VALID_SOURCES.includes(rawSource) ? rawSource : 'AFAD');
         const event = {
             id: req.body.id || `webhook-${Date.now()}`,
             magnitude,
@@ -562,7 +603,7 @@ exports.eewWebhook = functions
             longitude,
             depth: Number(req.body.depth) || 10,
             location: req.body.location || 'Unknown',
-            source: req.body.source || 'AFAD',
+            source,
             timestamp: Date.now(),
             issuedAt: Date.now(),
         };
@@ -928,7 +969,7 @@ exports.onSOSAlert = functions
     .region(REGION)
     .firestore.document('devices/{deviceId}/sos_alerts/{alertId}')
     .onCreate(async (snap, context) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     const alert = snap.data();
     const targetDeviceId = context.params.deviceId;
     functions.logger.warn(`🚨 SOS Alert received for device ${targetDeviceId}:`, {
@@ -942,7 +983,28 @@ exports.onSOSAlert = functions
         const deviceDoc = await db.collection('devices').doc(targetDeviceId).get();
         const ownerUid = deviceDoc.exists ? (_a = deviceDoc.data()) === null || _a === void 0 ? void 0 : _a.ownerUid : null;
         if (!ownerUid) {
-            functions.logger.warn(`No ownerUid found on device doc ${targetDeviceId} — cannot send push`);
+            // LIFE-SAFETY FALLBACK: If ownerUid missing, try pushToken directly from device doc
+            const fallbackToken = deviceDoc.exists ? (((_b = deviceDoc.data()) === null || _b === void 0 ? void 0 : _b.pushToken) || ((_c = deviceDoc.data()) === null || _c === void 0 ? void 0 : _c.token)) : null;
+            if (fallbackToken) {
+                functions.logger.warn(`No ownerUid on device ${targetDeviceId} — using device pushToken fallback`);
+                const fbTitle = `🆘 ACİL SOS: ${alert.senderName || 'Aile Üyesi'}`;
+                const fbBody = alert.message || 'Acil yardım gerekiyor!';
+                // CRITICAL FIX: Include all data fields so client can navigate to SOS screen
+                await sendPushToToken(fallbackToken, fbTitle, fbBody, {
+                    type: 'sos_family',
+                    signalId: alert.signalId || context.params.alertId,
+                    senderDeviceId: alert.senderDeviceId || '',
+                    senderUid: alert.senderUid || alert.userId || '',
+                    senderName: alert.senderName || 'Aile Üyesi',
+                    message: alert.message || '',
+                    timestamp: String(alert.timestamp || Date.now()),
+                    trapped: String(alert.trapped === true),
+                    latitude: ((_d = alert.location) === null || _d === void 0 ? void 0 : _d.latitude) ? String(alert.location.latitude) : '',
+                    longitude: ((_e = alert.location) === null || _e === void 0 ? void 0 : _e.longitude) ? String(alert.location.longitude) : '',
+                });
+                return null;
+            }
+            functions.logger.error(`No ownerUid AND no pushToken on device ${targetDeviceId} — SOS push LOST`);
             return null;
         }
         // V3: Collect ALL tokens — push_tokens first, then fcm_tokens fallback
@@ -952,19 +1014,19 @@ exports.onSOSAlert = functions
         try {
             const v3Snap = await db.collection('push_tokens').doc(ownerUid).collection('devices').get();
             for (const tDoc of v3Snap.docs) {
-                const t = (_b = tDoc.data()) === null || _b === void 0 ? void 0 : _b.token;
+                const t = (_f = tDoc.data()) === null || _f === void 0 ? void 0 : _f.token;
                 if (t && !seenTokens.has(t)) {
                     seenTokens.add(t);
                     allTokens.push(t);
                 }
             }
         }
-        catch ( /* push_tokens may not exist yet */_j) { /* push_tokens may not exist yet */ }
+        catch ( /* push_tokens may not exist yet */_o) { /* push_tokens may not exist yet */ }
         // Step 2b: Legacy fcm_tokens/{uid} + subcollection
         try {
             const tokenDoc = await db.collection('fcm_tokens').doc(ownerUid).get();
             if (tokenDoc.exists) {
-                const t = (_c = tokenDoc.data()) === null || _c === void 0 ? void 0 : _c.token;
+                const t = (_g = tokenDoc.data()) === null || _g === void 0 ? void 0 : _g.token;
                 if (t && !seenTokens.has(t)) {
                     seenTokens.add(t);
                     allTokens.push(t);
@@ -972,7 +1034,7 @@ exports.onSOSAlert = functions
                 // Multi-device subcollection
                 const devicesSnapshot = await tokenDoc.ref.collection('devices').get();
                 for (const dDoc of devicesSnapshot.docs) {
-                    const dt = (_d = dDoc.data()) === null || _d === void 0 ? void 0 : _d.token;
+                    const dt = (_h = dDoc.data()) === null || _h === void 0 ? void 0 : _h.token;
                     if (dt && !seenTokens.has(dt)) {
                         seenTokens.add(dt);
                         allTokens.push(dt);
@@ -980,10 +1042,10 @@ exports.onSOSAlert = functions
                 }
             }
         }
-        catch ( /* fcm_tokens fallback is best-effort */_k) { /* fcm_tokens fallback is best-effort */ }
+        catch ( /* fcm_tokens fallback is best-effort */_p) { /* fcm_tokens fallback is best-effort */ }
         // Step 2c: Device doc pushToken as final fallback
         if (allTokens.length === 0) {
-            const fallbackToken = ((_e = deviceDoc.data()) === null || _e === void 0 ? void 0 : _e.pushToken) || ((_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.token);
+            const fallbackToken = ((_j = deviceDoc.data()) === null || _j === void 0 ? void 0 : _j.pushToken) || ((_k = deviceDoc.data()) === null || _k === void 0 ? void 0 : _k.token);
             if (fallbackToken && !seenTokens.has(fallbackToken)) {
                 allTokens.push(fallbackToken);
             }
@@ -1015,20 +1077,135 @@ exports.onSOSAlert = functions
             message: alert.message || '',
             timestamp: String(alert.timestamp || Date.now()),
             trapped: String(isTrapped),
-            latitude: ((_g = alert.location) === null || _g === void 0 ? void 0 : _g.latitude) ? String(alert.location.latitude) : '',
-            longitude: ((_h = alert.location) === null || _h === void 0 ? void 0 : _h.longitude) ? String(alert.location.longitude) : '',
+            latitude: ((_l = alert.location) === null || _l === void 0 ? void 0 : _l.latitude) ? String(alert.location.latitude) : '',
+            longitude: ((_m = alert.location) === null || _m === void 0 ? void 0 : _m.longitude) ? String(alert.location.longitude) : '',
         };
-        // Send to all tokens
+        // LIFE-SAFETY: Send to all tokens with retry on failure
         let sentCount = 0;
+        const failedTokens = [];
         for (const pushToken of allTokens) {
             const success = await sendPushToToken(pushToken, title, body, pushData);
-            if (success)
+            if (success) {
                 sentCount++;
+            }
+            else {
+                failedTokens.push(pushToken);
+            }
+        }
+        // CRITICAL: Retry failed tokens once for SOS (life-saving)
+        if (failedTokens.length > 0) {
+            functions.logger.warn(`SOS push: ${failedTokens.length} tokens failed, retrying once...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            for (const pushToken of failedTokens) {
+                const success = await sendPushToToken(pushToken, title, body, pushData);
+                if (success)
+                    sentCount++;
+            }
         }
         functions.logger.info(`✅ SOS family push sent: ${sentCount}/${allTokens.length} tokens (device: ${targetDeviceId})`);
     }
     catch (error) {
         functions.logger.error('❌ SOS FCM push failed:', error);
+    }
+    return null;
+});
+// ============================================================
+// 10b. V3: SOS ALERT - FCM PUSH TO FAMILY MEMBERS (UID PATH)
+// Trigger: sos_alerts/{targetUid}/items/{signalId} -> push to targetUid
+// Complements the legacy onSOSAlert trigger for the V3 write path.
+// SOSChannelRouter writes to BOTH legacy and V3 paths; without this
+// trigger, the V3 path would silently not deliver push notifications.
+// ============================================================
+exports.onSOSAlertV3 = functions
+    .region(REGION)
+    .firestore.document('sos_alerts/{targetUid}/items/{signalId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c;
+    const alert = snap.data();
+    const targetUid = context.params.targetUid;
+    const signalId = context.params.signalId;
+    functions.logger.warn(`🚨 V3 SOS Alert received for user ${targetUid}:`, {
+        sender: alert.senderDeviceId,
+        message: alert.message,
+    });
+    try {
+        // DEDUP: Check if legacy path also has this alert AND can deliver push.
+        // SOSChannelRouter writes same alert to BOTH devices/{id}/sos_alerts
+        // and sos_alerts/{id}/items with the SAME targetId. If targetId happens
+        // to be a deviceId with a valid ownerUid, onSOSAlert already sent push.
+        try {
+            const legacyAlertDoc = await db
+                .collection('devices').doc(targetUid)
+                .collection('sos_alerts').doc(signalId)
+                .get();
+            if (legacyAlertDoc.exists) {
+                // Check if the legacy device doc has ownerUid (meaning onSOSAlert can deliver)
+                const deviceDoc = await db.collection('devices').doc(targetUid).get();
+                if (deviceDoc.exists && ((_a = deviceDoc.data()) === null || _a === void 0 ? void 0 : _a.ownerUid)) {
+                    functions.logger.info(`V3 SOS dedup: legacy path can deliver for ${targetUid}/${signalId} — skipping`);
+                    return null;
+                }
+            }
+        }
+        catch (_d) {
+            // Legacy check failed — continue with V3 push (better double than none for SOS)
+        }
+        // V3 path: targetUid IS the Firebase Auth UID — look up tokens directly
+        const allTokens = await collectPushTokensForUid(targetUid);
+        if (allTokens.length === 0) {
+            functions.logger.warn(`No push tokens found for uid: ${targetUid} (V3 SOS alert)`);
+            return null;
+        }
+        const isTrapped = alert.trapped === true;
+        const alertSenderName = alert.senderName || 'Aile Üyesi';
+        const title = isTrapped
+            ? `🚨 ENKAZ ALTINDA: ${alertSenderName}`
+            : `🆘 ACİL SOS: ${alertSenderName}`;
+        const locationText = alert.location
+            ? `Konum: ${Number(alert.location.latitude).toFixed(4)}, ${Number(alert.location.longitude).toFixed(4)}`
+            : 'Konum bilgisi yok';
+        const body = `${alert.message || 'Acil yardım gerekiyor!'}\n${locationText}`;
+        const senderUid = typeof alert.senderUid === 'string'
+            ? alert.senderUid
+            : (typeof alert.userId === 'string' ? alert.userId : '');
+        const pushData = {
+            type: 'sos_family',
+            signalId: alert.signalId || context.params.signalId,
+            senderDeviceId: alert.senderDeviceId || '',
+            senderUid,
+            senderName: alertSenderName,
+            message: alert.message || '',
+            timestamp: String(alert.timestamp || Date.now()),
+            trapped: String(isTrapped),
+            latitude: ((_b = alert.location) === null || _b === void 0 ? void 0 : _b.latitude) ? String(alert.location.latitude) : '',
+            longitude: ((_c = alert.location) === null || _c === void 0 ? void 0 : _c.longitude) ? String(alert.location.longitude) : '',
+        };
+        // LIFE-SAFETY: Send to all tokens with retry on failure
+        let sentCount = 0;
+        const failedTokens = [];
+        for (const pushToken of allTokens) {
+            const success = await sendPushToToken(pushToken, title, body, pushData);
+            if (success) {
+                sentCount++;
+            }
+            else {
+                failedTokens.push(pushToken);
+            }
+        }
+        // CRITICAL: Retry failed tokens once for SOS (life-saving)
+        if (failedTokens.length > 0) {
+            functions.logger.warn(`V3 SOS push: ${failedTokens.length} tokens failed, retrying once...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            for (const pushToken of failedTokens) {
+                const success = await sendPushToToken(pushToken, title, body, pushData);
+                if (success)
+                    sentCount++;
+            }
+        }
+        functions.logger.info(`✅ V3 SOS family push sent: ${sentCount}/${allTokens.length} tokens (uid: ${targetUid})`);
+    }
+    catch (error) {
+        functions.logger.error('❌ V3 SOS FCM push failed:', error);
     }
     return null;
 });
@@ -1140,14 +1317,27 @@ exports.onSOSBroadcast = functions
             }
         }
         // Remove sender's own uid to prevent self-notification
-        // Find sender's ownerUid from their device doc
+        // LIFE-SAFETY: Use ALL available sender identifiers for robust self-exclusion
+        // 1. Direct fields from broadcast document (most reliable, no lookup needed)
+        if (typeof broadcast.senderUid === 'string' && broadcast.senderUid) {
+            targetOwnerUids.delete(broadcast.senderUid);
+            functions.logger.info(`🔇 Excluded sender via senderUid: ${broadcast.senderUid}`);
+        }
+        if (typeof broadcast.userId === 'string' && broadcast.userId) {
+            targetOwnerUids.delete(broadcast.userId);
+            functions.logger.info(`🔇 Excluded sender via userId: ${broadcast.userId}`);
+        }
+        // 2. Fallback: device doc lookup (for cases where senderUid/userId differ from ownerUid)
         if (senderDeviceId) {
-            const senderDeviceDoc = await db.collection('devices').doc(senderDeviceId).get();
-            const senderOwnerUid = senderDeviceDoc.exists ? (_c = senderDeviceDoc.data()) === null || _c === void 0 ? void 0 : _c.ownerUid : null;
-            if (senderOwnerUid) {
-                targetOwnerUids.delete(senderOwnerUid);
-                functions.logger.info(`🔇 Excluded sender's ownerUid: ${senderOwnerUid}`);
+            try {
+                const senderDeviceDoc = await db.collection('devices').doc(senderDeviceId).get();
+                const senderOwnerUid = senderDeviceDoc.exists ? (_c = senderDeviceDoc.data()) === null || _c === void 0 ? void 0 : _c.ownerUid : null;
+                if (senderOwnerUid) {
+                    targetOwnerUids.delete(senderOwnerUid);
+                    functions.logger.info(`🔇 Excluded sender via device ownerUid: ${senderOwnerUid}`);
+                }
             }
+            catch ( /* device doc lookup failed — direct exclusion above should suffice */_g) { /* device doc lookup failed — direct exclusion above should suffice */ }
         }
         functions.logger.info(`📊 Device discovery results:`, {
             totalDevices: devicesSnapshot.size,
@@ -1192,7 +1382,7 @@ exports.onSOSBroadcast = functions
                         }
                     }
                 }
-                catch ( /* push_tokens may not exist */_g) { /* push_tokens may not exist */ }
+                catch ( /* push_tokens may not exist */_h) { /* push_tokens may not exist */ }
                 // Legacy: fcm_tokens/{uid} + subcollection
                 const tokenDoc = await db.collection('fcm_tokens').doc(uid).get();
                 if (tokenDoc.exists && ((_e = tokenDoc.data()) === null || _e === void 0 ? void 0 : _e.token)) {
@@ -1214,7 +1404,7 @@ exports.onSOSBroadcast = functions
                         }
                     }
                 }
-                catch ( /* multi-device subcollection may not exist */_h) { /* multi-device subcollection may not exist */ }
+                catch ( /* multi-device subcollection may not exist */_j) { /* multi-device subcollection may not exist */ }
                 // Track misses: check if THIS user contributed any new tokens
                 if (tokensToSend.length === tokenCountBefore) {
                     tokenLookupMiss++;
@@ -1265,11 +1455,25 @@ exports.onSOSBroadcast = functions
                 functions.logger.info(`📤 Expo batch ${Math.floor(i / 100) + 1}: ${result.successCount} success, ${result.failCount} failed`);
             }
         }
-        // Send to any native FCM tokens (unlikely but supported)
+        // Send to any native FCM tokens (unlikely but supported) with retry
+        const failedNativeTokens = [];
         for (const token of nativeTokens) {
             const success = await sendPushToToken(token, title, body, pushData);
-            if (success)
+            if (success) {
                 sentCount++;
+            }
+            else {
+                failedNativeTokens.push(token);
+            }
+        }
+        // CRITICAL: Retry failed native tokens once for SOS (life-saving)
+        if (failedNativeTokens.length > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            for (const token of failedNativeTokens) {
+                const success = await sendPushToToken(token, title, body, pushData);
+                if (success)
+                    sentCount++;
+            }
         }
         functions.logger.warn(`✅ GLOBAL SOS BROADCAST COMPLETED: ${sentCount}/${tokensToSend.length} push notifications delivered to ${targetOwnerUids.size} users`);
     }
@@ -1800,7 +2004,7 @@ async function createCrowdsourcedAlert(consensus) {
 exports.onSeismicReportCreated = functions
     .region(REGION)
     .database.ref('seismic_reports/{reportId}')
-    .onCreate(async (snapshot, context) => {
+    .onCreate(async (snapshot, _context) => {
     const report = snapshot.val();
     functions.logger.info('📱 New seismic report from device:', report);
     if (!report.location || !report.detection) {
@@ -2091,7 +2295,7 @@ exports.onNewMessage = functions
     .region(REGION)
     .firestore.document('devices/{deviceId}/messages/{messageId}')
     .onCreate(async (snap, context) => {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { deviceId } = context.params;
     const messageData = snap.data();
     if (!messageData) {
@@ -2102,6 +2306,14 @@ exports.onNewMessage = functions
     const senderUid = typeof messageData.senderUid === 'string' ? messageData.senderUid : '';
     const content = messageData.content || '';
     const senderName = messageData.senderName || ((_a = messageData.metadata) === null || _a === void 0 ? void 0 : _a.senderName) || messageData.fromName || 'Yeni Mesaj';
+    // DUPLICATE-NOTIFICATION FIX: Skip push for V3 messages (schemaVersion === 3).
+    // V3 messages are handled by onNewConversationMessageV3 which fires on the
+    // conversations/{convId}/messages path. The legacy onNewMessage should only
+    // handle truly old-schema messages to avoid sending a SECOND FCM push.
+    if (messageData.schemaVersion === 3) {
+        functions.logger.debug(`onNewMessage: Skipping V3 message ${context.params.messageId} (handled by onNewConversationMessageV3)`);
+        return;
+    }
     // Don't notify sender about their own message copy
     // (dual-write creates a copy in both sender and recipient inboxes)
     if (senderDeviceId === deviceId) {
@@ -2134,19 +2346,31 @@ exports.onNewMessage = functions
                 }
             }
         }
-        catch ( /* push_tokens may not exist */_g) { /* push_tokens may not exist */ }
-        // Legacy: fcm_tokens/{uid}
-        if (allTokens.length === 0) {
+        catch ( /* push_tokens may not exist */_h) { /* push_tokens may not exist */ }
+        // Legacy: fcm_tokens/{uid} + devices subcollection
+        // CRITICAL FIX: Always check legacy tokens too — multi-device users may have
+        // some devices on V3 push_tokens and others on legacy fcm_tokens.
+        try {
             const tokenDoc = await db.collection('fcm_tokens').doc(ownerUid).get();
             const legacyToken = tokenDoc.exists ? (_d = tokenDoc.data()) === null || _d === void 0 ? void 0 : _d.token : null;
             if (legacyToken && !seenTokens.has(legacyToken)) {
                 seenTokens.add(legacyToken);
                 allTokens.push(legacyToken);
             }
+            // Multi-device: check devices subcollection too
+            const legacyDevicesSnap = await db.collection('fcm_tokens').doc(ownerUid).collection('devices').get();
+            for (const dDoc of legacyDevicesSnap.docs) {
+                const dt = (_e = dDoc.data()) === null || _e === void 0 ? void 0 : _e.token;
+                if (dt && !seenTokens.has(dt)) {
+                    seenTokens.add(dt);
+                    allTokens.push(dt);
+                }
+            }
         }
+        catch ( /* fcm_tokens may not exist */_j) { /* fcm_tokens may not exist */ }
         // Final fallback: device doc pushToken
         if (allTokens.length === 0) {
-            const fallbackToken = ((_e = deviceDoc.data()) === null || _e === void 0 ? void 0 : _e.pushToken) || ((_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.token);
+            const fallbackToken = ((_f = deviceDoc.data()) === null || _f === void 0 ? void 0 : _f.pushToken) || ((_g = deviceDoc.data()) === null || _g === void 0 ? void 0 : _g.token);
             if (fallbackToken && !seenTokens.has(fallbackToken)) {
                 allTokens.push(fallbackToken);
                 functions.logger.info(`onNewMessage: using fallback pushToken from devices/${deviceId}`);
@@ -2193,7 +2417,7 @@ exports.onNewConversationMessageV3 = functions
     .region(REGION)
     .firestore.document('conversations/{conversationId}/messages/{messageId}')
     .onCreate(async (snap, context) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     const { conversationId, messageId } = context.params;
     const messageData = snap.data();
     if (!messageData) {
@@ -2202,7 +2426,9 @@ exports.onNewConversationMessageV3 = functions
     }
     const senderUid = messageData.senderUid || '';
     const content = messageData.content || '';
-    const senderName = messageData.senderName || 'Yeni Mesaj';
+    // CRITICAL FIX: Client writes 'fromName', not 'senderName'.
+    // Without this, ALL group push notifications show "Yeni Mesaj" instead of actual sender.
+    const senderName = messageData.fromName || messageData.senderName || 'Yeni Mesaj';
     const messageType = messageData.type || 'text';
     if (!senderUid) {
         functions.logger.warn('onNewConversationMessageV3: no senderUid');
@@ -2232,29 +2458,42 @@ exports.onNewConversationMessageV3 = functions
                 .doc(recipientUid)
                 .collection('devices')
                 .get();
-            if (devicesSnap.empty) {
-                // Fallback: try legacy fcm_tokens/{uid}
-                const legacyDoc = await db.collection('fcm_tokens').doc(recipientUid).get();
-                if (legacyDoc.exists && ((_c = legacyDoc.data()) === null || _c === void 0 ? void 0 : _c.token)) {
-                    const success = await sendPushToToken(legacyDoc.data().token, `💬 ${senderName}`, truncatedContent || 'Yeni mesaj', {
-                        type: messageType === 'sos' ? 'sos_message' : 'new_message',
-                        messageId,
-                        conversationId,
-                        conversationType,
-                        isGroup: String(isGroupConversation),
-                        senderUid,
-                        senderName,
-                    });
-                    if (success)
-                        totalSent++;
-                }
-                continue;
-            }
-            // Multi-device: send to ALL installations
+            // Collect ALL tokens from both V3 and legacy sources
+            const recipientTokens = [];
+            const seenTokens = new Set();
+            // V3: push_tokens/{uid}/devices
             for (const deviceDoc of devicesSnap.docs) {
-                const token = (_d = deviceDoc.data()) === null || _d === void 0 ? void 0 : _d.token;
-                if (!token)
-                    continue;
+                const t = (_c = deviceDoc.data()) === null || _c === void 0 ? void 0 : _c.token;
+                if (t && !seenTokens.has(t)) {
+                    seenTokens.add(t);
+                    recipientTokens.push(t);
+                }
+            }
+            // CRITICAL FIX: Always check legacy tokens too — multi-device users may have
+            // some devices on V3 push_tokens and others on legacy fcm_tokens.
+            try {
+                const legacyDoc = await db.collection('fcm_tokens').doc(recipientUid).get();
+                if (legacyDoc.exists && ((_d = legacyDoc.data()) === null || _d === void 0 ? void 0 : _d.token)) {
+                    const lt = legacyDoc.data().token;
+                    if (!seenTokens.has(lt)) {
+                        seenTokens.add(lt);
+                        recipientTokens.push(lt);
+                    }
+                }
+                const legacyDevSnap = await db.collection('fcm_tokens').doc(recipientUid).collection('devices').get();
+                for (const ld of legacyDevSnap.docs) {
+                    const lt = (_e = ld.data()) === null || _e === void 0 ? void 0 : _e.token;
+                    if (lt && !seenTokens.has(lt)) {
+                        seenTokens.add(lt);
+                        recipientTokens.push(lt);
+                    }
+                }
+            }
+            catch ( /* fcm_tokens may not exist */_f) { /* fcm_tokens may not exist */ }
+            if (recipientTokens.length === 0)
+                continue;
+            // Send to ALL devices
+            for (const token of recipientTokens) {
                 const success = await sendPushToToken(token, `💬 ${senderName}`, truncatedContent || 'Yeni mesaj', {
                     type: messageType === 'sos' ? 'sos_message' : 'new_message',
                     messageId,

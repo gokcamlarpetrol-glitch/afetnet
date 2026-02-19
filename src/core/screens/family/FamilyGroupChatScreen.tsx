@@ -72,7 +72,22 @@ const resolveFamilyMemberUid = (member: { uid?: string; deviceId?: string }): st
 
 const getCurrentAuthUserSafe = () => {
   try {
-    return getAuth().currentUser;
+    const user = getAuth().currentUser;
+    if (user) return user;
+    // CRITICAL FIX: getAuth().currentUser can be null during cold start / token refresh.
+    // Return a minimal user-like object from identityService MMKV cache so group chat
+    // doesn't silently fail when auth state is transiently unavailable.
+    const cachedUid = identityService.getUid?.();
+    if (cachedUid) {
+      const identity = identityService.getIdentity?.();
+      return {
+        uid: cachedUid,
+        displayName: identity?.displayName || null,
+        email: null,
+        photoURL: null,
+      } as unknown as ReturnType<typeof getAuth>['currentUser'];
+    }
+    return null;
   } catch {
     return null;
   }
@@ -529,7 +544,6 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
     }
 
     const resolveOrCreatePromise = (async (): Promise<string | null> => {
-      logger.warn('⚠️ firestoreGroupId null — attempting on-demand group creation...');
       try {
         const participantModel = buildParticipantModel();
         if (!participantModel) {
@@ -707,10 +721,20 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
   }, [firestoreGroupId]);
 
   useEffect(() => {
-    loadDeviceId();
+    let disposed = false;
+
+    // Load device ID with unmount guard
+    (async () => {
+      try {
+        const id = await getDeviceId();
+        if (!disposed) setMyDeviceId(id);
+      } catch (error) {
+        logger.warn('Failed to load device ID in family group chat:', error);
+      }
+    })();
 
     // ELITE: Ensure BLE Mesh service is started for offline messaging
-    const ensureMeshReady = async () => {
+    (async () => {
       try {
         if (!bleMeshService.getIsRunning()) {
           await bleMeshService.start();
@@ -721,13 +745,10 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       } catch (error) {
         logger.warn('BLE Mesh start failed (non-critical):', error);
       }
-    };
-
-    ensureMeshReady().catch((error) => {
-      logger.error('Error ensuring mesh ready:', error);
-    });
+    })();
 
     return () => {
+      disposed = true;
       if (voiceRecordingIntervalRef.current) {
         clearInterval(voiceRecordingIntervalRef.current);
         voiceRecordingIntervalRef.current = null;
@@ -741,17 +762,9 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
-    const showDidSub = Platform.OS === 'ios'
-      ? Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true))
-      : null;
-    const hideDidSub = Platform.OS === 'ios'
-      ? Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))
-      : null;
     return () => {
       showSub.remove();
       hideSub.remove();
-      showDidSub?.remove();
-      hideDidSub?.remove();
     };
   }, []);
 
@@ -866,15 +879,6 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       return Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
     });
   }, [isAllowedGroupMessageWithAliases, meshMessages, parseGroupPayload, firestoreMessages, selfIds]);
-
-  const loadDeviceId = async () => {
-    try {
-      const id = await getDeviceId();
-      setMyDeviceId(id);
-    } catch (error) {
-      logger.warn('Failed to load device ID in family group chat:', error);
-    }
-  };
 
   // ELITE: Memoized callback with comprehensive error handling
   const handleSend = useCallback(async () => {
@@ -1362,7 +1366,9 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         return (
           <Pressable
             onPress={() => {
-              const { lat, lng } = item.location;
+              const lat = item.location?.lat;
+              const lng = item.location?.lng;
+              if (typeof lat !== 'number' || typeof lng !== 'number') return;
               const url = Platform.select({
                 ios: `maps:0,0?q=${lat},${lng}`,
                 default: `https://maps.google.com/?q=${lat},${lng}`,

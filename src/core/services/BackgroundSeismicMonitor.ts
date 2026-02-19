@@ -24,7 +24,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import { Accelerometer } from 'expo-sensors';
 import { Platform, AppState, AppStateStatus } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
 
@@ -304,15 +304,15 @@ class BackgroundSeismicMonitorService {
 
     private async loadConfig(): Promise<void> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.ENABLED);
+            const saved = DirectStorage.getString(STORAGE_KEYS.ENABLED);
             if (saved !== null) {
                 this.config.enabled = saved === 'true';
             }
-            const savedSensitivity = await AsyncStorage.getItem('@afetnet_background_seismic_sensitivity');
+            const savedSensitivity = DirectStorage.getString('@afetnet_background_seismic_sensitivity');
             if (savedSensitivity === 'low' || savedSensitivity === 'medium' || savedSensitivity === 'high') {
                 this.config.sensitivity = savedSensitivity;
             }
-            const savedPowerMode = await AsyncStorage.getItem('@afetnet_background_seismic_power_mode');
+            const savedPowerMode = DirectStorage.getString('@afetnet_background_seismic_power_mode');
             if (savedPowerMode === 'normal' || savedPowerMode === 'aggressive' || savedPowerMode === 'battery_saver') {
                 this.config.powerMode = savedPowerMode;
             }
@@ -323,9 +323,9 @@ class BackgroundSeismicMonitorService {
 
     private async saveConfig(): Promise<void> {
         try {
-            await AsyncStorage.setItem(STORAGE_KEYS.ENABLED, String(this.config.enabled));
-            await AsyncStorage.setItem('@afetnet_background_seismic_sensitivity', this.config.sensitivity);
-            await AsyncStorage.setItem('@afetnet_background_seismic_power_mode', this.config.powerMode);
+            DirectStorage.setString(STORAGE_KEYS.ENABLED, String(this.config.enabled));
+            DirectStorage.setString('@afetnet_background_seismic_sensitivity', this.config.sensitivity);
+            DirectStorage.setString('@afetnet_background_seismic_power_mode', this.config.powerMode);
         } catch (e) {
             logger.debug('Failed to save config');
         }
@@ -359,12 +359,12 @@ class BackgroundSeismicMonitorService {
      */
     async getPendingDetections(): Promise<BackgroundDetection[]> {
         try {
-            const saved = await AsyncStorage.getItem(STORAGE_KEYS.DETECTIONS);
+            const saved = DirectStorage.getString(STORAGE_KEYS.DETECTIONS);
             if (saved) {
                 const detections = JSON.parse(saved);
                 // Clear after reading
-                await AsyncStorage.removeItem(STORAGE_KEYS.DETECTIONS);
-                return detections;
+                DirectStorage.delete(STORAGE_KEYS.DETECTIONS);
+                return Array.isArray(detections) ? detections : [];
             }
         } catch (e) {
             logger.debug('No pending detections');
@@ -391,10 +391,12 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
     return new Promise((resolve) => {
         let maxAccel = 0;
         let sampleCount = 0;
+        let resolved = false;
         const startTime = Date.now();
 
         // Quick 2-second sampling
         const subscription = Accelerometer.addListener((data) => {
+            if (resolved) return;
             const mag = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
             const accel = Math.abs(mag - 1.0);
 
@@ -405,6 +407,7 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
 
             // Check for 2 seconds
             if (Date.now() - startTime > 2000) {
+                resolved = true;
                 subscription.remove();
                 resolve({
                     timestamp: startTime,
@@ -418,8 +421,10 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
         // Set fast interval for check
         Accelerometer.setUpdateInterval(50); // 20Hz
 
-        // Timeout failsafe
+        // Timeout failsafe — only fires if listener didn't resolve
         setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
             subscription.remove();
             resolve(null);
         }, 3000);
@@ -428,13 +433,14 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
 
 async function saveBackgroundDetection(detection: BackgroundDetection): Promise<void> {
     try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEYS.DETECTIONS);
-        const detections: BackgroundDetection[] = saved ? JSON.parse(saved) : [];
+        const saved = DirectStorage.getString(STORAGE_KEYS.DETECTIONS);
+        const parsed = saved ? JSON.parse(saved) : [];
+        const detections: BackgroundDetection[] = Array.isArray(parsed) ? parsed : [];
         detections.push(detection);
 
         // Keep last 10 detections
         const trimmed = detections.slice(-10);
-        await AsyncStorage.setItem(STORAGE_KEYS.DETECTIONS, JSON.stringify(trimmed));
+        DirectStorage.setString(STORAGE_KEYS.DETECTIONS, JSON.stringify(trimmed));
     } catch (e) {
         // Ignore
     }

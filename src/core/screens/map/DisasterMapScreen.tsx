@@ -1560,7 +1560,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
               {/* ACTION BUTTONS — Life-saving actions */}
               <View style={styles.actionButtons}>
 
-                {/* 🧭 KONUMA GİT — Turn-by-turn navigation */}
+                {/* 🧭 KONUMA GİT — Turn-by-turn navigation with walking/driving choice */}
                 <LinearGradient
                   colors={['#DC2626', '#B91C1C']}
                   style={styles.actionBtnPrimary}
@@ -1569,10 +1569,33 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
                     style={styles.actionBtnInner}
                     onPress={() => {
                       haptics.impactHeavy();
-                      const url = Platform.OS === 'ios'
-                        ? `http://maps.apple.com/?daddr=${selectedSOS.latitude},${selectedSOS.longitude}&dirflg=d`
-                        : `https://www.google.com/maps/dir/?api=1&destination=${selectedSOS.latitude},${selectedSOS.longitude}&travelmode=driving`;
-                      Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
+                      const lat = selectedSOS.latitude;
+                      const lng = selectedSOS.longitude;
+                      Alert.alert(
+                        'Yol Tarifi',
+                        'Nasıl gitmek istiyorsunuz?',
+                        [
+                          {
+                            text: 'Yürüyerek',
+                            onPress: () => {
+                              const url = Platform.OS === 'ios'
+                                ? `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=w`
+                                : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
+                              Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
+                            },
+                          },
+                          {
+                            text: 'Araçla',
+                            onPress: () => {
+                              const url = Platform.OS === 'ios'
+                                ? `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`
+                                : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+                              Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
+                            },
+                          },
+                          { text: 'İptal', style: 'cancel' },
+                        ],
+                      );
                     }}
                   >
                     <Ionicons name="navigate" size={20} color="#fff" />

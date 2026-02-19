@@ -77,7 +77,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
     setShowSOSModal(true);
   }, []);
 
-  const latestEarthquake = earthquakes[0];
+  const latestEarthquake = earthquakes.length > 0 ? earthquakes[0] : null;
   const isDataStale = !!lastUpdate && Date.now() - lastUpdate > 10 * 60 * 1000;
 
   const dataStatusText = error

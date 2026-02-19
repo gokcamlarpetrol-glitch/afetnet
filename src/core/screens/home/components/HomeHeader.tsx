@@ -4,7 +4,7 @@
  * Every pixel crafted for maximum impact
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,9 +18,11 @@ import Animated, {
   FadeInDown,
   interpolate,
 } from 'react-native-reanimated';
+import { identityService } from '../../../services/IdentityService';
 
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
+  const [userName, setUserName] = useState(identityService.getDisplayName());
 
   // Greeting Logic
   const hour = new Date().getHours();
@@ -36,6 +38,20 @@ export default function HomeHeader() {
     greetingText = 'İyi Akşamlar';
     greetingIcon = 'moon-outline';
   }
+
+  // Update name when identity loads/changes
+  useEffect(() => {
+    const name = identityService.getDisplayName();
+    if (name && name !== 'İsimsiz Kahraman') {
+      setUserName(name);
+    }
+    // Re-check after a short delay in case identity loads async
+    const timer = setTimeout(() => {
+      const latestName = identityService.getDisplayName();
+      if (latestName) setUserName(latestName);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Shimmer animation
   const shimmer = useSharedValue(0);
@@ -109,7 +125,7 @@ export default function HomeHeader() {
             <Ionicons name={greetingIcon as any} size={12} color="#F59E0B" />
             <Text style={styles.greetingText}>{greetingText}</Text>
           </View>
-          <Text style={styles.userName}>Gökhan</Text>
+          <Text style={styles.userName}>{userName}</Text>
         </View>
       </View>
 

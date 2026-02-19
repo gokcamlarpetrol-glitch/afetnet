@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../utils/storage';
 
 interface OnboardingState {
   completed: boolean;
@@ -21,7 +21,7 @@ export const useOnboardingStore = create<OnboardingState>()(
     }),
     {
       name: 'afetnet-onboarding',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => eliteStorage),
       onRehydrateStorage: () => (state, error) => {
         // CRITICAL: Mark hydrated on success OR error - app must continue either way
         if (error) {

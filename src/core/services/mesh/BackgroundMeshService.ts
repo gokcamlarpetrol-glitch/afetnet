@@ -16,7 +16,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import { batteryOptimizedScanner } from './BatteryOptimizedScanner';
 import { useMeshStore } from './MeshStore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 
 const logger = createLogger('BackgroundMeshService');
 
@@ -71,12 +71,12 @@ if (!TaskManager.isTaskDefined(TASK_NAMES.MESH_SYNC)) {
             }
 
             // Update last sync time
-            await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+            DirectStorage.setString(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
 
             // Increment sync count
-            const countStr = await AsyncStorage.getItem(STORAGE_KEYS.SYNC_COUNT);
+            const countStr = DirectStorage.getString(STORAGE_KEYS.SYNC_COUNT);
             const count = countStr ? parseInt(countStr, 10) + 1 : 1;
-            await AsyncStorage.setItem(STORAGE_KEYS.SYNC_COUNT, count.toString());
+            DirectStorage.setString(STORAGE_KEYS.SYNC_COUNT, count.toString());
 
             const duration = Date.now() - startTime;
             logger.info(`✅ Background sync completed in ${duration}ms`);
@@ -133,7 +133,7 @@ class BackgroundMeshService {
 
         try {
             // Check if background was previously enabled
-            const enabled = await AsyncStorage.getItem(STORAGE_KEYS.BACKGROUND_ENABLED);
+            const enabled = DirectStorage.getString(STORAGE_KEYS.BACKGROUND_ENABLED);
             this.isBackgroundEnabled = enabled === 'true';
 
             // Subscribe to app state changes
@@ -290,7 +290,7 @@ class BackgroundMeshService {
         if (this.isBackgroundEnabled) return;
 
         this.isBackgroundEnabled = true;
-        await AsyncStorage.setItem(STORAGE_KEYS.BACKGROUND_ENABLED, 'true');
+        DirectStorage.setString(STORAGE_KEYS.BACKGROUND_ENABLED, 'true');
         await this.registerBackgroundTasks();
 
         logger.info('✅ Background mesh enabled');
@@ -303,7 +303,7 @@ class BackgroundMeshService {
         if (!this.isBackgroundEnabled) return;
 
         this.isBackgroundEnabled = false;
-        await AsyncStorage.setItem(STORAGE_KEYS.BACKGROUND_ENABLED, 'false');
+        DirectStorage.setString(STORAGE_KEYS.BACKGROUND_ENABLED, 'false');
         await this.unregisterBackgroundTasks();
 
         if (this.foregroundServiceRunning) {
@@ -336,8 +336,8 @@ class BackgroundMeshService {
         isEnabled: boolean;
         isInBackground: boolean;
     }> {
-        const lastSyncStr = await AsyncStorage.getItem(STORAGE_KEYS.LAST_SYNC);
-        const countStr = await AsyncStorage.getItem(STORAGE_KEYS.SYNC_COUNT);
+        const lastSyncStr = DirectStorage.getString(STORAGE_KEYS.LAST_SYNC);
+        const countStr = DirectStorage.getString(STORAGE_KEYS.SYNC_COUNT);
 
         return {
             lastSync: lastSyncStr ? parseInt(lastSyncStr, 10) : null,
@@ -393,7 +393,7 @@ class BackgroundMeshService {
                 meshStore.removeFromQueue(message.id);
             }
 
-            await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+            DirectStorage.setString(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
             logger.info('✅ Forced sync completed');
         } catch (error) {
             logger.error('Forced sync failed:', error);

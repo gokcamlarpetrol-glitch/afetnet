@@ -27,7 +27,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Platform, NativeModules, NativeEventEmitter, DeviceEventEmitter } from 'react-native';
 import { meshCompressionService } from './MeshCompressionService';
 
@@ -1040,12 +1040,12 @@ class LoRaMeshService {
 
     private async saveKnownNodes(): Promise<void> {
         const data = Array.from(this.knownNodes.entries());
-        await AsyncStorage.setItem(STORAGE_KEYS.KNOWN_NODES, JSON.stringify(data));
+        DirectStorage.setString(STORAGE_KEYS.KNOWN_NODES, JSON.stringify(data));
     }
 
     private async loadKnownNodes(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEYS.KNOWN_NODES);
+            const data = DirectStorage.getString(STORAGE_KEYS.KNOWN_NODES);
             if (data) {
                 const entries = JSON.parse(data) as Array<[number, LoRaNode]>;
                 this.knownNodes = new Map(entries);

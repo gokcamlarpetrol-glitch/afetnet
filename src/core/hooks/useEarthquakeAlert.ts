@@ -14,7 +14,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { AppState, AppStateStatus, Vibration, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { useEarthquakeStore } from '../stores/earthquakeStore';
 import { notificationCenter } from '../services/notifications/NotificationCenter';
 import { firebaseAnalyticsService } from '../services/FirebaseAnalyticsService';
@@ -152,7 +152,7 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
     // ELITE: Load saved settings
     const loadSettings = async () => {
         try {
-            const saved = await AsyncStorage.getItem(ALERT_SETTINGS_KEY);
+            const saved = DirectStorage.getString(ALERT_SETTINGS_KEY);
             if (saved) {
                 setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
             }
@@ -182,7 +182,7 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         try {
             const updated = { ...settings, ...newSettings };
             setSettings(updated);
-            await AsyncStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(updated));
+            DirectStorage.setString(ALERT_SETTINGS_KEY, JSON.stringify(updated));
 
             // Track settings change
             firebaseAnalyticsService.logEvent('earthquake_alert_settings_changed', {

@@ -15,7 +15,7 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('EEWHistoryStore');
@@ -179,7 +179,7 @@ export const useEEWHistoryStore = create<EEWHistoryState>()(
         }),
         {
             name: 'eew-history-storage',
-            storage: createJSONStorage(() => AsyncStorage),
+            storage: createJSONStorage(() => eliteStorage),
             partialize: (state) => ({
                 events: state.events,
             }),

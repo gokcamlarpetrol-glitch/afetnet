@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../utils/storage';
 import * as Battery from 'expo-battery';
 import NetInfo from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
@@ -188,7 +188,7 @@ export const useRiskStore = create<RiskState>()(
     }),
     {
       name: 'risk-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => eliteStorage),
     },
   ),
 );

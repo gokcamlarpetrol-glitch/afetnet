@@ -16,7 +16,7 @@
  * @version 3.0.0 — UID-Centric Conversation Model
  */
 
-import { doc, setDoc, getDoc, getDocs, deleteDoc, collection, onSnapshot, query, orderBy, limit, where, increment } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, deleteDoc, updateDoc, collection, onSnapshot, query, orderBy, limit, where, increment, serverTimestamp, deleteField } from 'firebase/firestore';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 import type { MessageData, ConversationData, UserInboxThread } from '../../types/firebase';
@@ -139,21 +139,55 @@ export async function findOrCreateDMConversation(
     // Without this constraint in the query, Firestore rejects the query with
     // permission-denied — even if all matching docs actually satisfy the rule.
     const conversationsRef = collection(db, 'conversations');
-    const q = query(
-      conversationsRef,
-      where('pairKey', '==', pairKey),
-      where('type', '==', 'dm'),
-      where('participants', 'array-contains', myUid),
-      limit(1),
-    );
+    let existingConversation: ConversationData | null = null;
 
-    const snapshot = await withTimeout(() => getDocs(q), 'DM conversation lookup');
+    // Strategy 1: Use 2-field composite index query (pairKey + participants).
+    // This is the fast path that requires the composite index from firestore.indexes.json.
+    try {
+      const q = query(
+        conversationsRef,
+        where('pairKey', '==', pairKey),
+        where('participants', 'array-contains', myUid),
+        limit(1),
+      );
 
-    if (!snapshot.empty) {
-      const existingDoc = snapshot.docs[0];
-      const data = existingDoc.data() as ConversationData;
-      logger.info(`✅ Existing DM found: ${existingDoc.id}`);
-      return { ...data, id: existingDoc.id };
+      const snapshot = await withTimeout(() => getDocs(q), 'DM conversation lookup');
+
+      if (!snapshot.empty) {
+        const existingDoc = snapshot.docs[0];
+        const data = existingDoc.data() as ConversationData;
+        logger.info(`✅ Existing DM found (indexed): ${existingDoc.id}`);
+        existingConversation = { ...data, id: existingDoc.id };
+      }
+    } catch (lookupError) {
+      // Composite index query failed — this is the #1 cause of duplicate conversations.
+      // Fall back to single-field query + client-side pairKey filter.
+      logger.warn('🚨 Composite index query failed — using fallback (deploy firestore.indexes.json to fix permanently):', lookupError);
+
+      // Strategy 2: FALLBACK — query by participants only (no composite index needed)
+      // then filter by pairKey in client code.
+      // Single-field array-contains queries use Firestore's automatic single-field index.
+      try {
+        const fallbackQ = query(
+          conversationsRef,
+          where('participants', 'array-contains', myUid),
+        );
+        const fallbackSnap = await withTimeout(() => getDocs(fallbackQ), 'DM conversation fallback lookup');
+        fallbackSnap.forEach((docSnap) => {
+          if (existingConversation) return; // Already found
+          const data = docSnap.data();
+          if (data.pairKey === pairKey) {
+            logger.info(`✅ Existing DM found (fallback): ${docSnap.id}`);
+            existingConversation = { ...data, id: docSnap.id } as ConversationData;
+          }
+        });
+      } catch (fallbackError) {
+        logger.error('🚨 Fallback DM lookup also FAILED:', fallbackError);
+      }
+    }
+
+    if (existingConversation) {
+      return existingConversation;
     }
 
     // 2. Create new DM conversation
@@ -294,7 +328,7 @@ export async function saveMessage(
  */
 export async function loadMessages(
   conversationId: string,
-  messageLimit: number = 50,
+  messageLimit: number = 200,
 ): Promise<MessageData[]> {
   try {
     const db = await getFirestoreInstanceAsync();
@@ -334,52 +368,92 @@ export async function subscribeToMessages(
   onError?: (error: any) => void,
   messageLimit: number = 100,
 ): Promise<(() => void) | null> {
-  try {
-    const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available for message subscription');
-      return null;
+  let isDisposed = false;
+  let currentUnsub: (() => void) | null = null;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const MAX_RETRIES = 5;
+
+  const cleanup = () => {
+    isDisposed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } currentUnsub = null; }
+  };
+
+  const startSnapshot = async (): Promise<boolean> => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db || isDisposed) return false;
+
+      const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+      const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(messageLimit));
+
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (isDisposed) return;
+          retryCount = 0; // Reset on successful snapshot
+          try {
+            const messages: MessageData[] = [];
+            snapshot.forEach((doc) => {
+              messages.push({ ...doc.data(), id: doc.id } as MessageData);
+            });
+            callback(messages.reverse());
+          } catch (error) {
+            logger.error('Error processing message snapshot:', error);
+            onError?.(error);
+          }
+        },
+        (error: any) => {
+          if (isDisposed) return;
+          if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+            logger.warn(`⚠️ Message subscription PERMISSION DENIED for conversation ${conversationId}`);
+            return;
+          }
+          logger.error('Message subscription error:', error);
+
+          // Retry with exponential backoff for non-permission errors
+          if (retryCount >= MAX_RETRIES) {
+            logger.error(`Message subscription exhausted retries for ${conversationId}`);
+            onError?.(error);
+            return;
+          }
+          retryCount++;
+          const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 30000);
+          logger.info(`Message subscription retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isDisposed) startSnapshot();
+          }, delay);
+        },
+      );
+
+      if (isDisposed) {
+        try { unsubscribe(); } catch { /* no-op */ }
+        return false;
+      }
+
+      if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+      currentUnsub = unsubscribe;
+      logger.info(`✅ Subscribed to messages: conversations/${conversationId}`);
+      return true;
+    } catch (error: unknown) {
+      if (isDisposed) return false;
+      const code = getErrorCode(error);
+      if (code === 'permission-denied') {
+        logger.debug('Message subscription skipped (permission denied)');
+        return false;
+      }
+      logger.error('Failed to subscribe to messages:', error);
+      onError?.(error);
+      return false;
     }
+  };
 
-    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(messageLimit));
+  const started = await startSnapshot();
+  if (!started && isDisposed) return null;
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        try {
-          const messages: MessageData[] = [];
-          snapshot.forEach((doc) => {
-            messages.push({ ...doc.data(), id: doc.id } as MessageData);
-          });
-          callback(messages.reverse());
-        } catch (error) {
-          logger.error('Error processing message snapshot:', error);
-          onError?.(error);
-        }
-      },
-      (error: any) => {
-        if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-          logger.warn(`⚠️ Message subscription PERMISSION DENIED for conversation ${conversationId}`);
-          return;
-        }
-        logger.error('Message subscription error:', error);
-        onError?.(error);
-      },
-    );
-
-    logger.info(`✅ Subscribed to messages: conversations/${conversationId}`);
-    return unsubscribe;
-  } catch (error: unknown) {
-    const code = getErrorCode(error);
-    if (code === 'permission-denied') {
-      logger.debug('Message subscription skipped (permission denied)');
-      return null;
-    }
-    logger.error('Failed to subscribe to messages:', error);
-    onError?.(error);
-    return null;
-  }
+  return cleanup;
 }
 
 // ─── USER INBOX OPERATIONS ──────────────────────────
@@ -552,5 +626,163 @@ export async function saveMessageLegacy(
     return true;
   } catch (error) {
     return handleFirestoreError(error, 'saveMessageLegacy');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TYPING INDICATOR — Firestore-based for remote delivery
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Set typing state for a user in a conversation.
+ * Writes: conversations/{convId}.typing.{uid} = serverTimestamp()
+ */
+export async function setTypingIndicator(
+  conversationId: string,
+  uid: string,
+  isTyping: boolean,
+): Promise<void> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return;
+    const convRef = doc(db, 'conversations', conversationId);
+    if (isTyping) {
+      await updateDoc(convRef, { [`typing.${uid}`]: serverTimestamp() });
+    } else {
+      await updateDoc(convRef, { [`typing.${uid}`]: deleteField() });
+    }
+  } catch {
+    // Non-critical — best effort
+  }
+}
+
+/**
+ * Subscribe to typing indicators for a conversation.
+ * Returns unsubscribe function.
+ * Callback receives map of uid → timestamp (ms) of currently typing users.
+ */
+export function subscribeToTyping(
+  conversationId: string,
+  myUid: string,
+  callback: (typingUsers: Map<string, number>) => void,
+): () => void {
+  let unsubscribe: (() => void) | null = null;
+
+  (async () => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+      const convRef = doc(db, 'conversations', conversationId);
+      unsubscribe = onSnapshot(convRef, (snap) => {
+        const data = snap.data();
+        const typing = data?.typing;
+        const result = new Map<string, number>();
+        if (typing && typeof typing === 'object') {
+          const now = Date.now();
+          for (const [uid, ts] of Object.entries(typing)) {
+            if (uid === myUid) continue; // Skip self
+            // Firestore Timestamp → milliseconds
+            const msTime = ts && typeof ts === 'object' && 'toMillis' in ts
+              ? (ts as any).toMillis()
+              : typeof ts === 'number' ? ts : 0;
+            // Only show typing if within last 6 seconds
+            if (msTime > 0 && now - msTime < 6000) {
+              result.set(uid, msTime);
+            }
+          }
+        }
+        callback(result);
+      }, () => {
+        // Ignore snapshot errors for typing
+      });
+    } catch {
+      // Non-critical
+    }
+  })();
+
+  return () => { unsubscribe?.(); };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LAST SEEN — User presence tracking
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Update user's lastSeen timestamp in Firestore.
+ * Writes: users/{uid}.lastSeen = serverTimestamp()
+ */
+export async function updateLastSeen(uid: string): Promise<void> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return;
+    const userRef = doc(db, 'users', uid);
+    await setDoc(userRef, { lastSeen: serverTimestamp() }, { merge: true });
+  } catch {
+    // Non-critical — best effort
+  }
+}
+
+/**
+ * Subscribe to a user's lastSeen timestamp.
+ * Callback receives the timestamp in milliseconds, or null if unknown.
+ */
+export function subscribeToLastSeen(
+  uid: string,
+  callback: (lastSeen: number | null) => void,
+): () => void {
+  let unsubscribe: (() => void) | null = null;
+
+  (async () => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+      const userRef = doc(db, 'users', uid);
+      unsubscribe = onSnapshot(userRef, (snap) => {
+        const data = snap.data();
+        const ts = data?.lastSeen;
+        if (ts && typeof ts === 'object' && 'toMillis' in ts) {
+          callback((ts as any).toMillis());
+        } else if (typeof ts === 'number') {
+          callback(ts);
+        } else {
+          callback(null);
+        }
+      }, () => {
+        callback(null);
+      });
+    } catch {
+      callback(null);
+    }
+  })();
+
+  return () => { unsubscribe?.(); };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MESSAGE DELETION — Firestore cloud delete for "delete for everyone"
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Delete a message for everyone in a conversation.
+ * Updates the message doc: deleted=true, content='Bu mesaj silindi', deletedAt=serverTimestamp()
+ */
+export async function deleteMessageForEveryone(
+  conversationId: string,
+  messageId: string,
+): Promise<boolean> {
+  try {
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return false;
+    const msgRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+    await updateDoc(msgRef, {
+      deleted: true,
+      content: 'Bu mesaj silindi',
+      deletedAt: serverTimestamp(),
+    });
+    logger.info(`Message ${messageId} deleted for everyone in ${conversationId}`);
+    return true;
+  } catch (error) {
+    logger.warn('deleteMessageForEveryone failed:', error);
+    return false;
   }
 }

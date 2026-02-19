@@ -24,6 +24,7 @@ import {
     onSnapshot,
     arrayUnion,
     arrayRemove,
+    deleteField,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { createLogger } from '../../utils/logger';
@@ -103,7 +104,13 @@ async function withTimeout<T>(
 
 function getMyUid(): string | null {
     try {
-        return getAuth().currentUser?.uid || null;
+        const authUid = getAuth().currentUser?.uid;
+        if (authUid) return authUid;
+        // CRITICAL FIX: Fallback to identityService when getAuth().currentUser is temporarily null
+        // (cold start, token refresh). identityService reads UID from MMKV cache.
+        const { identityService } = require('../IdentityService');
+        const cachedUid = typeof identityService.getUid === 'function' ? identityService.getUid() : null;
+        return cachedUid || null;
     } catch {
         return null;
     }
@@ -233,6 +240,8 @@ export async function removeGroupMember(
         await withTimeout(
             () => updateDoc(ref, {
                 participants: arrayRemove(memberUid),
+                [`participantNames.${memberUid}`]: deleteField(),
+                [`participantDeviceIds.${memberUid}`]: deleteField(),
                 updatedAt: Date.now(),
             }),
             'removeGroupMember',
@@ -262,9 +271,10 @@ export async function sendGroupMessage(
 
         const msgRef = doc(db, 'conversations', conversationId, 'messages', message.id);
         const convRef = doc(db, 'conversations', conversationId);
-        const messageForWrite: GroupMessage = {
+        const messageForWrite = {
             ...message,
             senderUid: message.senderUid || message.from,
+            schemaVersion: 3,
         };
 
         // Write message + update conversation lastMessage in parallel
@@ -446,11 +456,16 @@ export function subscribeToMyGroupConversations(
             const uid = getMyUid();
             if (!uid) {
                 logger.warn('Cannot subscribe to groups: no auth UID');
+                // CRITICAL FIX: Report failure so caller can retry
+                onError?.(new Error('No auth UID available for group subscription'));
                 return;
             }
 
             const db = await getFirestoreInstanceAsync();
-            if (!db) return;
+            if (!db) {
+                onError?.(new Error('Firestore unavailable for group subscription'));
+                return;
+            }
             if (isDisposed) return;
 
             // Firestore requires the array-contains query for participant filtering

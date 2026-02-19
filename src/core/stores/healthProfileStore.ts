@@ -5,9 +5,9 @@
  */
 
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth } from 'firebase/auth';
 import { initializeFirebase } from '../../lib/firebase';
+import { DirectStorage } from '../utils/storage';
 import { logger } from '../utils/logger';
 
 export interface EmergencyContact {
@@ -272,13 +272,13 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
 
   loadProfile: async () => {
     try {
-      // First load from AsyncStorage (fast)
+      // SECURITY FIX: Use encrypted MMKV (DirectStorage) instead of unencrypted AsyncStorage
       const scopedKey = getScopedStorageKey();
-      let stored = await AsyncStorage.getItem(scopedKey);
+      let stored = DirectStorage.getString(scopedKey) ?? null;
       if (!stored) {
-        stored = await AsyncStorage.getItem(STORAGE_KEY_BASE);
+        stored = DirectStorage.getString(STORAGE_KEY_BASE) ?? null;
         if (stored) {
-          await AsyncStorage.setItem(scopedKey, stored);
+          DirectStorage.setString(scopedKey, stored);
         }
       }
       if (stored) {
@@ -310,7 +310,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
           if (cloudProfile) {
             // Merge: Firebase takes precedence
             set({ profile: cloudProfile, isLoaded: true });
-            await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(cloudProfile));
+            DirectStorage.setString(getScopedStorageKey(), JSON.stringify(cloudProfile));
             logger.info('HealthProfile loaded from Firebase');
           }
         }
@@ -326,7 +326,7 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
   saveProfile: async () => {
     try {
       const { profile } = get();
-      await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(profile));
+      DirectStorage.setString(getScopedStorageKey(), JSON.stringify(profile));
 
       // Save to Firebase
       try {
@@ -369,10 +369,8 @@ export const useHealthProfileStore = create<HealthProfileState>((set, get) => ({
 
   clearProfile: async () => {
     try {
-      await AsyncStorage.removeItem(getScopedStorageKey());
-      await AsyncStorage.removeItem(STORAGE_KEY_BASE).catch(() => {
-        // legacy key cleanup
-      });
+      DirectStorage.delete(getScopedStorageKey());
+      try { DirectStorage.delete(STORAGE_KEY_BASE); } catch { /* legacy key cleanup */ }
       set({ profile: DEFAULT_PROFILE });
       logger.info('HealthProfile cleared');
     } catch (error) {

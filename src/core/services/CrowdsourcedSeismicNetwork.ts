@@ -27,7 +27,7 @@ import { Platform } from 'react-native';
 import { getDatabase, ref, push, onValue, serverTimestamp, query, orderByChild, limitToLast, off } from 'firebase/database';
 import { getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import * as Location from 'expo-location';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
@@ -424,11 +424,11 @@ class CrowdsourcedSeismicNetworkService {
                 this.userId = currentUser.uid;
                 return;
             }
-            // Fallback: AsyncStorage ID (writes will fail with RTDB rules but reads still work)
-            let saved = await AsyncStorage.getItem(STORAGE_KEYS.USER_ID);
+            // Fallback: DirectStorage ID (writes will fail with RTDB rules but reads still work)
+            let saved = DirectStorage.getString(STORAGE_KEYS.USER_ID) ?? null;
             if (!saved) {
                 saved = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-                await AsyncStorage.setItem(STORAGE_KEYS.USER_ID, saved);
+                DirectStorage.setString(STORAGE_KEYS.USER_ID, saved);
             }
             this.userId = saved;
             logger.warn('No auth user, using fallback userId — seismic reports will be rejected by RTDB rules');

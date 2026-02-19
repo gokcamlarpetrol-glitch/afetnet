@@ -215,8 +215,26 @@ export async function createFamily(
 /**
  * Get or create a default family for the current user.
  * If user has no families, creates one automatically.
+ * Uses in-memory dedup to prevent concurrent calls creating duplicate families.
  */
+let _pendingFamilyCreation: Promise<string | null> | null = null;
+
 export async function getOrCreateDefaultFamily(
+  myUid: string,
+  myDisplayName: string,
+): Promise<string | null> {
+  // Dedup: if another call is already in-flight, wait for it
+  if (_pendingFamilyCreation) return _pendingFamilyCreation;
+
+  _pendingFamilyCreation = _getOrCreateDefaultFamilyImpl(myUid, myDisplayName);
+  try {
+    return await _pendingFamilyCreation;
+  } finally {
+    _pendingFamilyCreation = null;
+  }
+}
+
+async function _getOrCreateDefaultFamilyImpl(
   myUid: string,
   myDisplayName: string,
 ): Promise<string | null> {
@@ -317,20 +335,28 @@ export async function saveFamilyMember(
       RETRY_CONFIG,
     );
 
-    // 2. Add to family members array
+    // 2. Add to family members array (with retry for transient failures)
     const familyRef = doc(db, 'families', familyId);
-    await updateDoc(familyRef, {
-      members: arrayUnion(memberUid),
-      updatedAt: now,
-    }).catch(() => {
-      // If updateDoc fails (doc may not exist yet), try setDoc with merge
-      // CRITICAL: createdBy is required by Firestore rules for family create
-      return setDoc(familyRef, {
-        members: [memberUid, myUid],
-        createdBy: myUid,
-        updatedAt: now,
-      }, { merge: true });
-    });
+    await retryWithBackoff(
+      () => withTimeout(
+        async () => {
+          await updateDoc(familyRef, {
+            members: arrayUnion(memberUid),
+            updatedAt: now,
+          }).catch(() => {
+            // If updateDoc fails (doc may not exist yet), try setDoc with merge
+            // CRITICAL: createdBy is required by Firestore rules for family create
+            return setDoc(familyRef, {
+              members: [memberUid, myUid],
+              createdBy: myUid,
+              updatedAt: now,
+            }, { merge: true });
+          });
+        },
+        'Aile üyesi dizisi güncelleme',
+      ),
+      RETRY_CONFIG,
+    );
 
     // 3. Create UID → familyId mapping for the new member
     await setDoc(

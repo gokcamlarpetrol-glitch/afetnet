@@ -51,7 +51,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         let authTimeout: ReturnType<typeof setTimeout> | null = null;
 
         try {
-            // ELITE: Use getFirebaseAuth() which ensures AsyncStorage persistence
+            // ELITE: Use getFirebaseAuth() which ensures MMKV persistence
             const auth = getFirebaseAuth();
             if (!auth) {
                 logger.error('Firebase auth not initialized');

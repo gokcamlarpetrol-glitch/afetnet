@@ -3,7 +3,7 @@
  * Advanced caching for map data with TTL and invalidation
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('MapCacheService');
@@ -32,7 +32,7 @@ class MapCacheService {
       }
 
       // Check AsyncStorage
-      const stored = await AsyncStorage.getItem(`${this.CACHE_PREFIX}${key}`);
+      const stored = DirectStorage.getString(`${this.CACHE_PREFIX}${key}`);
       if (stored) {
         const entry: CacheEntry<T> = JSON.parse(stored);
         if (this.isValid(entry)) {
@@ -68,7 +68,7 @@ class MapCacheService {
       this.evictMemoryCacheIfNeeded();
 
       // Store in AsyncStorage
-      await AsyncStorage.setItem(`${this.CACHE_PREFIX}${key}`, JSON.stringify(entry));
+      DirectStorage.setString(`${this.CACHE_PREFIX}${key}`, JSON.stringify(entry));
     } catch (error) {
       logger.error('Cache set error:', error);
     }
@@ -80,7 +80,7 @@ class MapCacheService {
   async remove(key: string): Promise<void> {
     try {
       this.memoryCache.delete(key);
-      await AsyncStorage.removeItem(`${this.CACHE_PREFIX}${key}`);
+      DirectStorage.delete(`${this.CACHE_PREFIX}${key}`);
     } catch (error) {
       logger.error('Cache remove error:', error);
     }
@@ -92,9 +92,9 @@ class MapCacheService {
   async clear(): Promise<void> {
     try {
       this.memoryCache.clear();
-      const keys = await AsyncStorage.getAllKeys();
+      const keys = DirectStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(this.CACHE_PREFIX));
-      await AsyncStorage.multiRemove(cacheKeys);
+      cacheKeys.forEach(k => DirectStorage.delete(k));
     } catch (error) {
       logger.error('Cache clear error:', error);
     }
@@ -128,7 +128,7 @@ class MapCacheService {
    */
   async getStats(): Promise<{ memory: number; storage: number; total: number }> {
     const memory = this.memoryCache.size;
-    const keys = await AsyncStorage.getAllKeys();
+    const keys = DirectStorage.getAllKeys();
     const storage = keys.filter(key => key.startsWith(this.CACHE_PREFIX)).length;
     
     return {

@@ -36,7 +36,7 @@ export type MainStackParamList = {
     HealthProfile: undefined;
     MedicalInformation: undefined;
     NewMessage: undefined;
-    Conversation: { userId: string; userName?: string };
+    Conversation: { userId: string; userName?: string; conversationId?: string };
     SOSConversation: {
         sosUserId: string;
         sosUserName?: string;
@@ -85,6 +85,12 @@ export type MainStackParamList = {
     Security: undefined;
     EEWSettings: undefined;
     RescueTeam: undefined;
+    VoiceCall: {
+        recipientUid: string;
+        recipientName: string;
+        callId?: string;
+        isIncoming?: boolean;
+    };
 };
 
 // Onboarding Stack Navigator Param List

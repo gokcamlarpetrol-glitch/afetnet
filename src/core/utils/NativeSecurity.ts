@@ -151,10 +151,10 @@ class NativeSecurity {
       );
       logger.info('✓ SecureStore cleared');
 
-      // 2. Clear AsyncStorage (all app data)
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      await AsyncStorage.clear();
-      logger.info('✓ AsyncStorage cleared');
+      // 2. Clear DirectStorage (all app data)
+      const { DirectStorage } = require('../utils/storage');
+      DirectStorage.clearAll();
+      logger.info('✓ DirectStorage cleared');
 
       // 3. Clear Firestore persistence cache (if using offline persistence)
       try {

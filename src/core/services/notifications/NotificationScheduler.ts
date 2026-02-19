@@ -80,11 +80,14 @@ export async function scheduleNotification(
       return null;
     }
 
-    // Rate limiting check
-    const notificationKey = `${content.title}:${content.body.substring(0, 50)}`;
-    if (!shouldSendNotification(notificationKey)) {
-      logger.debug('Notification rate limited:', content.title);
-      return null;
+    // Rate limiting check — CRITICAL: SOS and EEW ALWAYS bypass rate limiter
+    const isCriticalType = options.channelType === 'sos' || options.channelType === 'eew';
+    if (!isCriticalType) {
+      const notificationKey = `${content.title}:${content.body.substring(0, 50)}`;
+      if (!shouldSendNotification(notificationKey)) {
+        logger.debug('Notification rate limited:', content.title);
+        return null;
+      }
     }
 
     // Ensure channels are initialized

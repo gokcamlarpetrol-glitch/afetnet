@@ -17,8 +17,35 @@ import {
   // @ts-expect-error - getReactNativePersistence is available in firebase/auth but not in typings
   getReactNativePersistence
 } from 'firebase/auth'; // ELITE: Auth imports with persistence
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storage } from '../core/utils/storage';
 import { createLogger } from '../core/utils/logger';
+
+// CRITICAL FIX: MMKV-backed adapter for Firebase Auth persistence.
+// AsyncStorage may lose data during iOS background kill, causing auto-logout.
+// MMKV is synchronous, crash-safe, and survives background termination.
+const mmkvAuthStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    try {
+      return storage.getString(key) ?? null;
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    try {
+      storage.set(key, value);
+    } catch {
+      // non-blocking
+    }
+  },
+  removeItem: async (key: string): Promise<void> => {
+    try {
+      storage.delete(key);
+    } catch {
+      // non-blocking
+    }
+  },
+};
 
 const logger = createLogger('FirebaseLib');
 
@@ -87,7 +114,7 @@ export function initializeFirebase(): FirebaseApp | null {
       }
       firebaseApp = initializeApp(config);
     }
-    // CRITICAL: Ensure Auth is initialized with AsyncStorage persistence
+    // CRITICAL: Ensure Auth is initialized with MMKV persistence
     // before any module falls back to firebase/auth getAuth() directly.
     try {
       getOrInitializeAuth(firebaseApp);
@@ -104,16 +131,16 @@ export function initializeFirebase(): FirebaseApp | null {
 
 /**
  * ELITE: Get or initialize Auth instance with persistence
- * Uses initializeAuth with AsyncStorage for proper session persistence
+ * Uses initializeAuth with MMKV for crash-safe session persistence
+ * MMKV survives iOS background kill — AsyncStorage does NOT reliably.
  */
 function getOrInitializeAuth(app: FirebaseApp): Auth {
   if (authInstance) return authInstance;
 
   try {
-    // ELITE: Initialize auth with AsyncStorage persistence
-    // This prevents the "Auth state will default to memory persistence" warning
+    // ELITE: Initialize auth with MMKV persistence (crash-safe, survives background kill)
     authInstance = initializeAuth(app, {
-      persistence: getReactNativePersistence(AsyncStorage),
+      persistence: getReactNativePersistence(mmkvAuthStorage),
     });
   } catch (error: any) {
     // If auth is already initialized (hot reload, etc.), get existing instance
@@ -145,7 +172,7 @@ export function getFirebaseApp(): FirebaseApp | null {
 }
 
 /**
- * ELITE: Get Firebase Auth with AsyncStorage persistence
+ * ELITE: Get Firebase Auth with MMKV persistence
  * This is the ONLY way to get Auth — ensures persistence is always configured
  */
 export function getFirebaseAuth(): Auth | null {

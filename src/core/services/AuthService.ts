@@ -26,7 +26,7 @@ try {
 }
 
 import * as AppleAuthentication from 'expo-apple-authentication';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { Platform } from 'react-native';
 import {
   signInWithCredential,
@@ -269,7 +269,7 @@ export const AuthService = {
         } : null;
 
         if (appleFullName?.givenName || appleFullName?.familyName) {
-          await AsyncStorage.setItem(
+          DirectStorage.setString(
             `@afetnet:apple_name_${userCredential.user.uid}`,
             JSON.stringify(appleFullName),
           );
@@ -279,9 +279,9 @@ export const AuthService = {
         let nameToSync: AppleFullName | null = appleFullName;
         if (!nameToSync?.givenName && !nameToSync?.familyName) {
           try {
-            const storedName = await AsyncStorage.getItem(
+            const storedName = DirectStorage.getString(
               `@afetnet:apple_name_${userCredential.user.uid}`,
-            );
+            ) ?? null;
             if (storedName) {
               nameToSync = JSON.parse(storedName) as AppleFullName;
             }

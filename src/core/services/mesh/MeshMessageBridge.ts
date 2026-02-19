@@ -15,7 +15,7 @@ import { useMeshStore, MeshMessage } from './MeshStore';
 import { useMessageStore, Message } from '../../stores/messageStore';
 import { LRUSet } from '../../utils/LRUCache';
 import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { getDeviceId } from '../../utils/device';
 
 const logger = createLogger('MeshMessageBridge');
@@ -386,7 +386,7 @@ class MeshMessageBridge {
 
     private async loadSeenIds(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(BRIDGE_CONFIG.STORAGE_KEY);
+            const data = DirectStorage.getString(BRIDGE_CONFIG.STORAGE_KEY);
             if (data) {
                 this.seenMessageIds.fromArray(JSON.parse(data));
             }
@@ -397,7 +397,7 @@ class MeshMessageBridge {
 
     private async saveSeenIds(): Promise<void> {
         try {
-            await AsyncStorage.setItem(
+            DirectStorage.setString(
                 BRIDGE_CONFIG.STORAGE_KEY,
                 JSON.stringify(this.seenMessageIds.toArray())
             );

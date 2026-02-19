@@ -9,7 +9,7 @@ import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsServic
 import * as haptics from '../../utils/haptics';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring, withSequence, withTiming } from 'react-native-reanimated';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('PreparednessPlanScreen');
@@ -125,7 +125,7 @@ export default function PreparednessPlanScreen() {
 
   const loadProgress = async () => {
     try {
-      const saved = await AsyncStorage.getItem(CHECKLIST_STORAGE_KEY);
+      const saved = DirectStorage.getString(CHECKLIST_STORAGE_KEY);
       if (saved) {
         setCheckedItems(JSON.parse(saved));
       }
@@ -138,7 +138,7 @@ export default function PreparednessPlanScreen() {
 
   const saveProgress = async () => {
     try {
-      await AsyncStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(checkedItems));
+      DirectStorage.setString(CHECKLIST_STORAGE_KEY, JSON.stringify(checkedItems));
     } catch (e) {
       logger.warn('Failed to save progress:', e);
     }
@@ -177,7 +177,7 @@ export default function PreparednessPlanScreen() {
           onPress: async () => {
             haptics.notificationWarning();
             setCheckedItems({});
-            await AsyncStorage.removeItem(CHECKLIST_STORAGE_KEY);
+            DirectStorage.delete(CHECKLIST_STORAGE_KEY);
           }
         },
       ]

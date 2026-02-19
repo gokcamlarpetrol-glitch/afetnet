@@ -364,9 +364,9 @@ class BackgroundEEWService {
      */
     private async markAsNotified(eventId: string): Promise<void> {
         try {
-            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            const { DirectStorage } = await import('../utils/storage');
             // Store with timestamp for age-based cleanup (setTimeout doesn't survive background kills)
-            await AsyncStorage.setItem(`eew_notified_${eventId}`, String(Date.now()));
+            DirectStorage.setString(`eew_notified_${eventId}`, String(Date.now()));
 
             // Cleanup stale entries (older than 24h) on every mark to prevent unbounded growth
             await this.cleanupStaleNotifications();
@@ -381,8 +381,8 @@ class BackgroundEEWService {
      */
     private async checkIfNotified(eventId: string): Promise<boolean> {
         try {
-            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-            const value = await AsyncStorage.getItem(`eew_notified_${eventId}`);
+            const { DirectStorage } = await import('../utils/storage');
+            const value = DirectStorage.getString(`eew_notified_${eventId}`);
             if (!value) return false;
 
             // Check age — if stored as timestamp, verify it's within 24h
@@ -391,7 +391,7 @@ class BackgroundEEWService {
                 const ageMs = Date.now() - storedTime;
                 if (ageMs > 24 * 60 * 60 * 1000) {
                     // Stale entry — remove and return false
-                    await AsyncStorage.removeItem(`eew_notified_${eventId}`);
+                    DirectStorage.delete(`eew_notified_${eventId}`);
                     return false;
                 }
             }
@@ -408,8 +408,8 @@ class BackgroundEEWService {
      */
     private async cleanupStaleNotifications(): Promise<void> {
         try {
-            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-            const allKeys = await AsyncStorage.getAllKeys();
+            const { DirectStorage } = await import('../utils/storage');
+            const allKeys = DirectStorage.getAllKeys();
             const eewKeys = allKeys.filter(k => k.startsWith('eew_notified_'));
 
             // Only cleanup if there are many entries (avoid unnecessary work)
@@ -420,9 +420,9 @@ class BackgroundEEWService {
             const keysToRemove: string[] = [];
 
             // Check each key's age
-            const entries = await AsyncStorage.multiGet(eewKeys);
-            for (const [key, value] of entries) {
-                if (!key || !value) continue;
+            for (const key of eewKeys) {
+                const value = DirectStorage.getString(key);
+                if (!value) continue;
                 const storedTime = Number(value);
                 if (Number.isFinite(storedTime) && now - storedTime > TWENTY_FOUR_HOURS) {
                     keysToRemove.push(key);
@@ -433,7 +433,7 @@ class BackgroundEEWService {
             }
 
             if (keysToRemove.length > 0) {
-                await AsyncStorage.multiRemove(keysToRemove);
+                keysToRemove.forEach(k => DirectStorage.delete(k));
                 logger.debug(`Cleaned up ${keysToRemove.length} stale notification entries`);
             }
         } catch {

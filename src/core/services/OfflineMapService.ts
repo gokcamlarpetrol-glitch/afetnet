@@ -8,7 +8,7 @@
  * - Seamless Online/Offline Switch
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import { mapCacheService } from './MapCacheService';
 
@@ -165,9 +165,10 @@ class OfflineMapService {
   // ... [Keep existing Storage/Cache methods] ...
 
   private async loadFromCache() {
-    const cached = await AsyncStorage.getItem(this.STORAGE_KEY);
+    const cached = DirectStorage.getString(this.STORAGE_KEY);
     if (cached) {
-      this.locations = JSON.parse(cached);
+      const parsed = JSON.parse(cached);
+      this.locations = Array.isArray(parsed) ? parsed : [];
       this.isLoaded = true;
     } else {
       this.loadSampleData();
@@ -175,7 +176,7 @@ class OfflineMapService {
   }
 
   private async saveToCache() {
-    await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.locations));
+    DirectStorage.setString(this.STORAGE_KEY, JSON.stringify(this.locations));
   }
 
   private loadSampleData() {
@@ -197,15 +198,16 @@ class OfflineMapService {
 
   // City Management
   async getDownloadedCities(): Promise<string[]> {
-    const json = await AsyncStorage.getItem(this.CITY_INDEX_KEY);
-    return json ? JSON.parse(json) : [];
+    const json = DirectStorage.getString(this.CITY_INDEX_KEY);
+    const parsed = json ? JSON.parse(json) : [];
+    return Array.isArray(parsed) ? parsed : [];
   }
 
   private async markCityDownloaded(city: string) {
     const cities = await this.getDownloadedCities();
     if (!cities.includes(city)) {
       cities.push(city);
-      await AsyncStorage.setItem(this.CITY_INDEX_KEY, JSON.stringify(cities));
+      DirectStorage.setString(this.CITY_INDEX_KEY, JSON.stringify(cities));
     }
   }
 
@@ -218,7 +220,7 @@ class OfflineMapService {
    */
   private async getLastUpdateTime(): Promise<number | null> {
     try {
-      const time = await AsyncStorage.getItem(`${this.STORAGE_KEY}:last_update`);
+      const time = DirectStorage.getString(`${this.STORAGE_KEY}:last_update`);
       return time ? parseInt(time, 10) : null;
     } catch {
       return null;

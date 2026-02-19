@@ -11,7 +11,7 @@
  * - Sıkıştırılmış veri formatı
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('TurkeyOfflineDataService');

@@ -83,9 +83,56 @@ function processSOSAlert(alertId: string, alertData: any): void {
         return;
     }
 
+    // Handle cancellation signals — show "SOS cancelled" notification and remove from store
+    if (alertData.status === 'cancelled') {
+        logger.info(`✅ SOS CANCELLED by ${alertData.senderName || alertData.senderDeviceId}`);
+        showSOSCancelledNotification(alertData).catch((err) => {
+            logger.error('Failed to show SOS cancellation notification:', err);
+        });
+        // Remove the original active alert from SOS store (map markers)
+        // Cancellation signalId has 'cancel-' prefix — strip it to match the original
+        try {
+            const { useSOSStore } = require('./SOSStateManager');
+            const rawSignalId = alertData.signalId || '';
+            const originalSignalId = rawSignalId.startsWith('cancel-')
+                ? rawSignalId.slice(7)
+                : rawSignalId;
+            if (originalSignalId) {
+                useSOSStore.getState().removeIncomingSOSAlertBySignalId(originalSignalId);
+            }
+        } catch { /* store not available */ }
+        return;
+    }
+
     logger.warn(`🚨 SOS ALERT RECEIVED from ${alertData.senderName || alertData.senderDeviceId}!`);
 
-    // Fire critical notification
+    // ELITE FIX: Direct foreground full-screen alert — bypasses notification pipeline entirely.
+    // The notification chain (notify → deliver → scheduleNotification → addNotificationReceivedListener
+    // → DeviceEventEmitter) is fragile on iOS. Instead, emit directly when app is in foreground.
+    try {
+        const { AppState, DeviceEventEmitter } = require('react-native');
+        if (AppState.currentState === 'active') {
+            const senderName = alertData.senderName || 'Aile Üyesi';
+            const message = alertData.message || 'Acil yardım gerekiyor!';
+            DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
+                signalId: alertData.signalId || alertId,
+                senderUid: alertData.senderUid || alertData.userId,
+                senderDeviceId: alertData.senderDeviceId,
+                senderName,
+                message,
+                latitude: alertData.location?.latitude,
+                longitude: alertData.location?.longitude,
+                trapped: alertData.trapped === true || alertData.trapped === 'true',
+                battery: alertData.battery ? Number(alertData.battery) : undefined,
+                healthInfo: alertData.healthInfo && typeof alertData.healthInfo === 'object'
+                    ? alertData.healthInfo
+                    : undefined,
+            });
+            logger.info(`📱 SOS FULLSCREEN ALERT emitted directly for foreground app`);
+        }
+    } catch { /* DeviceEventEmitter not available — notification pipeline below handles it */ }
+
+    // Fire critical notification (push banner + sound — also works for background/killed)
     showSOSReceivedNotification(alertData).catch((err) => {
         logger.error('Failed to show SOS notification:', err);
     });
@@ -168,10 +215,10 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
             try {
                 const alertsRef = collection(db, 'devices', targetId, 'sos_alerts');
 
-                // Only listen for active alerts (not resolved/cancelled)
+                // Listen for active AND cancelled alerts (cancellation must reach recipients)
                 const alertsQuery = query(
                     alertsRef,
-                    where('status', '==', 'active'),
+                    where('status', 'in', ['active', 'cancelled']),
                     orderBy('timestamp', 'desc'),
                 );
 
@@ -199,7 +246,7 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
 
                 const v3AlertsQuery = query(
                     v3AlertsRef,
-                    where('status', '==', 'active'),
+                    where('status', 'in', ['active', 'cancelled']),
                     orderBy('timestamp', 'desc'),
                 );
 
@@ -250,6 +297,26 @@ export function stopSOSAlertListener(): void {
     }
     isListening = false;
     processedAlertIds.clear();
+}
+
+/**
+ * Show notification when an SOS alert is cancelled by the sender.
+ */
+async function showSOSCancelledNotification(alertData: any): Promise<void> {
+    try {
+        const { notificationCenter } = await import('../notifications/NotificationCenter');
+        const senderName = alertData.senderName || 'Aile Üyesi';
+
+        await notificationCenter.notify('system', {
+            subtype: 'generic',
+            title: `SOS İptal: ${senderName}`,
+            message: `${senderName} acil durum çağrısını iptal etti.`,
+        } as any, 'SOSAlertListener-cancel');
+
+        logger.info(`✅ SOS cancellation notification shown for ${senderName}`);
+    } catch (error) {
+        logger.error('Failed to show SOS cancellation notification:', error);
+    }
 }
 
 /**

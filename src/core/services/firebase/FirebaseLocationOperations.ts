@@ -149,10 +149,11 @@ export async function getCurrentLocation(
 }
 
 /**
+ * @deprecated Use subscribeToLocationAsync instead — this sync version
+ * relies on (globalThis).__firestoreInstance which may not be ready.
+ *
  * Subscribe to real-time location updates for a user.
  * Path: locations_current/{uid}
- * 
- * Used by familyStore to track family member locations.
  */
 export function subscribeToLocation(
   uid: string,

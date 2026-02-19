@@ -75,6 +75,17 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   const [isListening, setIsListening] = useState(false);
   const [isOnlineMode, setIsOnlineMode] = useState(true);
   const flatListRef = useRef<FlatList>(null);
+  const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // CRITICAL FIX: Cleanup voice timer on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      if (voiceTimerRef.current) {
+        clearTimeout(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // ELITE: Check actual network connectivity
   useEffect(() => {
@@ -163,14 +174,17 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     haptics.impactMedium();
     if (isListening) {
       setIsListening(false);
-      // Voice recognition session ended — currently using quick scenario fallback
-      // Real speech-to-text requires expo-speech-recognition (not yet integrated)
+      // Clear pending voice timer when manually stopping
+      if (voiceTimerRef.current) {
+        clearTimeout(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
     } else {
       setIsListening(true);
-      // Auto-stop after 5 seconds and show guidance
-      setTimeout(() => {
+      // Auto-stop after 3 seconds and show guidance
+      voiceTimerRef.current = setTimeout(() => {
+        voiceTimerRef.current = null;
         setIsListening(false);
-        // Guide user to use quick scenarios or type their question
         setMessages(prev => [...prev, {
           id: `voice_hint_${Date.now()}`,
           text: '🎙️ Sesli komut henüz desteklenmiyor.\n\n💡 Hızlı erişim butonlarını kullanabilir veya sorunuzu yazarak sorabilirsiniz.',

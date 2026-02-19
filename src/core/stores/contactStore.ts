@@ -14,7 +14,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { getAuth } from 'firebase/auth';
 import { initializeFirebase } from '../../lib/firebase';
 import { contactService, Contact, BlockedContact } from '../services/ContactService';
@@ -39,30 +39,30 @@ const getContactStoreScope = (): string => {
 const getScopedContactStoreKey = (base: string): string => `${base}:${getContactStoreScope()}`;
 
 const scopedContactStoreStorage = {
-    getItem: async (name: string): Promise<string | null> => {
+    getItem: (name: string): string | null => {
         const scopedKey = getScopedContactStoreKey(name);
-        const scopedData = await AsyncStorage.getItem(scopedKey);
+        const scopedData = DirectStorage.getString(scopedKey) ?? null;
         if (scopedData) {
             return scopedData;
         }
 
         // One-time migration from legacy global store key.
-        const legacyData = await AsyncStorage.getItem(name);
+        const legacyData = DirectStorage.getString(name) ?? null;
         if (!legacyData) {
             return null;
         }
 
-        await AsyncStorage.setItem(scopedKey, legacyData).catch(() => undefined);
-        await AsyncStorage.removeItem(name).catch(() => undefined);
+        try { DirectStorage.setString(scopedKey, legacyData); } catch { /* best effort */ }
+        try { DirectStorage.delete(name); } catch { /* best effort */ }
         logger.info(`♻️ ContactStore cache migrated to ${scopedKey}`);
         return legacyData;
     },
-    setItem: async (name: string, value: string): Promise<void> => {
-        await AsyncStorage.setItem(getScopedContactStoreKey(name), value);
+    setItem: (name: string, value: string): void => {
+        DirectStorage.setString(getScopedContactStoreKey(name), value);
     },
-    removeItem: async (name: string): Promise<void> => {
-        await AsyncStorage.removeItem(getScopedContactStoreKey(name));
-        await AsyncStorage.removeItem(name).catch(() => undefined);
+    removeItem: (name: string): void => {
+        try { DirectStorage.delete(getScopedContactStoreKey(name)); } catch { /* best effort */ }
+        try { DirectStorage.delete(name); } catch { /* best effort */ }
     },
 };
 
@@ -341,8 +341,8 @@ export const useContactStore = create<ContactState>()(
                     pendingSyncCount: 0,
                     lastSyncTime: null,
                 });
-                await AsyncStorage.removeItem(getScopedContactStoreKey(CONTACT_STORE_KEY_BASE)).catch(() => undefined);
-                await AsyncStorage.removeItem(CONTACT_STORE_KEY_BASE).catch(() => undefined);
+                try { DirectStorage.delete(getScopedContactStoreKey(CONTACT_STORE_KEY_BASE)); } catch { /* best effort */ }
+                try { DirectStorage.delete(CONTACT_STORE_KEY_BASE); } catch { /* best effort */ }
             },
         }),
         {

@@ -1,7 +1,7 @@
 /**
  * MESSAGE STORE - Offline Messaging
  * Messages sent via BLE mesh network
- * Persistent storage with AsyncStorage + Firebase Firestore sync
+ * Persistent storage with encrypted MMKV (DirectStorage) + Firebase Firestore sync
  */
 
 import { create } from 'zustand';
@@ -82,6 +82,8 @@ export interface Conversation {
   lastMessage: string;
   lastMessageTime: number;
   unreadCount: number;
+  // CRITICAL: Firestore V3 conversation ID — allows direct subscription without pairKey lookup
+  conversationId?: string;
   // ELITE: Enhanced conversation metadata
   isTyping?: boolean;
   lastSeen?: number;
@@ -152,6 +154,9 @@ export interface MessageActions {
 const STORAGE_KEY_MESSAGES_BASE = '@afetnet:messages';
 const STORAGE_KEY_CONVERSATIONS_BASE = '@afetnet:conversations';
 const STORAGE_GUEST_SCOPE = 'guest';
+// Message cap — MMKV handles large payloads efficiently.
+// Set high to preserve message history (user expects messages to persist until deleted).
+const MAX_MESSAGES = 50000;
 const SELF_ID_LITERALS = new Set(['me', 'ME']);
 const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 const isNonRoutableConversationId = (value: string): boolean =>
@@ -361,13 +366,9 @@ const readScopedStorage = (baseKey: string): string | null => {
     return scopedData;
   }
 
-  // Migration path for legacy global keys
-  const legacyData = DirectStorage.getString(baseKey);
-  if (legacyData) {
-    DirectStorage.setString(scopedKey, legacyData);
-    return legacyData;
-  }
-
+  // CRITICAL FIX: Do NOT migrate legacy global keys — they may belong to a
+  // different user account, causing cross-account data bleed (privacy breach).
+  // Legacy data is orphaned; each account starts fresh with scoped storage.
   return null;
 };
 
@@ -560,7 +561,11 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       // Double-check inside set() to handle race conditions
       if (state.messages.some(m => m.id === normalizedMessage.id)) return state;
 
-      const newMessages = [...state.messages, normalizedMessage];
+      let newMessages = [...state.messages, normalizedMessage];
+      // CRITICAL FIX: Cap message count to prevent unbounded memory growth
+      if (newMessages.length > MAX_MESSAGES) {
+        newMessages = newMessages.slice(newMessages.length - MAX_MESSAGES);
+      }
       // ELITE V2: Update conversation index incrementally
       const newIndex = new Map(state.conversationIndex);
       const otherUserId = getOtherUserIdForMessage(normalizedMessage, selfIds);
@@ -639,7 +644,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         if (otherUserId) {
           const existing = newIndex.get(otherUserId);
           if (existing) {
-            existing.push(msg);
+            // Clone array to avoid mutating state — Zustand immutability
+            newIndex.set(otherUserId, [...existing, msg]);
           } else {
             newIndex.set(otherUserId, [msg]);
           }
@@ -680,12 +686,26 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       const normalizedConversation: Conversation = {
         ...conversation,
         userId: existing?.userId || resolvedConversationId,
+        // CRITICAL FIX: Explicitly preserve conversationId during merge.
+        // Without this, when an incoming conversation object (e.g., from mesh)
+        // doesn't carry conversationId, the spread sets it to undefined,
+        // overwriting the existing Firestore V3 conversation ID. This caused
+        // MessagesScreen to navigate without conversationId, forcing a pairKey
+        // lookup that may fail (missing composite index or timing issues).
+        // Use nullish coalescing: undefined conversationId must NOT overwrite existing one.
+        // || would treat '' as falsy too, but conversationId should never be empty string.
+        conversationId: (conversation.conversationId != null ? conversation.conversationId : undefined) || existing?.conversationId,
         userName: conversation.userName || existing?.userName || resolvedConversationId,
         lastMessage: conversation.lastMessage || existing?.lastMessage || '',
         lastMessageTime: resolvedLastMessageTime,
         unreadCount: existing?.unreadCount ?? conversation.unreadCount ?? 0,
         isPinned: existing?.isPinned ?? conversation.isPinned,
         isMuted: existing?.isMuted ?? conversation.isMuted,
+        // Preserve optional metadata from existing conversation when not provided
+        lastMessageFrom: conversation.lastMessageFrom || existing?.lastMessageFrom,
+        lastMessageStatus: conversation.lastMessageStatus || existing?.lastMessageStatus,
+        status: conversation.status || existing?.status,
+        lastSeen: conversation.lastSeen ?? existing?.lastSeen,
       };
 
       if (existingIndex >= 0 && existing) {
@@ -818,7 +838,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
   },
   updateConversations: () => {
     const { messages, conversations: existingConversations } = get();
-    const { blockedUsers } = require('./settingsStore').useSettingsStore.getState();
+    const settingsState = require('./settingsStore').useSettingsStore.getState();
+    const blockedUsers = Array.isArray(settingsState?.blockedUsers) ? settingsState.blockedUsers : [];
     const blockedAliasSet = new Set<string>();
     blockedUsers.forEach((blockedUserId: string) => {
       const aliases = getPeerAliasCandidates(blockedUserId);

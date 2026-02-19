@@ -12,7 +12,7 @@
 
 import { createLogger } from '../utils/logger';
 import { useMeshStore, MeshMessage } from './mesh/MeshStore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 
 const logger = createLogger('DeliveryManager');
 
@@ -370,7 +370,7 @@ class DeliveryManager {
 
     private async loadRecords() {
         try {
-            const data = await AsyncStorage.getItem(DELIVERY_TRACKING_KEY);
+            const data = DirectStorage.getString(DELIVERY_TRACKING_KEY);
             if (data) {
                 const records: DeliveryRecord[] = JSON.parse(data);
                 records.forEach(r => this.deliveryRecords.set(r.messageId, r));
@@ -383,7 +383,7 @@ class DeliveryManager {
     private async saveRecords() {
         try {
             const records = Array.from(this.deliveryRecords.values());
-            await AsyncStorage.setItem(DELIVERY_TRACKING_KEY, JSON.stringify(records));
+            DirectStorage.setString(DELIVERY_TRACKING_KEY, JSON.stringify(records));
         } catch (error) {
             logger.error('Failed to save delivery records:', error);
         }

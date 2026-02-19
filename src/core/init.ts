@@ -27,6 +27,8 @@ let backgroundSeismicMonitor: any;
 let widgetDataBridgeService: any;
 let multiSourceWidgetUnsubscribe: (() => void) | null = null;
 let multiSourceBleAutoUnsubscribe: (() => void) | null = null;
+// CRITICAL FIX: Store HybridMessageService subscription unsubscribe to prevent listener leaks
+let hybridMessageUnsubscribe: (() => void) | null = null;
 
 let isInitialized = false;
 let isInitializing = false;
@@ -137,6 +139,20 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     } catch (e: unknown) {
       logger.warn('Early notification handler failed (non-blocking):', e);
     }
+
+    // -----------------------------------------------------------------------
+    // CRITICAL: NotificationCenter MUST initialize BEFORE Phase A imports.
+    // On cold-start (user taps push notification to open app), Expo's
+    // getLastNotificationResponseAsync() has a short window to return the tap.
+    // If we wait until after Phase A + Phase B (10-15s), the response expires
+    // and the user is NOT navigated to the conversation. This fix ensures
+    // cold-start taps are captured within the first 1-2 seconds.
+    // -----------------------------------------------------------------------
+    try {
+      const { notificationCenter } = await import('./services/notifications/NotificationCenter');
+      await notificationCenter.initialize();
+      logger.info('✅ NotificationCenter (early — cold-start safe)');
+    } catch (e: unknown) { logger.error('NotificationCenter early init:', e); }
 
     // -----------------------------------------------------------------------
     // Crash diagnostics baseline (must start before feature modules)
@@ -287,6 +303,21 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         const { identityService } = await import('./services/IdentityService');
         await withTimeout(identityService.initialize(), 10_000, undefined);
         logger.info(`✅ IdentityService (id: ${identityService.getMyId()})`);
+
+        // ELITE: Update lastSeen on app open + listen for AppState changes
+        const uid = identityService.getUid();
+        if (uid) {
+          import('./services/firebase/FirebaseMessageOperations').then(({ updateLastSeen }) => {
+            updateLastSeen(uid);
+            // Also update on every foreground resume
+            const { AppState } = require('react-native');
+            const lastSeenListener = AppState.addEventListener('change', (state: string) => {
+              if (state === 'active') updateLastSeen(uid);
+            });
+            // Store cleanup ref (cleaned up in shutdownApp via module unload)
+            (globalThis as any).__lastSeenListener = lastSeenListener;
+          }).catch(() => {});
+        }
       } catch (e: unknown) { logger.error('IdentityService:', e); }
 
       try {
@@ -300,7 +331,9 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         // BUG 1 FIX: initialize() MUST be called before subscribeToMessages()
         // Without this, queue processing, connection listener, and device registration never start
         await withTimeout(hybridMessageService.initialize(), 15_000, undefined);
-        await hybridMessageService.subscribeToMessages((msg) => {
+        // CRITICAL FIX: Store unsubscribe to prevent listener accumulation on re-login
+        if (hybridMessageUnsubscribe) { hybridMessageUnsubscribe(); hybridMessageUnsubscribe = null; }
+        hybridMessageUnsubscribe = await hybridMessageService.subscribeToMessages((msg) => {
           logger.debug(`Cloud msg: ${msg.id} from ${msg.senderId}`);
         });
         logger.info('✅ HybridMessageService initialized + subscriptions');
@@ -314,17 +347,28 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         logger.info('✅ MessageStore');
       } catch (e: unknown) { logger.error('MessageStore:', e); }
 
+      // FIX: Initialize GroupChatService on boot so group message notifications
+      // fire even before the user opens FamilyGroupChatScreen
+      try {
+        const { groupChatService } = await import('./services/GroupChatService');
+        groupChatService.initialize();
+        logger.info('✅ GroupChatService');
+      } catch (e: unknown) { logger.error('GroupChatService:', e); }
+
+      // ELITE: Start listening for incoming voice calls
+      try {
+        const { voiceCallService } = await import('./services/VoiceCallService');
+        if (voiceCallService.isAvailable()) {
+          voiceCallService.listenForIncomingCalls();
+          logger.info('✅ VoiceCallService listener');
+        }
+      } catch (e: unknown) { logger.debug('VoiceCallService (optional):', e); }
+
     } else {
       logger.info('ℹ️ Auth-gated services deferred');
     }
 
-    // Initialize NotificationCenter regardless of auth state so notification taps
-    // (including cold-start SOS taps) are never dropped before auth resolves.
-    try {
-      const { notificationCenter } = await import('./services/notifications/NotificationCenter');
-      await notificationCenter.initialize();
-      logger.info('✅ NotificationCenter');
-    } catch (e: unknown) { logger.error('NotificationCenter:', e); }
+    // NotificationCenter already initialized early (before Phase A) for cold-start safety.
 
     // FIX: Initialize NotificationService regardless of auth (sets up local notification infra)
     try {
@@ -346,7 +390,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     }
 
     // CRITICAL FIX: FamilyStore MUST init regardless of auth state
-    // — AsyncStorage cache loads locally, enabling UI to show family members
+    // — MMKV cache loads locally, enabling UI to show family members
     // — Firebase sync inside initialize() gracefully fails if not authed
     try {
       const { useFamilyStore } = await import('./stores/familyStore');
@@ -466,22 +510,34 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
           await startNearbySOSListener(myDeviceId);
           logger.info('✅ SOS Alert Listeners (family + nearby)');
         } else {
-          logger.warn('⚠️ SOS listeners: no deviceId yet — retrying in 5s');
-          // LIFE-SAFETY: Retry SOS listeners after short delay — critical for first-launch users
-          setTimeout(async () => {
-            try {
-              const retryDeviceId = await getDeviceId();
-              if (retryDeviceId) {
-                const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
-                const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
-                await startSOSAlertListener(retryDeviceId);
-                await startNearbySOSListener(retryDeviceId);
-                logger.info('✅ SOS Alert Listeners started (retry)');
-              } else {
-                logger.error('❌ SOS listeners FAILED after retry — user will NOT receive SOS alerts');
+          logger.warn('⚠️ SOS listeners: no deviceId yet — retrying with backoff');
+          // LIFE-SAFETY: Retry SOS listeners with exponential backoff — critical for first-launch users
+          const MAX_SOS_RETRIES = 4;
+          const retrySOSListeners = async (attempt: number, delayMs: number) => {
+            if (attempt > MAX_SOS_RETRIES) {
+              logger.error(`❌ SOS listeners FAILED after ${MAX_SOS_RETRIES} retries — user will NOT receive SOS alerts`);
+              return;
+            }
+            setTimeout(async () => {
+              try {
+                const retryDeviceId = await getDeviceId();
+                if (retryDeviceId) {
+                  const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
+                  const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
+                  await startSOSAlertListener(retryDeviceId);
+                  await startNearbySOSListener(retryDeviceId);
+                  logger.info(`✅ SOS Alert Listeners started (retry #${attempt})`);
+                } else {
+                  logger.warn(`⚠️ SOS listeners retry #${attempt}: still no deviceId`);
+                  retrySOSListeners(attempt + 1, Math.min(delayMs * 1.5, 30000));
+                }
+              } catch (retryErr) {
+                logger.error(`SOS Listeners retry #${attempt}:`, retryErr);
+                retrySOSListeners(attempt + 1, Math.min(delayMs * 1.5, 30000));
               }
-            } catch (retryErr) { logger.error('SOS Listeners retry:', retryErr); }
-          }, 5000);
+            }, delayMs);
+          };
+          retrySOSListeners(1, 3000);
         }
       } catch (e: unknown) { logger.error('SOS Listeners:', e); }
 
@@ -618,7 +674,7 @@ function startSeismicHealthCheck() {
 // ---------------------------------------------------------------------------
 
 export async function shutdownApp() {
-  if (!isInitialized) return;
+  if (!isInitialized && !isInitializing) return;
   logger.info('Shutting down...');
 
   if (seismicHealthCheckInterval) { clearInterval(seismicHealthCheckInterval); seismicHealthCheckInterval = null; }
@@ -643,6 +699,8 @@ export async function shutdownApp() {
     multiSourceBleAutoUnsubscribe = null;
   }
 
+  // CRITICAL FIX: Unsubscribe cloud/mesh listeners before destroying service
+  if (hybridMessageUnsubscribe) { hybridMessageUnsubscribe(); hybridMessageUnsubscribe = null; }
   try {
     const { hybridMessageService } = await import('./services/HybridMessageService');
     hybridMessageService.destroy();

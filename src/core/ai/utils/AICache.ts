@@ -3,7 +3,7 @@
  * Caching strategy for AI responses to reduce costs and improve performance
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('AICache');
@@ -29,7 +29,7 @@ export class AICache {
         ttl,
       };
 
-      await AsyncStorage.setItem(
+      DirectStorage.setString(
         CACHE_PREFIX + key,
         JSON.stringify(entry),
       );
@@ -45,7 +45,7 @@ export class AICache {
    */
   static async get<T>(key: string): Promise<T | null> {
     try {
-      const cached = await AsyncStorage.getItem(CACHE_PREFIX + key);
+      const cached = DirectStorage.getString(CACHE_PREFIX + key);
 
       if (!cached) {
         return null;
@@ -74,7 +74,7 @@ export class AICache {
    */
   static async delete(key: string): Promise<void> {
     try {
-      await AsyncStorage.removeItem(CACHE_PREFIX + key);
+      DirectStorage.delete(CACHE_PREFIX + key);
       logger.info(`Cache deleted: ${key}`);
     } catch (error) {
       logger.error('Cache delete error:', error);
@@ -86,10 +86,10 @@ export class AICache {
    */
   static async clear(): Promise<void> {
     try {
-      const keys = await AsyncStorage.getAllKeys();
+      const keys = DirectStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
 
-      await AsyncStorage.multiRemove(cacheKeys);
+      cacheKeys.forEach(k => DirectStorage.delete(k));
       logger.info(`Cache cleared: ${cacheKeys.length} entries`);
     } catch (error) {
       logger.error('Cache clear error:', error);
@@ -105,14 +105,14 @@ export class AICache {
     oldestEntry: number;
   }> {
     try {
-      const keys = await AsyncStorage.getAllKeys();
+      const keys = DirectStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
 
       let totalSize = 0;
       let oldestTimestamp = Date.now();
 
       for (const key of cacheKeys) {
-        const value = await AsyncStorage.getItem(key);
+        const value = DirectStorage.getString(key);
         if (value) {
           totalSize += value.length;
 
@@ -147,25 +147,25 @@ export class AICache {
    */
   static async cleanup(): Promise<number> {
     try {
-      const keys = await AsyncStorage.getAllKeys();
+      const keys = DirectStorage.getAllKeys();
       const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
 
       let cleaned = 0;
 
       for (const key of cacheKeys) {
-        const value = await AsyncStorage.getItem(key);
+        const value = DirectStorage.getString(key);
         if (value) {
           try {
             const entry = JSON.parse(value);
             const age = Date.now() - entry.timestamp;
 
             if (age > entry.ttl) {
-              await AsyncStorage.removeItem(key);
+              DirectStorage.delete(key);
               cleaned++;
             }
           } catch (e) {
             // Invalid entry, remove it
-            await AsyncStorage.removeItem(key);
+            DirectStorage.delete(key);
             cleaned++;
           }
         }

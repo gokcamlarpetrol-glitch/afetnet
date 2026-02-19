@@ -122,8 +122,9 @@ class FirebaseService {
         // ELITE: Get both Expo push token and FCM token
         try {
           // Get Expo push token (for Expo push notification service)
+          const { APP_CONFIG } = await import('../config/app');
           const expoToken = await Notifications.getExpoPushTokenAsync({
-            projectId: '072f1217-172a-40ce-af23-3fc0ad3f7f09',
+            projectId: APP_CONFIG.easProjectId,
           });
           this.pushToken = expoToken.data;
           if (__DEV__) logger.info('Expo push token:', this.pushToken);

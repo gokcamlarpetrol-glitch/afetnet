@@ -15,11 +15,14 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { Platform } from 'react-native';
 import { Buffer } from 'buffer';
 import * as ExpoCrypto from 'expo-crypto';
+// SECURITY FIX: Use tweetnacl for real cryptographic operations
+import nacl from 'tweetnacl';
+import naclUtil from 'tweetnacl-util';
 
 const logger = createLogger('CryptoService');
 
@@ -145,12 +148,12 @@ class CryptoService {
      * Generate a new encryption key pair using expo-crypto
      */
     async generateEncryptionKeyPair(): Promise<EncryptionKeyPair> {
-        const privateKeyBytes = ExpoCrypto.getRandomBytes(32);
-        const publicKeyBytes = ExpoCrypto.getRandomBytes(32);
+        // SECURITY FIX: Use nacl.box.keyPair for real Curve25519 ECDH key pair
+        const keyPair = nacl.box.keyPair();
 
         this.encryptionKeyPair = {
-            publicKey: Buffer.from(publicKeyBytes).toString('base64'),
-            privateKey: Buffer.from(privateKeyBytes).toString('base64'),
+            publicKey: naclUtil.encodeBase64(keyPair.publicKey),
+            privateKey: naclUtil.encodeBase64(keyPair.secretKey),
             createdAt: Date.now(),
         };
 
@@ -165,12 +168,12 @@ class CryptoService {
      * Generate a new signing key pair using expo-crypto
      */
     async generateSigningKeyPair(): Promise<SigningKeyPair> {
-        const privateKeyBytes = ExpoCrypto.getRandomBytes(64);
-        const publicKeyBytes = ExpoCrypto.getRandomBytes(32);
+        // SECURITY FIX: Use nacl.sign.keyPair for real Ed25519 signing key pair
+        const keyPair = nacl.sign.keyPair();
 
         this.signingKeyPair = {
-            publicKey: Buffer.from(publicKeyBytes).toString('base64'),
-            privateKey: Buffer.from(privateKeyBytes).toString('base64'),
+            publicKey: naclUtil.encodeBase64(keyPair.publicKey),
+            privateKey: naclUtil.encodeBase64(keyPair.secretKey),
             createdAt: Date.now(),
         };
 
@@ -255,8 +258,8 @@ class CryptoService {
     }
 
     /**
-     * Simple XOR-based encryption (placeholder for real E2E)
-     * In production, use a proper encryption library like react-native-quick-crypto
+     * SECURITY FIX: Authenticated encryption using nacl.box (Curve25519 + XSalsa20-Poly1305)
+     * Replaces broken XOR cipher with real public-key authenticated encryption.
      */
     async encryptMessage(
         message: string,
@@ -266,29 +269,30 @@ class CryptoService {
             throw new Error('Keys not initialized');
         }
 
-        const messageBytes = Buffer.from(message, 'utf8');
-        const nonceBytes = ExpoCrypto.getRandomBytes(24);
-        const nonce = Buffer.from(nonceBytes).toString('base64');
+        const messageBytes = naclUtil.decodeUTF8(message);
+        const nonce = nacl.randomBytes(nacl.box.nonceLength);
 
-        // Simple XOR encryption with nonce (not production-ready, but works)
-        const keyBytes = Buffer.from(recipientPublicKey, 'base64');
-        const encrypted = Buffer.alloc(messageBytes.length);
-        for (let i = 0; i < messageBytes.length; i++) {
-            encrypted[i] = messageBytes[i] ^ keyBytes[i % keyBytes.length] ^ nonceBytes[i % nonceBytes.length];
+        // Real Curve25519 ECDH + XSalsa20-Poly1305 authenticated encryption
+        const mySecretKey = naclUtil.decodeBase64(this.encryptionKeyPair.privateKey);
+        const theirPublicKey = naclUtil.decodeBase64(recipientPublicKey);
+        const encrypted = nacl.box(messageBytes, nonce, theirPublicKey, mySecretKey);
+
+        if (!encrypted) {
+            throw new Error('Encryption failed');
         }
 
-        const ciphertext = encrypted.toString('base64');
+        const ciphertext = naclUtil.encodeBase64(encrypted);
+        const nonceB64 = naclUtil.encodeBase64(nonce);
 
-        // Create signature using HMAC-like approach
-        const signatureData = `${ciphertext}:${nonce}:${Date.now()}`;
-        const signature = await ExpoCrypto.digestStringAsync(
-            ExpoCrypto.CryptoDigestAlgorithm.SHA256,
-            signatureData + this.signingKeyPair.privateKey
-        );
+        // Real Ed25519 digital signature
+        const signingKey = naclUtil.decodeBase64(this.signingKeyPair.privateKey);
+        const signatureData = naclUtil.decodeUTF8(`${ciphertext}:${nonceB64}:${Date.now()}`);
+        const signatureBytes = nacl.sign.detached(signatureData, signingKey);
+        const signature = naclUtil.encodeBase64(signatureBytes);
 
         return {
             ciphertext,
-            nonce,
+            nonce: nonceB64,
             senderPublicKey: this.encryptionKeyPair.publicKey,
             timestamp: Date.now(),
             signature,
@@ -296,7 +300,7 @@ class CryptoService {
     }
 
     /**
-     * Decrypt a message
+     * SECURITY FIX: Authenticated decryption using nacl.box.open (Curve25519 + XSalsa20-Poly1305)
      */
     async decryptMessage(
         encryptedMessage: EncryptedMessage
@@ -305,54 +309,53 @@ class CryptoService {
             throw new Error('Keys not initialized');
         }
 
-        const ciphertextBytes = Buffer.from(encryptedMessage.ciphertext, 'base64');
-        const nonceBytes = Buffer.from(encryptedMessage.nonce, 'base64');
-        const keyBytes = Buffer.from(this.encryptionKeyPair.privateKey, 'base64');
+        const ciphertextBytes = naclUtil.decodeBase64(encryptedMessage.ciphertext);
+        const nonce = naclUtil.decodeBase64(encryptedMessage.nonce);
+        const mySecretKey = naclUtil.decodeBase64(this.encryptionKeyPair.privateKey);
+        const senderPublicKey = naclUtil.decodeBase64(encryptedMessage.senderPublicKey);
 
-        // Reverse XOR decryption
-        const decrypted = Buffer.alloc(ciphertextBytes.length);
-        for (let i = 0; i < ciphertextBytes.length; i++) {
-            decrypted[i] = ciphertextBytes[i] ^ keyBytes[i % keyBytes.length] ^ nonceBytes[i % nonceBytes.length];
+        // Real authenticated decryption
+        const decrypted = nacl.box.open(ciphertextBytes, nonce, senderPublicKey, mySecretKey);
+
+        if (!decrypted) {
+            throw new Error('Decryption failed — message tampered or wrong key');
         }
 
-        return decrypted.toString('utf8');
+        return naclUtil.encodeUTF8(decrypted);
     }
 
     /**
-     * Sign a message using HMAC-like approach
+     * SECURITY FIX: Real Ed25519 digital signature using nacl.sign.detached
      */
     async signMessage(message: string): Promise<string> {
         if (!this.signingKeyPair) {
             throw new Error('Signing key not initialized');
         }
 
-        const signature = await ExpoCrypto.digestStringAsync(
-            ExpoCrypto.CryptoDigestAlgorithm.SHA256,
-            message + this.signingKeyPair.privateKey
-        );
-
-        return signature;
+        const messageBytes = naclUtil.decodeUTF8(message);
+        const secretKey = naclUtil.decodeBase64(this.signingKeyPair.privateKey);
+        const signatureBytes = nacl.sign.detached(messageBytes, secretKey);
+        return naclUtil.encodeBase64(signatureBytes);
     }
 
     /**
-     * Verify a message signature
+     * SECURITY FIX: Real Ed25519 signature verification using nacl.sign.detached.verify
+     * Can now verify ANY user's signature (not just our own) given their public key.
      */
     async verifySignature(
         message: string,
         signature: string,
         signerPublicKey: string
     ): Promise<boolean> {
-        // In a proper implementation, we would verify against the public key
-        // For now, we can only verify our own signatures
-        if (this.signingKeyPair && signerPublicKey === this.signingKeyPair.publicKey) {
-            const expectedSig = await this.signMessage(message);
-            return signature === expectedSig;
+        try {
+            const messageBytes = naclUtil.decodeUTF8(message);
+            const signatureBytes = naclUtil.decodeBase64(signature);
+            const publicKeyBytes = naclUtil.decodeBase64(signerPublicKey);
+            return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
+        } catch (error) {
+            logger.warn('Signature verification failed:', error);
+            return false;
         }
-
-        // SECURITY FIX: Do NOT trust unverifiable signatures
-        // Previously returned true, which allowed forged messages to pass
-        logger.warn('SECURITY: Cannot verify signature from other user — rejecting (no key exchange implemented)');
-        return false;
     }
 
     /**
@@ -404,14 +407,14 @@ class CryptoService {
     // ==================== PRIVATE HELPERS ====================
 
     /**
-     * Store data securely (SecureStore or AsyncStorage fallback)
+     * Store data securely (SecureStore or encrypted MMKV fallback)
      */
     private async storeSecurely(key: string, value: string): Promise<void> {
         try {
             if (this.useSecureStorage) {
                 await SecureStore.setItemAsync(key, value);
             } else {
-                await AsyncStorage.setItem(key, value);
+                DirectStorage.setString(key, value);
             }
         } catch (error) {
             logger.error(`Failed to store ${key}:`, error);
@@ -427,7 +430,7 @@ class CryptoService {
             if (this.useSecureStorage) {
                 return await SecureStore.getItemAsync(key);
             } else {
-                return await AsyncStorage.getItem(key);
+                return DirectStorage.getString(key) ?? null;
             }
         } catch (error) {
             logger.error(`Failed to load ${key}:`, error);
@@ -441,7 +444,7 @@ class CryptoService {
     private async saveKnownPublicKeys(): Promise<void> {
         try {
             const data = JSON.stringify(Array.from(this.knownPublicKeys.entries()));
-            await AsyncStorage.setItem(KEY_PAIRS_STORAGE, data);
+            DirectStorage.setString(KEY_PAIRS_STORAGE, data);
         } catch (error) {
             logger.error('Failed to save known public keys:', error);
         }
@@ -452,7 +455,7 @@ class CryptoService {
      */
     private async loadKnownPublicKeys(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(KEY_PAIRS_STORAGE);
+            const data = DirectStorage.getString(KEY_PAIRS_STORAGE) ?? null;
             if (data) {
                 const entries = JSON.parse(data) as [string, KnownPublicKey][];
                 this.knownPublicKeys = new Map(entries);
@@ -484,7 +487,7 @@ class CryptoService {
                 if (this.useSecureStorage) {
                     await SecureStore.deleteItemAsync(key);
                 } else {
-                    await AsyncStorage.removeItem(key);
+                    try { DirectStorage.delete(key); } catch { /* best effort */ }
                 }
             } catch (error) {
                 logger.warn(`Failed to remove ${key}:`, error);

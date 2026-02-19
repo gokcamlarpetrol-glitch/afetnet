@@ -83,6 +83,12 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   const initRequestedRef = useRef(false);
   const [scanCountdown, setScanCountdown] = useState(0);
 
+  // ONLINE SEARCH: Search Firestore users by AFN code or display name
+  type OnlineUser = { uid: string; displayName: string; publicUserCode?: string };
+  const [onlineSearchResults, setOnlineSearchResults] = useState<OnlineUser[]>([]);
+  const [isSearchingOnline, setIsSearchingOnline] = useState(false);
+  const onlineSearchTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const meshStoreDeviceId = useMeshStore((state) => state.myDeviceId);
 
   const tabOptions = useMemo<
@@ -540,6 +546,8 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     return false;
   };
 
+  const [isResolving, setIsResolving] = useState(false);
+
   const handleManualAdd = async () => {
     const trimmedDeviceId = deviceId.trim();
     if (!trimmedDeviceId) {
@@ -575,8 +583,146 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     }
 
     haptics.impactMedium();
-    startConversation(trimmedDeviceId);
+    setIsResolving(true);
+
+    try {
+      // CRITICAL FIX: Resolve AFN code / non-UID to Firebase UID BEFORE opening conversation.
+      // Previously, startConversation was called with raw AFN code, which meant:
+      // 1. Contact was never added to Firestore
+      // 2. Messages were sent to AFN code instead of UID → delivery failure
+      let resolvedUid = trimmedDeviceId;
+      let resolvedName = '';
+
+      if (!UID_REGEX.test(trimmedDeviceId)) {
+        // Not a UID — resolve via Firestore (publicUserCode, qrId, device lookup)
+        try {
+          await firebaseDataService.initialize();
+          const uid = await firebaseDataService.resolveRecipientUid(trimmedDeviceId);
+          if (uid && UID_REGEX.test(uid)) {
+            resolvedUid = uid;
+            logger.info(`✅ Resolved "${trimmedDeviceId}" → UID ${uid}`);
+          } else {
+            Alert.alert(
+              'Kullanıcı Bulunamadı',
+              `"${trimmedDeviceId}" ile eşleşen bir AfetNet kullanıcısı bulunamadı. Kodu kontrol edip tekrar deneyin.`,
+            );
+            return;
+          }
+        } catch (error) {
+          logger.error('UID resolution failed:', error);
+          Alert.alert(
+            'Bağlantı Hatası',
+            'Kullanıcı aranırken bir hata oluştu. İnternet bağlantınızı kontrol edin.',
+          );
+          return;
+        }
+      }
+
+      // Self-check with resolved UID
+      if (selfIdCandidates.has(resolvedUid)) {
+        Alert.alert(SELF_ACCOUNT_WARNING_TITLE, SELF_ACCOUNT_WARNING_MESSAGE);
+        return;
+      }
+
+      // Add as contact (best-effort — don't block conversation if this fails)
+      try {
+        const existingContact = contactService.getContactByAnyId(resolvedUid);
+        if (!existingContact) {
+          await contactService.addContact(resolvedUid, resolvedName || `Kişi ${resolvedUid.slice(0, 8)}`, {
+            addedVia: 'id',
+            sendContactRequest: true,
+          });
+          logger.info(`✅ Contact added: ${resolvedUid}`);
+        }
+      } catch (contactError) {
+        logger.warn('Contact add failed (continuing to conversation):', contactError);
+      }
+
+      await startConversation(resolvedUid);
+    } finally {
+      setIsResolving(false);
+    }
   };
+
+  // ONLINE SEARCH: Query Firestore users collection by AFN code or display name
+  const searchOnlineUsers = useCallback(async (term: string) => {
+    const trimmed = term.trim();
+    if (trimmed.length < 3) {
+      setOnlineSearchResults([]);
+      return;
+    }
+    setIsSearchingOnline(true);
+    try {
+      await firebaseDataService.initialize();
+      const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+
+      const { collection, query, where, limit, getDocs, orderBy } = await import('firebase/firestore');
+      const usersRef = collection(db, 'users');
+      const results: OnlineUser[] = [];
+      const seenUids = new Set<string>();
+      const myUid = identityService.getUid();
+
+      // 1. Search by AFN code (exact match, case-insensitive stored as uppercase)
+      const upperTerm = trimmed.toUpperCase();
+      try {
+        const q1 = query(usersRef, where('publicUserCode', '==', upperTerm), limit(5));
+        const snap1 = await getDocs(q1);
+        snap1.forEach(docSnap => {
+          const d = docSnap.data();
+          const uid = docSnap.id;
+          if (uid && uid !== myUid && !seenUids.has(uid)) {
+            seenUids.add(uid);
+            results.push({ uid, displayName: d.displayName || d.name || uid.slice(0, 8), publicUserCode: d.publicUserCode });
+          }
+        });
+      } catch { /* index may not exist */ }
+
+      // 2. Search by displayName prefix
+      if (results.length < 5) {
+        try {
+          const q2 = query(
+            usersRef,
+            where('displayName', '>=', trimmed),
+            where('displayName', '<', trimmed + '\uf8ff'),
+            orderBy('displayName'),
+            limit(5),
+          );
+          const snap2 = await getDocs(q2);
+          snap2.forEach(docSnap => {
+            const d = docSnap.data();
+            const uid = docSnap.id;
+            if (uid && uid !== myUid && !seenUids.has(uid)) {
+              seenUids.add(uid);
+              results.push({ uid, displayName: d.displayName || uid.slice(0, 8), publicUserCode: d.publicUserCode });
+            }
+          });
+        } catch { /* ignore */ }
+      }
+
+      setOnlineSearchResults(results);
+    } catch (e) {
+      logger.warn('Online user search failed:', e);
+    } finally {
+      setIsSearchingOnline(false);
+    }
+  }, []);
+
+  // Debounced online search — fires 600ms after user stops typing
+  useEffect(() => {
+    if (onlineSearchTimerRef.current) clearTimeout(onlineSearchTimerRef.current);
+    if (contactSearch.trim().length >= 3) {
+      onlineSearchTimerRef.current = setTimeout(() => {
+        searchOnlineUsers(contactSearch);
+      }, 600);
+    } else {
+      setOnlineSearchResults([]);
+    }
+    return () => {
+      if (onlineSearchTimerRef.current) clearTimeout(onlineSearchTimerRef.current);
+    };
+  }, [contactSearch, searchOnlineUsers]);
 
   const handleDeviceSelect = (selectedDeviceId: string) => {
     const normalizedTarget = selectedDeviceId.trim();
@@ -686,6 +832,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
       return baseTarget;
     }
 
+    // baseTarget is not a UID (e.g. AFN code, device ID) — try to resolve to UID
     try {
       await firebaseDataService.initialize();
       const resolvedUid = await firebaseDataService.resolveRecipientUid(baseTarget);
@@ -696,7 +843,12 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
       logger.debug('Failed to canonicalize recipient to UID in NewMessageScreen', error);
     }
 
-    return baseTarget;
+    // CRITICAL FIX: Do NOT return non-UID targets — they break message delivery.
+    // The old behavior was to return the raw AFN code, which caused messages to
+    // be sent to a non-existent Firestore path. Return empty string to trigger
+    // a user-facing error in startConversation.
+    logger.warn(`⚠️ Cannot resolve "${baseTarget}" to Firebase UID — conversation cannot be created`);
+    return '';
   }, [resolveConversationTargetId]);
 
   const startConversation = async (targetDeviceId: string) => {
@@ -915,17 +1067,55 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
           <Text style={styles.contactSectionTitle}>{mergedContacts.length} sonuç bulundu</Text>
         )}
 
-        {mergedContacts.length === 0 && (
+        {mergedContacts.length === 0 && onlineSearchResults.length === 0 && (
           <View style={styles.emptyContactState}>
             <Ionicons name="people-outline" size={48} color="#cbd5e1" />
             <Text style={styles.emptyContactTitle}>
               {contactSearch.length > 0 ? 'Sonuç bulunamadı' : 'Henüz kişi yok'}
             </Text>
             <Text style={styles.emptyContactSubtitle}>
-              {contactSearch.length > 0
-                ? 'Farklı bir arama terimi deneyin'
+              {contactSearch.length >= 3
+                ? isSearchingOnline ? 'Çevrimiçi aranıyor...' : 'Çevrimiçi kullanıcı da bulunamadı'
+                : contactSearch.length > 0
+                ? '3+ karakter girerek çevrimiçi arama yapabilirsiniz'
                 : 'QR kod veya ID ile kişi ekleyebilirsiniz'}
             </Text>
+          </View>
+        )}
+
+        {/* ONLINE SEARCH RESULTS */}
+        {onlineSearchResults.length > 0 && (
+          <View style={{ marginTop: 8 }}>
+            <Text style={[styles.contactSectionTitle, { color: '#0ea5e9' }]}>
+              🌐 Çevrimiçi Kullanıcılar ({onlineSearchResults.length})
+            </Text>
+            {onlineSearchResults.map((user) => (
+              <Pressable
+                key={`online-${user.uid}`}
+                style={({ pressed }) => [styles.contactRow, pressed && styles.contactRowPressed]}
+                onPress={() => startConversation(user.uid)}
+              >
+                <View style={[styles.contactAvatar, { backgroundColor: '#e0f2fe' }]}>
+                  <Text style={[styles.contactAvatarText, { color: '#0369a1' }]}>
+                    {(user.displayName || 'U').charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.contactInfo}>
+                  <Text style={styles.contactName} numberOfLines={1}>{user.displayName}</Text>
+                  {user.publicUserCode && (
+                    <Text style={styles.contactStatusText}>{user.publicUserCode}</Text>
+                  )}
+                </View>
+                <Ionicons name="chatbubble-outline" size={20} color="#0ea5e9" />
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {isSearchingOnline && (
+          <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+            <ActivityIndicator size="small" color="#0ea5e9" />
+            <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Çevrimiçi aranıyor...</Text>
           </View>
         )}
 
@@ -1019,12 +1209,16 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         autoCorrect={false}
       />
       <Pressable
-        style={[styles.primaryButton, !deviceId.trim() && styles.primaryButtonDisabled]}
+        style={[styles.primaryButton, (!deviceId.trim() || isResolving) && styles.primaryButtonDisabled]}
         onPress={handleManualAdd}
-        disabled={!deviceId.trim()}
+        disabled={!deviceId.trim() || isResolving}
       >
-        <Ionicons name="send" size={16} color="#0f172a" />
-        <Text style={styles.primaryButtonText}>Ekle ve Mesaj Gönder</Text>
+        {isResolving ? (
+          <ActivityIndicator size="small" color="#0f172a" />
+        ) : (
+          <Ionicons name="send" size={16} color="#0f172a" />
+        )}
+        <Text style={styles.primaryButtonText}>{isResolving ? 'Aranıyor...' : 'Ekle ve Mesaj Gönder'}</Text>
       </Pressable>
       <Text style={styles.cardHint}>ID “afn-” ile başlar ve en az 8 karakter içerir.</Text>
     </View>

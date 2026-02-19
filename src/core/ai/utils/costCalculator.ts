@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 
 const logger = createLogger('CostCalculator');
 
@@ -130,7 +130,7 @@ class CostTracker {
 
   private async saveRecords(): Promise<void> {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY_COST_TRACKER, JSON.stringify(this.records));
+      DirectStorage.setString(STORAGE_KEY_COST_TRACKER, JSON.stringify(this.records));
     } catch (error) {
       logger.debug('Failed to save cost records:', error);
     }
@@ -143,7 +143,7 @@ class CostTracker {
     cost: number,
   ): Promise<void> {
     try {
-      const statsJson = await AsyncStorage.getItem(STORAGE_KEY_COST_STATS);
+      const statsJson = DirectStorage.getString(STORAGE_KEY_COST_STATS);
       let stats: CostStats = statsJson
         ? JSON.parse(statsJson)
         : {
@@ -185,7 +185,7 @@ class CostTracker {
       stats.serviceBreakdown[service].cost += cost;
       stats.serviceBreakdown[service].tokens += inputTokens + outputTokens;
 
-      await AsyncStorage.setItem(STORAGE_KEY_COST_STATS, JSON.stringify(stats));
+      DirectStorage.setString(STORAGE_KEY_COST_STATS, JSON.stringify(stats));
     } catch (error) {
       logger.debug('Failed to update cost stats:', error);
     }
@@ -193,7 +193,7 @@ class CostTracker {
 
   async getStats(): Promise<CostStats | null> {
     try {
-      const statsJson = await AsyncStorage.getItem(STORAGE_KEY_COST_STATS);
+      const statsJson = DirectStorage.getString(STORAGE_KEY_COST_STATS);
       return statsJson ? JSON.parse(statsJson) : null;
     } catch (error) {
       logger.debug('Failed to get cost stats:', error);
@@ -203,7 +203,7 @@ class CostTracker {
 
   async getRecentRecords(limit: number = 50): Promise<CostRecord[]> {
     try {
-      const recordsJson = await AsyncStorage.getItem(STORAGE_KEY_COST_TRACKER);
+      const recordsJson = DirectStorage.getString(STORAGE_KEY_COST_TRACKER);
       if (!recordsJson) return [];
       
       const records: CostRecord[] = JSON.parse(recordsJson);
@@ -216,8 +216,8 @@ class CostTracker {
 
   async resetStats(): Promise<void> {
     try {
-      await AsyncStorage.removeItem(STORAGE_KEY_COST_STATS);
-      await AsyncStorage.removeItem(STORAGE_KEY_COST_TRACKER);
+      DirectStorage.delete(STORAGE_KEY_COST_STATS);
+      DirectStorage.delete(STORAGE_KEY_COST_TRACKER);
       this.records = [];
       logger.info('💰 Cost stats reset');
     } catch (error) {

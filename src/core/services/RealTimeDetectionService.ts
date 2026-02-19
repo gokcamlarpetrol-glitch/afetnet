@@ -334,8 +334,8 @@ class RealTimeDetectionService {
    */
   private async loadLearnedParameters(): Promise<void> {
     try {
-      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-      const saved = await AsyncStorage.getItem('realtime_detection_params');
+      const { DirectStorage } = await import('../utils/storage');
+      const saved = DirectStorage.getString('realtime_detection_params');
       
       if (saved) {
         const params = JSON.parse(saved);
@@ -354,8 +354,8 @@ class RealTimeDetectionService {
    */
   private async saveLearnedParameters(): Promise<void> {
     try {
-      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-      await AsyncStorage.setItem('realtime_detection_params', JSON.stringify({
+      const { DirectStorage } = await import('../utils/storage');
+      DirectStorage.setString('realtime_detection_params', JSON.stringify({
         falsePositiveRate: this.falsePositiveRate,
         truePositiveRate: this.truePositiveRate,
         adaptiveThreshold: this.adaptiveThreshold,

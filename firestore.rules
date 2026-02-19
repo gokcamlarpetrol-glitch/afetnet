@@ -168,7 +168,8 @@ service cloud.firestore {
                       && !(resource.data.ownerUid is string)
                       && request.resource.data.ownerUid == request.auth.uid
                     );
-      allow delete: if false; // Devices should not be deleted
+      // CRITICAL FIX: Allow device owner to delete (account deletion / GDPR)
+      allow delete: if isDeviceOwner(deviceId);
       
       // Family members subcollection
       // - Each device can have its own family members list
@@ -178,8 +179,11 @@ service cloud.firestore {
       // succeeds in BOTH directions (required for location/status/message reads).
       match /familyMembers/{memberId} {
         allow read: if isDeviceReadable(deviceId);
+        // SECURITY FIX: Creator must prove identity — memberId must match
+        // their auth UID or their QR ID. Prevents spoofing family links.
         allow create: if isAuthenticated()
-                      && request.resource.data.id is string;
+                      && request.resource.data.id is string
+                      && (memberId == request.auth.uid || memberId == requesterQrId());
         allow update: if isDeviceOwner(deviceId);
         // Allow device owner to delete any member, OR allow a user to delete
         // their own reciprocal doc (memberId matches their uid or qrId).
@@ -245,10 +249,15 @@ service cloud.firestore {
         // SECURITY: Any authenticated user can create messages in any device inbox
         // (fan-out write pattern: sender writes to recipient's inbox)
         // Validation: fromDeviceId and toDeviceId must be strings, content must exist
+        // SECURITY FIX: Validate senderUid matches auth.uid to prevent spoofed messages
         allow create: if isAuthenticated()
                       && request.resource.data.fromDeviceId is string
                       && request.resource.data.toDeviceId is string
-                      && request.resource.data.content is string;
+                      && request.resource.data.content is string
+                      && (
+                        !('senderUid' in request.resource.data)
+                        || request.resource.data.senderUid == request.auth.uid
+                      );
         // CRITICAL FIX: Allow owner OR message sender to update messages.
         // Owner: for read receipts, status updates on own inbox.
         // Sender (isSenderOwned): for retries — setDoc({merge:true}) on an
@@ -278,11 +287,16 @@ service cloud.firestore {
       // - Any authenticated user can CREATE an SOS alert for any device
       //   (family member sends SOS to your device path)
       // - Device owner + linked family can READ alerts
+      // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
       match /sos_alerts/{alertId} {
         allow read: if isDeviceReadable(deviceId);
         allow create: if isAuthenticated()
                       && request.resource.data.signalId is string
-                      && request.resource.data.timestamp is number;
+                      && request.resource.data.timestamp is number
+                      && (
+                        !('senderUid' in request.resource.data)
+                        || request.resource.data.senderUid == request.auth.uid
+                      );
         allow update: if isDeviceOwner(deviceId);
         allow delete: if isDeviceOwner(deviceId);
       }
@@ -449,7 +463,8 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isOwner(userId);
-      allow delete: if false;
+      // CRITICAL FIX: Allow owner to delete their own profile (account deletion / GDPR)
+      allow delete: if isOwner(userId);
 
       // Private contacts for each authenticated user
       match /contacts/{contactId} {
@@ -507,21 +522,21 @@ service cloud.firestore {
       match /health/{healthId} {
         allow read: if isOwner(userId);
         allow create, update: if isOwner(userId);
-        allow delete: if false;
+        allow delete: if isOwner(userId); // GDPR: owner can delete
       }
 
       // V3: ICE data subcollection (moved from devices/{id}/ice)
       match /ice/{iceId} {
         allow read: if isOwner(userId);
         allow create, update: if isOwner(userId);
-        allow delete: if false;
+        allow delete: if isOwner(userId); // GDPR: owner can delete
       }
 
       // V3: Status subcollection
       match /status/{statusId} {
         allow read: if isAuthenticated(); // Family members need to read status
         allow create, update: if isOwner(userId);
-        allow delete: if false;
+        allow delete: if isOwner(userId); // GDPR: owner can delete
       }
 
       // V3: Status updates history
@@ -531,7 +546,8 @@ service cloud.firestore {
         allow read: if isAuthenticated();
         allow create: if isAuthenticated()
                       && request.resource.data.timestamp is number;
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isOwner(userId); // GDPR: owner can delete their own history
       }
 
       // V3: Bidirectional family member mapping (used by sharesFamilyWith() rule function)
@@ -593,10 +609,15 @@ service cloud.firestore {
                     && resource.data.ownerUid == request.auth.uid;
     }
     
-    // SOS alerts
+    // SOS alerts (legacy)
+    // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
     match /sosAlerts/{alertId} {
       allow read: if isAuthenticated() || isAdmin();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && (
+                      !('senderUid' in request.resource.data)
+                      || request.resource.data.senderUid == request.auth.uid
+                    );
       allow update: if false;
       allow delete: if false;
     }
@@ -625,7 +646,8 @@ service cloud.firestore {
       allow update: if isAuthenticated()
                     && resource.data.creatorUid == request.auth.uid
                     && request.resource.data.id == resource.data.id;
-      allow delete: if false; // SOS signals must be preserved
+      // GDPR: creator can delete their own SOS signals during account deletion
+      allow delete: if isAuthenticated() && resource.data.creatorUid == request.auth.uid;
     }
 
     // ============================================================
@@ -659,19 +681,21 @@ service cloud.firestore {
       allow create, update: if isOwner(userId)
                             && request.resource.data.latitude is number
                             && request.resource.data.longitude is number;
-      allow delete: if false;
+      allow delete: if isOwner(userId); // GDPR: owner can delete their location
     }
 
     // V3: Location history trail
     match /locations_history/{userId} {
       allow read: if isOwner(userId);
+      allow delete: if isOwner(userId); // GDPR: owner can delete
 
       match /points/{pointId} {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId)
                       && request.resource.data.latitude is number
                       && request.resource.data.longitude is number;
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isOwner(userId); // GDPR: owner can delete
       }
     }
 
@@ -694,7 +718,9 @@ service cloud.firestore {
       allow update: if isAuthenticated()
                     && resource.data.members is list
                     && request.auth.uid in resource.data.members;
-      allow delete: if false;
+      // GDPR: creator can delete family during account deletion
+      allow delete: if isAuthenticated()
+                    && resource.data.createdBy == request.auth.uid;
 
       // Family members subcollection
       match /members/{memberUid} {
@@ -747,10 +773,15 @@ service cloud.firestore {
     match /sos_alerts/{userId} {
       allow read: if isAuthenticated();
 
+      // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
       match /items/{signalId} {
         allow read: if isAuthenticated();
         allow create: if isAuthenticated()
-                      && request.resource.data.timestamp is number;
+                      && request.resource.data.timestamp is number
+                      && (
+                        !('senderUid' in request.resource.data)
+                        || request.resource.data.senderUid == request.auth.uid
+                      );
         // Only the SOS creator can update (cancel, ack)
         allow update: if isOwner(userId);
         allow delete: if false; // SOS records are preserved
@@ -860,11 +891,8 @@ service cloud.firestore {
                     && request.resource.data.latitude is number
                     && request.resource.data.longitude is number
                     && request.resource.data.timestamp is number
-                    && (
-                      // New field: must match auth.uid if present
-                      !('senderUid' in request.resource.data)
-                      || request.resource.data.senderUid == request.auth.uid
-                    );
+                    && request.resource.data.senderUid is string
+                    && request.resource.data.senderUid == request.auth.uid;
       allow update: if false;
       allow delete: if false; // Cleanup via TTL or Cloud Functions
 
@@ -877,6 +905,32 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if false;
       }
+    }
+
+    // ============================================================
+    // VOICE CALLS (P2P WebRTC signaling)
+    // ============================================================
+
+    // Call documents — caller and recipient can read/write
+    match /voice_calls/{callId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false; // Cleanup via TTL or Cloud Functions only
+
+      // ICE candidates subcollections
+      match /callerCandidates/{candidateId} {
+        allow read, write: if isAuthenticated();
+      }
+      match /calleeCandidates/{candidateId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Incoming call notifications — only the recipient can read, caller can write
+    match /voice_calls_incoming/{userId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isAuthenticated();
     }
 
     // ============================================================

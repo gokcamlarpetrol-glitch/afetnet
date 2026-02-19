@@ -61,15 +61,25 @@ class SOSChannelRouter {
         ]);
 
         // Log results of each channel
+        const succeededChannels: string[] = [];
+        const failedChannels: string[] = [];
         results.forEach((result, i) => {
             if (result.status === 'fulfilled') {
                 logger.debug(`[SOS] Channel ${channelNames[i]}: ✅ OK`);
+                succeededChannels.push(channelNames[i]);
             } else {
-                logger.debug(`[SOS] Channel ${channelNames[i]}: ❌ REJECTED: ${result.reason}`);
+                logger.warn(`[SOS] Channel ${channelNames[i]}: ❌ FAILED: ${result.reason}`);
+                failedChannels.push(channelNames[i]);
             }
         });
 
-        logger.info('✅ SOS broadcast completed on all channels');
+        if (failedChannels.length === channelNames.length) {
+            logger.error(`🆘 SOS broadcast FAILED on ALL channels: ${failedChannels.join(', ')}`);
+        } else if (failedChannels.length > 0) {
+            logger.warn(`⚠️ SOS broadcast partial: ✅ ${succeededChannels.join(', ')} | ❌ ${failedChannels.join(', ')}`);
+        } else {
+            logger.info('✅ SOS broadcast completed on all channels');
+        }
     }
 
     // ============================================================================
@@ -420,7 +430,10 @@ class SOSChannelRouter {
                 const user = auth.currentUser;
                 logger.debug(`[SOS] Step 3 - Auth: uid=${user?.uid || 'NOT LOGGED IN'}, emailVerified=${user?.emailVerified}`);
                 if (!user) {
-                    logger.debug('[SOS] CRITICAL: No authenticated user — Firestore write will be REJECTED by security rules!');
+                    // CRITICAL FIX: Don't attempt Firestore write without auth — it will be rejected by rules.
+                    // SOS will still be broadcast via mesh (offline) and other channels.
+                    logger.error('[SOS] No authenticated user — skipping Firestore broadcast (will be rejected by rules)');
+                    return;
                 }
             } catch (authErr) {
                 logger.debug(`[SOS] Step 3 - Auth check error: ${authErr}`);
@@ -642,8 +655,8 @@ class SOSChannelRouter {
         emergencyNotes?: string;
     } | null> {
         try {
-            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-            const raw = await AsyncStorage.getItem('@health_profile');
+            const { DirectStorage } = await import('../../utils/storage');
+            const raw = DirectStorage.getString('@health_profile');
             if (!raw) return null;
             const profile = JSON.parse(raw);
             return {

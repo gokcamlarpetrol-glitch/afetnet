@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../utils/storage';
 
 export interface TrappedUser {
   id: string;
@@ -143,7 +143,7 @@ export const useRescueStore = create<RescueState>()(
     },
     {
       name: '@afetnet:rescue',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => eliteStorage),
       partialize: (state) => ({
         isRescueTeamMode: state.isRescueTeamMode,
         beaconInterval: state.beaconInterval,

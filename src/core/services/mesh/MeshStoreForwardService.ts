@@ -10,7 +10,7 @@
  * - Message expiration handling
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Buffer } from 'buffer';
 import { createLogger } from '../../utils/logger';
 import { MeshProtocol, MeshMessageType, MeshPriority, MeshPacket } from './MeshProtocol';
@@ -381,7 +381,7 @@ class MeshStoreForwardService {
 
     private async saveMailbox(): Promise<void> {
         try {
-            await AsyncStorage.setItem(STORAGE_KEY_MAILBOX, JSON.stringify(this.mailbox));
+            DirectStorage.setString(STORAGE_KEY_MAILBOX, JSON.stringify(this.mailbox));
         } catch (error) {
             logger.error('Failed to save mailbox', error);
         }
@@ -389,7 +389,7 @@ class MeshStoreForwardService {
 
     private async loadMailbox(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEY_MAILBOX);
+            const data = DirectStorage.getString(STORAGE_KEY_MAILBOX) ?? null;
             if (data) {
                 this.mailbox = JSON.parse(data);
             }
@@ -402,7 +402,7 @@ class MeshStoreForwardService {
     private async savePendingACKs(): Promise<void> {
         try {
             const arr = Array.from(this.pendingACKs.entries());
-            await AsyncStorage.setItem(STORAGE_KEY_PENDING_ACKS, JSON.stringify(arr));
+            DirectStorage.setString(STORAGE_KEY_PENDING_ACKS, JSON.stringify(arr));
         } catch (error) {
             logger.error('Failed to save pending ACKs', error);
         }
@@ -410,7 +410,7 @@ class MeshStoreForwardService {
 
     private async loadPendingACKs(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEY_PENDING_ACKS);
+            const data = DirectStorage.getString(STORAGE_KEY_PENDING_ACKS) ?? null;
             if (data) {
                 const arr: [number, PendingACK][] = JSON.parse(data);
                 this.pendingACKs = new Map(arr);
@@ -425,7 +425,7 @@ class MeshStoreForwardService {
         try {
             // Only keep recent IDs (max 1000)
             const arr = Array.from(this.deliveredIds).slice(-1000);
-            await AsyncStorage.setItem(STORAGE_KEY_DELIVERED, JSON.stringify(arr));
+            DirectStorage.setString(STORAGE_KEY_DELIVERED, JSON.stringify(arr));
         } catch (error) {
             logger.error('Failed to save delivered IDs', error);
         }
@@ -433,7 +433,7 @@ class MeshStoreForwardService {
 
     private async loadDeliveredIds(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEY_DELIVERED);
+            const data = DirectStorage.getString(STORAGE_KEY_DELIVERED) ?? null;
             if (data) {
                 this.deliveredIds = new Set(JSON.parse(data));
             }
@@ -509,9 +509,9 @@ class MeshStoreForwardService {
         this.deliveredIds.clear();
 
         await Promise.all([
-            AsyncStorage.removeItem(STORAGE_KEY_MAILBOX),
-            AsyncStorage.removeItem(STORAGE_KEY_PENDING_ACKS),
-            AsyncStorage.removeItem(STORAGE_KEY_DELIVERED),
+            DirectStorage.delete(STORAGE_KEY_MAILBOX),
+            DirectStorage.delete(STORAGE_KEY_PENDING_ACKS),
+            DirectStorage.delete(STORAGE_KEY_DELIVERED),
         ]);
 
         logger.info('Store & Forward data cleared');

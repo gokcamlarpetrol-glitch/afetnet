@@ -266,37 +266,31 @@ class FirebaseDataService {
         const getFirebaseAppAsync = firebaseModule.getFirebaseAppAsync;
 
         if (!getFirebaseAppAsync || typeof getFirebaseAppAsync !== 'function') {
-          if (__DEV__) {
-            logger.debug('getFirebaseAppAsync is not available — Firestore disabled');
-          }
+          logger.warn('⚠️ getFirebaseAppAsync is not available — Firestore disabled');
           return;
         }
 
         const initPromise = getFirebaseAppAsync();
         const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 8000),
+          setTimeout(() => resolve(null), 20000),
         );
 
         const firebaseApp = await Promise.race([initPromise, timeoutPromise]);
 
         if (!firebaseApp) {
-          if (__DEV__) {
-            logger.debug('Firebase app not initialized — Firestore disabled');
-          }
+          logger.warn('⚠️ Firebase app not initialized after 20s — Firestore disabled');
           return;
         }
 
         const dbPromise = getFirestoreInstanceAsync();
         const dbTimeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 5000),
+          setTimeout(() => resolve(null), 15000),
         );
 
         const db = await Promise.race([dbPromise, dbTimeoutPromise]);
 
         if (!db) {
-          if (__DEV__) {
-            logger.debug('Firestore not available — using AsyncStorage fallback');
-          }
+          logger.warn('⚠️ Firestore not available after 15s — messaging will not work');
           return;
         }
 
@@ -360,14 +354,9 @@ class FirebaseDataService {
         logger.info('✅ FirebaseDataService V3 initialized (UID-centric)');
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes('LoadBundleFromServerRequestError') ||
-          errorMessage.includes('Could not load bundle')) {
-          if (__DEV__) {
-            logger.debug('FirebaseDataService init skipped (bundle load error)');
-          }
-        } else {
-          logger.error('FirebaseDataService init error:', { error: errorMessage });
-        }
+        // CRITICAL: Always log init failures — previously hidden behind __DEV__ guard,
+        // making TestFlight/production failures completely invisible
+        logger.error('FirebaseDataService init error:', { error: errorMessage });
       }
     })();
 
@@ -457,6 +446,7 @@ class FirebaseDataService {
   async subscribeToUserLocation(
     uid: string,
     callback: (location: LocationUpdateData | null) => void,
+    onError?: (error: any) => void,
   ): Promise<() => void> {
     if (!this._isInitialized) return () => { };
     const targetUid = await this.resolveUidForUserPath(uid);
@@ -464,7 +454,7 @@ class FirebaseDataService {
       logger.warn(`subscribeToUserLocation skipped: unable to resolve UID from "${uid}"`);
       return () => { };
     }
-    const unsub = await subscribeToLocationAsync(targetUid, callback);
+    const unsub = await subscribeToLocationAsync(targetUid, callback, onError);
     return unsub || (() => { });
   }
 
@@ -553,12 +543,34 @@ class FirebaseDataService {
    * Also does legacy dual-write for backward compat.
    */
   async saveMessage(uid: string, message: MessageData): Promise<boolean> {
-    if (!this._isInitialized) return false;
-    try {
-      const senderUid = await this.getCurrentUid();
-      if (!senderUid) {
-        logger.warn('saveMessage: no authenticated user');
+    // CRITICAL FIX: Lazy re-initialization — if init failed silently during startup
+    // (timeout, slow network, etc.), retry here instead of permanently breaking messaging
+    if (!this._isInitialized) {
+      logger.warn('saveMessage: not initialized — attempting lazy re-init');
+      await this.initialize();
+      if (!this._isInitialized) {
+        logger.error('saveMessage: lazy re-init FAILED — message will not be sent');
         return false;
+      }
+    }
+    try {
+      // CRITICAL FIX: Use message.senderUid as fallback when getAuth().currentUser is temporarily null.
+      // identityService.getUid() (used by attemptSend to set message.senderUid) reads from MMKV cache
+      // which survives auth state transitions. getAuth().currentUser?.uid can be null during:
+      // - Cold start (Firebase Auth SDK restoring from persistence)
+      // - Token refresh (brief gap between old and new token)
+      // - Network-triggered re-authentication
+      // Without this fallback, ALL messages silently fail until auth state stabilizes.
+      let senderUid = await this.getCurrentUid();
+      if (!senderUid) {
+        const messageSenderUid = typeof message.senderUid === 'string' ? message.senderUid.trim() : '';
+        if (messageSenderUid && this.isLikelyUid(messageSenderUid)) {
+          logger.warn(`saveMessage: getCurrentUid() returned null — using message.senderUid="${messageSenderUid}" as fallback`);
+          senderUid = messageSenderUid;
+        } else {
+          logger.error('🚨 saveMessage: NO authenticated user AND no valid senderUid in message — cannot send');
+          return false;
+        }
       }
 
       let v3Success = false;
@@ -584,7 +596,7 @@ class FirebaseDataService {
       const effectiveRecipientUid = recipientUid && this.isLikelyUid(recipientUid) ? recipientUid : null;
 
       if (!effectiveRecipientUid && rawRecipientId && rawRecipientId !== 'broadcast') {
-        logger.warn(`⚠️ saveMessage: UID resolution failed for "${rawRecipientId}" — V3 path skipped (non-UID participants would break security rules)`);
+        logger.error(`🚨 saveMessage: UID resolution failed for "${rawRecipientId}" — V3 path skipped. Message may NOT be delivered! Attempting legacy fallback.`);
       }
 
       if (effectiveRecipientUid) {
@@ -600,7 +612,7 @@ class FirebaseDataService {
           const v3Message: MessageData = {
             ...message,
             senderUid: senderUid,
-            senderName: message.metadata?.senderName as string || message.senderName || '',
+            senderName: message.metadata?.senderName as string || (message as any).fromName || message.senderName || '',
           };
 
           v3Success = await saveMessageV3(conversation.id, v3Message, [senderUid, effectiveRecipientUid]);
@@ -614,16 +626,22 @@ class FirebaseDataService {
         }
       }
 
-      // LEGACY: Also write to devices path for backward compat
+      // DUPLICATE-NOTIFICATION FIX: Legacy write is now SKIPPED when V3 succeeds.
+      // The legacy path (devices/{id}/messages/{id}) triggers the old onNewMessage
+      // Cloud Function which sends a SECOND FCM push to the recipient → duplicate notification.
+      // V3 onNewConversationMessageV3 CF already handles push for the V3 path.
+      // Only fall back to legacy if V3 failed AND there is no effective recipient UID
+      // (broadcast/unknown target where V3 has no conversation to write to).
       let legacySuccess = false;
-      try {
-        // Legacy path is recipient device inbox, not sender identity.
-        const legacyTargetDeviceId = rawRecipientId && rawRecipientId !== 'broadcast' ? rawRecipientId : uid;
-        if (legacyTargetDeviceId) {
-          legacySuccess = await saveMessageLegacy(legacyTargetDeviceId, message);
+      if (!v3Success) {
+        try {
+          const legacyTargetDeviceId = rawRecipientId && rawRecipientId !== 'broadcast' ? rawRecipientId : uid;
+          if (legacyTargetDeviceId) {
+            legacySuccess = await saveMessageLegacy(legacyTargetDeviceId, message);
+          }
+        } catch {
+          // Legacy write failure is non-blocking
         }
-      } catch {
-        // Legacy write failure is non-blocking
       }
 
       // CRITICAL: V3 path is the ONLY path receivers subscribe to.
@@ -741,7 +759,15 @@ class FirebaseDataService {
     callback: (messages: MessageData[]) => void,
     onError?: (error: Error) => void,
   ): Promise<(() => void) | null> {
-    if (!this._isInitialized) return null;
+    // CRITICAL FIX: Lazy re-initialization for subscriptions too
+    if (!this._isInitialized) {
+      logger.warn('subscribeToConversationMessages: not initialized — attempting lazy re-init');
+      await this.initialize();
+      if (!this._isInitialized) {
+        logger.error('subscribeToConversationMessages: lazy re-init FAILED — no real-time messages');
+        return null;
+      }
+    }
     try {
       return subscribeToMessagesV3(conversationId, callback);
     } catch (error) {

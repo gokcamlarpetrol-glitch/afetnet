@@ -6,7 +6,7 @@
  * Uses AsyncStorage for persisting language preference.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { NativeModules, Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
 
@@ -82,7 +82,7 @@ async function initialize(): Promise<void> {
 
   try {
     // Check for stored preference
-    const storedLocale = await AsyncStorage.getItem(STORAGE_KEY);
+    const storedLocale = DirectStorage.getString(STORAGE_KEY);
 
     if (storedLocale && (storedLocale === 'tr' || storedLocale === 'en')) {
       currentLocale = storedLocale as SupportedLocale;
@@ -166,7 +166,7 @@ async function setLocale(locale: SupportedLocale): Promise<void> {
 
   try {
     currentLocale = locale;
-    await AsyncStorage.setItem(STORAGE_KEY, locale);
+    DirectStorage.setString(STORAGE_KEY, locale);
 
     // Notify listeners
     listeners.forEach(listener => {

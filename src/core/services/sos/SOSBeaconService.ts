@@ -114,6 +114,9 @@ class SOSBeaconService {
             this.appStateSubscription = null;
         }
 
+        // Clear isSOS flag on Firestore so rescuers see the cancellation
+        this.clearSOSLocationFlag().catch(() => {});
+
         logger.info('🛑 SOS Beacon Service STOPPED');
     }
 
@@ -249,6 +252,9 @@ class SOSBeaconService {
      * Fails silently when offline — mesh beacon is the primary offline channel.
      */
     private async writeLocationToFirestore(location: SOSLocation): Promise<void> {
+        // Guard: don't write if beacon has been stopped (prevents stale writes from in-flight calls)
+        if (!this.isActive) return;
+
         const signal = useSOSStore.getState().currentSignal;
         if (!signal?.userId) return;
 
@@ -276,6 +282,32 @@ class SOSBeaconService {
         } catch {
             // Offline — Firestore write queued by SDK or silently dropped
             // Mesh beacon is the primary offline location channel
+        }
+    }
+
+    /**
+     * Clear the isSOS flag on Firestore when SOS is cancelled.
+     * Rescuers watching locations_current will see isSOS: false.
+     */
+    private async clearSOSLocationFlag(): Promise<void> {
+        const signal = useSOSStore.getState().currentSignal;
+        if (!signal?.userId) return;
+
+        try {
+            const { getFirestoreInstanceAsync } = await import(
+                '../firebase/FirebaseInstanceManager'
+            );
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
+
+            const { doc, setDoc } = await import('firebase/firestore');
+            await setDoc(
+                doc(db, 'locations_current', signal.userId),
+                { isSOS: false, cancelledAt: Date.now() },
+                { merge: true },
+            );
+        } catch {
+            // Best-effort — offline scenarios handled by other cancellation channels
         }
     }
 

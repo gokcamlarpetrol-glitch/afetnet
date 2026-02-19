@@ -3,7 +3,7 @@
  * Manages onboarding completion state with backend sync
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from './storage';
 import { createLogger } from './logger';
 import { useOnboardingStore } from '../stores/onboardingStore';
 
@@ -14,7 +14,7 @@ const ONBOARDING_STORE_KEY = 'afetnet-onboarding';
 
 async function getPersistedStoreCompleted(): Promise<boolean> {
   try {
-    const raw = await AsyncStorage.getItem(ONBOARDING_STORE_KEY);
+    const raw = DirectStorage.getString(ONBOARDING_STORE_KEY) ?? null;
     if (!raw) return false;
 
     const parsed = JSON.parse(raw) as {
@@ -44,7 +44,7 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
       return true;
     }
 
-    const legacyValue = await AsyncStorage.getItem(LEGACY_ONBOARDING_COMPLETED_KEY);
+    const legacyValue = DirectStorage.getString(LEGACY_ONBOARDING_COMPLETED_KEY) ?? null;
     const completed = legacyValue === '1';
     if (completed) {
       useOnboardingStore.setState({ completed: true, isHydrated: true });
@@ -63,7 +63,7 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
  */
 export async function setOnboardingCompleted(): Promise<void> {
   try {
-    await AsyncStorage.setItem(LEGACY_ONBOARDING_COMPLETED_KEY, '1');
+    DirectStorage.setString(LEGACY_ONBOARDING_COMPLETED_KEY, '1');
     useOnboardingStore.setState({ completed: true, isHydrated: true });
     logger.info('Onboarding marked as completed');
 
@@ -93,8 +93,8 @@ export async function setOnboardingCompleted(): Promise<void> {
  */
 export async function resetOnboarding(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(LEGACY_ONBOARDING_COMPLETED_KEY);
-    await AsyncStorage.removeItem(ONBOARDING_STORE_KEY);
+    DirectStorage.delete(LEGACY_ONBOARDING_COMPLETED_KEY);
+    DirectStorage.delete(ONBOARDING_STORE_KEY);
     useOnboardingStore.setState({ completed: false, isHydrated: true });
     logger.info('Onboarding reset');
   } catch (error) {

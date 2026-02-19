@@ -62,7 +62,7 @@ async function initializeWebAnalytics() {
 /**
  * Custom analytics storage for React Native (AsyncStorage fallback)
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 
 const ANALYTICS_STORAGE_KEY = 'afetnet_analytics_events';
 const MAX_STORED_EVENTS = 1000; // Limit stored events
@@ -209,9 +209,10 @@ class FirebaseAnalyticsService {
    */
   private async loadStoredEvents() {
     try {
-      const stored = await AsyncStorage.getItem(ANALYTICS_STORAGE_KEY);
+      const stored = DirectStorage.getString(ANALYTICS_STORAGE_KEY);
       if (stored) {
-        const events: StoredEvent[] = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        const events: StoredEvent[] = Array.isArray(parsed) ? parsed : [];
         this.eventQueue = events.slice(-MAX_STORED_EVENTS); // Keep only recent events
         logger.info(`Loaded ${this.eventQueue.length} stored analytics events`);
       }
@@ -225,7 +226,7 @@ class FirebaseAnalyticsService {
    */
   private async saveStoredEvents() {
     try {
-      await AsyncStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(this.eventQueue));
+      DirectStorage.setString(ANALYTICS_STORAGE_KEY, JSON.stringify(this.eventQueue));
     } catch (error) {
       logger.error('Failed to save stored events:', error);
     }
@@ -246,7 +247,7 @@ class FirebaseAnalyticsService {
 
       // Clear queue after flush
       this.eventQueue = [];
-      await AsyncStorage.removeItem(ANALYTICS_STORAGE_KEY);
+      DirectStorage.delete(ANALYTICS_STORAGE_KEY);
     } catch (error) {
       logger.error('Failed to flush stored events:', error);
     }

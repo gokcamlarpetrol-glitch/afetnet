@@ -11,7 +11,7 @@
  */
 
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { bleMeshService } from './BLEMeshService';
 import { firebaseDataService } from './FirebaseDataService';
@@ -178,9 +178,10 @@ class FamilyTrackingService {
      */
   async initialize() {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEY);
+      const data = DirectStorage.getString(STORAGE_KEY) ?? null;
       if (data) {
-        this.members = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        this.members = Array.isArray(parsed) ? parsed : [];
         logger.info(`Loaded ${this.members.length} family members`);
       }
       this.syncMembersFromStore();
@@ -757,7 +758,7 @@ class FamilyTrackingService {
 
   private async saveMembers() {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(this.members));
+      DirectStorage.setString(STORAGE_KEY, JSON.stringify(this.members));
     } catch (e) {
       logger.error('Failed to save family members', e);
     }

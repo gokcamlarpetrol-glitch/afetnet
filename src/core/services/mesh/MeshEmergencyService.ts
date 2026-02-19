@@ -14,7 +14,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import { Accelerometer, AccelerometerMeasurement } from 'expo-sensors';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { Buffer } from 'buffer';
 import { createLogger } from '../../utils/logger';
 import { MeshProtocol, MeshMessageType, MeshPriority } from './MeshProtocol';
@@ -590,7 +590,7 @@ class MeshEmergencyService {
 
     private async saveSettings(): Promise<void> {
         try {
-            await AsyncStorage.setItem(STORAGE_KEY_EMERGENCY_SETTINGS, JSON.stringify(this.settings));
+            DirectStorage.setString(STORAGE_KEY_EMERGENCY_SETTINGS, JSON.stringify(this.settings));
         } catch (error) {
             logger.error('Failed to save emergency settings', error);
         }
@@ -598,7 +598,7 @@ class MeshEmergencyService {
 
     private async loadSettings(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEY_EMERGENCY_SETTINGS);
+            const data = DirectStorage.getString(STORAGE_KEY_EMERGENCY_SETTINGS) ?? null;
             if (data) {
                 this.settings = { ...this.settings, ...JSON.parse(data) };
             }
@@ -609,7 +609,7 @@ class MeshEmergencyService {
 
     private async saveFamilyMembers(): Promise<void> {
         try {
-            await AsyncStorage.setItem(STORAGE_KEY_FAMILY_MEMBERS, JSON.stringify(this.familyMembers));
+            DirectStorage.setString(STORAGE_KEY_FAMILY_MEMBERS, JSON.stringify(this.familyMembers));
         } catch (error) {
             logger.error('Failed to save family members', error);
         }
@@ -617,9 +617,10 @@ class MeshEmergencyService {
 
     private async loadFamilyMembers(): Promise<void> {
         try {
-            const data = await AsyncStorage.getItem(STORAGE_KEY_FAMILY_MEMBERS);
+            const data = DirectStorage.getString(STORAGE_KEY_FAMILY_MEMBERS) ?? null;
             if (data) {
-                this.familyMembers = JSON.parse(data);
+                const parsed = JSON.parse(data);
+                this.familyMembers = Array.isArray(parsed) ? parsed : [];
             }
         } catch (error) {
             logger.error('Failed to load family members', error);

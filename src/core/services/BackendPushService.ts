@@ -49,6 +49,15 @@ class BackendPushService {
       const { ENV } = await import('../config/env');
       this.baseUrl = ENV.API_BASE_URL || ''; // DEPRECATED: Using Firebase
 
+      // Skip registration if no valid backend URL configured
+      if (!this.baseUrl || !this.baseUrl.startsWith('http')) {
+        if (__DEV__) {
+          logger.debug('Backend URL not configured, skipping push registration');
+        }
+        this._isInitialized = true;
+        return;
+      }
+
       if (__DEV__) {
         logger.info(`Backend URL: ${this.baseUrl}`);
       }

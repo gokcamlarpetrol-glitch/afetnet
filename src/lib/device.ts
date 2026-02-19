@@ -6,7 +6,7 @@
 import * as Device from 'expo-device';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../core/utils/storage';
 import { createLogger } from '../core/utils/logger';
 
 const logger = createLogger('DeviceLib');
@@ -65,7 +65,7 @@ export async function getDeviceId(): Promise<string> {
         cachedDeviceId = identityId;
         try {
           await SecureStore.setItemAsync(DEVICE_ID_KEY, identityId);
-          await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, identityId);
+          DirectStorage.setString(LEGACY_ASYNC_DEVICE_ID_KEY, identityId);
         } catch { /* best-effort persistence */ }
       }
       return identityId;
@@ -85,7 +85,7 @@ export async function getDeviceId(): Promise<string> {
         const normalizedSecureId = normalizeDeviceId(secureId);
         await SecureStore.setItemAsync(DEVICE_ID_KEY, normalizedSecureId);
         await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalizedSecureId);
-        await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedSecureId);
+        DirectStorage.setString(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedSecureId);
         cachedDeviceId = normalizedSecureId;
         return cachedDeviceId;
       }
@@ -93,13 +93,13 @@ export async function getDeviceId(): Promise<string> {
       logger.warn('SecureStore access failed, falling back to legacy check', e);
     }
 
-    // 4. Migration: Check Legacy AsyncStorage
-    const legacyId = await AsyncStorage.getItem(LEGACY_ASYNC_DEVICE_ID_KEY);
+    // 4. Migration: Check Legacy MMKV storage
+    const legacyId = DirectStorage.getString(LEGACY_ASYNC_DEVICE_ID_KEY) ?? null;
     if (legacyId && isValidDeviceId(legacyId)) {
       const normalizedLegacyId = normalizeDeviceId(legacyId);
       await SecureStore.setItemAsync(DEVICE_ID_KEY, normalizedLegacyId);
       await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalizedLegacyId);
-      await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedLegacyId);
+      DirectStorage.setString(LEGACY_ASYNC_DEVICE_ID_KEY, normalizedLegacyId);
       cachedDeviceId = normalizedLegacyId;
       return normalizedLegacyId;
     }
@@ -110,7 +110,7 @@ export async function getDeviceId(): Promise<string> {
     // Save to Vault
     await SecureStore.setItemAsync(DEVICE_ID_KEY, newId);
     await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, newId);
-    await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, newId);
+    DirectStorage.setString(LEGACY_ASYNC_DEVICE_ID_KEY, newId);
 
     cachedDeviceId = newId;
 
@@ -193,7 +193,7 @@ export async function setDeviceId(deviceId: string): Promise<void> {
   try {
     await SecureStore.setItemAsync(DEVICE_ID_KEY, normalized);
     await SecureStore.setItemAsync(LEGACY_SECURE_DEVICE_ID_KEY, normalized);
-    await AsyncStorage.setItem(LEGACY_ASYNC_DEVICE_ID_KEY, normalized);
+    DirectStorage.setString(LEGACY_ASYNC_DEVICE_ID_KEY, normalized);
     cachedDeviceId = normalized;
 
     if (changed) {
@@ -211,7 +211,7 @@ export async function clearDeviceId(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(DEVICE_ID_KEY);
     await SecureStore.deleteItemAsync(LEGACY_SECURE_DEVICE_ID_KEY);
-    await AsyncStorage.removeItem(LEGACY_ASYNC_DEVICE_ID_KEY);
+    try { DirectStorage.delete(LEGACY_ASYNC_DEVICE_ID_KEY); } catch { /* best effort */ }
   } catch (error) {
     logger.error('Failed to clear device ID:', error);
   } finally {

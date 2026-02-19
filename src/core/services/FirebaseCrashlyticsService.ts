@@ -6,7 +6,7 @@
 
 import { Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { safeIncludes } from '../utils/safeString';
 
 const logger = createLogger('FirebaseCrashlytics');
@@ -261,7 +261,7 @@ class FirebaseCrashlyticsService {
    */
   private async loadStoredCrashes() {
     try {
-      const stored = await AsyncStorage.getItem(CRASH_STORAGE_KEY);
+      const stored = DirectStorage.getString(CRASH_STORAGE_KEY);
       if (stored) {
         const crashes: CrashReport[] = JSON.parse(stored);
         this.crashQueue = crashes.slice(-MAX_STORED_CRASHES);
@@ -277,7 +277,7 @@ class FirebaseCrashlyticsService {
    */
   private async saveStoredCrashes() {
     try {
-      await AsyncStorage.setItem(CRASH_STORAGE_KEY, JSON.stringify(this.crashQueue));
+      DirectStorage.setString(CRASH_STORAGE_KEY, JSON.stringify(this.crashQueue));
     } catch (error) {
       logger.error('Failed to save stored crashes:', error);
     }
@@ -298,7 +298,7 @@ class FirebaseCrashlyticsService {
 
       // Clear queue after flush
       this.crashQueue = [];
-      await AsyncStorage.removeItem(CRASH_STORAGE_KEY);
+      DirectStorage.delete(CRASH_STORAGE_KEY);
     } catch (error) {
       logger.error('Failed to flush stored crashes:', error);
     }

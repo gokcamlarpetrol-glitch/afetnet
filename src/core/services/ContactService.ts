@@ -14,7 +14,7 @@
  * @version 4.0.0 — Single-UID Clean Architecture
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { getAuth } from 'firebase/auth';
 import {
     getFirestore,
@@ -186,21 +186,28 @@ class ContactService {
             this.resetInMemoryState();
             const keys = this.getStorageKeys(scope);
 
-            const contactsData = await AsyncStorage.getItem(keys.contacts);
-            const blockedData = await AsyncStorage.getItem(keys.blocked);
-            const pendingData = await AsyncStorage.getItem(keys.pending);
+            const contactsData = DirectStorage.getString(keys.contacts) ?? null;
+            const blockedData = DirectStorage.getString(keys.blocked) ?? null;
+            const pendingData = DirectStorage.getString(keys.pending) ?? null;
 
             if (contactsData) {
-                const parsed = JSON.parse(contactsData) as Contact[];
-                parsed.forEach(c => this.contacts.set(c.uid, c));
+                const parsed = JSON.parse(contactsData);
+                if (Array.isArray(parsed)) {
+                    (parsed as Contact[]).forEach(c => this.contacts.set(c.uid, c));
+                }
                 logger.info(`📂 ${this.contacts.size} contacts from cache`);
             }
             if (blockedData) {
-                const parsed = JSON.parse(blockedData) as BlockedContact[];
-                parsed.forEach(b => this.blockedContacts.set(b.uid, b));
+                const parsed = JSON.parse(blockedData);
+                if (Array.isArray(parsed)) {
+                    (parsed as BlockedContact[]).forEach(b => this.blockedContacts.set(b.uid, b));
+                }
             }
             if (pendingData) {
-                this.pendingSync = JSON.parse(pendingData);
+                const parsed = JSON.parse(pendingData);
+                if (Array.isArray(parsed)) {
+                    this.pendingSync = parsed;
+                }
             }
         } catch (error) {
             logger.error('Failed to load from cache:', error);
@@ -210,8 +217,8 @@ class ContactService {
     private async saveToCache(): Promise<void> {
         try {
             const keys = this.getStorageKeys();
-            await AsyncStorage.setItem(keys.contacts, JSON.stringify(Array.from(this.contacts.values())));
-            await AsyncStorage.setItem(keys.blocked, JSON.stringify(Array.from(this.blockedContacts.values())));
+            DirectStorage.setString(keys.contacts, JSON.stringify(Array.from(this.contacts.values())));
+            DirectStorage.setString(keys.blocked, JSON.stringify(Array.from(this.blockedContacts.values())));
         } catch (error) {
             logger.error('Failed to save to cache:', error);
         }
@@ -219,7 +226,7 @@ class ContactService {
 
     private async savePendingSync(): Promise<void> {
         try {
-            await AsyncStorage.setItem(this.getStorageKeys().pending, JSON.stringify(this.pendingSync));
+            DirectStorage.setString(this.getStorageKeys().pending, JSON.stringify(this.pendingSync));
         } catch (error) {
             logger.error('Failed to save pending sync:', error);
         }
@@ -674,9 +681,13 @@ class ContactService {
     async clearAll(): Promise<void> {
         this.resetInMemoryState();
         const keys = this.getStorageKeys();
-        await AsyncStorage.multiRemove([keys.contacts, keys.blocked, keys.pending]).catch(e =>
-            logger.warn('Failed to clear storage:', e)
-        );
+        try {
+            DirectStorage.delete(keys.contacts);
+            DirectStorage.delete(keys.blocked);
+            DirectStorage.delete(keys.pending);
+        } catch (e) {
+            logger.warn('Failed to clear storage:', e);
+        }
         this.isInitialized = false;
         this.initPromise = null;
         this.activeScope = STORAGE_GUEST_SCOPE;

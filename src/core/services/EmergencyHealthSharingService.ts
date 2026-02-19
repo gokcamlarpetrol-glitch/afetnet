@@ -8,7 +8,7 @@
  * - No full name (only initials), no phone numbers, no insurance
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import { MeshProtocol, MeshMessageType } from './mesh/MeshProtocol';
 import { getDeviceId } from '../utils/device';
@@ -42,7 +42,7 @@ class EmergencyHealthSharingService {
     async initialize(): Promise<void> {
         try {
             // Load user preference
-            const enabled = await AsyncStorage.getItem(SETTINGS_KEY);
+            const enabled = DirectStorage.getString(SETTINGS_KEY);
             this.isEnabled = enabled === 'true';
 
             // Get device ID
@@ -74,7 +74,7 @@ class EmergencyHealthSharingService {
      */
     async setEnabled(enabled: boolean): Promise<void> {
         this.isEnabled = enabled;
-        await AsyncStorage.setItem(SETTINGS_KEY, enabled ? 'true' : 'false');
+        DirectStorage.setString(SETTINGS_KEY, enabled ? 'true' : 'false');
         logger.info('Health sharing preference updated:', { enabled });
     }
 

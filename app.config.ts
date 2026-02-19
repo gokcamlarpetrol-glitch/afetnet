@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.3.6",
+  version: "1.3.7",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -30,7 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-camera",
       {
-        cameraPermission: "AfetNet, QR kodları okumak için kameraya erişir.",
+        cameraPermission: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
       }
     ],
     "expo-font",
@@ -63,10 +63,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     // ELITE: Google Sign-In Plugin
     "@react-native-google-signin/google-signin",
+    // ELITE: WebRTC for voice calling
+    "react-native-webrtc",
   ],
   ios: {
     ...config.ios,
-    buildNumber: "7",
+    buildNumber: "9",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
@@ -92,6 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-central",
         "bluetooth-peripheral",
         "processing",
+        "voip",
       ],
       ITSAppUsesNonExemptEncryption: false,
       // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
@@ -140,12 +143,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.BLUETOOTH_ADMIN",
       "android.permission.BLUETOOTH_CONNECT",
       "android.permission.BLUETOOTH_SCAN",
+      "android.permission.BLUETOOTH_ADVERTISE",
       "android.permission.ACCESS_FINE_LOCATION",
       "android.permission.ACCESS_COARSE_LOCATION",
       "android.permission.ACCESS_BACKGROUND_LOCATION",
       "android.permission.CAMERA",
       "android.permission.RECORD_AUDIO",
       "android.permission.INTERNET",
+      "android.permission.VIBRATE",
     ],
     googleServicesFile: "./google-services.json",
   },

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eliteStorage } from '../utils/storage';
 
 export type MapStyle = 'standard' | 'satellite' | 'hybrid' | 'terrain' | 'dark';
 
@@ -75,7 +75,7 @@ export const useMapStore = create<MapState>()(
     }),
     {
       name: 'map-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => eliteStorage),
       version: 1,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Partial<MapState> | undefined;

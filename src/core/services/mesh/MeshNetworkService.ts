@@ -36,7 +36,7 @@ import { meshEmergencyService, EmergencyReasonCode } from './MeshEmergencyServic
 import { Buffer } from 'buffer';
 import { highPerformanceBle, BlePeer } from '../../ble/HighPerformanceBle';
 import { AppState, AppStateStatus } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { LRUSet } from '../../utils/LRUCache';
 import { sanitizeMessage } from '../../utils/messageSanitizer';
 import { cryptoService } from '../CryptoService';
@@ -566,7 +566,7 @@ class MeshNetworkService {
         relay: this.serializeQueue(this.relayQueue),
         seenIds: this.seenMessageIds.toArray(),
       });
-      await AsyncStorage.setItem(STORAGE_KEYS.MESH_QUEUE, data);
+      DirectStorage.setString(STORAGE_KEYS.MESH_QUEUE, data);
     } catch (e) {
       logger.error('Failed to save queues', e);
     }
@@ -574,7 +574,7 @@ class MeshNetworkService {
 
   private async loadQueues(): Promise<void> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.MESH_QUEUE);
+      const data = DirectStorage.getString(STORAGE_KEYS.MESH_QUEUE) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         this.criticalQueue = this.deserializeQueue(parsed.critical);

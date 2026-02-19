@@ -4,7 +4,7 @@ import { createLogger } from '../utils/logger';
 import { firebaseDataService } from '../services/FirebaseDataService';
 import { bleMeshService } from '../services/BLEMeshService';
 import { getDeviceId } from '../../lib/device';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../utils/storage';
 
 const logger = createLogger('BackgroundLocationTask');
 
@@ -49,7 +49,7 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
 
         // Get the unified ID from cached identity (same as IdentityService.id)
         try {
-          const cachedIdentityJson = await AsyncStorage.getItem('@afetnet:identity_cache_v2');
+          const cachedIdentityJson = DirectStorage.getString('@afetnet:identity_cache_v4') ?? null;
           if (cachedIdentityJson) {
             const cachedIdentity = JSON.parse(cachedIdentityJson);
             if (cachedIdentity?.id && cachedIdentity.id !== 'unknown') {
@@ -60,12 +60,12 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
           // Identity cache read failed
         }
 
-        // Fallback: try AsyncStorage device ID (already synced to unified ID by IdentityService)
+        // Fallback: try device ID from mesh service or MMKV storage
         if (!singleId) {
           singleId = bleMeshService.getMyDeviceId();
         }
         if (!singleId) {
-          singleId = await AsyncStorage.getItem('@afetnet:device_id');
+          singleId = DirectStorage.getString('@afetnet:device_id') ?? null;
         }
 
         if (!singleId) {

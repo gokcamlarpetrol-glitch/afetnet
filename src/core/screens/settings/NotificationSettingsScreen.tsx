@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DirectStorage } from '../../utils/storage';
 import { colors, typography } from '../../theme';
 import { styles } from './NotificationSettingsScreen.styles';
 import * as haptics from '../../utils/haptics';
@@ -196,7 +196,7 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
 
                   if (!result.canceled && result.assets && result.assets.length > 0) {
                     const soundUri = result.assets[0].uri;
-                    await AsyncStorage.setItem('customNotificationSoundUri', soundUri);
+                    DirectStorage.setString('customNotificationSoundUri', soundUri);
                     setNotificationSoundType('custom');
                     Alert.alert('Başarılı', 'Özel ses dosyası seçildi');
                   }
