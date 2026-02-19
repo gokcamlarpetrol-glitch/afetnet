@@ -63,8 +63,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     // ELITE: Google Sign-In Plugin
     "@react-native-google-signin/google-signin",
-    // ELITE: WebRTC for voice calling
-    "react-native-webrtc",
+    // NOTE: react-native-webrtc doesn't have an Expo config plugin
+    // VoiceCallService uses graceful fallback if native module unavailable
   ],
   ios: {
     ...config.ios,

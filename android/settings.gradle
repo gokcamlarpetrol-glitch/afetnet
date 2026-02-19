@@ -31,7 +31,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
 }
 expoAutolinking.useExpoModules()
 
-rootProject.name = 'AfetNet - Şebekesiz Acil İletişim'
+rootProject.name = 'AfetNet - Acil İletişim'
 
 expoAutolinking.useExpoVersionCatalog()
 

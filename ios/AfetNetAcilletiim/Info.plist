@@ -115,6 +115,7 @@
       <string>bluetooth-central</string>
       <string>bluetooth-peripheral</string>
       <string>processing</string>
+      <string>voip</string>
     </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
