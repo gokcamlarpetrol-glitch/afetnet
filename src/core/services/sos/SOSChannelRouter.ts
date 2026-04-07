@@ -47,9 +47,9 @@ async function waitForAuthUid(label: string): Promise<string | null> {
     // CRITICAL FIX: Increased from 2s to 5s. Auth restoration on cold start can take
     // up to 8s (INITIAL_RESTORE_GRACE_MS). 2s was insufficient — family/nearby SOS
     // channels silently failed because senderUid was null (Firestore rules reject).
-    logger.warn(`⏳ ${label}: No auth yet — waiting up to 5s for auth restoration...`);
+    logger.warn(`⏳ ${label}: No auth yet — waiting up to 8s for auth restoration...`);
     const start = Date.now();
-    while (!uid && Date.now() - start < 5000) {
+    while (!uid && Date.now() - start < 8000) {
         await new Promise(r => setTimeout(r, 250));
         uid = getFirebaseAuth()?.currentUser?.uid ?? null;
     }
@@ -298,10 +298,10 @@ class SOSChannelRouter {
         updateStatus('firebase', 'pending');
 
         try {
-            // CRITICAL FIX: Do NOT skip Firestore write when offline.
-            // Firestore has offline persistence — writes are queued locally and
-            // synced to server when connectivity returns. This ensures the SOS
-            // signal is recorded even during network outage.
+            // IMPORTANT: Always attempt Firestore write even when offline.
+            // Firestore on RN has memory-only cache (NO persistent offline queue).
+            // The write is attempted optimistically; online status is verified AFTER
+            // to determine reported status (sent vs pending). See lines 352-362.
             updateStatus('firebase', 'sending');
 
             // CRITICAL FIX: Write SOS to a GLOBAL sos_signals collection,
@@ -315,7 +315,7 @@ class SOSChannelRouter {
             // before giving up — SOS is life-critical and MUST NOT silently fail.
             const currentUid = await waitForAuthUid('Firebase SOS');
             if (!currentUid) {
-                logger.error('❌ Firebase SOS broadcast FAILED: No authenticated user after 2s wait — Firestore rules will reject. Mesh channel is the fallback.');
+                logger.error('❌ Firebase SOS broadcast FAILED: No authenticated user after 8s wait — Firestore rules will reject. Mesh channel is the fallback.');
                 updateStatus('firebase', 'failed');
                 return;
             }
@@ -489,7 +489,7 @@ class SOSChannelRouter {
                     logger.error('❌ Family SOS: Auth still unavailable after 2s — Firestore writes will likely be rejected');
                 }
                 if (authUid) resolvedSenderUid = authUid;
-            } catch { /* use fallback */ }
+            } catch (e) { logger.error('SOS auth UID resolution failed:', e); }
 
             const sosAlert = {
                 signalId: signal.id,
@@ -536,14 +536,14 @@ class SOSChannelRouter {
                         const { getFirebaseAuth } = await import('../../../lib/firebase');
                         const authUid = getFirebaseAuth()?.currentUser?.uid;
                         if (authUid) senderSelfIds.add(authUid);
-                    } catch { /* auth not ready */ }
+                    } catch (e) { logger.error('SOS family self-ID auth check failed:', e); }
                     if (signal.userId) senderSelfIds.add(signal.userId);
                     if (senderDeviceId) senderSelfIds.add(senderDeviceId);
                     try {
                         const { identityService: idSvc } = await import('../IdentityService');
                         const publicCode = idSvc.getPublicUserCode?.();
                         if (publicCode) senderSelfIds.add(publicCode);
-                    } catch { /* non-critical */ }
+                    } catch (e) { logger.error('SOS family publicCode resolution failed:', e); }
 
                     const writePromises = members.flatMap((member) => {
                         // Skip self — check all known IDs for the sender
@@ -800,13 +800,13 @@ class SOSChannelRouter {
             try {
                 const { getFirebaseAuth } = await import('../../../lib/firebase');
                 userId = getFirebaseAuth()?.currentUser?.uid;
-            } catch { /* fallback */ }
+            } catch (e) { logger.error('SOS ACK auth fallback failed:', e); }
             if (!userId) {
                 try {
                     const { identityService } = await import('../IdentityService');
                     userId = identityService.getUid() || undefined;
-                } catch {
-                    // fallback
+                } catch (e) {
+                    logger.error('SOS ACK identity fallback failed:', e);
                 }
             }
 
@@ -819,7 +819,7 @@ class SOSChannelRouter {
                 try {
                     const { getFirebaseAuth: getAuth2 } = await import('../../../lib/firebase');
                     userId = getAuth2()?.currentUser?.uid || undefined;
-                } catch { /* last resort */ }
+                } catch (e) { logger.error('SOS ACK last-resort auth failed:', e); }
             }
             if (!userId || userId.trim().length === 0) {
                 logger.error('❌ Cannot send rescue ACK: no valid userId — Firestore rules will reject');

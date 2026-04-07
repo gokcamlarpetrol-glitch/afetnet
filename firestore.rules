@@ -216,11 +216,10 @@ service cloud.firestore {
       // succeeds in BOTH directions (required for location/status/message reads).
       match /familyMembers/{memberId} {
         allow read: if isDeviceReadable(deviceId);
-        // SECURITY FIX: Creator must prove identity — memberId must match
-        // their auth UID or their QR ID. Prevents spoofing family links.
-        allow create: if isAuthenticated()
-                      && request.resource.data.id is string
-                      && (memberId == request.auth.uid || memberId == requesterQrId());
+        // SECURITY FIX: Only device owner can add family members to their device.
+        // Previously allowed any user to add themselves — enabling unauthorized device linking.
+        allow create: if isDeviceOwner(deviceId)
+                      && request.resource.data.id is string;
         allow update: if isDeviceOwner(deviceId);
         // Allow device owner to delete any member, OR allow a user to delete
         // their own reciprocal doc (memberId matches their uid or qrId).
@@ -251,10 +250,10 @@ service cloud.firestore {
       }
 
       // Status updates from family members (fan-out writes)
-      // Any authenticated family member can write status updates to notify device owner
+      // Only device owner or linked family members can write status updates
       match /status_updates/{updateId} {
         allow read: if isDeviceReadable(deviceId);
-        allow create: if isAuthenticated()
+        allow create: if (isDeviceOwner(deviceId) || isLinkedFamilyMember(deviceId))
                       && request.resource.data.fromDeviceId is string
                       && request.resource.data.status is string
                       && request.resource.data.timestamp is number;
@@ -585,7 +584,7 @@ service cloud.firestore {
 
       // V3: Status subcollection
       match /status/{statusId} {
-        allow read: if isAuthenticated(); // Family members need to read status
+        allow read: if isOwner(userId) || sharesFamilyWith(userId);
         allow create, update: if isOwner(userId);
         allow delete: if isOwner(userId); // GDPR: owner can delete
       }
@@ -595,7 +594,7 @@ service cloud.firestore {
       // (FamilyScreen.handleStatusUpdate fans out to all members' paths)
       // SECURITY FIX: senderUid must match auth.uid to prevent spoofed status updates
       match /status_updates/{updateId} {
-        allow read: if isAuthenticated();
+        allow read: if isOwner(userId) || sharesFamilyWith(userId);
         allow create: if isAuthenticated()
                       && request.resource.data.timestamp is number
                       && request.resource.data.senderUid is string
@@ -608,21 +607,32 @@ service cloud.firestore {
       // Written by: saveFamilyMember (both directions), deleted by: deleteFamilyMember
       // Read by: sharesFamilyWith() via exists() check
       match /familyMembers/{otherUid} {
-        allow read: if isAuthenticated(); // Any authenticated user can check family membership
-        // SECURITY FIX: Only involved parties can create family member entries
-        // saveFamilyMember writes to BOTH users' subcollections
+        allow read: if isOwner(userId) || sharesFamilyWith(userId);
+        // SECURITY FIX: Prevent unauthorized family link injection (stalking vector).
+        // saveFamilyMember writes to BOTH users' subcollections:
+        //   1. users/{myUid}/familyMembers/{otherUid} — direct write (auth.uid == userId)
+        //   2. users/{otherUid}/familyMembers/{myUid} — reciprocal write (auth.uid == otherUid)
+        // The reciprocal write is ONLY allowed if the writer has ALREADY added the target
+        // to their OWN familyMembers (proving they initiated the family link).
+        // Attack scenario blocked: attacker writes to victim's familyMembers without
+        // having the victim in their own familyMembers first.
         allow create: if isAuthenticated()
-                      && (request.auth.uid == userId || request.auth.uid == otherUid);
+                      && (
+                        request.auth.uid == userId
+                        || (
+                          request.auth.uid == otherUid
+                          && exists(/databases/$(database)/documents/users/$(request.auth.uid)/familyMembers/$(userId))
+                        )
+                      );
         allow update: if isOwner(userId); // Only the doc owner can update
         allow delete: if isOwner(userId)
                       || request.auth.uid == otherUid; // Either side can remove mapping
       }
 
       // V3: UID → familyId mapping (for security rule lookups)
-      // SECURITY FIX: Only owner can write their own familyId mappings
-      // (saveFamilyMember writes to users/{myUid}/familyIds, not other users')
+      // SECURITY FIX: Only owner can read/write their own familyId mappings
       match /familyIds/{familyId} {
-        allow read: if isAuthenticated(); // Need to check family membership
+        allow read: if isOwner(userId);
         allow create, update: if isOwner(userId);
         allow delete: if isOwner(userId);
       }
@@ -645,7 +655,7 @@ service cloud.firestore {
     // Felt earthquakes reports
     // SECURITY FIX: userId must match auth.uid to prevent spoofing
     match /feltEarthquakes/{reportId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.earthquakeId is string

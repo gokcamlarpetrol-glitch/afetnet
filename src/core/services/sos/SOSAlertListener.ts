@@ -58,10 +58,12 @@ function processSOSAlert(alertId: string, alertData: any): void {
 
         // Also check Firebase Auth UID directly (in case IdentityService hasn't synced)
         try {
-            const { getAuth } = require('firebase/auth');
-            const authUid = getAuth()?.currentUser?.uid;
+            // CRITICAL FIX: Path was ../../lib/firebase → src/core/lib/firebase (doesn't exist)
+            // Correct: ../../../lib/firebase → src/lib/firebase
+            const { getFirebaseAuth } = require('../../../lib/firebase');
+            const authUid = getFirebaseAuth()?.currentUser?.uid;
             if (authUid) selfIds.add(authUid);
-        } catch { /* auth not ready */ }
+        } catch (e) { logger.error('SOS alert self-ID auth check failed:', e); }
 
         // Check ALL sender identity fields from the alert
         const senderIds = [
@@ -74,7 +76,7 @@ function processSOSAlert(alertId: string, alertData: any): void {
         if (senderIds.some(id => selfIds.has(id))) {
             return;
         }
-    } catch { /* IdentityService not ready — allow alert through to be safe */ }
+    } catch (e) { logger.error('SOS alert self-identity check failed — allowing alert through:', e); }
 
     // Skip very old alerts (older than 30 minutes)
     const normalizedTimestamp = normalizeTimestampMs(alertData?.timestamp) ?? 0;
@@ -100,7 +102,11 @@ function processSOSAlert(alertId: string, alertData: any): void {
             if (originalSignalId) {
                 useSOSStore.getState().removeIncomingSOSAlertBySignalId(originalSignalId);
             }
-        } catch { /* store not available */ }
+            // CRITICAL FIX: Emit cancel event to dismiss SOSFullScreenAlert modal
+            const { DeviceEventEmitter } = require('react-native');
+            DeviceEventEmitter.emit('SOS_FULLSCREEN_CANCEL', { signalId: originalSignalId || rawSignalId });
+            logger.info(`📱 SOS FULLSCREEN CANCEL emitted for cancelled status: ${originalSignalId || rawSignalId}`);
+        } catch { /* store/emitter not available */ }
         return;
     }
 
@@ -109,6 +115,7 @@ function processSOSAlert(alertId: string, alertData: any): void {
     // ELITE FIX: Direct foreground full-screen alert — bypasses notification pipeline entirely.
     // The notification chain (notify → deliver → scheduleNotification → addNotificationReceivedListener
     // → DeviceEventEmitter) is fragile on iOS. Instead, emit directly when app is in foreground.
+    let fullScreenEmitted = false;
     try {
         const { AppState, DeviceEventEmitter } = require('react-native');
         if (AppState.currentState === 'active') {
@@ -128,14 +135,20 @@ function processSOSAlert(alertId: string, alertData: any): void {
                     ? alertData.healthInfo
                     : undefined,
             });
+            fullScreenEmitted = true;
             logger.info(`📱 SOS FULLSCREEN ALERT emitted directly for foreground app`);
         }
     } catch { /* DeviceEventEmitter not available — notification pipeline below handles it */ }
 
-    // Fire critical notification (push banner + sound — also works for background/killed)
-    showSOSReceivedNotification(alertData).catch((err) => {
-        logger.error('Failed to show SOS notification:', err);
-    });
+    // Fire critical notification (push banner + sound).
+    // FIX: Skip local notification when full-screen alert was already shown in foreground.
+    // Previously both fired simultaneously, causing duplicate alarm sounds and haptic bursts.
+    // Notification is still needed for background/killed state where full-screen can't fire.
+    if (!fullScreenEmitted) {
+        showSOSReceivedNotification(alertData).catch((err) => {
+            logger.error('Failed to show SOS notification:', err);
+        });
+    }
 
     // Save to SOS store for map marker display
     saveAlertToStore(alertId, alertData);
@@ -148,6 +161,9 @@ function processSOSAlert(alertId: string, alertData: any): void {
 // CRITICAL FIX: Track retry state for SOS listener recovery
 let sosRetryCount = 0;
 const SOS_MAX_RETRIES = 10;
+// After max retries, wait this long before resetting and trying again (life-safety: never give up)
+// CRITICAL: 30 seconds — not 10 minutes. This is life-safety; 10 min of no SOS reception is unacceptable.
+const SOS_REVIVAL_DELAY_MS = 30_000; // 30 seconds
 let sosRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let lastDeviceId: string | null = null;
 
@@ -168,21 +184,40 @@ function handleListenerError(error: any, listenerLabel: string): void {
 
     logger.error(`SOS alert listener error for ${listenerLabel}:`, error);
 
-    // CRITICAL FIX: Retry with exponential backoff (like GroupChatService)
-    if (sosRetryCount < SOS_MAX_RETRIES && lastDeviceId) {
+    if (!lastDeviceId) return;
+
+    if (sosRetryCount < SOS_MAX_RETRIES) {
+        // Standard exponential backoff: 2s, 4s, 8s, ... 30s
         sosRetryCount++;
         const delay = Math.min(2000 * Math.pow(2, sosRetryCount - 1), 30000);
         logger.info(`🔄 SOS listener retry ${sosRetryCount}/${SOS_MAX_RETRIES} in ${delay}ms`);
         if (sosRetryTimer) clearTimeout(sosRetryTimer);
+        const capturedDeviceId = lastDeviceId; // Capture BEFORE stop nulls it
         sosRetryTimer = setTimeout(() => {
             sosRetryTimer = null;
-            if (lastDeviceId) {
+            if (capturedDeviceId) {
                 stopSOSAlertListener();
-                startSOSAlertListener(lastDeviceId).catch((e) => {
+                startSOSAlertListener(capturedDeviceId).catch((e) => {
                     logger.error('SOS listener retry failed:', e);
                 });
             }
         }, delay);
+    } else {
+        // LIFE-SAFETY: After max retries, schedule a revival after a long delay.
+        // NEVER give up permanently — a family member's SOS must always be received.
+        logger.error(`⚠️ SOS listener exhausted ${SOS_MAX_RETRIES} retries — scheduling revival in ${SOS_REVIVAL_DELAY_MS / 60000} min`);
+        if (sosRetryTimer) clearTimeout(sosRetryTimer);
+        const capturedDeviceIdRevival = lastDeviceId; // Capture BEFORE stop nulls it
+        sosRetryTimer = setTimeout(() => {
+            sosRetryTimer = null;
+            sosRetryCount = 0; // Reset counter so normal retry logic applies again
+            if (capturedDeviceIdRevival) {
+                stopSOSAlertListener();
+                startSOSAlertListener(capturedDeviceIdRevival).catch((e) => {
+                    logger.error('SOS listener revival failed:', e);
+                });
+            }
+        }, SOS_REVIVAL_DELAY_MS);
     }
 }
 
@@ -197,6 +232,13 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
     }
     lastDeviceId = myDeviceId;
     sosRetryCount = 0; // Reset retry count on fresh start
+
+    // CRITICAL FIX: Clear any pending retry timer from a previous session to prevent
+    // timer accumulation when startSOSAlertListener() is called multiple times.
+    if (sosRetryTimer) {
+        clearTimeout(sosRetryTimer);
+        sosRetryTimer = null;
+    }
 
     // Already listening — skip
     if (isListening && currentUnsubscribe) {
@@ -230,7 +272,7 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
             return;
         }
 
-        const { collection, onSnapshot, query, where, orderBy } = await import('firebase/firestore');
+        const { collection, onSnapshot, query, where, orderBy, limit } = await import('firebase/firestore');
 
         // Create listeners for each target ID
         const unsubscribers: (() => void)[] = [];
@@ -245,14 +287,27 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
                     alertsRef,
                     where('status', 'in', ['active', 'cancelled']),
                     orderBy('timestamp', 'desc'),
+                    limit(100),
                 );
 
                 const unsub = onSnapshot(
                     alertsQuery,
                     (snapshot) => {
                         for (const change of snapshot.docChanges()) {
-                            if (change.type !== 'added') continue;
-                            processSOSAlert(change.doc.id, change.doc.data());
+                            if (change.type === 'added') {
+                                processSOSAlert(change.doc.id, change.doc.data());
+                            } else if (change.type === 'modified') {
+                                // Handle SOS cancellation via document update (not just separate cancel doc)
+                                const data = change.doc.data();
+                                if (data?.status === 'cancelled') {
+                                    handleSOSCancellation(change.doc.id, data);
+                                } else {
+                                    // Updated SOS (new location, battery, etc.) — update store directly.
+                                    // Do NOT use processSOSAlert — its dedup would block the update
+                                    // since we already processed this alertId on the initial 'added' event.
+                                    saveAlertToStore(change.doc.id, data);
+                                }
+                            }
                         }
                     },
                     (error: any) => {
@@ -273,14 +328,24 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
                     v3AlertsRef,
                     where('status', 'in', ['active', 'cancelled']),
                     orderBy('timestamp', 'desc'),
+                    limit(100),
                 );
 
                 const v3Unsub = onSnapshot(
                     v3AlertsQuery,
                     (snapshot) => {
                         for (const change of snapshot.docChanges()) {
-                            if (change.type !== 'added') continue;
-                            processSOSAlert(change.doc.id, change.doc.data());
+                            if (change.type === 'added') {
+                                processSOSAlert(change.doc.id, change.doc.data());
+                            } else if (change.type === 'modified') {
+                                const data = change.doc.data();
+                                if (data?.status === 'cancelled') {
+                                    handleSOSCancellation(change.doc.id, data);
+                                } else {
+                                    // Updated SOS — bypass dedup, update store directly
+                                    saveAlertToStore(change.doc.id, data);
+                                }
+                            }
                         }
                     },
                     (error: any) => {
@@ -312,6 +377,10 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
  * Stop the SOS alert listener.
  */
 export function stopSOSAlertListener(): void {
+    if (sosRetryTimer) {
+        clearTimeout(sosRetryTimer);
+        sosRetryTimer = null;
+    }
     if (currentUnsubscribe) {
         try {
             currentUnsubscribe();
@@ -321,7 +390,47 @@ export function stopSOSAlertListener(): void {
         currentUnsubscribe = null;
     }
     isListening = false;
+    lastDeviceId = null; // Prevent stale timer callbacks from restarting listener
+    // DO NOT clear processedAlertIds on stop — they are needed to prevent
+    // duplicate SOS full-screen alerts when the listener restarts (onSnapshot fires initial snapshot).
+    // IDs will be naturally evicted by the 10% batch eviction logic.
+}
+
+/**
+ * Clear dedup set on logout/account switch.
+ * This prevents cross-account SOS dedup — where User B's SOS is dropped
+ * because User A already processed the same signalId.
+ */
+export function clearSOSAlertDedup(): void {
     processedAlertIds.clear();
+}
+
+/**
+ * Handle SOS cancellation via document 'modified' event.
+ * Removes the alert from the store and notifies the user.
+ */
+function handleSOSCancellation(docId: string, data: any): void {
+    try {
+        const signalId = data?.signalId || docId;
+        const { useSOSStore } = require('./SOSStateManager');
+        useSOSStore.getState().removeIncomingSOSAlertBySignalId(signalId);
+        showSOSCancelledNotification(data).catch((err: any) =>
+            logger.warn('showSOSCancelledNotification failed:', err)
+        );
+
+        // CRITICAL FIX: Emit cancel event to dismiss SOSFullScreenAlert modal.
+        // Without this, the full-screen SOS alert stays open for up to 60 seconds
+        // after cancellation — rescuer may travel to a location where help is no longer needed.
+        try {
+            const { DeviceEventEmitter } = require('react-native');
+            DeviceEventEmitter.emit('SOS_FULLSCREEN_CANCEL', { signalId });
+            logger.info(`📱 SOS FULLSCREEN CANCEL emitted for signalId: ${signalId}`);
+        } catch { /* DeviceEventEmitter not available */ }
+
+        logger.info(`SOS cancellation detected via modified event: ${signalId}`);
+    } catch (error) {
+        logger.error('Failed to handle SOS cancellation:', error);
+    }
 }
 
 /**

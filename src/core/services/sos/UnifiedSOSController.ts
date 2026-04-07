@@ -27,6 +27,7 @@ import * as Location from 'expo-location';
 import * as haptics from '../../utils/haptics';
 import { Vibration } from 'react-native';
 import { getDeviceId } from '../../utils/device';
+import { fallDetectionService } from './FallDetectionService';
 
 const logger = createLogger('UnifiedSOSController');
 
@@ -39,7 +40,7 @@ const SOS_CONFIG = {
     COUNTDOWN_TICK_MS: 1000,
     AUTO_LOCATION: true,
     // ELITE V2: Pre-cache location on app start for instant SOS attachment
-    LOCATION_PRECACHE_INTERVAL_MS: 30_000,  // Refresh pre-cached location every 30s
+    LOCATION_PRECACHE_INTERVAL_MS: 120_000,  // Refresh pre-cached location every 2 min (was 30s — too aggressive for battery)
 };
 
 // ============================================================================
@@ -48,6 +49,7 @@ const SOS_CONFIG = {
 
 class UnifiedSOSController {
     private isInitialized = false;
+    private isDestroying = false;
     private countdownTimer: NodeJS.Timeout | null = null;
     private deviceId: string = '';
     private userId: string = ''; // Firebase Auth UID (NOT device ID)
@@ -67,6 +69,7 @@ class UnifiedSOSController {
 
     async initialize(): Promise<void> {
         if (this.isInitialized) return;
+        this.isDestroying = false;
 
         try {
             // Get device ID
@@ -81,15 +84,68 @@ class UnifiedSOSController {
             // ELITE V2: Start pre-caching location for instant SOS (Noonlight pattern)
             this.startLocationPrecache();
 
+            // ELITE V2: Start Fall & Crash Detection Sensor
+            fallDetectionService.start();
+
             this.isInitialized = true;
             logger.info('Unified SOS Controller initialized');
+
+            // CRITICAL FIX: Resume SOS after app crash/restart
+            // If the persisted store says SOS is active but no beacons are running,
+            // the user is trapped under rubble with a dead SOS — resume immediately.
+            // NOTE: Recovery is best-effort. If it fails, SOS system is still initialized
+            // and the user can trigger a new SOS manually.
+            const store = useSOSStore.getState();
+            if (store.isActive && store.currentSignal) {
+                logger.warn('RECOVERING ACTIVE SOS after app restart — resuming beacons and alarm');
+                try {
+                    await Promise.race([
+                        sosChannelRouter.broadcastSOS(store.currentSignal),
+                        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Recovery broadcast timeout')), 8000)),
+                    ]).catch(err => logger.error('SOS recovery broadcast failed/timed out:', err));
+                    sosBeaconService.start();
+                    if (!store.currentSignal.isSilent) {
+                        this.startAlarmAndVibration();
+                    }
+                } catch (err) {
+                    logger.error('SOS recovery broadcast failed:', err);
+                }
+            } else if (!store.isActive && store.isCountingDown && store.countdownStartedAt) {
+                // CRITICAL FIX: Resume countdown from crash instead of clearing.
+                // User pressed SOS, app crashed during 3s countdown — they still need help!
+                const elapsed = Math.floor((Date.now() - store.countdownStartedAt) / 1000);
+                const remaining = Math.max(0, SOS_CONFIG.COUNTDOWN_SECONDS - elapsed);
+                if (remaining > 0) {
+                    logger.warn(`Resuming SOS countdown from crash: ${remaining}s remaining`);
+                    store.recalculateCountdown();
+                    this.startCountdownTimer(); // Resume the setInterval
+                } else {
+                    logger.warn('SOS countdown expired during crash — activating immediately');
+                    this.stopCountdownTimer(); // FIX: ensure no stale timer before activation
+                    await this.activateSOS();
+                }
+            } else if (!store.isActive && (store.isCountingDown || store.currentSignal?.status === 'countdown')) {
+                // countdownStartedAt missing — can't resume accurately, clear
+                logger.warn('Clearing orphaned SOS countdown (no timestamp)');
+                store.cancelCountdown();
+            }
         } catch (error) {
+            // CRITICAL FIX: Reset isInitialized on failure so future calls can re-init.
+            // Without this, init failure → isInitialized stays true → future initialize()
+            // calls return early at line 71 guard → SOS permanently disabled.
+            this.isInitialized = false;
             logger.error('Failed to initialize SOS Controller:', error);
         }
     }
 
     // ELITE V2: Continuously pre-cache location so SOS has instant coordinates
     private startLocationPrecache(): void {
+        // Clear any previous timer to prevent leak on repeated calls
+        if (this.locationPrecacheTimer) {
+            clearInterval(this.locationPrecacheTimer);
+            this.locationPrecacheTimer = null;
+        }
+
         // Fetch immediately
         this.refreshPrecachedLocation();
 
@@ -101,7 +157,11 @@ class UnifiedSOSController {
 
     private async refreshPrecachedLocation(): Promise<void> {
         try {
-            const Location = await import('expo-location');
+            // Use top-level Location import (not dynamic import which shadows it)
+            // Without this check, getCurrentPositionAsync throws on iOS if not granted.
+            const { status } = await Location.getForegroundPermissionsAsync();
+            if (status !== 'granted') return;
+
             const loc = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.High,
             });
@@ -122,6 +182,7 @@ class UnifiedSOSController {
     private async resolveCurrentUserId(): Promise<string> {
         try {
             const { identityService } = await import('../IdentityService');
+            await identityService.initialize().catch(e => { if (__DEV__) logger.debug('SOS: identity init best-effort:', e); });
             const identityUid = identityService.getUid();
             if (identityUid) {
                 return identityUid;
@@ -131,10 +192,38 @@ class UnifiedSOSController {
         }
 
         try {
-            const { getAuth } = await import('firebase/auth');
-            const authUid = getAuth()?.currentUser?.uid;
+            const { onAuthStateChanged } = await import('firebase/auth');
+            const { getFirebaseAuth } = await import('../../../lib/firebase');
+            const auth = getFirebaseAuth();
+            const authUid = auth?.currentUser?.uid;
             if (authUid) {
                 return authUid;
+            }
+
+            const waitedUid = await new Promise<string | null>((resolve) => {
+                let settled = false;
+                let unsubscribe: (() => void) | null = null;
+                const finish = (value: string | null) => {
+                    if (settled) return;
+                    settled = true;
+                    if (unsubscribe) {
+                        try { unsubscribe(); } catch { /* no-op */ }
+                        unsubscribe = null;
+                    }
+                    resolve(value);
+                };
+
+                const timer = setTimeout(() => finish(null), 2500);
+                unsubscribe = onAuthStateChanged(auth, (user) => {
+                    const uid = typeof user?.uid === 'string' ? user.uid.trim() : '';
+                    if (!uid) return;
+                    clearTimeout(timer);
+                    finish(uid);
+                });
+            });
+
+            if (waitedUid) {
+                return waitedUid;
             }
         } catch {
             // best effort
@@ -153,7 +242,8 @@ class UnifiedSOSController {
      */
     async triggerSOS(
         reason: EmergencyReason = EmergencyReason.MANUAL_SOS,
-        message: string = 'Acil yardım gerekiyor!'
+        message: string = 'Acil yardım gerekiyor!',
+        isSilent: boolean = false
     ): Promise<void> {
         await this.initialize();
 
@@ -168,12 +258,25 @@ class UnifiedSOSController {
         logger.warn('🆘 SOS TRIGGERED - Starting countdown');
         this.userId = await this.resolveCurrentUserId();
 
-        // Heavy haptic feedback
-        haptics.impactHeavy();
-        haptics.notificationError();
+        // FIX 9: Auth pre-check — log warning if no authenticated user.
+        // This is NOT a blocker (offline users still need mesh SOS), but provides
+        // visibility into why Firebase channels may fail during broadcast.
+        try {
+            const { getFirebaseAuth } = await import('../../../lib/firebase');
+            const auth = getFirebaseAuth();
+            if (!auth?.currentUser?.uid) {
+                logger.warn('No authenticated user — SOS will use device ID for mesh-only broadcast');
+            }
+        } catch {
+            logger.warn('Auth check failed during SOS trigger — proceeding with mesh-only fallback');
+        }
+
+        // SOS haptic feedback — ALWAYS fires even if vibration is disabled
+        // User MUST feel this to know SOS countdown started (e.g. pocket trigger)
+        haptics.sosAlert();
 
         // Start countdown with resolved userId
-        store.startCountdown(reason, this.userId || this.deviceId, message);
+        store.startCountdown(reason, this.userId || this.deviceId, message, isSilent);
 
         // ELITE V2: Use pre-cached location INSTANTLY (Noonlight pattern)
         // No delay — location was already fetched in background
@@ -188,7 +291,7 @@ class UnifiedSOSController {
         }
 
         // Also fetch fresh location in parallel (will update if better)
-        this.fetchLocation();
+        this.fetchLocation().catch(err => logger.error('SOS location fetch failed:', err));
 
         // Get device status
         await this.updateDeviceStatus();
@@ -219,8 +322,8 @@ class UnifiedSOSController {
             }
 
             // ELITE V4: Stop alarm sound + vibration + ambient recording
-            this.stopAlarmAndVibration();
-            this.stopAmbientRecording();
+            this.stopAlarmAndVibration().catch(e => { if (__DEV__) logger.warn('Stop alarm failed:', e); });
+            this.stopAmbientRecording().catch(e => { if (__DEV__) logger.warn('Stop recording failed:', e); });
 
             // Stop ACK listener
             try {
@@ -229,13 +332,19 @@ class UnifiedSOSController {
             } catch { /* non-critical */ }
 
             // ELITE V2: Broadcast cancellation to ALL channels (Noonlight pattern)
-            // Responders need to know the SOS was cancelled
+            // Responders need to know the SOS was cancelled — LIFE-SAFETY CRITICAL
             const signal = store.currentSignal;
             if (signal) {
                 this.broadcastCancellation(signal).catch(err => {
-                    logger.warn('SOS cancellation broadcast failed:', err);
+                    logger.error('❌ SOS cancellation broadcast failed — responders may still see active SOS:', err);
                 });
             }
+
+            // Deactivate emergency GPS mode
+            try {
+                const { familyTrackingService } = require('../FamilyTrackingService');
+                familyTrackingService.setEmergencyMode(false);
+            } catch { /* non-critical */ }
 
             store.stopSOS();
             haptics.notificationSuccess();
@@ -246,19 +355,141 @@ class UnifiedSOSController {
         }
     }
 
-    // ELITE V2: Broadcast SOS cancellation to all channels
-    private async broadcastCancellation(originalSignal: SOSSignal): Promise<void> {
-        const cancellationSignal: SOSSignal = {
-            ...originalSignal,
-            id: `cancel-${originalSignal.id}`,
-            status: 'cancelled' as SOSStatus,
-            message: `SOS İPTAL EDİLDİ: ${originalSignal.message || 'Acil durum iptal edildi'}`,
-            timestamp: Date.now(),
-        };
+    /**
+     * Clean shutdown — stop all timers, fall detection, and reset initialization state.
+     * Called from shutdownApp() on logout to prevent timer leaks across sessions.
+     */
+    destroy(): void {
+        // CRITICAL: Set destroying flag BEFORE clearing timers to prevent
+        // stale countdown ticks from calling activateSOS() after auth is destroyed.
+        this.isDestroying = true;
 
+        // Stop countdown if active
+        this.stopCountdownTimer();
+
+        // Stop location precache
+        if (this.locationPrecacheTimer) {
+            clearInterval(this.locationPrecacheTimer);
+            this.locationPrecacheTimer = null;
+        }
+
+        // Stop alarm and ambient recording
+        // CRITICAL FIX: Add .catch() — these are async methods called from synchronous destroy().
+        // Without .catch(), rejected promises from whistleService.stop() or recording.stop()
+        // cause unhandled promise rejections that can crash the app.
+        this.stopAlarmAndVibration().catch(e => { if (__DEV__) logger.debug('Stop alarm error in destroy:', e); });
+        this.stopAmbientRecording().catch(e => { if (__DEV__) logger.debug('Stop recording error in destroy:', e); });
+
+        // Stop fall detection sensor
+        fallDetectionService.stop();
+
+        // Stop beacon
+        sosBeaconService.stop();
+
+        // Stop ACK listener to prevent Firestore leak during logout
         try {
-            await sosChannelRouter.broadcastSOS(cancellationSignal);
-            logger.info('✅ SOS cancellation broadcast sent to all channels');
+            const { stopSOSAckListener } = require('./SOSAckListener');
+            stopSOSAckListener();
+        } catch { /* non-critical */ }
+
+        // CRITICAL FIX: Broadcast cancellation before clearing state, so family/nearby
+        // users stop seeing the active SOS. Without this, logout while SOS active leaves
+        // family members seeing an active SOS indefinitely.
+        try {
+            const store = useSOSStore.getState();
+            if (store.isActive && store.currentSignal) {
+                this.broadcastCancellation(store.currentSignal).catch(e => {
+                    if (__DEV__) logger.warn('Cancellation broadcast during destroy failed:', e);
+                });
+            }
+            if (store.isActive || store.currentSignal || store.isCountingDown) {
+                store.stopSOS();
+                store.cancelCountdown();
+            }
+        } catch (e) { logger.error('SOS state clear failed on logout:', e); }
+
+        // CRITICAL FIX: Reset concurrency guards and user identity state.
+        // Without this, isActivating/isBroadcasting can remain true after destroy(),
+        // preventing SOS activation on the next session after re-initialize().
+        this.isActivating = false;
+        this.isBroadcasting = false;
+        this.userId = '';
+        this.deviceId = '';
+        this.preCachedLocation = null;
+
+        this.isInitialized = false;
+        logger.info('UnifiedSOSController destroyed');
+    }
+
+    // ELITE V2: Broadcast SOS cancellation to all channels
+    // CRITICAL FIX: Only updateDoc existing documents — do NOT call broadcastSOS() with
+    // cancel-prefixed signal. broadcastSOS creates NEW Firestore documents which trigger
+    // Cloud Functions onCreate → sends NEW "emergency" push notifications for a CANCELLED SOS.
+    private async broadcastCancellation(originalSignal: SOSSignal): Promise<void> {
+        try {
+            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+            const db = await getFirestoreInstanceAsync();
+            if (db) {
+                const { doc, updateDoc } = await import('firebase/firestore');
+                const cancelData = { status: 'cancelled', cancelledAt: Date.now() };
+
+                // 1. Update original broadcast document (NearbySOSListener watches for 'modified')
+                await updateDoc(doc(db, 'sos_broadcasts', originalSignal.id), cancelData)
+                    .catch(e => logger.warn('SOS: cancel broadcast update failed:', e));
+
+                // 2. Update original signal document
+                await updateDoc(doc(db, 'sos_signals', originalSignal.id), cancelData)
+                    .catch(e => logger.warn('SOS: cancel signal update failed:', e));
+
+                // 3. Update per-family-member alert documents
+                // SOSAlertListener watches sos_alerts/{memberId}/items/{signalId}
+                try {
+                    const { useFamilyStore } = await import('../../stores/familyStore');
+                    const members = useFamilyStore.getState().members;
+                    if (members.length > 0) {
+                        await Promise.allSettled(
+                            members.flatMap(m => {
+                                const ids = [m.uid, m.deviceId].filter(Boolean) as string[];
+                                return ids.flatMap(id => [
+                                    updateDoc(doc(db, 'sos_alerts', id, 'items', originalSignal.id), cancelData)
+                                        .catch(e => logger.debug('SOS: cancel user alert best-effort:', e)),
+                                    updateDoc(doc(db, 'devices', id, 'sos_alerts', originalSignal.id), cancelData)
+                                        .catch(e => logger.debug('SOS: cancel device alert best-effort:', e)),
+                                ]);
+                            })
+                        );
+                        logger.info('✅ SOS cancellation propagated to family member alert documents');
+                    }
+                } catch (e) { logger.error('Family SOS cancellation broadcast failed:', e); }
+            }
+
+            // 4. Broadcast cancel via BLE mesh with explicit SOS_CANCEL type
+            try {
+                const { meshNetworkService } = await import('../mesh');
+                const { MeshMessageType } = await import('../mesh/MeshProtocol');
+                const { getInstallationId } = await import('../../../lib/installationId');
+                const installationId = await getInstallationId().catch(() => '');
+                const meshSenderId = installationId || originalSignal.userId || this.deviceId;
+
+                const cancelPayload = JSON.stringify({
+                    type: 'SOS_CANCEL',
+                    originalSignalId: originalSignal.id,
+                    senderUid: originalSignal.userId,
+                    senderName: (() => { try { const { identityService: idSvc } = require('../IdentityService'); return idSvc.getDisplayName() || 'Kullanıcı'; } catch { return 'Kullanıcı'; } })(),
+                    status: 'cancelled',
+                    timestamp: Date.now(),
+                });
+
+                await meshNetworkService.broadcastMessage(cancelPayload, MeshMessageType.SOS, {
+                    from: meshSenderId,
+                    messageId: `cancel-${originalSignal.id}`,
+                });
+                logger.info('✅ SOS cancellation sent via BLE Mesh');
+            } catch (meshErr) {
+                logger.warn('Mesh cancel broadcast failed (non-critical):', meshErr);
+            }
+
+            logger.info('✅ SOS cancellation broadcast completed');
         } catch (error) {
             logger.error('Failed to broadcast SOS cancellation:', error);
         }
@@ -270,7 +501,8 @@ class UnifiedSOSController {
      */
     async forceActivateSOS(
         reason: EmergencyReason,
-        message: string = 'Otomatik algılandı: Acil yardım gerekiyor!'
+        message: string = 'Otomatik algılandı: Acil yardım gerekiyor!',
+        isSilent: boolean = false
     ): Promise<void> {
         await this.initialize();
         this.userId = await this.resolveCurrentUserId();
@@ -283,13 +515,16 @@ class UnifiedSOSController {
             return;
         }
 
-        // Cancel any existing countdown
+        // Cancel any existing countdown — clear BOTH timer AND store state
+        // Without cancelCountdown(), store remains isCountingDown=true if activateSOS
+        // fails before store.activateSOS() is reached → UI stuck in countdown state.
         if (store.isCountingDown) {
             this.stopCountdownTimer();
+            store.cancelCountdown();
         }
 
         // Create and activate signal immediately with resolved userId
-        store.startCountdown(reason, this.userId || this.deviceId, message);
+        store.startCountdown(reason, this.userId || this.deviceId, message, isSilent);
 
         await this.fetchLocation();
         await this.updateDeviceStatus();
@@ -306,7 +541,9 @@ class UnifiedSOSController {
         this.stopCountdownTimer();
 
         this.countdownTimer = setInterval(() => {
-            this.onCountdownTick();
+            // CRITICAL FIX: onCountdownTick is async — unhandled promise rejection from
+            // setInterval callback can crash the app. Add .catch() for safety.
+            this.onCountdownTick().catch(e => logger.error('Countdown tick error:', e));
         }, SOS_CONFIG.COUNTDOWN_TICK_MS);
     }
 
@@ -318,6 +555,12 @@ class UnifiedSOSController {
     }
 
     private async onCountdownTick(): Promise<void> {
+        // CRITICAL: Guard against stale ticks firing after destroy()
+        if (this.isDestroying) {
+            this.stopCountdownTimer();
+            return;
+        }
+
         const store = useSOSStore.getState();
 
         if (!store.isCountingDown) {
@@ -345,6 +588,7 @@ class UnifiedSOSController {
     // ============================================================================
 
     private isActivating = false;
+    private isBroadcasting = false;
 
     private async activateSOS(): Promise<void> {
         // Guard against double activation (countdown race condition)
@@ -379,14 +623,40 @@ class UnifiedSOSController {
         // Re-read signal from store AFTER activation to get correct status
         const activatedSignal = useSOSStore.getState().currentSignal;
 
-        // Broadcast through all channels with correct status
-        await sosChannelRouter.broadcastSOS(activatedSignal || signal);
+        // LIFE-SAFETY: Broadcast with timeout + concurrency guard to prevent overlapping
+        // broadcasts and to ensure SOS activation completes even if a channel hangs.
+        if (!this.isBroadcasting) {
+            this.isBroadcasting = true;
+            try {
+                await Promise.race([
+                    sosChannelRouter.broadcastSOS(activatedSignal || signal),
+                    new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Broadcast timeout')), 8000)),
+                ]);
+            } catch (broadcastErr) {
+                logger.error('SOS broadcast failed or timed out:', broadcastErr);
+            } finally {
+                this.isBroadcasting = false;
+            }
+        } else {
+            logger.warn('SOS broadcast already in progress — skipping duplicate');
+        }
 
         // Start beacon service
         await sosBeaconService.start();
 
-        // ELITE V4: Start SOS alarm sound + continuous vibration
-        this.startAlarmAndVibration();
+        // ELITE: Activate emergency GPS mode (1s interval) for precise location tracking
+        try {
+            const { familyTrackingService } = await import('../FamilyTrackingService');
+            familyTrackingService.setEmergencyMode(true);
+        } catch { /* non-critical */ }
+
+        // ELITE V4: Start SOS alarm sound if NOT silent
+        if (!signal.isSilent) {
+            this.startAlarmAndVibration();
+        } else {
+            logger.info('🔇 Silent SOS active - Alarm and continuous vibration skipped');
+            try { Vibration.vibrate([0, 100, 100, 100], false); } catch { }
+        }
 
         // ELITE V4: Start 10-second ambient sound recording
         this.startAmbientRecording(signal.id);
@@ -409,9 +679,13 @@ class UnifiedSOSController {
 
     private async fetchLocation(): Promise<SOSLocation | null> {
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
+            // CRITICAL FIX: Use getForegroundPermissionsAsync (check-only) instead of
+            // requestForegroundPermissionsAsync (shows dialog). Permission dialogs during
+            // SOS activation violate Apple guidelines — permissions must be pre-requested
+            // during onboarding or first use, not during emergency flows.
+            const { status } = await Location.getForegroundPermissionsAsync();
             if (status !== 'granted') {
-                logger.warn('Location permission denied');
+                logger.warn('Location permission not granted — skipping SOS location');
                 useSOSStore.getState().updateDeviceStatus({ locationEnabled: false });
                 return null;
             }
@@ -528,6 +802,15 @@ class UnifiedSOSController {
         if (this.isAmbientRecording) return;
 
         try {
+            // CRITICAL FIX: Check microphone permission before recording.
+            // Starting recording without permission violates Apple guidelines and crashes on iOS.
+            const { getRecordingPermissionsAsync } = await import('expo-audio');
+            const { status } = await getRecordingPermissionsAsync();
+            if (status !== 'granted') {
+                logger.warn('Microphone permission not granted — skipping ambient recording');
+                return;
+            }
+
             const { voiceMessageService } = await import('../VoiceMessageService');
             const started = await voiceMessageService.startRecording();
             if (!started) {
@@ -550,6 +833,7 @@ class UnifiedSOSController {
     private async finishAmbientRecording(signalId: string): Promise<void> {
         if (!this.isAmbientRecording) return;
         this.isAmbientRecording = false;
+        this.ambientRecordingTimer = null;
 
         try {
             const { voiceMessageService } = await import('../VoiceMessageService');

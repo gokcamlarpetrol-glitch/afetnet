@@ -465,7 +465,7 @@ class NotificationCenter {
                                             logger.error('🚨 CRITICAL: EEW countdown engine import/start FAILED:', eewErr);
                                         });
                                     }
-                                } catch { /* non-critical */ }
+                                } catch (e) { logger.error('EEW countdown engine start failed:', e); }
                                 try {
                                     const magnitude = Number(fgData?.magnitude);
                                     const location = String(fgData?.location || 'Unknown').trim() || 'Unknown';

@@ -1499,6 +1499,10 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                       domStorageEnabled={true}
                       allowsBackForwardNavigationGestures={true}
                       scalesPageToFit={true}
+                      originWhitelist={['https://*', 'http://*']}
+                      onShouldStartLoadWithRequest={(request: any) => {
+                        return request.url.startsWith('https://') || request.url.startsWith('http://');
+                      }}
                       renderLoading={() => (
                         <View style={styles.inlineWebViewLoading}>
                           <ActivityIndicator size="large" color={colors.accent.primary} />
@@ -1597,6 +1601,10 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
               source={{ uri: article.url ?? '' }}
               style={styles.browserWebView}
               startInLoadingState
+              originWhitelist={['https://*', 'http://*']}
+              onShouldStartLoadWithRequest={(request: any) => {
+                return request.url.startsWith('https://') || request.url.startsWith('http://');
+              }}
               renderLoading={() => (
                 <View style={styles.browserLoading}>
                   <ActivityIndicator size="large" color={colors.accent.primary} />
@@ -1795,6 +1803,10 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
                     allowsBackForwardNavigationGestures={true}
+                    originWhitelist={['https://*', 'http://*']}
+                    onShouldStartLoadWithRequest={(request: any) => {
+                      return request.url.startsWith('https://') || request.url.startsWith('http://');
+                    }}
                     renderLoading={() => (
                       <View style={styles.inAppBrowserLoading}>
                         <ActivityIndicator size="large" color={colors.accent.primary} />

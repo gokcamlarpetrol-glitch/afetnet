@@ -948,7 +948,7 @@ export async function shutdownApp() {
   try {
     const { getFirebaseAuth } = await import('../lib/firebase');
     shutdownUid = getFirebaseAuth()?.currentUser?.uid || '';
-  } catch { /* */ }
+  } catch (e) { logger.error('Shutdown UID capture failed:', e); }
 
   // CRITICAL FIX: Increment epoch so any in-flight initializeApp() body
   // knows that shutdown happened and won't overwrite isInitialized/isInitializing.
@@ -1056,7 +1056,7 @@ export async function shutdownApp() {
   try {
     const { eewService } = await import('./services/EEWService');
     eewService.stop();
-  } catch { /* already stopped */ }
+  } catch (e) { logger.error('EEW service stop failed:', e); }
 
   // CRITICAL FIX: Stop EmergencyHealthSharingService (broadcastInterval timer).
   // setInterval continues broadcasting health data via BLE mesh after logout.
@@ -1111,7 +1111,7 @@ export async function shutdownApp() {
   try {
     const { unifiedSOSController } = await import('./services/sos/UnifiedSOSController');
     unifiedSOSController.destroy();
-  } catch { /* already stopped */ }
+  } catch (e) { logger.error('UnifiedSOSController destroy failed:', e); }
 
   // Cleanup MeshEmergencyService (beacon timer, inactivity timer)
   // Without this, emergency beacons continue broadcasting for old user after account switch
