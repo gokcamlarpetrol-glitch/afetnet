@@ -5,11 +5,14 @@
  */
 
 import { create } from 'zustand';
-import { getAuth } from 'firebase/auth';
+import { AppState } from 'react-native';
 import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 import { safeLowerCase, safeIncludes } from '../utils/safeString';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirebaseAuth } from '../../lib/firebase';
+import { identityService } from '../services/IdentityService';
+import { readCachedAuthUid } from '../utils/authSessionCache';
+import { retryWithBackoffSafe } from '../utils/retry';
 
 const logger = createLogger('MessageStore');
 
@@ -26,6 +29,9 @@ interface FirebaseDataServiceType {
   saveMessage: (deviceId: string, message: Record<string, unknown>) => Promise<boolean>;
   saveConversation?: (deviceId: string, conversation: Conversation) => Promise<boolean>;
   deleteConversation?: (deviceId: string, userId: string) => Promise<boolean>;
+  // ELITE: Double-tick and read receipts Firestore sync
+  markMessageAsDelivered?: (conversationId: string, messageId: string) => Promise<boolean>;
+  markMessageAsRead?: (conversationId: string, messageId: string) => Promise<boolean>;
 }
 
 // ELITE: Lazy import to break circular dependency
@@ -53,8 +59,12 @@ export interface Message {
   read: boolean;
   type?: 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'VOICE';
   priority?: 'critical' | 'high' | 'normal';
-  // ELITE: Enhanced delivery tracking
+  // CRITICAL: Used for syncing statuses and navigation routing
+  conversationId?: string;
+  // ELITE: Enhanced delivery tracking (WhatsApp triple-tick)
   status?: 'pending' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  deliveredAt?: number;  // Timestamp when message was delivered to recipient device
+  readAt?: number;       // Timestamp when message was read by recipient
   retryCount?: number;
   lastRetryAt?: number;
   // ELITE: Threading
@@ -118,6 +128,7 @@ interface MessageState {
 
 export interface MessageActions {
   initialize: () => Promise<void>;
+  syncFromStorageIncremental: () => Promise<void>;
   addMessage: (message: Message) => Promise<void>;
   addConversation: (conversation: Conversation) => Promise<void>;
   markAsDelivered: (messageId: string) => Promise<void>;
@@ -132,7 +143,7 @@ export interface MessageActions {
   // Enhanced actions
   updateMessageStatus: (messageId: string, status: Message['status']) => Promise<void>;
   // ELITE V2: Sync read receipt to Firebase (WhatsApp 3-tick pattern)
-  syncReadReceipt: (messageId: string, senderId: string) => Promise<void>;
+  syncReadReceipt: (messageId: string, senderId: string, conversationId?: string) => Promise<void>;
   setTyping: (conversationId: string, userId: string, userName?: string) => void;
   clearTyping: (conversationId: string) => void;
   getUnreadCount: () => number;
@@ -158,42 +169,14 @@ const STORAGE_GUEST_SCOPE = 'guest';
 // Set high to preserve message history (user expects messages to persist until deleted).
 const MAX_MESSAGES = 50000;
 const SELF_ID_LITERALS = new Set(['me', 'ME']);
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+import { UID_REGEX, normalizeIdentityValue } from '../utils/messaging/identityUtils';
+import { NON_CHAT_SYSTEM_TYPES, getEnvelopeTypeFromContent } from '../utils/messaging/filters';
+
 const isNonRoutableConversationId = (value: string): boolean =>
   value === 'broadcast' || value.startsWith('group:');
-const NON_CHAT_SYSTEM_TYPES = new Set([
-  'family_status_update',
-  'family_location_update',
-  'family_location',
-  'status_update',
-  'device_status',
-  'presence_update',
-  'typing',
-  'ack',
-  'reaction',
-]);
 
-
-const normalizeId = (value: string | null | undefined): string => {
-  if (!value || typeof value !== 'string') return '';
-  return value.trim();
-};
-
-const getEnvelopeTypeFromContent = (content: string): string => {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
-    return '';
-  }
-  try {
-    const parsed = JSON.parse(trimmed) as { type?: unknown };
-    if (typeof parsed.type !== 'string') {
-      return '';
-    }
-    return parsed.type.trim().toLowerCase();
-  } catch {
-    return '';
-  }
-};
+/** Alias for shared normalizeIdentityValue — used extensively throughout this store */
+const normalizeId = normalizeIdentityValue;
 
 const isSystemConversationMessage = (message: Message): boolean => {
   if (message.type === 'STATUS') {
@@ -206,25 +189,24 @@ const isSystemConversationMessage = (message: Message): boolean => {
   return NON_CHAT_SYSTEM_TYPES.has(envelopeType);
 };
 
-const findFamilyMemberByUid = (uid: string): { uid: string; name?: string } | undefined => {
-  if (!uid) return undefined;
-  try {
-    const { useFamilyStore } = require('./familyStore');
-    return useFamilyStore.getState().members.find((m: { uid: string }) => m.uid === uid);
-  } catch {
-    return undefined;
-  }
-};
 
 const getStorageScope = (): string => {
+  // Primary: Firebase Auth currentUser
   try {
-    const app = initializeFirebase();
-    if (!app) return STORAGE_GUEST_SCOPE;
-    const uid = getAuth(app).currentUser?.uid;
-    return uid ? `user:${uid}` : STORAGE_GUEST_SCOPE;
-  } catch {
-    return STORAGE_GUEST_SCOPE;
-  }
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    if (uid) return `user:${uid}`;
+  } catch { /* fallback below */ }
+
+  // Fallback: MMKV-cached UID (survives auth token refresh)
+  try {
+    const cachedUid = identityService?.getUid?.();
+    if (cachedUid && cachedUid !== 'unknown') return `user:${cachedUid}`;
+  } catch { /* fallback below */ }
+
+  const persistedUid = readCachedAuthUid();
+  if (persistedUid) return `user:${persistedUid}`;
+
+  return STORAGE_GUEST_SCOPE;
 };
 
 const getScopedStorageKey = (baseKey: string): string => `${baseKey}:${getStorageScope()}`;
@@ -233,21 +215,23 @@ const getSelfIdentityCandidates = (): Set<string> => {
   const ids = new Set<string>(SELF_ID_LITERALS);
 
   try {
-    const app = initializeFirebase();
-    if (app) {
-      const uid = getAuth(app).currentUser?.uid;
-      if (uid) ids.add(uid);
-    }
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    if (uid) ids.add(uid);
   } catch {
     // best effort
   }
 
   try {
-    const { identityService } = require('../services/IdentityService');
-    const uid = identityService.getUid?.();
+    const uid = identityService?.getUid?.();
     if (uid) ids.add(uid);
-  } catch {
-    // best effort
+    const persistedUid = readCachedAuthUid();
+    if (persistedUid) ids.add(persistedUid);
+    const aliases = (identityService as any)?.getAliases?.();
+    if (Array.isArray(aliases)) {
+      aliases.forEach((a: string) => ids.add(a));
+    }
+  } catch (err) {
+    if (__DEV__) logger.error('getSelfIdentityCandidates Error:', err);
   }
 
   return ids;
@@ -262,8 +246,10 @@ const resolveCanonicalPeerId = (value: string | null | undefined): string => {
   const normalized = normalizeId(value);
   if (!normalized) return '';
   if (isNonRoutableConversationId(normalized)) return '';
+  // Prefer strict UID when available
   if (UID_REGEX.test(normalized)) return normalized;
-  return '';
+  // Fallback: accept normalized alias/deviceId so non-UID identities are still routable
+  return normalized;
 };
 
 const getPeerAliasCandidates = (value: string | null | undefined): Set<string> => {
@@ -387,6 +373,10 @@ const buildConversationIndex = (messages: Message[]): Map<string, Message[]> => 
   const selfIds = getSelfIdentityCandidates();
   for (const msg of messages) {
     if (isSystemConversationMessage(msg)) continue;
+
+    // CRITICAL FIX: Prevent Family Group messages (Phantom Groups) from entering the DM pipeline.
+    if (msg.to?.startsWith('grp_') || msg.conversationId?.startsWith('grp_')) continue;
+
     const otherUserId = getOtherUserIdForMessage(msg, selfIds);
     if (!otherUserId) continue;
     const existing = index.get(otherUserId);
@@ -398,7 +388,7 @@ const buildConversationIndex = (messages: Message[]): Map<string, Message[]> => 
   }
   // Sort each conversation by timestamp
   for (const [, msgs] of index) {
-    msgs.sort((a, b) => a.timestamp - b.timestamp);
+    msgs.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
   }
   return index;
 };
@@ -408,6 +398,10 @@ let _conversationUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 const CONVERSATION_UPDATE_DEBOUNCE_MS = 100;
 
 const debouncedConversationUpdate = (updateFn: () => void) => {
+  if (process.env.NODE_ENV === 'test') {
+    updateFn();
+    return;
+  }
   if (_conversationUpdateTimer) clearTimeout(_conversationUpdateTimer);
   _conversationUpdateTimer = setTimeout(updateFn, CONVERSATION_UPDATE_DEBOUNCE_MS);
 };
@@ -430,14 +424,50 @@ const loadMessages = (): Message[] => {
   return parsed;
 };
 
-// ELITE: Save messages to MMKV (Sync & Fast)
+// ELITE: Save messages to MMKV — debounced to avoid 50k JSON.stringify on every message
+let _saveMessagesTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingSaveMessages: Message[] | null = null;
+
 const saveMessages = (messages: Message[]) => {
-  try {
-    DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_MESSAGES_BASE), JSON.stringify(messages));
-  } catch (error) {
-    logger.error('Failed to save messages:', error);
+  _pendingSaveMessages = messages;
+  if (_saveMessagesTimer) return; // already scheduled
+  _saveMessagesTimer = setTimeout(() => {
+    _saveMessagesTimer = null;
+    if (_pendingSaveMessages) {
+      try {
+        DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_MESSAGES_BASE), JSON.stringify(_pendingSaveMessages));
+      } catch (error) {
+        logger.error('Failed to save messages:', error);
+      }
+      _pendingSaveMessages = null;
+    }
+  }, 500);
+};
+
+// Flush pending messages immediately (for shutdown/logout)
+export const flushPendingMessages = () => {
+  if (_saveMessagesTimer) {
+    clearTimeout(_saveMessagesTimer);
+    _saveMessagesTimer = null;
+  }
+  if (_pendingSaveMessages) {
+    try {
+      DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_MESSAGES_BASE), JSON.stringify(_pendingSaveMessages));
+    } catch (error) {
+      logger.error('Failed to flush messages:', error);
+    }
+    _pendingSaveMessages = null;
   }
 };
+
+// CRITICAL: Flush pending messages when app goes to background/inactive
+// Prevents data loss if app is killed by OS while debounced saves are pending
+AppState?.addEventListener?.('change', (nextState) => {
+  if (nextState === 'background' || nextState === 'inactive') {
+    flushPendingMessages();
+    flushPendingConversations();
+  }
+});
 
 // ELITE: Load conversations from MMKV
 const loadConversations = (): Conversation[] => {
@@ -457,71 +487,212 @@ const loadConversations = (): Conversation[] => {
   return parsed;
 };
 
-// ELITE: Save conversations to MMKV
+// ELITE: Save conversations to MMKV — debounced
+let _saveConversationsTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingSaveConversations: Conversation[] | null = null;
+
 const saveConversations = (conversations: Conversation[]) => {
-  try {
-    DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_CONVERSATIONS_BASE), JSON.stringify(conversations));
-  } catch (error) {
-    logger.error('Failed to save conversations:', error);
+  _pendingSaveConversations = conversations;
+  if (_saveConversationsTimer) return;
+  _saveConversationsTimer = setTimeout(() => {
+    _saveConversationsTimer = null;
+    if (_pendingSaveConversations) {
+      try {
+        DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_CONVERSATIONS_BASE), JSON.stringify(_pendingSaveConversations));
+      } catch (error) {
+        logger.error('Failed to save conversations:', error);
+      }
+      _pendingSaveConversations = null;
+    }
+  }, 500);
+};
+
+export const flushPendingConversations = () => {
+  if (_saveConversationsTimer) {
+    clearTimeout(_saveConversationsTimer);
+    _saveConversationsTimer = null;
+  }
+  if (_pendingSaveConversations) {
+    try {
+      DirectStorage.setString(getScopedStorageKey(STORAGE_KEY_CONVERSATIONS_BASE), JSON.stringify(_pendingSaveConversations));
+    } catch (error) {
+      logger.error('Failed to flush conversations:', error);
+    }
+    _pendingSaveConversations = null;
   }
 };
+
+const getBootstrappedMessageState = (): Pick<MessageState, 'messages' | 'conversations' | 'conversationIndex'> => {
+  try {
+    const selfIds = getSelfIdentityCandidates();
+    const messages = loadMessages()
+      .map((message) => normalizeMessageSelfFields(message, selfIds))
+      .filter((message) => !isSystemConversationMessage(message));
+    const conversations = loadConversations();
+
+    return {
+      messages,
+      conversations,
+      conversationIndex: buildConversationIndex(messages),
+    };
+  } catch (error) {
+    logger.warn('messageStore bootstrap from MMKV failed:', error);
+    return {
+      messages: [],
+      conversations: [],
+      conversationIndex: new Map(),
+    };
+  }
+};
+
+const bootstrappedState = getBootstrappedMessageState();
+
+// PERF: Typing indicator timers — prevents unbounded setTimeout accumulation
+const _typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// PERF Y1: O(1) message deduplication Set — avoids O(n) .some() scans on 50k messages
+let _messageIdSet = new Set<string>(bootstrappedState.messages.map((message) => message.id));
 
 // ELITE: Guard flag to prevent concurrent initialize() race conditions
 let _initializePromise: Promise<void> | null = null;
 
 export const useMessageStore = create<MessageState & MessageActions>((set, get) => ({
   ...initialState,
+  ...bootstrappedState,
 
   // ELITE: Initialize by loading from storage and Firebase
   initialize: async () => {
     if (_initializePromise) return _initializePromise;
     _initializePromise = (async () => {
-    set({ isInitializing: true });
-    try {
-    // ELITE: Cleanup existing Firebase subscription before re-initializing
-    const { firebaseUnsubscribe } = get();
-    if (firebaseUnsubscribe && typeof firebaseUnsubscribe === 'function') {
+      set({ isInitializing: true });
       try {
-        firebaseUnsubscribe();
-      } catch (error) {
-        if (__DEV__) {
-          logger.debug('Error unsubscribing from old Firebase message subscription:', error);
+        // ELITE: Cleanup existing Firebase subscription before re-initializing
+        const { firebaseUnsubscribe } = get();
+        if (firebaseUnsubscribe && typeof firebaseUnsubscribe === 'function') {
+          try {
+            firebaseUnsubscribe();
+          } catch (error) {
+            if (__DEV__) {
+              logger.debug('Error unsubscribing from old Firebase message subscription:', error);
+            }
+          }
+          set({ firebaseUnsubscribe: null });
         }
+
+        // First load from MMKV (Instant)
+        const localMessagesRaw = loadMessages();
+        const selfIds = getSelfIdentityCandidates();
+        const localMessages = localMessagesRaw
+          .map((message) => normalizeMessageSelfFields(message, selfIds))
+          .filter((message) => !isSystemConversationMessage(message));
+        const didNormalize =
+          localMessages.length !== localMessagesRaw.length
+          || localMessages.some((message, index) => message.from !== localMessagesRaw[index]?.from);
+        if (didNormalize) {
+          saveMessages(localMessages);
+        }
+        // PERF Y1: Rebuild dedup Set for this user scope
+        _messageIdSet = new Set(localMessages.map(m => m.id));
+        const localIndex = buildConversationIndex(localMessages);
+        set({ messages: localMessages, conversations: loadConversations(), conversationIndex: localIndex });
+
+        // Rebuild from messages to purge stale previews (e.g. old system JSON payloads)
+        // and keep startup state consistent with current filtering rules.
+        get().updateConversations();
+
+        // ARCHITECTURE: messageStore is LOCAL-ONLY (AsyncStorage/MMKV).
+        // All Firebase operations are handled by HybridMessageService using
+        // identityService.getMyId() — the single account-based ID.
+        // Previously, messageStore wrote to Firestore with getDeviceId() (random
+        // hardware ID), which was DIFFERENT from the identity ID, causing messages
+        // to be written to wrong paths and invisible to recipients.
+      } finally {
+        set({ isInitializing: false });
+        _initializePromise = null;
       }
-      set({ firebaseUnsubscribe: null });
-    }
-
-    // First load from MMKV (Instant)
-    const localMessagesRaw = loadMessages();
-    const selfIds = getSelfIdentityCandidates();
-    const localMessages = localMessagesRaw
-      .map((message) => normalizeMessageSelfFields(message, selfIds))
-      .filter((message) => !isSystemConversationMessage(message));
-    const didNormalize =
-      localMessages.length !== localMessagesRaw.length
-      || localMessages.some((message, index) => message.from !== localMessagesRaw[index]?.from);
-    if (didNormalize) {
-      saveMessages(localMessages);
-    }
-    const localIndex = buildConversationIndex(localMessages);
-    set({ messages: localMessages, conversations: loadConversations(), conversationIndex: localIndex });
-
-    // Rebuild from messages to purge stale previews (e.g. old system JSON payloads)
-    // and keep startup state consistent with current filtering rules.
-    get().updateConversations();
-
-    // ARCHITECTURE: messageStore is LOCAL-ONLY (AsyncStorage/MMKV).
-    // All Firebase operations are handled by HybridMessageService using
-    // identityService.getMyId() — the single account-based ID.
-    // Previously, messageStore wrote to Firestore with getDeviceId() (random
-    // hardware ID), which was DIFFERENT from the identity ID, causing messages
-    // to be written to wrong paths and invisible to recipients.
-    } finally {
-      set({ isInitializing: false });
-      _initializePromise = null;
-    }
     })();
     return _initializePromise;
+  },
+
+  /**
+   * Lightweight foreground refresh:
+   * - Merges any MMKV-persisted messages that are missing in-memory
+   * - Preserves active realtime subscriptions (no full initialize())
+   */
+  syncFromStorageIncremental: async () => {
+    try {
+      const selfIds = getSelfIdentityCandidates();
+      const localMessages = loadMessages()
+        .map((message) => normalizeMessageSelfFields(message, selfIds))
+        .filter((message) => !isSystemConversationMessage(message));
+
+      if (localMessages.length === 0) return;
+
+      // Use shared status priority from constants for consistency
+      const { MESSAGE_STATUS_PRIORITY } = require('../services/messaging/constants');
+
+      let changed = false;
+      set((state) => {
+        const indexById = new Map<string, number>();
+        const merged = [...state.messages];
+
+        merged.forEach((message, idx) => {
+          indexById.set(message.id, idx);
+        });
+
+        for (const localMessage of localMessages) {
+          const existingIndex = indexById.get(localMessage.id);
+          if (existingIndex === undefined) {
+            indexById.set(localMessage.id, merged.length);
+            merged.push(localMessage);
+            changed = true;
+            continue;
+          }
+
+          const existing = merged[existingIndex];
+          const existingPriority = MESSAGE_STATUS_PRIORITY[existing.status || ''] ?? 0;
+          const localPriority = MESSAGE_STATUS_PRIORITY[localMessage.status || ''] ?? 0;
+
+          const shouldUpgrade =
+            localPriority > existingPriority
+            || (!existing.conversationId && !!localMessage.conversationId)
+            || (!existing.mediaUrl && !!localMessage.mediaUrl)
+            || (!!existing.mediaUrl && existing.mediaUrl.startsWith('file:') && !!localMessage.mediaUrl && /^https?:\/\//.test(localMessage.mediaUrl))
+            || (!existing.mediaType && !!localMessage.mediaType)
+            || (existing.mediaDuration == null && typeof localMessage.mediaDuration === 'number')
+            || (!existing.mediaThumbnail && !!localMessage.mediaThumbnail)
+            || (!existing.location && !!localMessage.location)
+            || (!!localMessage.read && !existing.read)
+            || (!!localMessage.delivered && !existing.delivered);
+
+          if (shouldUpgrade) {
+            merged[existingIndex] = { ...existing, ...localMessage };
+            changed = true;
+          }
+        }
+
+        if (!changed) return state;
+
+        merged.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        const capped = merged.length > MAX_MESSAGES
+          ? merged.slice(merged.length - MAX_MESSAGES)
+          : merged;
+
+        _messageIdSet = new Set(capped.map((message) => message.id));
+
+        return {
+          messages: capped,
+          conversationIndex: buildConversationIndex(capped),
+        };
+      });
+
+      if (!changed) return;
+
+      get().updateConversations();
+      saveMessages(get().messages);
+    } catch (error) {
+      logger.warn('syncFromStorageIncremental failed:', error);
+    }
   },
 
   addMessage: async (message: Message) => {
@@ -550,20 +721,95 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       }
     }
 
-    // CRITICAL FIX: Deduplicate by message ID.
-    const { messages: existingMessages } = get();
-    if (existingMessages.some(m => m.id === normalizedMessage.id)) {
-      if (__DEV__) logger.debug(`Message ${normalizedMessage.id} already in store, skipping duplicate`);
+    // PERF Y1: O(1) dedup check via Set instead of O(n) .some()
+    if (_messageIdSet.has(normalizedMessage.id)) {
+      // CRITICAL FIX: Even if message exists, update status if new status is higher priority.
+      // This ensures delivery receipts (sent→delivered→read) are picked up from Firestore
+      // snapshots that call addMessage with updated message data.
+      // Uses shared delivery state machine from constants for consistency.
+      const { isStatusTransitionAllowed } = require('../services/messaging/constants');
+      // FIX: Always check for media/conversationId sync, even when status is unchanged.
+      // Without this, a message arriving with status='pending' + mediaUrl='https://...' would be
+      // skipped entirely — breaking voice/image message display.
+      set((state) => {
+        const existing = state.messages.find(m => m.id === normalizedMessage.id);
+        if (!existing) return state;
+        const statusChanged = isStatusTransitionAllowed(existing.status, normalizedMessage.status || 'pending')
+          && normalizedMessage.status !== existing.status;
+        const needsConversationIdSync = !existing.conversationId && !!normalizedMessage.conversationId;
+        const hasExistingMediaUrl = typeof existing.mediaUrl === 'string' && existing.mediaUrl.length > 0;
+        const hasNewMediaUrl = typeof normalizedMessage.mediaUrl === 'string' && normalizedMessage.mediaUrl.length > 0;
+        const shouldUpgradeMediaUrl = hasNewMediaUrl
+          && (
+            !hasExistingMediaUrl
+            || (existing.mediaUrl!.startsWith('file:') && /^https?:\/\//.test(normalizedMessage.mediaUrl!))
+          );
+        const needsMediaSync = shouldUpgradeMediaUrl
+          || (!existing.mediaType && !!normalizedMessage.mediaType)
+          || (existing.mediaDuration == null && typeof normalizedMessage.mediaDuration === 'number')
+          || (!existing.mediaThumbnail && !!normalizedMessage.mediaThumbnail)
+          || (!existing.location && !!normalizedMessage.location);
+
+        if (statusChanged || needsConversationIdSync || needsMediaSync) {
+          const newStatus = normalizedMessage.status || 'pending';
+          const isDeliveredOrHigher = newStatus === 'delivered' || newStatus === 'read';
+          const isRead = newStatus === 'read';
+          const updatedMessage = {
+            ...existing,
+            ...(statusChanged ? { status: normalizedMessage.status, delivered: isDeliveredOrHigher, read: isRead } : {}),
+            ...(needsConversationIdSync ? { conversationId: normalizedMessage.conversationId } : {}),
+            ...(needsMediaSync ? {
+              mediaUrl: shouldUpgradeMediaUrl ? normalizedMessage.mediaUrl : existing.mediaUrl,
+              mediaType: normalizedMessage.mediaType || existing.mediaType,
+              mediaDuration: normalizedMessage.mediaDuration ?? existing.mediaDuration,
+              mediaThumbnail: normalizedMessage.mediaThumbnail || existing.mediaThumbnail,
+              location: normalizedMessage.location || existing.location
+            } : {})
+          };
+
+          const updatedMessages = state.messages.map(m => m.id === normalizedMessage.id ? updatedMessage : m);
+
+          // CRITICAL FIX: Update conversationIndex so ConversationScreen UI re-renders with the new status
+          const newIndex = new Map(state.conversationIndex);
+          const selfIds = getSelfIdentityCandidates();
+          const otherUserId = getOtherUserIdForMessage(updatedMessage, selfIds);
+
+          if (otherUserId) {
+            const existingIndexMessages = newIndex.get(otherUserId);
+            if (existingIndexMessages) {
+              newIndex.set(
+                otherUserId,
+                existingIndexMessages.map(m => m.id === updatedMessage.id ? updatedMessage : m)
+              );
+            }
+          }
+
+          return {
+            messages: updatedMessages,
+            conversationIndex: newIndex
+          };
+        }
+        return state;
+      });
+      // CRITICAL FIX: Persist status/media upgrades and update conversations.
+      // Previously the dedup-update path only changed in-memory state but never
+      // called saveMessages/debouncedConversationUpdate — status upgrades
+      // (sent→delivered→read) and media URL patches were lost on app restart.
+      debouncedConversationUpdate(() => get().updateConversations());
+      saveMessages(get().messages);
       return;
     }
 
     set((state) => {
-      // Double-check inside set() to handle race conditions
-      if (state.messages.some(m => m.id === normalizedMessage.id)) return state;
+      // Double-check inside set() to handle race conditions (O(1) via Set)
+      if (_messageIdSet.has(normalizedMessage.id)) return state;
+      _messageIdSet.add(normalizedMessage.id);
 
       let newMessages = [...state.messages, normalizedMessage];
       // CRITICAL FIX: Cap message count to prevent unbounded memory growth
       if (newMessages.length > MAX_MESSAGES) {
+        const removed = newMessages.slice(0, newMessages.length - MAX_MESSAGES);
+        removed.forEach(m => _messageIdSet.delete(m.id));
         newMessages = newMessages.slice(newMessages.length - MAX_MESSAGES);
       }
       // ELITE V2: Update conversation index incrementally
@@ -572,7 +818,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       if (otherUserId) {
         const existing = newIndex.get(otherUserId);
         if (existing) {
-          const updated = [...existing, normalizedMessage].sort((a, b) => a.timestamp - b.timestamp);
+          const updated = [...existing, normalizedMessage].sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
           newIndex.set(otherUserId, updated);
         } else {
           newIndex.set(otherUserId, [normalizedMessage]);
@@ -624,17 +870,40 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     const selfIds = getSelfIdentityCandidates();
     const normalizedImports = importedMessages
       .map(m => normalizeMessageSelfFields(m, selfIds))
-      .filter(m => !isSystemConversationMessage(m));
+      .filter(m => !isSystemConversationMessage(m))
+      .map((m) => {
+        // CRITICAL: backfill conversationId so ConversationScreen can filter correctly
+        if (!m.conversationId) {
+          const otherId = getOtherUserIdForMessage(m, selfIds);
+          if (otherId) {
+            const selfId = Array.from(selfIds)[0] || 'me';
+            const [a, b] = [otherId, selfId].sort();
+            const pair = `pair_${a}_${b}`;
+            return { ...m, conversationId: pair };
+          }
+        }
+        return m;
+      });
 
     if (normalizedImports.length === 0) return;
 
     set((state) => {
-      const existingIds = new Set(state.messages.map(m => m.id));
-      const newMessages = normalizedImports.filter(m => !existingIds.has(m.id));
+      // PERF Y1: Use module-level Set for O(1) dedup instead of rebuilding a new Set each time
+      const newMessages = normalizedImports.filter(m => !_messageIdSet.has(m.id));
 
       if (newMessages.length === 0) return state;
 
-      const updatedMessages = [...state.messages, ...newMessages];
+      // Add all new IDs to the dedup Set
+      newMessages.forEach(m => _messageIdSet.add(m.id));
+
+      let updatedMessages = [...state.messages, ...newMessages];
+
+      // CRITICAL FIX: Enforce MAX_MESSAGES cap (was only enforced in addMessage, not importMessages)
+      if (updatedMessages.length > MAX_MESSAGES) {
+        const removed = updatedMessages.slice(0, updatedMessages.length - MAX_MESSAGES);
+        removed.forEach(m => _messageIdSet.delete(m.id));
+        updatedMessages = updatedMessages.slice(updatedMessages.length - MAX_MESSAGES);
+      }
 
       // ELITE V2: Rebuild index smartly
       const newIndex = new Map(state.conversationIndex);
@@ -654,7 +923,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
       // Sort updated conversations
       for (const [, msgs] of newIndex) {
-        msgs.sort((a, b) => a.timestamp - b.timestamp);
+        msgs.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
       }
 
       return { messages: updatedMessages, conversationIndex: newIndex };
@@ -698,7 +967,11 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         userName: conversation.userName || existing?.userName || resolvedConversationId,
         lastMessage: conversation.lastMessage || existing?.lastMessage || '',
         lastMessageTime: resolvedLastMessageTime,
-        unreadCount: existing?.unreadCount ?? conversation.unreadCount ?? 0,
+        // FIX: Prefer incoming unreadCount when provided (non-null/non-undefined).
+        // The caller (pushCloudMessageToMeshStore) passes the incremented count.
+        // Previously, existing?.unreadCount ?? conversation.unreadCount always picked
+        // the existing value (even 0), ignoring the incoming +1 increment.
+        unreadCount: conversation.unreadCount ?? existing?.unreadCount ?? 0,
         isPinned: existing?.isPinned ?? conversation.isPinned,
         isMuted: existing?.isMuted ?? conversation.isMuted,
         // Preserve optional metadata from existing conversation when not provided
@@ -727,23 +1000,154 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     // handles all Firebase operations with the correct identity-based ID.
   },
   markAsDelivered: async (messageId: string) => {
-    set((state) => ({
-      messages: state.messages.map(m => m.id === messageId ? { ...m, delivered: true } : m),
-    }));
+    // IDEMPOTENCY GUARD: Skip if message is already delivered or read.
+    // Without this, concurrent calls from multiple code paths (ConversationScreen useEffect,
+    // notification handler, etc.) cause redundant Firestore writes + store re-renders.
+    const existing = get().messages.find(m => m.id === messageId);
+    if (existing && (existing.status === 'delivered' || existing.status === 'read' || existing.delivered || existing.status === 'failed')) {
+      return;
+    }
 
-    // ELITE: Save to AsyncStorage
+    let conversationId: string | undefined;
+    set((state) => {
+      const selfIds = getSelfIdentityCandidates();
+      const message = state.messages.find(m => m.id === messageId);
+      let updatedMessageRef: Message | null = null;
+
+      if (message && message.conversationId) {
+        conversationId = message.conversationId;
+      } else if (message) {
+        const peerId = getOtherUserIdForMessage(message, selfIds);
+        if (peerId) {
+          const conv = state.conversations.find(c => c.userId === peerId);
+          conversationId = conv?.conversationId;
+        }
+      }
+
+      const updatedMessages = state.messages.map(m => {
+        if (m.id === messageId) {
+          updatedMessageRef = { ...m, delivered: true, status: 'delivered' as const, deliveredAt: m.deliveredAt || Date.now() };
+          return updatedMessageRef;
+        }
+        return m;
+      });
+
+      // CRITICAL FIX: Update conversationIndex so UI re-renders delivery tick
+      const newIndex = new Map(state.conversationIndex);
+      if (updatedMessageRef) {
+        const otherUserId = getOtherUserIdForMessage(updatedMessageRef as Message, selfIds);
+        if (otherUserId && newIndex.has(otherUserId)) {
+          newIndex.set(
+            otherUserId,
+            newIndex.get(otherUserId)!.map(m => m.id === messageId ? (updatedMessageRef as Message) : m)
+          );
+        }
+      }
+
+      return { messages: updatedMessages, conversationIndex: newIndex };
+    });
+
+    // Save to MMKV
     const { messages } = get();
     await saveMessages(messages);
+
+    // Sync "delivered" status to Firestore (Double-tick ✓✓)
+    // CRITICAL FIX: Skip synthetic pair_ conversationIds — they're not valid Firestore paths
+    // FIX: Retry with backoff — fire-and-forget .catch() silently loses receipts on network blips
+    if (conversationId && !conversationId.startsWith('pair_')) {
+      const svc = getFirebaseDataService();
+      if (svc?.markMessageAsDelivered) {
+        retryWithBackoffSafe(
+          () => svc.markMessageAsDelivered!(conversationId!, messageId).then(() => undefined),
+          // FIX: 4 retries (~30s) too low for mobile networks with 30s+ blips.
+          // 8 retries with 30s cap gives ~2 minutes coverage for delivery receipts.
+          { maxRetries: 8, baseDelayMs: 2000, maxDelayMs: 30000 },
+        ).catch(err => {
+          logger.warn('Failed to sync delivered status to Firestore after retries', err);
+        });
+      }
+    }
   },
   markAsRead: async (messageId: string) => {
-    set((state) => ({
-      messages: state.messages.map(m => m.id === messageId ? { ...m, read: true } : m),
-    }));
-    get().updateConversations();
+    // IDEMPOTENCY GUARD: Skip if message is already read or failed (failed is terminal)
+    const existingMsg = get().messages.find(m => m.id === messageId);
+    if (existingMsg && (existingMsg.status === 'read' || existingMsg.read || existingMsg.status === 'failed')) {
+      return;
+    }
+
+    let affectedUserId: string | null = null;
+    let wasUnread = false;
+    let targetConversationId: string | undefined;
+
+    set((state) => {
+      const selfIds = getSelfIdentityCandidates();
+      let updatedMessageRef: Message | null = null;
+
+      const updatedMessages = state.messages.map(m => {
+        if (m.id === messageId && !m.read) {
+          wasUnread = true;
+          affectedUserId = isSelfId(m.from, selfIds) ? m.to : m.from;
+          // Use conversationId from message, or look it up from conversations list
+          targetConversationId = m.conversationId;
+          if (!targetConversationId && affectedUserId) {
+            const peerId = resolveCanonicalPeerId(affectedUserId) || normalizeId(affectedUserId);
+            const conv = state.conversations.find(c =>
+              resolveCanonicalPeerId(c.userId) === peerId || c.userId === peerId
+            );
+            targetConversationId = conv?.conversationId;
+          }
+          updatedMessageRef = { ...m, read: true, status: 'read', readAt: m.readAt || Date.now() };
+          return updatedMessageRef;
+        }
+        return m;
+      });
+
+      if (!wasUnread || !affectedUserId) return { messages: updatedMessages };
+
+      const resolvedId = resolveCanonicalPeerId(affectedUserId) || normalizeId(affectedUserId);
+      const updatedConversations = state.conversations.map(c => {
+        if (resolveCanonicalPeerId(c.userId) === resolvedId || c.userId === resolvedId) {
+          return { ...c, unreadCount: Math.max(0, c.unreadCount - 1) };
+        }
+        return c;
+      });
+
+      // CRITICAL FIX: Push updated message reference to conversationIndex so UI re-renders
+      const newIndex = new Map(state.conversationIndex);
+      if (updatedMessageRef) {
+        const otherUserId = getOtherUserIdForMessage(updatedMessageRef as Message, selfIds);
+        if (otherUserId && newIndex.has(otherUserId)) {
+          newIndex.set(
+            otherUserId,
+            newIndex.get(otherUserId)!.map(m => m.id === messageId ? (updatedMessageRef as Message) : m)
+          );
+        }
+      }
+
+      return { messages: updatedMessages, conversations: updatedConversations, conversationIndex: newIndex };
+    });
 
     // ELITE: Save to AsyncStorage
-    const { messages } = get();
+    const { messages, conversations } = get();
     await saveMessages(messages);
+    saveConversations(conversations);
+
+    // CRITICAL FIX: Sync "read" status to Firestore (Blue Double-tick ✓✓🔵)
+    // Skip synthetic pair_ conversationIds — they're not valid Firestore paths
+    // FIX: Retry with backoff — fire-and-forget .catch() silently loses receipts on network blips
+    if (wasUnread && targetConversationId && !targetConversationId.startsWith('pair_')) {
+      const svc = getFirebaseDataService();
+      if (svc?.markMessageAsRead) {
+        retryWithBackoffSafe(
+          () => svc.markMessageAsRead!(targetConversationId!, messageId).then(() => undefined),
+          // FIX: 4 retries (~30s) too low for mobile networks with 30s+ blips.
+          // 8 retries with 30s cap gives ~2 minutes coverage for read receipts.
+          { maxRetries: 8, baseDelayMs: 2000, maxDelayMs: 30000 },
+        ).catch(err => {
+          logger.warn('Failed to sync read status to Firestore after retries', err);
+        });
+      }
+    }
   },
   markConversationRead: async (userId: string) => {
     const aliasIds = getPeerAliasCandidates(userId);
@@ -757,23 +1161,60 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       (m) => isIdentityInAliasSet(m.from, aliasIds) && !m.read,
     );
 
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        isIdentityInAliasSet(m.from, aliasIds) ? { ...m, read: true, status: 'read' } : m,
-      ),
-    }));
+    set((state) => {
+      const updatedMessages = state.messages.map((m) =>
+        isIdentityInAliasSet(m.from, aliasIds) && !m.read && m.status !== 'failed'
+          ? { ...m, read: true, status: 'read' as const }
+          : m,
+      );
+
+      const newIndex = new Map(state.conversationIndex);
+      const keysToUpdate = Array.from(aliasIds);
+
+      for (const key of keysToUpdate) {
+        if (newIndex.has(key)) {
+          newIndex.set(
+            key,
+            newIndex.get(key)!.map(m =>
+              isIdentityInAliasSet(m.from, aliasIds) && !m.read && m.status !== 'failed'
+                ? { ...m, read: true, status: 'read' as const }
+                : m
+            )
+          );
+        }
+      }
+
+      return {
+        messages: updatedMessages,
+        conversationIndex: newIndex
+      };
+    });
     get().updateConversations();
 
     // Save to AsyncStorage (local persistence)
     const { messages } = get();
     await saveMessages(messages);
 
-    // CRITICAL FIX: Sync read receipts to sender's Firestore inbox
-    // Without this, sender never sees blue double-check (✓✓🔵)
+    // CRITICAL FIX: Sync read receipts per conversation.
+    // A single peer can have legacy duplicate conversationIds in production data.
+    // Syncing only the latest unread message can leave other conversation threads unread.
     if (unreadMessages.length > 0) {
-      for (const msg of unreadMessages) {
-        get().syncReadReceipt(msg.id, msg.from).catch(() => { });
-      }
+      const latestByConversation = new Map<string, Message>();
+      unreadMessages.forEach((msg) => {
+        const key = msg.conversationId
+          ? `conv:${msg.conversationId}`
+          : `sender:${normalizeId(msg.from)}`;
+        const existing = latestByConversation.get(key);
+        if (!existing || msg.timestamp > existing.timestamp) {
+          latestByConversation.set(key, msg);
+        }
+      });
+
+      await Promise.all(
+        Array.from(latestByConversation.values()).map((msg) =>
+          get().syncReadReceipt(msg.id, msg.from, msg.conversationId).catch(e => { if (__DEV__) logger.debug('Read receipt sync failed:', e); }),
+        ),
+      );
     }
   },
   getConversationMessages: (userId: string) => {
@@ -806,19 +1247,20 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     if (merged.size > 0) {
       return Array.from(merged.values())
         .filter((message) => !isSystemConversationMessage(message))
-        .sort((a, b) => a.timestamp - b.timestamp);
+        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
     }
 
     const selfIds = getSelfIdentityCandidates();
     return get().messages
       .filter((message) => !isSystemConversationMessage(message))
+      .filter((message) => !(message.to?.startsWith('grp_') || message.conversationId?.startsWith('grp_')))
       .filter((message) => {
         if (isSelfId(message.from, selfIds)) {
           return isIdentityInAliasSet(message.to, aliasIds);
         }
         return isIdentityInAliasSet(message.from, aliasIds);
       })
-      .sort((a, b) => a.timestamp - b.timestamp);
+      .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
   },
 
   // ELITE V2: Cursor-based pagination for large conversations (WhatsApp pattern)
@@ -857,6 +1299,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
     // Preserve existing metadata (isPinned, isMuted, userName) in a lookup map
     const metadataMap = new Map<string, Pick<Conversation, 'isPinned' | 'isMuted' | 'userName'>>();
+    // Preserve existing conversationId so pairKey lookups are not repeated
+    const conversationIdMap = new Map<string, string>();
     existingConversations.forEach(c => {
       const metadataKey = resolveCanonicalPeerId(c.userId) || normalizeId(c.userId);
       if (!metadataKey) return;
@@ -866,6 +1310,10 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         isMuted: (existingMeta?.isMuted ?? false) || (c.isMuted ?? false),
         userName: existingMeta?.userName || c.userName,
       });
+      // Keep the first non-null conversationId found for each user
+      if (c.conversationId && !conversationIdMap.has(metadataKey)) {
+        conversationIdMap.set(metadataKey, c.conversationId);
+      }
     });
 
     // O(n) single-pass: compute unread counts and latest message per user
@@ -875,6 +1323,9 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     for (const msg of messages) {
       if (isBlockedIdentity(msg.from) || isBlockedIdentity(msg.to)) continue;
       if (isSystemConversationMessage(msg)) continue;
+
+      // CRITICAL FIX: Prevent Family Group messages from splitting into DM conversations
+      if (msg.to?.startsWith('grp_') || msg.conversationId?.startsWith('grp_')) continue;
 
       const otherUserId = getOtherUserIdForMessage(msg, selfIds);
       if (!otherUserId) continue;
@@ -897,8 +1348,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       }
     }
 
-    // Build conversations from latest messages
     const conversations: Conversation[] = [];
+
     for (const [userId, latest] of latestMessages) {
       const meta = metadataMap.get(userId);
       const resolvedUserName = resolvePeerDisplayName(userId, meta?.userName || latest.fromName || userId);
@@ -912,6 +1363,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         isMuted: meta?.isMuted,
         lastMessageFrom: latest.from,
         lastMessageStatus: latest.status,
+        conversationId: conversationIdMap.get(userId),
       });
     }
 
@@ -921,6 +1373,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       if (!a.isPinned && b.isPinned) return 1;
       return b.lastMessageTime - a.lastMessageTime;
     });
+
 
     set({ conversations });
     saveConversations(conversations);
@@ -938,6 +1391,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         const to = normalizeId(m.to);
         return !isIdentityInAliasSet(from, aliasIds) && !isIdentityInAliasSet(to, aliasIds);
       });
+      // PERF Y1: Rebuild dedup Set after filtering to stay in sync
+      _messageIdSet = new Set(updatedMessages.map(m => m.id));
       return {
         conversations: state.conversations.filter((c) => !isIdentityInAliasSet(c.userId, aliasIds)),
         messages: updatedMessages,
@@ -987,6 +1442,32 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       }
     }
 
+    // CRITICAL FIX: Cancel all pending debounced timers BEFORE clearing state.
+    // Without this, a pending _conversationUpdateTimer fires after clear() and
+    // calls updateConversations() on the now-empty messages array, or a pending
+    // _saveMessagesTimer writes stale data back to MMKV.
+    if (_conversationUpdateTimer) {
+      clearTimeout(_conversationUpdateTimer);
+      _conversationUpdateTimer = null;
+    }
+    if (_saveMessagesTimer) {
+      clearTimeout(_saveMessagesTimer);
+      _saveMessagesTimer = null;
+      _pendingSaveMessages = null;
+    }
+    if (_saveConversationsTimer) {
+      clearTimeout(_saveConversationsTimer);
+      _saveConversationsTimer = null;
+      _pendingSaveConversations = null;
+    }
+    // Clear typing indicator timers
+    for (const [, timer] of _typingTimers) {
+      clearTimeout(timer);
+    }
+    _typingTimers.clear();
+
+    // PERF Y1: Clear dedup Set on store clear
+    _messageIdSet = new Set();
     set({ ...initialState, firebaseUnsubscribe: null });
     saveMessages([]);
     saveConversations([]);
@@ -997,15 +1478,58 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     DirectStorage.delete(STORAGE_KEY_CONVERSATIONS_BASE);
   },
 
-  // ELITE: Update message status
+  // ELITE: Update message status — uses shared delivery state machine guard
   updateMessageStatus: async (messageId: string, status: Message['status']) => {
-    set((state) => ({
-      messages: state.messages.map(m =>
-        m.id === messageId ? { ...m, status, delivered: status === 'delivered' || status === 'read' } : m
-      ),
-    }));
+    // Import shared state machine guard — single source of truth for status transitions
+    const { isStatusTransitionAllowed } = require('../services/messaging/constants');
+    set((state) => {
+      let updatedMessageRef: Message | null = null;
+      const updatedMessages = state.messages.map(m => {
+        if (m.id === messageId) {
+          // Enforce delivery state machine: only allowed transitions proceed
+          if (!isStatusTransitionAllowed(m.status, status || 'pending')) {
+            return m; // Block illegal transition
+          }
+          const now = Date.now();
+          const isDelivered = status === 'delivered' || status === 'read';
+          const isRead = status === 'read';
+          updatedMessageRef = {
+            ...m,
+            status,
+            // FIX: Preserve delivered/read booleans when downgrading to pending (retry)
+            delivered: isDelivered ? true : (status === 'pending' ? m.delivered : false),
+            read: isRead ? true : m.read,
+            deliveredAt: isDelivered ? (m.deliveredAt || now) : m.deliveredAt,
+            readAt: isRead ? (m.readAt || now) : m.readAt,
+          };
+          return updatedMessageRef;
+        }
+        return m;
+      });
+
+      const newIndex = new Map(state.conversationIndex);
+      if (updatedMessageRef) {
+        const selfIds = getSelfIdentityCandidates();
+        const otherUserId = getOtherUserIdForMessage(updatedMessageRef as Message, selfIds);
+        if (otherUserId && newIndex.has(otherUserId)) {
+          newIndex.set(
+            otherUserId,
+            newIndex.get(otherUserId)!.map(m => m.id === messageId ? (updatedMessageRef as Message) : m)
+          );
+        }
+      }
+
+      return {
+        messages: updatedMessages,
+        conversationIndex: newIndex
+      };
+    });
     const { messages } = get();
     saveMessages(messages);
+    // CRITICAL FIX: Update conversation list so MessagesScreen shows fresh status.
+    // Without this, processQueue 'sent' status change never propagates to the
+    // conversation list — users see stale "Gönderiliyor..." in MessagesScreen.
+    get().updateConversations();
   },
 
 
@@ -1019,13 +1543,15 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       },
     }));
 
-    // Auto-clear typing after 5 seconds
-    setTimeout(() => {
-      const { typingUsers } = get();
-      if (typingUsers[conversationId]?.timestamp && Date.now() - typingUsers[conversationId].timestamp >= 5000) {
-        get().clearTyping(conversationId);
-      }
+    // PERF: Clear old timer for this conversation before creating new one
+    const existingTimer = _typingTimers.get(conversationId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      _typingTimers.delete(conversationId);
+      get().clearTyping(conversationId);
     }, 5000);
+    _typingTimers.set(conversationId, timer);
   },
 
   // ELITE: Clear typing indicator
@@ -1100,50 +1626,55 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     const now = Date.now();
     const editEntry = { content: message.content, editedAt: now };
 
-    set((state) => ({
-      messages: state.messages.map(m =>
-        m.id === messageId
-          ? {
+    set((state) => {
+      let updatedMessageRef: Message | null = null;
+      const updatedMessages = state.messages.map(m => {
+        if (m.id === messageId) {
+          updatedMessageRef = {
             ...m,
             content: newContent,
             isEdited: true,
             editedAt: now,
             originalContent: m.originalContent || m.content,
-            editHistory: [...(m.editHistory || []), editEntry],
-          }
-          : m
-      ),
-    }));
+            editHistory: [...(m.editHistory || []).slice(-4), editEntry],
+          };
+          return updatedMessageRef;
+        }
+        return m;
+      });
+
+      const newIndex = new Map(state.conversationIndex);
+      if (updatedMessageRef) {
+        const selfIds = getSelfIdentityCandidates();
+        const otherUserId = getOtherUserIdForMessage(updatedMessageRef as Message, selfIds);
+        if (otherUserId && newIndex.has(otherUserId)) {
+          newIndex.set(
+            otherUserId,
+            newIndex.get(otherUserId)!.map(m => m.id === messageId ? (updatedMessageRef as Message) : m)
+          );
+        }
+      }
+
+      return {
+        messages: updatedMessages,
+        conversationIndex: newIndex
+      };
+    });
 
     saveMessages(get().messages);
     get().updateConversations();
 
-    // FIX: Sync edit to Firestore so other participants see the change
-    try {
-      const { identityService } = require('../services/IdentityService');
-      const uid = identityService.getUid();
-      if (uid) {
-        const { firebaseDataService } = require('../services/FirebaseDataService');
-        if (firebaseDataService?.isInitialized) {
-          const peerUid = getOtherUserIdForMessage(message, getSelfIdentityCandidates());
-          if (peerUid) {
-            await firebaseDataService.saveMessage(peerUid, {
-              id: messageId,
-              content: newContent,
-              isEdited: true,
-              editedAt: now,
-              type: 'text',
-              timestamp: message.timestamp,
-              senderUid: uid,
-              fromDeviceId: uid,
-              toDeviceId: peerUid,
-              status: 'sent',
-            });
-          }
-        }
+    // FIX: Sync edit to Firestore using correct conversation path
+    // CRITICAL FIX: Skip synthetic pair_ conversationIds — they're not valid Firestore paths
+    if (message.conversationId && !message.conversationId.startsWith('pair_')) {
+      try {
+        const { updateMessageContent } = await import('../services/firebase/FirebaseMessageOperations');
+        await updateMessageContent(message.conversationId, messageId, newContent);
+      } catch (fbError) {
+        logger.warn('Firebase edit sync failed:', fbError);
       }
-    } catch (syncError) {
-      logger.warn('Failed to sync edited message to cloud:', syncError);
+    } else {
+      logger.debug('editMessage: no valid conversationId, skipping Firebase sync');
     }
 
     logger.info(`Edited message ${messageId}`);
@@ -1168,48 +1699,53 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
     const now = Date.now();
 
-    set((state) => ({
-      messages: state.messages.map(m =>
-        m.id === messageId
-          ? {
+    set((state) => {
+      let updatedMessageRef: Message | null = null;
+      const updatedMessages = state.messages.map(m => {
+        if (m.id === messageId) {
+          updatedMessageRef = {
             ...m,
             isDeleted: true,
             deletedAt: now,
-            content: 'Bu mesaj silindi', // Replace content for privacy
-          }
-          : m
-      ),
-    }));
+            content: 'Bu mesaj silindi',
+          };
+          return updatedMessageRef;
+        }
+        return m;
+      });
+
+      const newIndex = new Map(state.conversationIndex);
+      if (updatedMessageRef) {
+        const selfIds = getSelfIdentityCandidates();
+        const otherUserId = getOtherUserIdForMessage(updatedMessageRef as Message, selfIds);
+        if (otherUserId && newIndex.has(otherUserId)) {
+          newIndex.set(
+            otherUserId,
+            newIndex.get(otherUserId)!.map(m => m.id === messageId ? (updatedMessageRef as Message) : m)
+          );
+        }
+      }
+
+      return {
+        messages: updatedMessages,
+        conversationIndex: newIndex
+      };
+    });
 
     saveMessages(get().messages);
     get().updateConversations();
 
-    // FIX: Sync deletion to Firestore so other participants see the change
-    try {
-      const { identityService } = require('../services/IdentityService');
-      const uid = identityService.getUid();
-      if (uid) {
-        const { firebaseDataService } = require('../services/FirebaseDataService');
-        if (firebaseDataService?.isInitialized) {
-          const peerUid = getOtherUserIdForMessage(message, getSelfIdentityCandidates());
-          if (peerUid) {
-            await firebaseDataService.saveMessage(peerUid, {
-              id: messageId,
-              content: 'Bu mesaj silindi',
-              isDeleted: true,
-              deletedAt: now,
-              type: 'text',
-              timestamp: message.timestamp,
-              senderUid: uid,
-              fromDeviceId: uid,
-              toDeviceId: peerUid,
-              status: 'sent',
-            });
-          }
-        }
+    // FIX: Sync deletion to Firestore using correct conversation path
+    // CRITICAL FIX: Skip synthetic pair_ conversationIds — they're not valid Firestore paths
+    if (message.conversationId && !message.conversationId.startsWith('pair_')) {
+      try {
+        const { deleteMessageForEveryone } = await import('../services/firebase/FirebaseMessageOperations');
+        await deleteMessageForEveryone(message.conversationId, messageId);
+      } catch (fbError) {
+        logger.warn('Firebase delete sync failed:', fbError);
       }
-    } catch (syncError) {
-      logger.warn('Failed to sync deleted message to cloud:', syncError);
+    } else {
+      logger.debug('deleteMessage: no valid conversationId, skipping Firebase sync');
     }
 
     logger.info(`Deleted message ${messageId}`);
@@ -1237,25 +1773,38 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       return null;
     }
 
-    // Create forwarded message
-    const forwardedMessage: Message = {
-      id: `fwd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      localId: `local-${Date.now()}`,
-      from: 'me',
-      to: canonicalRecipient,
-      content: originalMessage.content,
-      timestamp: Date.now(),
-      delivered: false,
-      read: false,
-      type: originalMessage.type || 'CHAT',
-      status: 'pending',
-      // Note: We could add a 'forwarded' flag here if needed
-    };
+    // CRITICAL FIX: Do NOT call addMessage() before sendMessage().
+    // sendMessage() generates its own message ID and calls pushCloudMessageToMeshStore()
+    // which adds the message to BOTH MeshStore and messageStore. The previous code called
+    // addMessage() with a fwd-... ID, then sendMessage() created a SECOND message with a
+    // different ID — resulting in TWO visible messages in the conversation UI.
+    // Let sendMessage() handle everything and return its message as a Message type.
+    try {
+      const { hybridMessageService } = await import('../services/HybridMessageService');
+      const sentMsg = await hybridMessageService.sendMessage(originalMessage.content, canonicalRecipient, {
+        type: originalMessage.type || 'CHAT',
+      });
 
-    await get().addMessage(forwardedMessage);
+      logger.info(`Forwarded message ${messageId} to ${canonicalRecipient} (new id: ${sentMsg.id})`);
 
-    logger.info(`Forwarded message ${messageId} to ${canonicalRecipient}`);
-    return forwardedMessage;
+      // Return a Message-shaped object from the HybridMessage
+      const forwardedMessage: Message = {
+        id: sentMsg.id,
+        localId: sentMsg.localId,
+        from: 'me',
+        to: canonicalRecipient,
+        content: originalMessage.content,
+        timestamp: sentMsg.timestamp,
+        delivered: false,
+        read: false,
+        type: originalMessage.type || 'CHAT',
+        status: sentMsg.status || 'pending',
+      };
+      return forwardedMessage;
+    } catch (e) {
+      logger.error('Forward send failed:', e);
+      return null;
+    }
   },
 
   // ELITE: Get single message by ID
@@ -1265,37 +1814,56 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
   // ELITE V2: Sync read receipt to Firebase (WhatsApp 3-tick pattern)
   // When recipient reads a message → update readBy field on the actual message doc
-  syncReadReceipt: async (_messageId: string, senderId: string) => {
+  syncReadReceipt: async (_messageId: string, senderId: string, conversationIdHint?: string) => {
     try {
       const { identityService } = require('../services/IdentityService');
       const myUid = identityService.getUid();
       if (!myUid || myUid === 'unknown') return;
 
-      // FIX: Use V3 conversation model — mark the conversation as read in inbox
-      // instead of creating fake "receipt" messages that pollute the conversation
+      // FIX: Use V3 conversation model — mark the exact conversation as read when known.
+      // Fallback to findOrCreate only if conversationId is unavailable.
       const { findOrCreateDMConversation, markConversationRead: markConvRead } = require('../services/firebase/FirebaseMessageOperations');
-      const conversation = await findOrCreateDMConversation(myUid, senderId);
-      const conversationId = conversation?.id;
-      if (conversationId) {
-        await markConvRead(myUid, conversationId);
+      const hintedConversationId = typeof conversationIdHint === 'string' ? conversationIdHint.trim() : '';
+      const localMessageConversationId = get().messages.find((message) => message.id === _messageId)?.conversationId;
 
-        // Also update the readBy field on recent messages in the conversation
-        try {
-          const { getFirestoreInstanceAsync } = require('../services/firebase/FirebaseInstanceManager');
-          const { doc, updateDoc } = require('firebase/firestore');
-          const db = await getFirestoreInstanceAsync();
-          if (db) {
-            await updateDoc(
-              doc(db, 'conversations', conversationId, 'messages', _messageId),
-              { [`readBy.${myUid}`]: Date.now() }
-            ).catch(() => { /* message may not exist in this conversation */ });
-          }
-        } catch {
-          // readBy update is best-effort
-        }
+      let conversationId = hintedConversationId
+        || (typeof localMessageConversationId === 'string' ? localMessageConversationId.trim() : '');
+
+      // Synthetic pair ids are local-only routing helpers, not Firestore document IDs.
+      if (conversationId.startsWith('pair_')) {
+        conversationId = '';
       }
 
-      logger.debug(`Read receipt synced for conversation with ${senderId}`);
+      if (!conversationId) {
+        const conversation = await findOrCreateDMConversation(myUid, senderId);
+        conversationId = conversation?.id || '';
+      }
+
+      if (!conversationId) {
+        logger.warn(`syncReadReceipt: unable to resolve conversationId for message ${_messageId}`);
+        return;
+      }
+
+      await markConvRead(myUid, conversationId);
+
+      // Also update the readBy field on recent messages in the conversation
+      try {
+        const { getFirestoreInstanceAsync } = require('../services/firebase/FirebaseInstanceManager');
+        const { doc, updateDoc, serverTimestamp } = require('firebase/firestore');
+        const db = await getFirestoreInstanceAsync();
+        if (db) {
+          // FIX: Use serverTimestamp() instead of Date.now() — client clocks can be
+          // skewed by minutes/hours on mobile, corrupting read receipt timing data.
+          await updateDoc(
+            doc(db, 'conversations', conversationId, 'messages', _messageId),
+            { [`readBy.${myUid}`]: serverTimestamp() }
+          ).catch(e => { if (__DEV__) logger.debug('readBy update failed (msg may not exist):', e); });
+        }
+      } catch {
+        // readBy update is best-effort
+      }
+
+      logger.debug(`Read receipt synced for conversation ${conversationId} with ${senderId}`);
     } catch (error) {
       // Read receipt sync is best-effort, don't block
       logger.warn('Failed to sync read receipt:', error);
@@ -1331,3 +1899,10 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     logger.debug(`Conversation index rebuilt: ${newIndex.size} conversations`);
   },
 }));
+
+// PERF Y1: Keep _messageIdSet in sync when messages are externally set (e.g. tests, setState)
+useMessageStore.subscribe((state, prevState) => {
+  if (state.messages !== prevState.messages && state.messages.length === 0 && prevState.messages.length > 0) {
+    _messageIdSet = new Set();
+  }
+});

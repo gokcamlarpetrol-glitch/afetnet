@@ -370,8 +370,8 @@ class NotificationCenter {
                                     senderDeviceId: fgData?.senderDeviceId,
                                     senderName,
                                     message,
-                                    latitude: lat ? Number(lat) : undefined,
-                                    longitude: lng ? Number(lng) : undefined,
+                                    latitude: lat != null && lat !== '' ? Number(lat) : undefined,
+                                    longitude: lng != null && lng !== '' ? Number(lng) : undefined,
                                     trapped: fgData?.trapped === 'true' || fgData?.trapped === true,
                                     battery: fgData?.battery ? Number(fgData.battery) : undefined,
                                     healthInfo: fgData?.healthInfo && typeof fgData.healthInfo === 'object'
@@ -397,8 +397,8 @@ class NotificationCenter {
                                         senderDeviceId: fgData?.senderDeviceId,
                                         senderName,
                                         message: `${senderName} acil durum bildirdi! Hemen kontrol edin.`,
-                                        latitude: lat ? Number(lat) : undefined,
-                                        longitude: lng ? Number(lng) : undefined,
+                                        latitude: lat != null && lat !== '' ? Number(lat) : undefined,
+                                        longitude: lng != null && lng !== '' ? Number(lng) : undefined,
                                     });
                                 } else if (status === 'safe' || status === 'need-help') {
                                     const statusText = status === 'safe' ? 'Güvendeyim' : 'Yardıma İhtiyacım Var';

@@ -1170,10 +1170,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
     if (newText.length > 0) {
       const now = Date.now();
-      // FIX: Reduced from 3000ms to 1500ms to match TYPING_THROTTLE_MS (1000ms) more closely.
-      // 3s was too long — user had to type for 3 full seconds before typing indicator appeared.
-      // 1.5s balances responsiveness with avoiding excessive Firestore writes.
-      if (now - lastTypingBroadcastRef.current >= 1500) {
+      // Typing broadcast throttle: 1000ms matches WhatsApp responsiveness.
+      if (now - lastTypingBroadcastRef.current >= 1000) {
         const typingConversationId = activeConversationId || activeRecipientId;
         if (typingConversationId) {
           hybridMessageService.broadcastTyping(typingConversationId);

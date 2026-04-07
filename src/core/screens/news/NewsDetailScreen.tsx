@@ -63,14 +63,15 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   // Previous code returned null here, skipping 30+ hooks below → crash.
   const article = route?.params?.article;
 
-  // CRITICAL: Validate URL with comprehensive type check
+  // CRITICAL: Validate URL with comprehensive type + scheme check
   const hasValidUrl = Boolean(
     article &&
     typeof article === 'object' &&
     article.url &&
     typeof article.url === 'string' &&
     article.url.trim() !== '' &&
-    article.url !== '#',
+    article.url !== '#' &&
+    (article.url.startsWith('https://') || article.url.startsWith('http://')),
   );
 
   // ELITE: Varsayılan olarak AI Özeti sekmesi açık (eskisi gibi)
@@ -453,15 +454,14 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
     // Load AI summary when component mounts or article changes
     loadAISummary();
 
-    // ELITE: Scroll to top when article changes - ensure content starts from top
-    setTimeout(() => {
+    // Scroll to top when article changes
+    const scrollTimer = setTimeout(() => {
       if (scrollViewRef.current) {
         scrollViewRef.current.scrollTo({ y: 0, animated: false });
       }
     }, 50);
-    // ELITE: loadAISummary is memoized via useCallback with article dependency,
-    // adding it to deps would cause unnecessary re-runs
-  }, [article?.id]); // Re-load if article changes (loadAISummary is memoized with article dependency)
+    return () => clearTimeout(scrollTimer);
+  }, [article?.id]);
 
   // ELITE: Orijinal haber sekmesine geçildiğinde inline WebView için URL ayarla (modal değil, sekme içinde göster)
   useEffect(() => {
@@ -490,21 +490,22 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
   }, [activeTab, hasValidUrl, article?.url]);
 
   useEffect(() => {
-    // ELITE: Scroll to top when tab changes to summary - ensure content starts from top
     if (activeTab === 'summary' && scrollViewRef.current) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         scrollViewRef.current?.scrollTo({ y: 0, animated: false });
       }, 50);
+      return () => clearTimeout(t);
     }
   }, [activeTab]);
 
-  // ELITE: Scroll to top on initial mount
+  // Scroll to top on initial mount
   useEffect(() => {
-    setTimeout(() => {
+    const t = setTimeout(() => {
       if (scrollViewRef.current) {
         scrollViewRef.current.scrollTo({ y: 0, animated: false });
       }
     }, 100);
+    return () => clearTimeout(t);
   }, []);
 
   // ELITE PRELOAD: WebView'i component mount olduğunda HEMEN yükle (bekletmeden)
@@ -755,7 +756,7 @@ export default function NewsDetailScreen({ route }: NewsDetailScreenProps) {
 
   useEffect(() => {
     // Load article content when URL is available
-    if (article.url && article.url !== '#') {
+    if (article?.url && article.url !== '#') {
       loadArticleContent().catch((error) => {
         logger.error('Failed to load article content:', error);
       });

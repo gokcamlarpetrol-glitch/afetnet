@@ -7,16 +7,21 @@
 import { createLogger } from '../utils/logger';
 import { firebaseDataService } from './FirebaseDataService';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
-import { deleteDoc, collection, query, where, getDocs, doc } from 'firebase/firestore';
-import { getAuth, deleteUser, signOut } from 'firebase/auth';
+import { deleteDoc, collection, query, where, getDocs, doc, updateDoc, arrayRemove, writeBatch, limit } from 'firebase/firestore';
+import { deleteUser, signOut } from 'firebase/auth';
 import { DirectStorage } from '../utils/storage';
 import * as SecureStore from 'expo-secure-store';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirebaseAuth } from '../../lib/firebase';
 import { useFamilyStore } from '../stores/familyStore';
 import { useHealthProfileStore } from '../stores/healthProfileStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useTrialStore } from '../stores/trialStore';
 import { usePremiumStore } from '../stores/premiumStore';
+import { useMessageStore } from '../stores/messageStore';
+import { useContactStore } from '../stores/contactStore';
+import { useUserStatusStore } from '../stores/userStatusStore';
+import { useEarthquakeStore } from '../stores/earthquakeStore';
+import { useEEWHistoryStore } from '../stores/eewHistoryStore';
+import { useMeshStore } from './mesh/MeshStore';
 
 const logger = createLogger('AccountDeletionService');
 
@@ -31,6 +36,14 @@ interface DeletionProgress {
   total: number;
 }
 
+/** Thrown when Firebase Auth requires recent login to delete the account. */
+export class ReauthRequiredError extends Error {
+  constructor() {
+    super('auth/requires-recent-login');
+    this.name = 'ReauthRequiredError';
+  }
+}
+
 class AccountDeletionService {
   /**
    * Delete all user account data
@@ -39,10 +52,12 @@ class AccountDeletionService {
   async deleteAccount(
     deviceId: string,
     onProgress?: (progress: DeletionProgress) => void,
-  ): Promise<{ success: boolean; errors: string[] }> {
+  ): Promise<{ success: boolean; errors: string[]; reauthRequired?: boolean }> {
     const errors: string[] = [];
     let progress = 0;
-    const totalSteps = 17; // 14 legacy + 3 V3 cleanup steps
+    const totalSteps = 19;
+    // CRITICAL: Capture UID NOW, before auth deletion nullifies it
+    const capturedUid = getFirebaseAuth()?.currentUser?.uid || '';
 
     try {
       logger.info('Starting account deletion process...');
@@ -210,7 +225,19 @@ class AccountDeletionService {
         logger.error('Failed to delete V3 user data:', error);
       });
 
-      // Step 14: Delete user profile
+      // Step 14: V3 — Remove user from conversations & clean up orphans
+      progress++;
+      onProgress?.({
+        step: 'V3 konuşmalar temizleniyor...',
+        progress,
+        total: totalSteps,
+      });
+      await this.deleteV3Conversations().catch((error) => {
+        errors.push(`V3 conversations: ${error.message}`);
+        logger.error('Failed to delete V3 conversations:', error);
+      });
+
+      // Step 15: Delete user profile
       progress++;
       onProgress?.({
         step: 'Kullanıcı profili siliniyor...',
@@ -222,19 +249,86 @@ class AccountDeletionService {
         logger.error('Failed to delete user profile:', error);
       });
 
-      // Step 15: Delete Firebase Auth account
+      // Step 16: Delete Firebase Storage user files (media, voice, images)
+      progress++;
+      onProgress?.({
+        step: 'Medya dosyaları siliniyor...',
+        progress,
+        total: totalSteps,
+      });
+      try {
+        const { getStorage, ref, listAll, deleteObject } = await import('firebase/storage');
+        const storage = getStorage();
+        const uid = capturedUid;
+
+        if (uid) {
+          // Delete files from common user upload paths
+          const userPaths = [
+            `users/${uid}/`,
+            `chat/${uid}/`,
+            `voice/${uid}/`,
+            `profile/${uid}/`,
+            `sos/${uid}/`,
+          ];
+
+          for (const path of userPaths) {
+            try {
+              const folderRef = ref(storage, path);
+              const result = await listAll(folderRef);
+              const deletePromises = result.items.map(item => deleteObject(item).catch(() => {}));
+              await Promise.all(deletePromises);
+              // Also handle nested prefixes (subdirectories)
+              for (const prefix of result.prefixes) {
+                const subResult = await listAll(prefix);
+                await Promise.all(subResult.items.map(item => deleteObject(item).catch(() => {})));
+              }
+            } catch (e) {
+              // Folder may not exist, continue
+              if (__DEV__) console.debug(`Storage cleanup for ${path} skipped:`, e);
+            }
+          }
+          logger.info('Firebase Storage user files deleted');
+        }
+      } catch (storageError) {
+        // Storage cleanup failure should NOT block account deletion
+        if (__DEV__) console.debug('Storage cleanup failed (non-blocking):', storageError);
+      }
+
+      // Step 17: Delete Firebase Auth account
       progress++;
       onProgress?.({
         step: 'Kimlik hesabı siliniyor...',
         progress,
         total: totalSteps,
       });
-      await this.deleteFirebaseAuthAccount().catch((error) => {
-        errors.push(`Auth account: ${error.message}`);
-        logger.error('Failed to delete auth account:', error);
-      });
+      let reauthRequired = false;
+      try {
+        await this.deleteFirebaseAuthAccount();
+      } catch (error: unknown) {
+        if (error instanceof ReauthRequiredError) {
+          // Don't sign out, don't clear local storage yet.
+          // Return early so UI can prompt re-auth, then call retryDeleteAuthAccount().
+          logger.warn('Auth deletion requires re-authentication — returning to UI for re-auth prompt');
+          reauthRequired = true;
+        } else {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          errors.push(`Auth account: ${errMsg}`);
+          logger.error('Failed to delete auth account:', error);
+        }
+      }
 
-      // Step 16: Clear local storage
+      // If re-auth is needed, skip local cleanup (steps 18-19) so the user
+      // stays logged in and can re-authenticate. After successful re-auth + retry,
+      // the caller should invoke clearLocalDataAfterDeletion() to finish cleanup.
+      if (reauthRequired) {
+        return {
+          success: false,
+          errors: ['auth/requires-recent-login'],
+          reauthRequired: true,
+        };
+      }
+
+      // Step 18: Clear local storage
       progress++;
       onProgress?.({
         step: 'Yerel veriler temizleniyor...',
@@ -246,14 +340,14 @@ class AccountDeletionService {
         logger.error('Failed to clear local storage:', error);
       });
 
-      // Step 17: Clear secure storage
+      // Step 19: Clear secure storage
       progress++;
       onProgress?.({
         step: 'Güvenli depolama temizleniyor...',
         progress,
         total: totalSteps,
       });
-      await this.clearSecureStorage().catch((error) => {
+      await this.clearSecureStorage(capturedUid).catch((error) => {
         errors.push(`Secure storage: ${error.message}`);
         logger.error('Failed to clear secure storage:', error);
       });
@@ -280,13 +374,12 @@ class AccountDeletionService {
   private async deleteUserProfile(): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
 
-    const app = initializeFirebase();
-    if (!app) {
-      logger.warn('Firebase app not initialized, skipping user profile deletion');
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      logger.warn('Firebase auth not available, skipping user profile deletion');
       return;
     }
 
-    const auth = getAuth(app);
     const uid = auth.currentUser?.uid;
     if (!uid) {
       logger.warn('No authenticated user, skipping user profile deletion');
@@ -309,17 +402,20 @@ class AccountDeletionService {
 
   /**
    * Delete Firebase Auth user account.
-   * Attempts reauthentication if requires-recent-login is encountered.
-   * Falls back to sign-out if auth account cannot be deleted (data is already gone).
+   * If requires-recent-login is encountered, throws ReauthRequiredError
+   * so the caller (SettingsScreen) can prompt re-authentication and retry
+   * via retryDeleteAuthAccount().
+   *
+   * IMPORTANT: Does NOT sign the user out on failure — that would leave
+   * an orphaned auth shell that the user can never delete.
    */
   private async deleteFirebaseAuthAccount(): Promise<void> {
-    const app = initializeFirebase();
-    if (!app) {
-      logger.warn('Firebase app not initialized, skipping auth deletion');
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      logger.warn('Firebase auth not available, skipping auth deletion');
       return;
     }
 
-    const auth = getAuth(app);
     const user = auth.currentUser;
     if (!user) {
       logger.warn('No authenticated user, skipping auth deletion');
@@ -328,47 +424,59 @@ class AccountDeletionService {
 
     try {
       await deleteUser(user);
-      await signOut(auth).catch(() => { /* Ignore sign-out errors after delete */ });
+      await signOut(auth).catch(e => { if (__DEV__) logger.debug('Sign-out after delete failed:', e); });
       logger.info('Firebase auth account deleted');
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code === 'auth/requires-recent-login') {
-        logger.warn('requires-recent-login — attempting provider reauthentication...');
-
-        // Try Google reauthentication
-        let reauthOk = false;
-        try {
-          const { GoogleSignin } = require('@react-native-google-signin/google-signin');
-          if (GoogleSignin) {
-            const userInfo = await GoogleSignin.signIn();
-            const idToken = userInfo?.data?.idToken || userInfo?.idToken;
-            if (idToken) {
-              const { GoogleAuthProvider, reauthenticateWithCredential } = require('firebase/auth');
-              const credential = GoogleAuthProvider.credential(idToken);
-              await reauthenticateWithCredential(user, credential);
-              await deleteUser(user);
-              await signOut(auth).catch(() => {});
-              reauthOk = true;
-              logger.info('Auth account deleted after Google reauthentication');
-            }
-          }
-        } catch (googleErr) {
-          logger.debug('Google reauthentication for deletion failed:', googleErr);
-        }
-
-        if (!reauthOk) {
-          // All user DATA is already deleted at this point.
-          // Sign out so the app resets to login screen.
-          // The empty Auth account can be cleaned up via Cloud Functions later.
-          logger.warn('Could not reauthenticate — signing out. Auth shell may remain.');
-          await signOut(auth).catch(() => {});
-          // Do NOT throw — treat as soft success since all data is cleaned
-          return;
-        }
+        logger.warn('requires-recent-login — caller must re-authenticate and call retryDeleteAuthAccount()');
+        // Do NOT sign out here. The user stays logged in so re-auth + retry is possible.
+        throw new ReauthRequiredError();
       } else {
         throw error;
       }
     }
+  }
+
+  /**
+   * PUBLIC: Retry auth account deletion after the user has re-authenticated.
+   * Called by UI after successful re-auth (Google/Apple/Email).
+   * At this point all Firestore data is already gone (Steps 1-15 ran previously).
+   */
+  async retryDeleteAuthAccount(): Promise<void> {
+    const auth = getFirebaseAuth();
+    if (!auth) throw new Error('Firebase auth not available');
+
+    const user = auth.currentUser;
+    if (!user) throw new Error('No authenticated user');
+
+    const uid = user.uid;
+    await deleteUser(user);
+    await signOut(auth).catch(e => { if (__DEV__) logger.debug('Sign-out after delete failed:', e); });
+    logger.info('Firebase auth account deleted (after re-auth retry)');
+
+    // Now finish local cleanup (was deferred when reauthRequired was returned)
+    await this.clearLocalDataAfterDeletion(uid);
+  }
+
+  /**
+   * PUBLIC: Clear local data after auth account is successfully deleted.
+   * Called after retryDeleteAuthAccount() succeeds, or can be called
+   * standalone if the user gives up on re-auth and wants to sign out.
+   */
+  async clearLocalDataAfterDeletion(uid?: string): Promise<void> {
+    const resolvedUid = uid || getFirebaseAuth()?.currentUser?.uid || '';
+    try {
+      await this.clearLocalStorage();
+    } catch (error) {
+      logger.error('Failed to clear local storage during post-deletion cleanup:', error);
+    }
+    try {
+      await this.clearSecureStorage(resolvedUid);
+    } catch (error) {
+      logger.error('Failed to clear secure storage during post-deletion cleanup:', error);
+    }
+    logger.info('Local data cleared after account deletion');
   }
 
   /**
@@ -413,7 +521,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(membersRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} family members`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -437,7 +545,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(messagesRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} messages`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -461,7 +569,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(conversationsRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} conversations`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -485,7 +593,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(locationsRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} location updates`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -509,7 +617,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(statusRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} status updates`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -575,7 +683,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(alertsRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} earthquake alerts`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -601,7 +709,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(q);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
       logger.info(`Deleted ${snapshot.docs.length} SOS signals`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
@@ -617,10 +725,7 @@ class AccountDeletionService {
   private async deleteV3UserInbox(): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
 
-    const app = initializeFirebase();
-    if (!app) return;
-
-    const uid = getAuth(app).currentUser?.uid;
+    const uid = getFirebaseAuth()?.currentUser?.uid;
     if (!uid) return;
 
     try {
@@ -631,7 +736,7 @@ class AccountDeletionService {
       const snapshot = await getDocs(threadsRef);
 
       const deletePromises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
-      await Promise.all(deletePromises);
+      await Promise.allSettled(deletePromises);
 
       // Also delete the parent user_inbox/{uid} doc if it exists
       try {
@@ -652,10 +757,7 @@ class AccountDeletionService {
   private async deleteV3PushTokens(): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
 
-    const app = initializeFirebase();
-    if (!app) return;
-
-    const uid = getAuth(app).currentUser?.uid;
+    const uid = getFirebaseAuth()?.currentUser?.uid;
     if (!uid) return;
 
     try {
@@ -665,14 +767,12 @@ class AccountDeletionService {
       // Delete V3 push tokens
       const pushTokensRef = collection(db, 'push_tokens', uid, 'devices');
       const pushSnapshot = await getDocs(pushTokensRef);
-      await Promise.all(pushSnapshot.docs.map((d) => deleteDoc(d.ref)));
+      await Promise.allSettled(pushSnapshot.docs.map((d) => deleteDoc(d.ref)));
 
-      // Delete legacy FCM tokens
-      const fcmTokensRef = collection(db, 'fcm_tokens', uid, 'devices');
-      const fcmSnapshot = await getDocs(fcmTokensRef);
-      await Promise.all(fcmSnapshot.docs.map((d) => deleteDoc(d.ref)));
+      // Delete legacy FCM token (flat doc, not subcollection)
+      await deleteDoc(doc(db, 'fcm_tokens', uid)).catch(() => {});
 
-      logger.info(`V3: Deleted ${pushSnapshot.docs.length + fcmSnapshot.docs.length} push tokens`);
+      logger.info(`V3: Deleted ${pushSnapshot.docs.length} push tokens + legacy FCM token`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code !== 'permission-denied') throw error;
@@ -686,10 +786,7 @@ class AccountDeletionService {
   private async deleteV3UserData(): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
 
-    const app = initializeFirebase();
-    if (!app) return;
-
-    const uid = getAuth(app).currentUser?.uid;
+    const uid = getFirebaseAuth()?.currentUser?.uid;
     if (!uid) return;
 
     try {
@@ -703,7 +800,7 @@ class AccountDeletionService {
         try {
           const ref = collection(db, parentPath, subName);
           const snap = await getDocs(ref);
-          await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+          await Promise.allSettled(snap.docs.map((d) => deleteDoc(d.ref)));
           return snap.docs.length;
         } catch { return 0; }
       };
@@ -714,7 +811,7 @@ class AccountDeletionService {
       const subcollections = [
         'contacts', 'blocked', 'reactions', 'contactRequests',
         'notifications', 'familyMembers', 'familyIds',
-        'health', 'ice', 'status', 'status_updates',
+        'health', 'ice', 'status', 'status_updates', 'settings',
       ];
       for (const sub of subcollections) {
         totalDeleted += await deleteSubcollection(userPath, sub);
@@ -732,11 +829,80 @@ class AccountDeletionService {
         const sosRef = collection(db, 'sos_signals');
         const sosQ = query(sosRef, where('creatorUid', '==', uid));
         const sosSnap = await getDocs(sosQ);
-        await Promise.all(sosSnap.docs.map((d) => deleteDoc(d.ref)));
+        await Promise.allSettled(sosSnap.docs.map((d) => deleteDoc(d.ref)));
         totalDeleted += sosSnap.docs.length;
       } catch { /* sos_signals cleanup is best-effort */ }
 
+      // Delete SOS broadcasts created by this user
+      try {
+        const sosBroadcastsRef = collection(db, 'sos_broadcasts');
+        const sbQuery = query(sosBroadcastsRef, where('senderUid', '==', uid), limit(500));
+        const sbSnapshot = await getDocs(sbQuery);
+        if (sbSnapshot.size > 0) {
+          const sbBatch = writeBatch(db);
+          sbSnapshot.docs.forEach(d => sbBatch.delete(d.ref));
+          await sbBatch.commit();
+          totalDeleted += sbSnapshot.size;
+        }
+      } catch { /* sos_broadcasts cleanup is best-effort */ }
+
       logger.info(`V3: Comprehensive cleanup — ${totalDeleted} documents deleted for uid=${uid}`);
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') throw error;
+    }
+  }
+
+  /**
+   * V3: Remove user from all conversations and delete orphaned ones.
+   * - For DM conversations (2 participants): delete the entire conversation + messages
+   * - For group conversations (3+ participants): remove user from participants array
+   * This prevents orphaned conversations and phantom chat issues for other users.
+   */
+  private async deleteV3Conversations(): Promise<void> {
+    if (!firebaseDataService.isInitialized) return;
+
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    if (!uid) return;
+
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+
+      // Find ALL conversations where user is a participant
+      const convsRef = collection(db, 'conversations');
+      const q = query(convsRef, where('participants', 'array-contains', uid));
+      const snapshot = await getDocs(q);
+
+      let deleted = 0;
+      let removed = 0;
+
+      for (const convDoc of snapshot.docs) {
+        const data = convDoc.data();
+        const participants: string[] = data?.participants || [];
+
+        try {
+          if (participants.length <= 2) {
+            // DM or 1-on-1: Delete conversation messages subcollection first
+            const msgsRef = collection(db, 'conversations', convDoc.id, 'messages');
+            const msgsSnap = await getDocs(msgsRef);
+            await Promise.allSettled(msgsSnap.docs.map(m => deleteDoc(m.ref)));
+            // Then delete conversation document
+            await deleteDoc(convDoc.ref);
+            deleted++;
+          } else {
+            // Group: Remove user from participants array (don't delete for other members)
+            await updateDoc(convDoc.ref, {
+              participants: arrayRemove(uid),
+            });
+            removed++;
+          }
+        } catch (convError) {
+          logger.warn(`Failed to clean conversation ${convDoc.id}:`, convError);
+        }
+      }
+
+      logger.info(`V3: Conversations cleanup — ${deleted} deleted, ${removed} user removed from groups`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code !== 'permission-denied') throw error;
@@ -759,22 +925,26 @@ class AccountDeletionService {
   /**
    * Clear secure storage (SecureStore)
    */
-  private async clearSecureStorage(): Promise<void> {
+  private async clearSecureStorage(uid: string): Promise<void> {
     try {
-      // Clear all known keys
-      const keys = [
-        'afn_deviceId', // Device ID key (from src/lib/device.ts)
-        'afetnet_device_id', // Device ID key (from src/core/utils/device.ts)
-        'afetnet_trial_start', // Trial start key (from trialStore.ts)
-        'afn:own_keypair', // Encryption keys (from security/keys.ts)
-        'afn:peers', // Peer keys (from security/keys.ts)
-        'afn:ik_sk', // Identity keys (from crypto/e2ee/identity.ts)
+      // AUTHORITATIVE: Purge ALL security keys via single cleanup function
+      const { purgeUserSecurityKeys } = await import('./security/SecurityKeyCleanup');
+      await purgeUserSecurityKeys(uid);
+
+      // Additional legacy device/identity keys (not user-scoped, but account-related)
+      const legacyKeys = [
+        'afn_deviceId',
+        'afetnet_device_id',
+        'afetnet_trial_start',
+        'afn:own_keypair',
+        'afn:peers',
+        'afn:ik_sk',
         'afn:ik_pk',
         'afn:pre_sk',
         'afn:pre_pk',
       ];
 
-      for (const key of keys) {
+      for (const key of legacyKeys) {
         try {
           await SecureStore.deleteItemAsync(key);
         } catch {
@@ -782,12 +952,17 @@ class AccountDeletionService {
         }
       }
 
-      // Clear stores
-      useFamilyStore.getState().clear();
-      useHealthProfileStore.getState().clearProfile();
+      // Clear ALL user-scoped stores (GDPR/KVKK compliance)
+      await useFamilyStore.getState().clear();
+      await useHealthProfileStore.getState().clearProfile();
       useSettingsStore.getState().resetToDefaults();
-      useTrialStore.getState().endTrial();
       usePremiumStore.getState().clear();
+      await useMessageStore.getState().clear();
+      await useContactStore.getState().clearLocalCache();
+      useUserStatusStore.getState().reset();
+      useEarthquakeStore.getState().clear();
+      useEEWHistoryStore.getState().clearHistory();
+      useMeshStore.getState().clearMessages();
 
       logger.info('Secure storage cleared');
     } catch (error) {

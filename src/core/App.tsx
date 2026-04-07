@@ -139,13 +139,15 @@ export default function CoreApp() {
       const onbRaw = DirectStorage.getString('afetnet-onboarding');
       const onbLegacy = DirectStorage.getString('AFETNET_ONBOARDING_COMPLETED');
       const eulaLegacy = DirectStorage.getString('AFETNET_EULA_ACCEPTED');
-      console.log(
-        `[ColdStart] mmkv=${isMMKVPersistent} auth_cached=${hasCached}` +
-        ` onb_store=${!!onbRaw} onb_legacy=${onbLegacy === '1'}` +
-        ` eula_legacy=${eulaLegacy === '1'}` +
-        ` zustand: onb=${isOnboardingCompleted} eula=${require('./stores/settingsStore').useSettingsStore.getState().eulaAccepted}` +
-        ` auth=${isAuthenticated} authLoading=${isAuthLoading}`
-      );
+      if (__DEV__) {
+        console.log(
+          `[ColdStart] mmkv=${isMMKVPersistent} auth_cached=${hasCached}` +
+          ` onb_store=${!!onbRaw} onb_legacy=${onbLegacy === '1'}` +
+          ` eula_legacy=${eulaLegacy === '1'}` +
+          ` zustand: onb=${isOnboardingCompleted} eula=${require('./stores/settingsStore').useSettingsStore.getState().eulaAccepted}` +
+          ` auth=${isAuthenticated} authLoading=${isAuthLoading}`
+        );
+      }
       // CRITICAL FIX: Warn user if MMKV fell back to volatile MemoryStorage.
       // Without MMKV, ALL data (auth, messages, settings) is lost on app restart.
       // This only happens on Remote Debugger or if JSI fails — should never happen in production.

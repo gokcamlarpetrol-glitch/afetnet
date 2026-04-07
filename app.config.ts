@@ -1,8 +1,104 @@
 import { ConfigContext, ExpoConfig } from "@expo/config";
+import * as fs from 'fs';
+import * as path from 'path';
 import * as dotenv from 'dotenv';
 
 // CRITICAL: Load .env file before reading environment variables
 dotenv.config();
+
+const PROJECT_ROOT = __dirname;
+const IOS_GOOGLE_SERVICES_CANDIDATES = [
+  'ios/AfetNetAcilletiim/GoogleService-Info.plist',
+  'GoogleService-Info.plist',
+];
+const ANDROID_GOOGLE_SERVICES_CANDIDATES = [
+  'android/app/google-services.json',
+  'google-services.json',
+];
+
+const toExpoRelativePath = (relativePath: string): string => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  return normalized.startsWith('./') ? normalized : `./${normalized}`;
+};
+
+const findFirstExistingPath = (candidates: string[]): string | null => {
+  for (const candidate of candidates) {
+    const absolutePath = path.resolve(PROJECT_ROOT, candidate);
+    if (fs.existsSync(absolutePath)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const readFileSafe = (relativePath: string | null): string => {
+  if (!relativePath) return '';
+  try {
+    return fs.readFileSync(path.resolve(PROJECT_ROOT, relativePath), 'utf8');
+  } catch {
+    return '';
+  }
+};
+
+const extractPlistStringValue = (plistText: string, key: string): string => {
+  if (!plistText) return '';
+  const match = plistText.match(new RegExp(`<key>${key}<\\/key>\\s*<string>([^<]+)<\\/string>`, 'm'));
+  return match?.[1]?.trim() || '';
+};
+
+const extractAndroidApiKey = (googleServicesJson: string): string => {
+  if (!googleServicesJson) return '';
+  try {
+    const parsed = JSON.parse(googleServicesJson) as {
+      client?: Array<{ api_key?: Array<{ current_key?: string }> }>;
+    };
+    const clients = Array.isArray(parsed.client) ? parsed.client : [];
+    for (const client of clients) {
+      const apiKeys = Array.isArray(client.api_key) ? client.api_key : [];
+      for (const apiKeyEntry of apiKeys) {
+        const key = typeof apiKeyEntry?.current_key === 'string' ? apiKeyEntry.current_key.trim() : '';
+        if (key.length > 0) {
+          return key;
+        }
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return '';
+};
+
+const foundIosPath = findFirstExistingPath(IOS_GOOGLE_SERVICES_CANDIDATES);
+const foundAndroidPath = findFirstExistingPath(ANDROID_GOOGLE_SERVICES_CANDIDATES);
+
+const resolvedIosGoogleServicesFile = toExpoRelativePath(
+  foundIosPath || IOS_GOOGLE_SERVICES_CANDIDATES[0],
+);
+const resolvedAndroidGoogleServicesFile = toExpoRelativePath(
+  foundAndroidPath || ANDROID_GOOGLE_SERVICES_CANDIDATES[0],
+);
+
+const resolveFirebaseApiKey = (): string => {
+  const envKey = (process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '').trim();
+  if (envKey.length > 0) {
+    return envKey;
+  }
+
+  const iosKey = extractPlistStringValue(readFileSafe(foundIosPath), 'API_KEY');
+  if (iosKey.length > 0) {
+    return iosKey;
+  }
+
+  const androidKey = extractAndroidApiKey(readFileSafe(foundAndroidPath));
+  if (androidKey.length > 0) {
+    return androidKey;
+  }
+
+  return '';
+};
+
+const resolvedFirebaseApiKey = resolveFirebaseApiKey();
+if (!resolvedFirebaseApiKey) {
+  console.warn('[app.config] Firebase API key could not be resolved from env, plist, or google-services.json');
+}
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -10,13 +106,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.3.8",
+  version: "1.5.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   splash: {
     image: "./assets/splash.png",
-    resizeMode: "contain",
+    resizeMode: "cover",
     backgroundColor: "#C62828",
   },
   primaryColor: "#C62828",
@@ -30,7 +126,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-camera",
       {
-        cameraPermission: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
+        cameraPermission: "AfetNet kameranızı sohbette paylaşmak için fotoğraf çekmek, aile üyesi eklerken QR kod taramak ve afet raporuna fotoğraf eklemek için kullanır. Örneğin, deprem sonrası hasar fotoğrafı çekip siz paylaşmayı seçtiğinizde rapor olarak gönderebilirsiniz.",
       }
     ],
     "expo-font",
@@ -65,28 +161,41 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "@react-native-google-signin/google-signin",
     // NOTE: react-native-webrtc doesn't have an Expo config plugin
     // VoiceCallService uses graceful fallback if native module unavailable
+    // AfetNet BLE Peripheral: autolinked via expo-module.config.json (no config plugin needed)
   ],
   ios: {
     ...config.ios,
-    buildNumber: "10",
+    buildNumber: "32",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
+    // APPLE REJECTION FIX: requireFullScreen must be true because the app:
+    // 1. Uses portrait-only orientation (no landscape support)
+    // 2. Uses static Dimensions.get('window') at module level in many screens
+    // 3. Does not handle iPad Split View / Slide Over resize events
+    // Without this, Apple tests Split View on iPad and the UI breaks.
+    requireFullScreen: true,
     usesAppleSignIn: true, // ELITE: Apple Sign-In için gerekli entitlement
     jsEngine: "hermes", // Redundant but explicit
 
     infoPlist: {
       ...(config.ios?.infoPlist || {}),
-      NSLocationWhenInUseUsageDescription: "AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.",
-      NSLocationAlwaysAndWhenInUseUsageDescription: "AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.",
-      NSBluetoothAlwaysUsageDescription: "AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.",
-      NSBluetoothPeripheralUsageDescription: "AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.",
-      NSMicrophoneUsageDescription: "AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.",
-      NSCameraUsageDescription: "AfetNet, aile üyeleri eklemek için kamera kullanır.",
-      NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.",
-      NSContactsUsageDescription: "AfetNet, acil durum kişilerinize hızlı erişim için kişilerinize erişir.",
-      NSPhotoLibraryUsageDescription: "AfetNet, acil durum fotoğraflarını görüntülemek için fotoğraf kütüphanenize erişir.",
-      NSPhotoLibraryAddUsageDescription: "AfetNet, acil durum fotoğraflarını kaydetmek için fotoğraf kütüphanenize erişir.",
-      NSFaceIDUsageDescription: "AfetNet, uygulama güvenliği için Face ID kullanır.",
+      NSLocationWhenInUseUsageDescription: "AfetNet, SOS sinyali gönderirken, sohbette konum paylaşırken, deprem yakınlık hesabı yaparken, toplanma alanlarını gösterirken ve afet haritasını kullanırken konumunuza erişir.",
+      NSLocationAlwaysAndWhenInUseUsageDescription: "AfetNet, aile üyelerinizle gerçek zamanlı konum paylaşımı ve arka planda deprem erken uyarısı için sürekli konum erişimi gerektirir.",
+      NSBluetoothAlwaysUsageDescription: "AfetNet, internet olmadan mesh ağı ile mesaj göndermek, SOS yardım çağrısı yaymak ve yakındaki kullanıcıları keşfetmek için Bluetooth kullanır.",
+      NSBluetoothPeripheralUsageDescription: "AfetNet, mesh ağında yakındaki cihazlara mesaj ve SOS sinyali iletmek için Bluetooth çevre birimi olarak çalışır.",
+      NSMicrophoneUsageDescription: "AfetNet, sohbette sesli mesaj göndermek, sesli arama yapmak ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.",
+      NSCameraUsageDescription: "AfetNet kameranızı sohbette paylaşmak için fotoğraf çekmek, aile üyesi eklerken QR kod taramak ve afet raporuna fotoğraf eklemek için kullanır. Örneğin, deprem sonrası hasar fotoğrafı çekip siz paylaşmayı seçtiğinizde rapor olarak gönderebilirsiniz.",
+      NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek, düşme/çarpışma tespiti yapmak ve kullanıcı aktivitesini değerlendirmek için hareket sensörlerini kullanır.",
+      NSPhotoLibraryUsageDescription: "AfetNet, sohbette ve afet raporlarında paylaşmak üzere fotoğraf kütüphanenizden görsel seçmek için erişir.",
+      NSPhotoLibraryAddUsageDescription: "AfetNet, acil durum fotoğraflarını cihazınıza kaydetmek için fotoğraf kütüphanenize erişir.",
+      NSFaceIDUsageDescription: "AfetNet, hesabınıza yetkisiz erişimi engellemek ve oturum açma işlemini hızlandırmak için Face ID ile kimlik doğrulaması yapar.",
+      // Apple Guideline 2.5.4: Each background mode is justified:
+      // fetch: BackgroundTaskService + BackgroundEEWService (earthquake data polling)
+      // remote-notification: Push notifications (SOS alerts, messages, EEW warnings)
+      // location: FamilyTrackingService + BackgroundEEWService location keep-alive + BackgroundLocationTask
+      // bluetooth-central: HighPerformanceBle BLE scanning for offline mesh networking
+      // bluetooth-peripheral: AfetNetBlePeripheral GATT server for mesh peer discovery
+      // processing: expo-background-task BGProcessingTask (mesh sync, seismic monitoring)
       UIBackgroundModes: [
         "fetch",
         "remote-notification",
@@ -94,19 +203,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-central",
         "bluetooth-peripheral",
         "processing",
-        "voip",
       ],
       ITSAppUsesNonExemptEncryption: false,
       // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: false,
         NSAllowsLocalNetworking: true,
-        NSExceptionDomains: {
-          "www.koeri.boun.edu.tr": {
-            NSExceptionAllowsInsecureHTTPLoads: true,
-            NSIncludesSubdomains: false,
-          },
-        },
+        NSExceptionDomains: {},
       },
       // ELITE: Required URL schemes for WebView and deep linking
       LSApplicationQueriesSchemes: [
@@ -128,12 +231,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "aps-environment": "production", // CRITICAL: Production için "production" (App Store için zorunlu)
       // IAP kaldırıldı - uygulama tamamen ücretsiz
     },
-    googleServicesFile: "./GoogleService-Info.plist",
+    googleServicesFile: resolvedIosGoogleServicesFile,
   },
   android: {
     ...config.android,
     package: "com.gokhancamci.afetnetapp",
-    versionCode: 11,
+    versionCode: 32,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png",
@@ -152,7 +255,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.INTERNET",
       "android.permission.VIBRATE",
     ],
-    googleServicesFile: "./google-services.json",
+    googleServicesFile: resolvedAndroidGoogleServicesFile,
   },
   extra: {
     eas: { projectId: process.env.EAS_PROJECT_ID || "072f1217-172a-40ce-af23-3fc0ad3f7f09" },
@@ -164,8 +267,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
     EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
     // CRITICAL: Firebase API Key from .env file (loaded via dotenv.config() above)
-    EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
-    FIREBASE_API_KEY: process.env.FIREBASE_API_KEY || '',
+    EXPO_PUBLIC_FIREBASE_API_KEY: resolvedFirebaseApiKey,
+    FIREBASE_API_KEY: resolvedFirebaseApiKey,
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     // SECURITY FIX: ORG_SECRET removed — must never be in client bundle
     // Use only server-side (Cloud Functions environment config)

@@ -34,8 +34,10 @@ import { LRUSet } from '../utils/LRUCache';
 import { Mutex, Debouncer, Throttle } from '../utils/Mutex';
 import { DirectStorage } from '../utils/storage';
 import { useMeshStore, type MeshMessage } from './mesh/MeshStore';
-import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import { AppState, AppStateStatus } from 'react-native';
+import { isLikelyFirebaseUid, normalizeIdentityValue } from '../utils/messaging/identityUtils';
+import { NON_CHAT_SYSTEM_TYPES, getEnvelopeTypeFromContent } from '../utils/messaging/filters';
+import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import {
   MAX_QUEUE_SIZE,
   MAX_SEEN_MESSAGE_IDS,
@@ -66,20 +68,8 @@ export type DeliveryStatus = 'pending' | 'sending' | 'sent' | 'delivered' | 'rea
 // ELITE: Message type
 export type MessageType = 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'TYPING' | 'ACK' | 'REACTION' | 'IMAGE' | 'VOICE';
 type CloudMessageType = 'text' | 'sos' | 'location' | 'status' | 'image' | 'voice';
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 const isNonRoutableRecipientId = (value: string): boolean =>
   value === 'me' || value === 'ME' || value.startsWith('group:');
-const SYSTEM_PAYLOAD_TYPES = new Set([
-  'family_status_update',
-  'family_location_update',
-  'family_location',
-  'status_update',
-  'device_status',
-  'presence_update',
-  'typing',
-  'ack',
-  'reaction',
-]);
 
 export interface HybridMessage {
   id: string;
@@ -87,7 +77,9 @@ export interface HybridMessage {
   content: string;
   senderId: string;
   senderName: string;
+  conversationId?: string;
   recipientId?: string;
+  recipientAliases?: string[];
   timestamp: number;
   source: 'CLOUD' | 'MESH' | 'HYBRID';
   location?: { lat: number; lng: number; address?: string };
@@ -103,8 +95,10 @@ export interface HybridMessage {
   // ELITE: Media attachments
   mediaUrl?: string;
   mediaType?: 'image' | 'voice' | 'location';
+  mediaLocalUri?: string; // Local file URI for re-upload on retry
   mediaDuration?: number; // For voice (seconds)
   mediaThumbnail?: string; // Base64 thumbnail for images
+  meshRoutedAt?: number;
 }
 
 // ELITE: Callback types
@@ -125,6 +119,9 @@ class HybridMessageService {
   private processTimer: NodeJS.Timeout | null = null;
   private connectionTimer: NodeJS.Timeout | null = null;
   private cleanupTimers: Set<NodeJS.Timeout> = new Set();
+  private lastMeshPeerCount = 0;
+  private physicalDeviceId: string | null = null;
+  private cachedUid: string | null = null; // FIX: Cached at init for destroy() scoped key
 
   // M2: Mutex for queue operations
   private queueMutex = new Mutex();
@@ -151,6 +148,7 @@ class HybridMessageService {
   // FOREGROUND RE-ENSURE: Reference to active cloud subscription handler
   // Stored so handleAppStateChange can re-invoke it on foreground resume
   private cloudEnsureRefresher: (() => Promise<void>) | null = null;
+  private lastInboxSyncAt = 0;
 
   // CRITICAL FIX: Prevent concurrent initialize() race condition
   private _initPromise: Promise<void> | null = null;
@@ -177,10 +175,20 @@ class HybridMessageService {
   private async _doInitialize(): Promise<void> {
     // CRITICAL FIX: Verify identity before registering device or setting up message processing
     const uid = identityService.getUid();
+    this.cachedUid = uid || null; // FIX: Cache UID for destroy() scoped key
     if (!uid) {
       logger.warn('⚠️ HybridMessageService: UID not resolved yet');
     } else {
       logger.info(`📨 HybridMessageService initializing with UID: ${uid}`);
+    }
+
+    try {
+      const physicalId = await getDeviceIdFromLib();
+      this.physicalDeviceId = typeof physicalId === 'string' && physicalId.trim().length > 0
+        ? physicalId.trim()
+        : null;
+    } catch (deviceIdError) {
+      logger.debug('Physical device ID unavailable during HybridMessageService init', deviceIdError);
     }
 
     await this.loadQueue();
@@ -190,18 +198,13 @@ class HybridMessageService {
     await deliveryManager.initialize();
 
     // Ensure device identity doc exists in Firestore.
-    // RC-3 FIX: Use identityService.getMyId() instead of getDeviceIdFromLib().
-    // getDeviceIdFromLib() can return a stale hardware ID if the identity cache
-    // hasn't been overwritten yet. identityService.getMyId() returns the correct
-    // AFN-XXXXXXXX ID that matches the Firestore device document path.
+    // NOTE: firebaseDataService.initialize() is NOT called here — init.ts Phase B
+    // already initializes it in parallel. If it isn't ready yet, saveDeviceId will
+    // gracefully fail and the device ID will be saved on next app launch.
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
-      try {
-        await firebaseDataService.initialize();
-      } catch { /* best effort */ }
-
       const myUid = identityService.getUid();
-      if (myUid) {
+      if (myUid && firebaseDataService.isInitialized) {
         await firebaseDataService.saveDeviceId(myUid);
       }
     } catch (error) {
@@ -223,7 +226,7 @@ class HybridMessageService {
     // This restores message history from Firestore on app launch, correcting "Amnesia".
     this.syncMessagesWithCloud().catch((err) => {
       logger.warn('Cloud hydration failed, will retry:', err?.message);
-      const retryTimer = setTimeout(() => this.syncMessagesWithCloud().catch(() => {}), 30000);
+      const retryTimer = setTimeout(() => this.syncMessagesWithCloud().catch(e => { if (__DEV__) logger.debug('HybridMsg: cloud sync retry failed:', e); }), 30000);
       this.cleanupTimers.add(retryTimer);
     });
   }
@@ -255,22 +258,40 @@ class HybridMessageService {
       }
 
       // Try direct conversations query first, fall back to inbox threads
-      let threads: Array<{ conversationId: string }> = [];
+      let threads: Array<{ conversationId: string; conversationType?: string; isGroup?: boolean }> = [];
       try {
-        const { collection, query: firestoreQuery, where, getDocs } = await import('firebase/firestore');
+        const { collection, query: firestoreQuery, where, getDocs, limit, orderBy } = await import('firebase/firestore');
         const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
         const db = await getFirestoreInstanceAsync();
         if (db) {
           const q = firestoreQuery(
             collection(db, 'conversations'),
             where('participants', 'array-contains', uid),
+            orderBy('lastMessageAt', 'desc'),
+            limit(50),
           );
           const snapshot = await getDocs(q);
-          snapshot.forEach((docSnap) => threads.push({ conversationId: docSnap.id }));
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data() as Record<string, unknown>;
+            const convType = typeof data?.type === 'string' ? data.type : '';
+            const isGroupConversation = convType === 'group' || docSnap.id.startsWith('grp_');
+            if (isGroupConversation) return;
+            threads.push({ conversationId: docSnap.id, conversationType: convType });
+          });
         }
       } catch {
         // Fallback to inbox threads if conversations query fails
-        threads = await firebaseDataService.loadInboxThreads(uid);
+        const inboxThreads = await firebaseDataService.loadInboxThreads(uid);
+        threads = inboxThreads.filter((thread: any) => {
+          const convId = typeof thread?.conversationId === 'string' ? thread.conversationId : '';
+          const convType = typeof thread?.conversationType === 'string' ? thread.conversationType : '';
+          const isGroupConversation =
+            convType === 'group'
+            || thread?.isGroup === true
+            || thread?.isGroup === 'true'
+            || convId.startsWith('grp_');
+          return !isGroupConversation;
+        });
       }
 
       if (!threads || threads.length === 0) {
@@ -299,8 +320,11 @@ class HybridMessageService {
               thread.conversationId
             );
 
-            // Take recent messages — load generously to preserve full history on restart
-            const recentMessages = Array.isArray(threadMessages) ? threadMessages.slice(0, 200) : [];
+            // FIX: Reduced from 200 to 50 per conversation for cloud sync.
+            // 200 messages x 50 conversations = 10,000 messages loaded into memory at once,
+            // causing OOM crashes on older devices. 50 messages per conversation is sufficient
+            // for recent context. Full history loads lazily when user opens a conversation.
+            const recentMessages = Array.isArray(threadMessages) ? threadMessages.slice(0, 50) : [];
 
             if (recentMessages && recentMessages.length > 0) {
               const selfIds = this.getSelfIdentityIds();
@@ -313,21 +337,42 @@ class HybridMessageService {
                 const senderId = rawMsg.senderUid || rawMsg.senderId || 'unknown';
 
                 const isFromMe = senderId === identityService.getUid?.() || selfIds.has(senderId);
+                const receiptState = this.resolveCloudDeliveryState(rawMsg, {
+                  isFromMe,
+                  selfIds,
+                });
 
-                // Map media type safely
+                // Map media type safely — check top-level first, then metadata fallback
+                const rawMetadata = rawMsg.metadata as Record<string, unknown> | undefined;
+                const rawMediaType = rawMsg.mediaType || rawMetadata?.mediaType;
                 let mediaType: 'image' | 'voice' | 'location' | undefined;
-                if (rawMsg.mediaType === 'image') mediaType = 'image';
-                else if (rawMsg.mediaType === 'voice') mediaType = 'voice';
-                else if (rawMsg.mediaType === 'location') mediaType = 'location';
+                if (rawMediaType === 'image') mediaType = 'image';
+                else if (rawMediaType === 'voice') mediaType = 'voice';
+                else if (rawMediaType === 'location') mediaType = 'location';
 
-                // CRITICAL FIX: Use actual UID for from/to fields instead of 'me'/conversationId.
+                // Use actual UID for from/to fields instead of 'me'/conversationId.
                 // ConversationScreen filters messages by checking selfIds.has(msg.from) and
                 // peerIdCandidates.has(msg.to). Using 'me' and conversationId breaks this filter.
                 const myUid = identityService.getUid?.() || 'me';
-                // For sent messages, derive peer from toDeviceId field; for received, peer is sender
-                const peerUid = isFromMe
-                  ? (rawMsg.toDeviceId || rawMsg.recipientId || senderId)
+                // For sent messages, derive peer from toDeviceId field; for received, peer is sender.
+                // V3 messages always have toDeviceId (set during attemptSend). Legacy messages
+                // without it fall back to conversation participants discovery.
+                let peerUid = isFromMe
+                  ? (rawMsg.toDeviceId || rawMsg.recipientId || '')
                   : senderId;
+                // If peerUid is empty/broadcast for a sent message, resolve from conversation participants
+                if (isFromMe && (!peerUid || peerUid === 'broadcast')) {
+                  const convData = rawMsg._conversationParticipants as string[] | undefined;
+                  if (convData) {
+                    const peer = convData.find((uid: string) => uid !== myUid);
+                    if (peer) peerUid = peer;
+                  }
+                  // FIX: Do NOT fall back to senderId for sent messages — senderId is SELF,
+                  // which would make to=self, hiding the message in conversations.
+                  // Use conversationId as peerUid so ConversationScreen's TIER 1 filter
+                  // (conversationId match) can still display it.
+                  if (!peerUid && rawMsg.conversationId) peerUid = rawMsg.conversationId;
+                }
 
                 messagesToImport.push({
                   id: msg.id,
@@ -338,17 +383,21 @@ class HybridMessageService {
                   content: rawMsg.content || '',
                   timestamp: rawMsg.timestamp || Date.now(),
                   type: this.toMeshStoreType(this.mapCloudTypeToHybridType(rawMsg.type, mediaType)),
-                  status: isFromMe ? 'sent' : 'read', // History is assumed read/sent
-                  delivered: true,
-                  read: true,
+                  status: receiptState.status,
+                  delivered: receiptState.delivered,
+                  read: receiptState.read,
                   priority: this.isMessagePriority(rawMsg.priority) ? rawMsg.priority : 'normal',
                   hops: 0,
                   retryCount: 0,
                   acks: [],
                   ttl: 3,
-                  mediaUrl: rawMsg.mediaUrl,
+                  mediaUrl: rawMsg.mediaUrl ?? (rawMetadata?.mediaUrl as string | undefined),
                   mediaType: mediaType,
-                  location: this.normalizeLocationPayload(rawMsg.location)
+                  mediaDuration: typeof rawMsg.mediaDuration === 'number' ? rawMsg.mediaDuration
+                    : typeof rawMetadata?.mediaDuration === 'number' ? rawMetadata.mediaDuration as number
+                    : undefined,
+                  location: this.normalizeLocationPayload(rawMsg.location),
+                  conversationId: thread.conversationId,
                 });
               });
             }
@@ -415,10 +464,23 @@ class HybridMessageService {
     this.typingCallbacks.clear();
     this.connectionCallbacks.clear();
 
-    // Force save queue
+    // Force save queue AND seen IDs before shutdown
     this.saveQueueImmediate();
+    this.saveSeenIdsImmediate();
+
+    // CRITICAL: Clear in-memory state so re-initialize by a different user
+    // doesn't inherit stale data from the previous account
+    this.queue = [];
+    this.seenMessageIds = new LRUSet<string>(MAX_SEEN_MESSAGE_IDS);
+    this.lastMeshPeerCount = 0;
+    this.physicalDeviceId = null;
+    this.cachedUid = null; // FIX: Clear AFTER save completes above
+    this.isProcessing = false; // Reset so queue isn't permanently stuck after re-init
+    this.lastEmittedConnectionState = null; // Reset so first connection event after re-init fires
+    this.isActive = true; // Reset to default so next init doesn't start with background state
 
     this.isInitialized = false;
+    this._initPromise = null; // CRITICAL FIX: Reset init promise so re-initialize works after destroy
     logger.info('HybridMessageService destroyed');
   }
 
@@ -451,7 +513,7 @@ class HybridMessageService {
       // network interruption). Without this, messages are missed until the next
       // online connection event.
       if (this.cloudEnsureRefresher) {
-        this.cloudEnsureRefresher().catch(() => {});
+        this.cloudEnsureRefresher().catch(e => { if (__DEV__) logger.debug('HybridMsg: cloud refresher error:', e); });
       }
       logger.debug('HybridMessageService resumed (foreground)');
     }
@@ -470,7 +532,9 @@ class HybridMessageService {
       if (!this.isActive) return;
 
       const isOnline = connectionManager.isOnline;
-      const meshConnected = useMeshStore.getState().isConnected;
+      const meshState = useMeshStore.getState();
+      const meshPeerCount = Array.isArray(meshState.peers) ? meshState.peers.length : 0;
+      const meshConnected = meshState.isConnected || meshPeerCount > 0;
 
       let state: 'online' | 'mesh' | 'offline';
       if (isOnline) {
@@ -488,7 +552,7 @@ class HybridMessageService {
       if (state !== this.lastEmittedConnectionState) {
         const previousState = this.lastEmittedConnectionState;
         this.lastEmittedConnectionState = state;
-        this.connectionCallbacks.forEach(cb => cb(state));
+        [...this.connectionCallbacks].forEach(cb => cb(state));
 
         // When transitioning to online, immediately process pending queue
         // so queued messages don't wait for the next 10-second cycle
@@ -497,6 +561,20 @@ class HybridMessageService {
           this.processQueue();
         }
       }
+
+      // Peer discovery nudge: when first peer appears, make queued messages immediately eligible.
+      if (this.lastMeshPeerCount === 0 && meshPeerCount > 0 && this.queue.length > 0) {
+        const now = Date.now();
+        for (const msg of this.queue) {
+          if (msg.status === 'pending' || msg.status === 'sending') {
+            msg.nextRetryAt = now;
+          }
+        }
+        this.saveQueueDebounced();
+        logger.info(`Mesh peer discovered (${meshPeerCount}); triggering immediate queue flush (${this.queue.length} messages)`);
+        this.processQueue();
+      }
+      this.lastMeshPeerCount = meshPeerCount;
     }, CONNECTION_CHECK_INTERVAL_MS);
   }
 
@@ -585,21 +663,9 @@ class HybridMessageService {
     }
   }
 
+  /** Delegates to shared getEnvelopeTypeFromContent from messaging/filters */
   private getEnvelopeTypeFromContent(content: string): string {
-    const trimmed = typeof content === 'string' ? content.trim() : '';
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
-      return '';
-    }
-
-    try {
-      const parsed = JSON.parse(trimmed) as { type?: unknown };
-      if (typeof parsed.type !== 'string') {
-        return '';
-      }
-      return parsed.type.trim().toLowerCase();
-    } catch {
-      return '';
-    }
+    return getEnvelopeTypeFromContent(content);
   }
 
   private deriveMessageTypeFromContent(
@@ -631,7 +697,7 @@ class HybridMessageService {
     if (!envelopeType) {
       return false;
     }
-    return SYSTEM_PAYLOAD_TYPES.has(envelopeType);
+    return NON_CHAT_SYSTEM_TYPES.has(envelopeType);
   }
 
   private normalizeLocationPayload(raw: unknown): HybridMessage['location'] | undefined {
@@ -680,10 +746,114 @@ class HybridMessageService {
     return value === 'critical' || value === 'high' || value === 'normal' || value === 'low';
   }
 
+  private isDeliveryStatus(value: unknown): value is DeliveryStatus {
+    return value === 'pending'
+      || value === 'sending'
+      || value === 'sent'
+      || value === 'delivered'
+      || value === 'read'
+      || value === 'failed';
+  }
+
+  private extractReceiptActorIds(value: unknown): string[] {
+    if (!value) return [];
+    if (typeof value === 'string') {
+      const normalized = this.normalizeIdentity(value);
+      return normalized ? [normalized] : [];
+    }
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => this.normalizeIdentity(typeof item === 'string' ? item : ''))
+        .filter((item) => item.length > 0);
+    }
+    if (typeof value === 'object') {
+      return Object.keys(value as Record<string, unknown>)
+        .map((key) => this.normalizeIdentity(key))
+        .filter((key) => key.length > 0);
+    }
+    return [];
+  }
+
+  private resolveCloudDeliveryState(
+    rawMessage: Record<string, unknown>,
+    options: {
+      isFromMe: boolean;
+      selfIds: Set<string>;
+    },
+  ): {
+    status: DeliveryStatus;
+    delivered: boolean;
+    read: boolean;
+  } {
+    const rawStatus = this.isDeliveryStatus(rawMessage.status)
+      ? rawMessage.status
+      : 'sent';
+    const readByIds = this.extractReceiptActorIds(rawMessage.readBy);
+    const deliveredToIds = this.extractReceiptActorIds(rawMessage.deliveredTo);
+    const hasSelfRead = readByIds.some((id) => options.selfIds.has(id));
+    const hasPeerRead = readByIds.some((id) => !options.selfIds.has(id));
+    const hasSelfDelivered = deliveredToIds.some((id) => options.selfIds.has(id));
+    const hasPeerDelivered = deliveredToIds.some((id) => !options.selfIds.has(id));
+
+    const read = rawStatus === 'read'
+      || rawMessage.read === true
+      || (options.isFromMe ? hasPeerRead : hasSelfRead);
+
+    const delivered = read
+      || rawStatus === 'delivered'
+      || rawMessage.delivered === true
+      || (options.isFromMe ? hasPeerDelivered : hasSelfDelivered)
+      || !options.isFromMe;
+
+    let status: DeliveryStatus = rawStatus;
+    if (read) {
+      status = 'read';
+    } else if (delivered) {
+      status = 'delivered';
+    } else if (!options.isFromMe && (rawStatus === 'pending' || rawStatus === 'sending' || rawStatus === 'sent')) {
+      status = 'delivered';
+    }
+
+    return { status, delivered, read };
+  }
+
   private getSelfIdentityIds(): Set<string> {
     const ids = new Set<string>(['ME', 'me']);
     const uid = identityService.getUid();
-    if (uid) ids.add(uid);
+    if (uid) {
+      ids.add(uid);
+    }
+
+    const identity = identityService.getIdentity() as (ReturnType<typeof identityService.getIdentity> & {
+      id?: string;
+      deviceId?: string;
+      qrId?: string;
+      publicUserCode?: string;
+    }) | null;
+    if (identity?.id) {
+      ids.add(identity.id);
+    }
+    if (identity?.deviceId) {
+      ids.add(identity.deviceId);
+    }
+    if (identity?.uid) {
+      ids.add(identity.uid);
+    }
+    if (identity?.publicUserCode) {
+      ids.add(identity.publicUserCode);
+    }
+    if (identity?.qrId) {
+      ids.add(identity.qrId);
+    }
+
+    const myId = identityService.getMyId?.();
+    if (myId) {
+      ids.add(myId);
+    }
+
+    if (this.physicalDeviceId) {
+      ids.add(this.physicalDeviceId);
+    }
     return ids;
   }
 
@@ -692,8 +862,125 @@ class HybridMessageService {
     const trimmed = recipientId.trim();
     if (!trimmed || trimmed === 'broadcast') return 'broadcast';
     if (isNonRoutableRecipientId(trimmed)) return undefined;
-    if (UID_REGEX.test(trimmed)) return trimmed;
+    if (isLikelyFirebaseUid(trimmed)) return trimmed;
     return undefined; // Only UIDs are routable in v4
+  }
+
+  private buildMeshRecipientAliases(
+    requestedRecipientId?: string,
+    resolvedRecipientId?: string,
+    extraAliases?: string[],
+  ): string[] | undefined {
+    const aliases = new Set<string>();
+
+    const tryAdd = (value?: string) => {
+      if (!value) return;
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === 'broadcast') return;
+      if (isNonRoutableRecipientId(trimmed)) return;
+      aliases.add(trimmed);
+    };
+
+    tryAdd(requestedRecipientId);
+    tryAdd(resolvedRecipientId);
+    if (Array.isArray(extraAliases)) {
+      extraAliases.forEach((alias) => tryAdd(alias));
+    }
+
+    return aliases.size > 0 ? Array.from(aliases) : undefined;
+  }
+
+  private isDirectedRecipient(recipientId?: string): boolean {
+    return !!(
+      typeof recipientId === 'string'
+      && recipientId.trim().length > 0
+      && recipientId !== 'broadcast'
+    );
+  }
+
+  private isUidRecipient(recipientId?: string): boolean {
+    return !!(
+      this.isDirectedRecipient(recipientId)
+      && isLikelyFirebaseUid(recipientId as string)
+    );
+  }
+
+  private normalizeMeshPeerId(value?: string | null): string {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  }
+
+  private getDirectedRecipientTargets(
+    message: Pick<HybridMessage, 'recipientId' | 'recipientAliases'>,
+  ): Set<string> {
+    const targets = new Set<string>();
+    const tryAdd = (value?: string | null) => {
+      const trimmed = typeof value === 'string' ? value.trim() : '';
+      if (!trimmed || trimmed === 'broadcast' || isNonRoutableRecipientId(trimmed)) {
+        return;
+      }
+      const normalized = this.normalizeMeshPeerId(trimmed);
+      if (normalized) {
+        targets.add(normalized);
+      }
+    };
+
+    tryAdd(message.recipientId);
+    if (Array.isArray(message.recipientAliases)) {
+      message.recipientAliases.forEach((alias) => tryAdd(alias));
+    }
+
+    return targets;
+  }
+
+  private hasVisibleMeshPeerForRecipient(
+    message: Pick<HybridMessage, 'recipientId' | 'recipientAliases'>,
+  ): boolean {
+    const targets = this.getDirectedRecipientTargets(message);
+    if (targets.size === 0) {
+      return false;
+    }
+
+    const peers = useMeshStore.getState().peers;
+    if (!Array.isArray(peers) || peers.length === 0) {
+      return false;
+    }
+
+    return peers.some((peer) => targets.has(this.normalizeMeshPeerId(peer?.id)));
+  }
+
+  private canTreatMeshSendAsDelivery(
+    message: Pick<HybridMessage, 'recipientId' | 'recipientAliases'>,
+  ): boolean {
+    // Broadcast/system messages can be considered sent once handed to mesh transport.
+    if (!this.isDirectedRecipient(message.recipientId)) {
+      return true;
+    }
+    // Direct messages are only trusted when the intended peer (or one of its aliases)
+    // is actually visible in the current mesh peer table. Treating "any peer" as
+    // successful delivery caused false positives and dropped offline retries.
+    return this.hasVisibleMeshPeerForRecipient(message);
+  }
+
+  private shouldKeepRetryingAfterMaxAttempts(
+    message: Pick<HybridMessage, 'type' | 'recipientId' | 'recipientAliases' | 'meshRoutedAt'>,
+    isOnline: boolean,
+  ): boolean {
+    if (message.type === 'SOS') {
+      return true;
+    }
+
+    if (message.meshRoutedAt && this.isUidRecipient(message.recipientId)) {
+      return true;
+    }
+
+    // Life-safety/offline-first behavior:
+    // direct offline messages must stay queued until the recipient becomes reachable
+    // or cloud sync returns. Hard-failing here makes offline chat appear broken.
+    if (!isOnline && this.getDirectedRecipientTargets(message).size > 0) {
+      return true;
+    }
+
+    return false;
   }
 
   private async resolveRecipientIdForSend(recipientId?: string): Promise<string | undefined> {
@@ -705,7 +992,7 @@ class HybridMessageService {
     logger.info(`🔍 resolveRecipientIdForSend: input="${recipientId}", after resolveRecipientId="${resolved}"`);
 
     // Already a valid UID — return directly (with self-UID alias detection)
-    if (resolved && UID_REGEX.test(resolved)) {
+    if (resolved && isLikelyFirebaseUid(resolved)) {
       // If alias resolution collapsed to current user's UID, preserve the original
       // non-UID recipient alias for mesh routing (multi-device/same-account safety).
       if (recipientId) {
@@ -713,7 +1000,7 @@ class HybridMessageService {
         const selfIds = this.getSelfIdentityIds();
         if (
           rawRecipient &&
-          !UID_REGEX.test(rawRecipient) &&
+          !isLikelyFirebaseUid(rawRecipient) &&
           !isNonRoutableRecipientId(rawRecipient) &&
           selfIds.has(resolved)
         ) {
@@ -730,10 +1017,11 @@ class HybridMessageService {
     // Non-routable (me, group:*) — no point in Firestore lookup
     if (isNonRoutableRecipientId(trimmed)) return undefined;
 
-    // CRITICAL FIX: For non-UID inputs (AFN codes, device IDs, etc.),
-    // attempt Firestore resolution. Previously this code was unreachable
-    // because resolveRecipientId() returned undefined for non-UIDs,
-    // and the !resolved check returned early before reaching this block.
+    // CANONICAL: For non-UID inputs (AFN codes, device IDs, etc.),
+    // attempt Firestore resolution to Firebase Auth UID.
+    // If resolution fails, return undefined — NOT the raw alias.
+    // A raw non-UID alias in recipientId causes Firestore writes to non-UID paths
+    // that no receiver subscribes to, creating orphan documents.
     try {
       const { firebaseDataService } = await import('./FirebaseDataService');
       try {
@@ -742,21 +1030,24 @@ class HybridMessageService {
         // best effort
       }
       const resolvedUid = await firebaseDataService.resolveRecipientUid(trimmed);
-      if (resolvedUid && UID_REGEX.test(resolvedUid)) {
+      if (resolvedUid && isLikelyFirebaseUid(resolvedUid)) {
         logger.info(`🔍 resolveRecipientIdForSend: Firestore resolved "${trimmed}" → UID ${resolvedUid}`);
         return resolvedUid;
       }
-      logger.warn(`⚠️ resolveRecipientIdForSend: Firestore could NOT resolve "${trimmed}" to UID`);
+      logger.warn(`⚠️ resolveRecipientIdForSend: Firestore could NOT resolve "${trimmed}" to UID — returning undefined (caller will show error to user)`);
     } catch (error) {
-      logger.debug(`resolveRecipientIdForSend Firestore lookup failed for "${trimmed}"`, error);
+      logger.warn(`resolveRecipientIdForSend Firestore lookup failed for "${trimmed}" — returning undefined`, error);
     }
 
+    // CANONICAL: Do NOT return raw non-UID alias for cloud write paths.
+    // sendMessage() checks for undefined and throws a user-visible error.
+    // Mesh routing still works via recipientAliases (built separately).
     return undefined;
   }
 
+  /** Delegates to shared normalizeIdentityValue from messaging/identityUtils */
   private normalizeIdentity(value: string | null | undefined): string {
-    if (!value || typeof value !== 'string') return '';
-    return value.trim();
+    return normalizeIdentityValue(value);
   }
 
 
@@ -896,6 +1187,13 @@ class HybridMessageService {
       // Previously, `from` was always set to 'me', which made incoming messages
       // appear as outgoing — corrupting the conversation index and hiding them.
       const isFromMe = selfIds.has(message.senderId);
+      const normalizedStatus: DeliveryStatus = isFromMe
+        ? (message.status === 'pending' ? 'sending' : (message.status || 'sent'))
+        : (message.status === 'read' ? 'read' : 'delivered');
+      const delivered = isFromMe
+        ? (normalizedStatus === 'delivered' || normalizedStatus === 'read')
+        : true;
+      const read = normalizedStatus === 'read';
 
       const fromField = isFromMe ? 'me' : message.senderId;
       const toField = isFromMe
@@ -910,11 +1208,11 @@ class HybridMessageService {
         to: toField,
         content: message.content,
         timestamp: message.timestamp,
-        delivered: !isFromMe, // Incoming messages are already delivered
-        read: false,
+        delivered,
+        read,
         type: message.type as 'CHAT' | 'SOS' | 'STATUS' | 'LOCATION' | 'VOICE',
         priority: message.priority,
-        status: isFromMe ? 'sending' : 'delivered',
+        status: normalizedStatus,
         replyTo: message.replyTo,
         replyPreview: message.replyPreview,
         // CRITICAL FIX: Pass media fields to messageStore
@@ -925,64 +1223,104 @@ class HybridMessageService {
         ...(typeof message.mediaDuration === 'number' ? { mediaDuration: message.mediaDuration } : {}),
         ...(message.mediaThumbnail ? { mediaThumbnail: message.mediaThumbnail } : {}),
         ...(message.location ? { location: message.location } : {}),
+        ...(conversationId ? { conversationId } : {}),
       });
 
-      // CRITICAL FIX: Auto-create conversation for incoming messages from unknown senders.
-      // Without this, messages arrive in the stores but don't appear in the Messages screen
-      // because no conversation entry exists for the sender.
-      // PHANTOM GROUP FIX: Validate senderId is a legitimate Firebase UID (20-40 alphanumeric chars).
-      // Skip broadcast/group prefixes and malformed IDs that create phantom conversations.
-      const senderIdValid = message.senderId
-        && message.senderId !== 'unknown'
-        && !message.senderId.startsWith('group:')
-        && !message.senderId.startsWith('family-')
-        && message.senderId !== 'broadcast'
-        && /^[A-Za-z0-9]{20,40}$/.test(message.senderId);
-      if (!isFromMe && senderIdValid) {
+      // CRITICAL FIX: Send Delivery Receipt (Double-tick) back to Sender
+      // Previously, incoming messages were added to the store but Firebase wasn't informed
+      // that they were delivered, leaving the sender with a single tick forever.
+      if (!isFromMe) {
+        useMessageStore.getState().markAsDelivered(message.id).catch((err: any) => {
+          logger.debug('Failed to auto-mark message as delivered', err);
+        });
+      }
+
+      // CRITICAL FIX: Auto-create and update conversation previews for BOTH incoming and outgoing messages.
+      // Previously, outgoing messages never updated the conversation list preview because it was
+      // guarded by `if (!isFromMe)`.
+      const conversationTargetId = isFromMe ? message.recipientId : message.senderId;
+      const isUUIDv4 = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(conversationTargetId || '');
+
+      const targetIdValid = conversationTargetId
+        && conversationTargetId !== 'unknown'
+        && conversationTargetId !== 'broadcast'
+        && !conversationTargetId.startsWith('group:')
+        && !conversationTargetId.startsWith('grp_')
+        && !conversationTargetId.startsWith('family-')
+        && !conversationTargetId.startsWith('device-')
+        && (
+          /^[A-Za-z0-9]{20,40}$/.test(conversationTargetId) ||
+          /^\+[1-9]\d{5,14}$/.test(conversationTargetId) ||
+          (conversationTargetId.length >= 20 && /^[A-Za-z0-9\-_.]+$/.test(conversationTargetId) && !isUUIDv4)
+        );
+
+      if (targetIdValid) {
         const conversations = useMessageStore.getState().conversations;
-        const existingConv = conversations.find((c: { userId: string }) => c.userId === message.senderId);
+        const existingConv = conversations.find((c: { userId: string }) => c.userId === conversationTargetId);
+
         if (!existingConv) {
-          // ELITE FIX: Look up contact display name before falling back to generic name
-          let displayName = message.senderName || '';
+          // Look up contact display name before falling back to generic name
+          let displayName = !isFromMe ? (message.senderName || '') : '';
           if (!displayName) {
             try {
               const { contactService } = require('./ContactService');
-              const contact = contactService.getContact?.(message.senderId);
+              const contact = contactService.getContact?.(conversationTargetId);
               displayName = contact?.displayName || contact?.nickname || '';
             } catch {
-              // ContactService not available — use fallback
+              // ContactService not available
             }
           }
+          if (!conversationTargetId) return;
           useMessageStore.getState().addConversation({
-            userId: message.senderId,
-            userName: displayName || `Cihaz ${message.senderId.slice(0, 8)}...`,
-            lastMessage: (message.content || '').substring(0, 100),
+            userId: conversationTargetId,
+            userName: displayName || `Cihaz ${conversationTargetId.slice(0, 8)}...`,
+            lastMessage: (message.content || 'Yeni Medya/Konum').substring(0, 100),
             lastMessageTime: message.timestamp,
-            unreadCount: 1,
-            // Store conversationId so MessagesScreen can pass it directly to ConversationScreen
-            // (bypasses pairKey lookup which requires a Firestore composite index)
+            unreadCount: isFromMe ? 0 : 1,
             ...(conversationId ? { conversationId } : {}),
           });
-        } else if (conversationId && !existingConv.conversationId) {
-          // CRITICAL FIX: Backfill conversationId for conversations that were
-          // created before V3 (e.g., via mesh) and don't have a conversationId yet.
-          // Without this, tapping on the conversation in MessagesScreen doesn't
-          // pass conversationId to ConversationScreen → forces a pairKey lookup
-          // which may fail if the composite index isn't deployed.
+        } else {
+          // CRITICAL FIX: Always update the conversation preview for BOTH incoming and outgoing messages!
           useMessageStore.getState().addConversation({
             ...existingConv,
-            conversationId,
-            lastMessage: (message.content || '').substring(0, 100),
-            lastMessageTime: message.timestamp,
-            unreadCount: (existingConv.unreadCount || 0) + 1,
+            conversationId: conversationId || existingConv.conversationId,
+            lastMessage: (message.content || 'Yeni Medya/Konum').substring(0, 100),
+            lastMessageTime: Math.max(existingConv.lastMessageTime || 0, message.timestamp),
+            // NOTE: Do NOT increment unreadCount client-side — CF onNewConversationMessageV3
+            // already increments it server-side. Client increment + CF increment = double count.
+            // The inbox onSnapshot will bring the authoritative count from Firestore.
+            unreadCount: existingConv.unreadCount || 0,
           });
         }
 
-        // DUPLICATE-NOTIFICATION FIX: Local notify() removed.
-        // Cloud Function onNewConversationMessageV3 already sends FCM push for every
-        // incoming message. Calling notificationCenter.notify() here was firing a
-        // SECOND (local) notification on top of the FCM banner → user saw 2 alerts.
-        // The FCM push is the authoritative notification; this local call is redundant.
+        // Local notification for INCOMING messages when app is NOT in active foreground.
+        // CRITICAL FIX: Previously gated on `!connectionManager.isOnline`, which meant
+        // when the device is online but the app is backgrounded, NO local notification
+        // fired. The code relied 100% on CF push (onNewConversationMessageV3), but CF
+        // push can fail silently (token not registered, Expo API down, rate limited, etc.)
+        // leaving the user with ZERO notification.
+        //
+        // Now: Fire local notification when app is backgrounded/inactive, regardless of
+        // online status. When the app is in the foreground, the OS banner from the CF push
+        // handles display (via setNotificationHandler with shouldShowAlert: true).
+        // Duplicate prevention: expo-notifications deduplicates by notification identifier,
+        // and NotificationCenter's conversation-level suppression handles foreground dedup.
+        if (!isFromMe && AppState.currentState !== 'active') {
+          try {
+            const { notificationCenter } = require('./notifications/NotificationCenter');
+            notificationCenter.notify('message', {
+              messageId: message.id,
+              userId: message.senderId,
+              senderUid: message.senderId,
+              senderName: existingConv?.userName || message.senderName || `Cihaz ${message.senderId.slice(0, 8)}...`,
+              message: message.content || 'Yeni Medya/Konum',
+              conversationId: conversationId || existingConv?.conversationId,
+              timestamp: message.timestamp
+            }).catch((err: any) => logger.debug('Local notify failed:', err));
+          } catch (err) {
+            logger.debug('Failed to trigger local notification', err);
+          }
+        }
       }
     } catch (error) {
       // messageStore push is best-effort — MeshStore is still the backup display
@@ -999,9 +1337,11 @@ class HybridMessageService {
     options: {
       priority?: MessagePriority;
       type?: MessageType;
+      conversationId?: string;
       replyTo?: string;
       replyPreview?: string;
       location?: { lat: number; lng: number; address?: string };
+      recipientAliases?: string[];
     } = {}
   ): Promise<HybridMessage> {
     if (!this.isInitialized) await this.initialize();
@@ -1043,6 +1383,11 @@ class HybridMessageService {
     ) {
       throw new Error('Alıcı kimliği çözümlenemedi. Lütfen kişiyi tekrar ekleyin.');
     }
+    const recipientAliases = this.buildMeshRecipientAliases(
+      requestedRecipientId,
+      resolvedRecipientId,
+      options.recipientAliases,
+    );
 
     const message: HybridMessage = {
       id: messageId,
@@ -1050,7 +1395,11 @@ class HybridMessageService {
       content: validation.sanitized,
       senderId: senderUid,
       senderName: myIdentity.displayName,
+      conversationId: typeof options.conversationId === 'string' && options.conversationId.trim().length > 0
+        ? options.conversationId.trim()
+        : undefined,
       recipientId: resolvedRecipientId,
+      recipientAliases,
       timestamp: Date.now(),
       source: 'HYBRID',
       status: 'pending',
@@ -1092,10 +1441,12 @@ class HybridMessageService {
     // CRITICAL FIX: Push sent message to MeshStore immediately for UI display.
     // Without this, the sender never sees their own message in ConversationScreen
     // (which reads from useMeshStore.messages).
-    this.pushCloudMessageToMeshStore(message);
+    this.pushCloudMessageToMeshStore(message, message.conversationId);
 
-    // Attempt immediate send
-    this.processMessageImmediate(message);
+    // Attempt immediate send (fire-and-forget but catch unhandled rejection)
+    this.processMessageImmediate(message).catch(e => {
+      logger.error('processMessageImmediate failed for text message:', e);
+    });
 
     return message;
   }
@@ -1113,6 +1464,8 @@ class HybridMessageService {
       mediaThumbnail?: string; // Base64 thumbnail
       location?: { lat: number; lng: number; address?: string };
       caption?: string;
+      conversationId?: string;
+      recipientAliases?: string[];
     }
   ): Promise<HybridMessage> {
     if (!this.isInitialized) await this.initialize();
@@ -1145,9 +1498,15 @@ class HybridMessageService {
     ) {
       throw new Error('Alıcı kimliği çözümlenemedi. Lütfen kişiyi tekrar ekleyin.');
     }
+    const recipientAliases = this.buildMeshRecipientAliases(
+      requestedRecipientId,
+      resolvedRecipientId,
+      options.recipientAliases,
+    );
 
     let mediaUrl = options.mediaUrl;
     let meshBinaryFallbackStarted = false;
+    let mediaUploadHardFailure: string | null = null;
 
     // Upload to Firebase Storage if local URI provided
     if (options.mediaLocalUri && !mediaUrl) {
@@ -1165,14 +1524,50 @@ class HybridMessageService {
         }
         const storagePath = `chat/${storageOwnerId}/${Date.now()}.${extension}`;
 
-        // Read file and upload
-        const FileSystem = require('expo-file-system');
-        const base64Data = await FileSystem.readAsStringAsync(options.mediaLocalUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const { Buffer } = await import('buffer');
-        const bytes = Uint8Array.from(Buffer.from(base64Data, 'base64'));
-        const uploadResult = await firebaseStorageService.uploadFile(storagePath, bytes, {
+        const FileSystem = await import('expo-file-system');
+
+        // PERFORMANCE FIX: Compress images before upload to reduce bandwidth & memory.
+        // This avoids base64 + Buffer duplication that can crash on large photos.
+        let uploadUri = options.mediaLocalUri;
+        if (mediaType === 'image') {
+          const originalInfo = await FileSystem.getInfoAsync(options.mediaLocalUri);
+          if (!originalInfo.exists) {
+            mediaUploadHardFailure = 'Seçilen fotoğraf dosyası bulunamadı.';
+            throw new Error('image-file-missing');
+          }
+
+          try {
+            const ImageManipulator = await import('expo-image-manipulator');
+            const compressed = await ImageManipulator.manipulateAsync(
+              options.mediaLocalUri,
+              [{ resize: { width: 1280 } }], // Max 1280px width (preserves aspect ratio)
+              { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            uploadUri = compressed.uri;
+
+            const compressedInfo = await FileSystem.getInfoAsync(uploadUri);
+            if (compressedInfo.exists && typeof compressedInfo.size === 'number' && compressedInfo.size > 5 * 1024 * 1024) {
+              // Re-compress from ORIGINAL to avoid cascading quality degradation
+              const tighter = await ImageManipulator.manipulateAsync(
+                options.mediaLocalUri,
+                [{ resize: { width: 960 } }],
+                { compress: 0.55, format: ImageManipulator.SaveFormat.JPEG }
+              );
+              uploadUri = tighter.uri;
+            }
+          } catch {
+            // expo-image-manipulator not available — upload original
+            logger.debug('Image compression skipped (manipulator unavailable)');
+          }
+
+          const finalInfo = await FileSystem.getInfoAsync(uploadUri);
+          if (finalInfo.exists && typeof finalInfo.size === 'number' && finalInfo.size > 15 * 1024 * 1024) {
+            mediaUploadHardFailure = 'Fotoğraf çok büyük. Lütfen daha küçük bir fotoğraf seçin.';
+            throw new Error('image-too-large');
+          }
+        }
+
+        const uploadResult = await firebaseStorageService.uploadFileFromUri(storagePath, uploadUri, {
           contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
           customMetadata: {
             userId: storageOwnerId,
@@ -1187,6 +1582,10 @@ class HybridMessageService {
         logger.error('Media upload failed:', error);
         // Continue without URL - binary mesh fallback below can still deliver media.
       }
+    }
+
+    if (mediaUploadHardFailure) {
+      throw new Error(mediaUploadHardFailure);
     }
 
     // Offline-proof fallback: if cloud media URL is unavailable, push raw media over mesh chunks.
@@ -1223,12 +1622,21 @@ class HybridMessageService {
       }
     }
 
-    // CRITICAL: Warn if both cloud upload and mesh fallback failed — media may not reach recipient
+    // CRITICAL FIX: If both cloud upload AND mesh fallback failed, throw error instead of
+    // sending an empty media message. Without this, recipient gets "📷 Fotoğraf" text with
+    // no actual image — misleading and wastes their time.
     if (!mediaUrl && !meshBinaryFallbackStarted && options.mediaLocalUri) {
-      logger.error(`🚨 CRITICAL: Media for message ${messageId} has NO cloud URL and NO mesh fallback — recipient will not receive ${mediaType} content`);
+      logger.error(`🚨 CRITICAL: Media for message ${messageId} has NO cloud URL and NO mesh fallback — aborting send`);
+      throw new Error(
+        mediaType === 'image'
+          ? 'Fotoğraf yüklenemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.'
+          : mediaType === 'voice'
+            ? 'Ses mesajı yüklenemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.'
+            : 'Medya yüklenemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.'
+      );
     }
 
-    const senderUid = myIdentity.uid || identityService.getUid();
+    const senderUid = myIdentity.uid;
 
     // Content is caption or type description
     const content = options.caption ||
@@ -1249,7 +1657,11 @@ class HybridMessageService {
       content,
       senderId: senderUid,
       senderName: myIdentity.displayName,
+      conversationId: typeof options.conversationId === 'string' && options.conversationId.trim().length > 0
+        ? options.conversationId.trim()
+        : undefined,
       recipientId: resolvedRecipientId,
+      recipientAliases,
       timestamp,
       source: 'HYBRID',
       status: 'pending',
@@ -1258,6 +1670,9 @@ class HybridMessageService {
       retryCount: 0,
       // Media fields
       mediaUrl,
+      // Retained for re-upload on retry when initial cloud upload fails.
+      // Cleared when mediaUrl exists (upload already succeeded — no need to persist local path).
+      mediaLocalUri: mediaUrl ? undefined : options.mediaLocalUri,
       mediaType,
       mediaDuration: validatedDuration,
       mediaThumbnail: options.mediaThumbnail,
@@ -1289,7 +1704,7 @@ class HybridMessageService {
     // CRITICAL FIX: Push sent media message to MeshStore immediately for UI display.
     // Without this, the sender never sees their own media message in ConversationScreen
     // (which reads from useMeshStore.messages). Same fix as sendMessage line 589.
-    this.pushCloudMessageToMeshStore(message);
+    this.pushCloudMessageToMeshStore(message, message.conversationId);
     if (meshBinaryFallbackStarted && options.mediaLocalUri) {
       // Local preview for sender; receiver gets real media through chunk transfer.
       useMeshStore.getState().updateMessage(messageId, {
@@ -1298,8 +1713,10 @@ class HybridMessageService {
       });
     }
 
-    // Attempt immediate send
-    this.processMessageImmediate(message);
+    // Attempt immediate send (fire-and-forget but catch unhandled rejection)
+    this.processMessageImmediate(message).catch(e => {
+      logger.error('processMessageImmediate failed for media message:', e);
+    });
 
     logger.info(`📤 Media message sent: ${mediaType}`);
     return message;
@@ -1338,12 +1755,32 @@ class HybridMessageService {
 
   /**
    * Process single message immediately
+   * CRITICAL: attemptSend + status update MUST be in a single mutex lock.
+   * Two separate locks had a race window where processQueue could call attemptSend
+   * on the same message between the first lock release and second lock acquire.
    */
   private async processMessageImmediate(message: HybridMessage): Promise<void> {
-    const success = await this.attemptSend(message);
+    // CRITICAL FIX: Do NOT hold queueMutex throughout attemptSend.
+    // attemptSend involves network I/O (Firestore writes, media uploads, mesh broadcasts)
+    // that can take seconds. Holding the mutex blocks ALL other message operations:
+    // - sendMessage() can't add new messages to queue (user sees frozen UI)
+    // - processQueue() can't process other pending messages
+    // - sendMediaMessage() queue addition is blocked
+    // Instead: mark as 'sending' under mutex BEFORE network I/O, then update after.
+    // The 'sending' status prevents processQueue from picking up the same message.
+    const alreadySending = await this.queueMutex.withLock(async () => {
+      if (message.status === 'sending' || message.status === 'sent' || message.status === 'delivered' || message.status === 'read') {
+        return true; // Another path is already handling this message
+      }
+      message.status = 'sending';
+      return false;
+    });
+    if (alreadySending) return;
+
+    const sendResult = await this.attemptSend(message);
 
     await this.queueMutex.withLock(async () => {
-      if (success) {
+      if (sendResult === 'success') {
         this.updateMessageStatus(message.id, 'sent');
         // ELITE V2: Sync delivery status to messageStore (WhatsApp 3-tick: ✓ sent)
         try {
@@ -1354,21 +1791,75 @@ class HybridMessageService {
         try {
           useMeshStore.getState().updateMessage(message.id, { status: 'sent' });
         } catch { /* best-effort */ }
+      } else if (sendResult === 'permanent') {
+        // PERMANENT FAILURE: Non-retryable (permission denied, conversation deleted, etc.)
+        // Force-remove from queue so auto-retry and retryAllFailed() don't resurrect it.
+        // updateMessageStatus('failed') does NOT remove from queue (only sent/delivered/read do),
+        // so we must splice manually. Without this, processQueue's connectivity-restore auto-retry
+        // resurrects permanently-failed messages, causing infinite futile retry loops.
+        const permIdx = this.queue.findIndex(m => m.id === message.id);
+        if (permIdx >= 0) {
+          this.queue.splice(permIdx, 1);
+          this.saveQueueDebounced();
+        }
+        try {
+          const { useMessageStore } = require('../stores/messageStore');
+          useMessageStore.getState().updateMessageStatus(message.id, 'failed');
+        } catch { /* best-effort */ }
+        try {
+          useMeshStore.getState().updateMessage(message.id, { status: 'failed' });
+        } catch { /* best-effort */ }
+        // Notify delivery callbacks so UI can show error state
+        const permCallbacks = this.deliveryCallbacks.get(message.id);
+        if (permCallbacks) {
+          permCallbacks.forEach(cb => cb(message.id, 'failed'));
+          this.deliveryCallbacks.delete(message.id);
+        }
+        logger.error(`🚫 Message ${message.id} permanently failed — removed from retry queue`);
       } else {
+        // RETRYABLE FAILURE: Temporary error, schedule retry
+        const meshRouted = typeof message.meshRoutedAt === 'number';
         message.retryCount++;
         message.lastRetryAt = Date.now();
         message.nextRetryAt = Date.now() + this.calculateNextRetryDelay(message.retryCount);
         message.status = 'pending';
-        this.saveQueueDebounced();
-        // ELITE V2: Mark as pending in messageStore too
-        try {
-          const { useMessageStore } = require('../stores/messageStore');
-          useMessageStore.getState().updateMessageStatus(message.id, 'pending');
-        } catch { /* best-effort */ }
-        // Update MeshStore visual status
-        try {
-          useMeshStore.getState().updateMessage(message.id, { status: 'pending' });
-        } catch { /* best-effort */ }
+        this.saveQueueImmediate();
+        // If message already went out over mesh, keep optimistic sent status in UI
+        // while cloud sync retries continue in background.
+        if (meshRouted) {
+          try {
+            const { useMessageStore } = require('../stores/messageStore');
+            useMessageStore.getState().updateMessageStatus(message.id, 'sent');
+          } catch { /* best-effort */ }
+          try {
+            useMeshStore.getState().updateMessage(message.id, { status: 'sent' });
+          } catch { /* best-effort */ }
+        } else {
+          // ELITE V2: Mark as pending in messageStore too
+          try {
+            const { useMessageStore } = require('../stores/messageStore');
+            useMessageStore.getState().updateMessageStatus(message.id, 'pending');
+          } catch { /* best-effort */ }
+          // Update MeshStore visual status
+          try {
+            useMeshStore.getState().updateMessage(message.id, { status: 'pending' });
+          } catch { /* best-effort */ }
+        }
+
+        // CRITICAL: Trigger a near-immediate retry tick instead of waiting for the
+        // periodic 10s queue cycle. This improves "instant send" behavior after
+        // transient failures (short network blips, auth refresh, etc.).
+        const retryDelay = Math.max(
+          300,
+          Math.min((message.nextRetryAt || Date.now()) - Date.now(), 2000),
+        );
+        const retryTimer = setTimeout(() => {
+          this.cleanupTimers.delete(retryTimer);
+          if (this.isActive) {
+            this.processQueue();
+          }
+        }, retryDelay);
+        this.cleanupTimers.add(retryTimer);
       }
     });
   }
@@ -1378,11 +1869,18 @@ class HybridMessageService {
    * - Auto-initialize Firebase if not ready
    * - SOS messages get priority treatment
    * - Store-and-Forward integration
+   *
+   * Returns:
+   * - 'success': Cloud delivery confirmed (or mesh-only for broadcasts)
+   * - 'retryable': Temporary failure, keep in queue for retry
+   * - 'permanent': Non-retryable error (permission denied, etc.), mark permanently_failed
    */
-  private async attemptSend(message: HybridMessage): Promise<boolean> {
+  private async attemptSend(message: HybridMessage): Promise<'success' | 'retryable' | 'permanent'> {
     const isOnline = connectionManager.isOnline;
+    const meshCanBeTrustedForDelivery = this.canTreatMeshSendAsDelivery(message);
     let meshSuccess = false;
     let cloudSuccess = false;
+    let isPermanentFailure = false;
 
     // PRODUCTION LOGGING: Always log send attempts for delivery debugging
     logger.info(`📤 attemptSend: id=${message.id}, to=${message.recipientId || 'broadcast'}, from=${message.senderId}, type=${message.type}, online=${isOnline}`);
@@ -1400,10 +1898,14 @@ class HybridMessageService {
       // 1. MESH LAYER: Always try (offline-first priority)
       try {
         const meshType = message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT;
+        const meshTarget = message.recipientId || message.recipientAliases?.[0] || 'broadcast';
         const meshPayload = JSON.stringify({
           id: message.id,
           from: message.senderId,
-          to: message.recipientId || 'broadcast',
+          to: meshTarget,
+          ...(message.recipientAliases && message.recipientAliases.length > 0
+            ? { toAliases: message.recipientAliases }
+            : {}),
           type: message.type,
           content: message.content,
           timestamp: message.timestamp,
@@ -1418,23 +1920,39 @@ class HybridMessageService {
         });
 
         await meshNetworkService.broadcastMessage(meshPayload, meshType, {
-          to: message.recipientId || 'broadcast',
+          to: meshTarget,
           from: message.senderId,
           messageId: message.id,
         });
         meshSuccess = true;
         logger.debug(`Mesh broadcast successful (type: ${meshType})`);
+        // CRITICAL FIX: Always mark meshRoutedAt when offline and mesh broadcast succeeds.
+        // Previously, meshRoutedAt was only set when the specific recipient's device ID
+        // was visible in BLE peer list. But BLE peer IDs (peripheral UUID on iOS, MAC on
+        // Android) NEVER match Firebase UIDs or installation IDs — so hasVisibleMeshPeerForRecipient()
+        // was ALWAYS false for DMs. This caused ALL offline messages to stay "pending" forever
+        // in the sender's UI, even though the mesh network DID deliver them to nearby devices.
+        // Now: when offline, trust that mesh will deliver the packet (it retries every 1s).
+        // The message stays in the cloud sync queue so it syncs when connectivity returns.
+        if (meshCanBeTrustedForDelivery || !connectionManager.isOnline) {
+          message.meshRoutedAt = Date.now();
+        } else {
+          logger.warn(`Mesh route not trusted for direct message ${message.id} (online, no visible peers)`);
+        }
 
         // V5: Store-and-Forward for offline peers
-        if (message.recipientId) {
+        const storeForwardTargets = this.getDirectedRecipientTargets(message);
+        if (storeForwardTargets.size > 0) {
           try {
             const { meshStoreForwardService } = await import('./mesh/MeshStoreForwardService');
-            await meshStoreForwardService.storeForPeer(
-              message.recipientId,
-              message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT,
-              meshPayload,
-              { priority: message.priority === 'critical' ? MeshPriority.CRITICAL : MeshPriority.NORMAL }
-            );
+            for (const targetId of storeForwardTargets) {
+              await meshStoreForwardService.storeForPeer(
+                targetId,
+                message.type === 'SOS' ? MeshMessageType.SOS : MeshMessageType.TEXT,
+                meshPayload,
+                { priority: message.priority === 'critical' ? MeshPriority.CRITICAL : MeshPriority.NORMAL }
+              );
+            }
           } catch {
             // Silent fail - Store-Forward is optional enhancement
           }
@@ -1443,7 +1961,76 @@ class HybridMessageService {
         logger.warn('Mesh broadcast failed:', meshError);
       }
 
-      // 2. CLOUD LAYER: Always attempt cloud write.
+      // 2a. MEDIA RE-UPLOAD: If initial cloud upload failed but local file URI is retained,
+      // try uploading again before the Firestore write. Without this, retried messages
+      // go to Firestore without mediaUrl — receiver gets "📷 Fotoğraf" with no actual image.
+      if (message.mediaLocalUri && !message.mediaUrl && message.mediaType && isOnline) {
+        try {
+          const FileSystem = await import('expo-file-system');
+          const fileInfo = await FileSystem.getInfoAsync(message.mediaLocalUri);
+          if (fileInfo.exists) {
+            const { firebaseStorageService } = await import('./FirebaseStorageService');
+            await firebaseStorageService.initialize();
+            const extension = message.mediaType === 'image' ? 'jpg' : 'm4a';
+            const storageOwnerId = identityService.getUid();
+            if (storageOwnerId) {
+              // FIX: Compress images on re-upload (same as initial send path).
+              // Without this, the original uncompressed photo (potentially 10-15MB)
+              // is uploaded instead of the compressed version (~1-2MB).
+              let uploadUri = message.mediaLocalUri!;
+              if (message.mediaType === 'image') {
+                try {
+                  const ImageManipulator = await import('expo-image-manipulator');
+                  const compressed = await ImageManipulator.manipulateAsync(
+                    uploadUri,
+                    [{ resize: { width: 1280 } }],
+                    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  uploadUri = compressed.uri;
+                } catch {
+                  logger.debug('Image compression skipped on re-upload (manipulator unavailable)');
+                }
+              }
+              const storagePath = `chat/${storageOwnerId}/${Date.now()}.${extension}`;
+              const uploadResult = await firebaseStorageService.uploadFileFromUri(storagePath, uploadUri, {
+                contentType: message.mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
+                customMetadata: { userId: storageOwnerId },
+              });
+              if (uploadResult) {
+                message.mediaUrl = uploadResult;
+                // Clear local URI — no longer needed after successful cloud upload
+                message.mediaLocalUri = undefined;
+                this.saveQueueDebounced();
+                // Update sender's MeshStore preview with the permanent cloud URL
+                try {
+                  const { useMeshStore } = await import('./mesh/MeshStore');
+                  useMeshStore.getState().updateMessage(message.id, { mediaUrl: uploadResult });
+                } catch { /* best-effort */ }
+                logger.info(`✅ Media re-upload succeeded for ${message.id}`);
+              }
+            }
+          } else {
+            // Local file no longer exists (iOS/Android cleaned temp cache)
+            logger.warn(`⚠️ Local media file gone for ${message.id}: ${message.mediaLocalUri}`);
+            message.mediaLocalUri = undefined;
+            this.saveQueueDebounced();
+          }
+        } catch (reuploadError) {
+          logger.warn(`Media re-upload attempt failed for ${message.id}:`, reuploadError);
+        }
+      }
+
+      // FIX: If this is a media message but has no cloud URL and local file is gone,
+      // skip cloud write. Writing a media-type message without mediaUrl to Firestore
+      // causes receiver to see an empty "📷 Fotoğraf" or "🎤 Sesli Mesaj" bubble.
+      // The message stays in queue; if mesh already delivered the binary, that's enough.
+      if (message.mediaType && message.mediaType !== 'location' && !message.mediaUrl && !message.mediaLocalUri) {
+        logger.warn(`⚠️ Skipping cloud write for ${message.id}: media message has no URL and no local file`);
+        // Don't return false yet — mesh may have succeeded above
+        // Just skip the cloud write section
+      } else
+
+      // 2b. CLOUD LAYER: Always attempt cloud write.
       // Firestore SDK handles offline queuing automatically.
       // Previously gated on isOnline which was unreliable on iOS
       // (isInternetReachable=null → isOnline=false → cloud writes silently skipped).
@@ -1478,7 +2065,11 @@ class HybridMessageService {
           const messageData = {
             id: message.id,
             senderUid: authUid,
+            ...(message.conversationId ? { conversationId: message.conversationId } : {}),
             senderName: message.senderName || '',
+            // BELT-AND-SUSPENDERS: onNewConversationMessageV3 CF reads fromName first,
+            // then falls back to senderName. Include both so notification title is always correct.
+            fromName: message.senderName || '',
             content: message.content,
             timestamp: message.timestamp,
             type: this.mapHybridTypeToCloudType(message.type),
@@ -1500,6 +2091,7 @@ class HybridMessageService {
             toDeviceId: message.recipientId || 'broadcast',
           };
 
+
           // V3: Use conversation model via FirebaseDataService facade
           const recipientId = message.recipientId && message.recipientId !== 'broadcast'
             ? message.recipientId
@@ -1513,12 +2105,51 @@ class HybridMessageService {
               ? message.recipientId
               : message.senderId;
           const result = await firebaseDataService.saveMessage(legacyFallbackTarget, messageData);
-          cloudSuccess = result;
+          // Extract structured outcome if available, with backward-compat boolean fallback
+          const outcome = typeof result === 'object' && result.outcome ? result.outcome : null;
+          const rawCloudSuccess = outcome
+            ? (outcome.status === 'full_success' || outcome.status === 'partial_success')
+            : (typeof result === 'object' ? result.success : !!result);
+          // CRITICAL FIX: Don't trust Firestore "success" when offline.
+          // On React Native, Firestore uses memory-only cache (no IndexedDB).
+          // setDoc() "succeeds" into memory cache even when offline, but this data
+          // is LOST on app kill. If we treat this as cloudSuccess=true, the message
+          // is removed from the retry queue (updateMessageStatus('sent') → splice).
+          // When the user kills the app, the message is permanently lost — never
+          // delivered to the recipient. Fix: only trust cloud success when actually online.
+          // Re-check connectivity AFTER the cloud write. If network dropped during
+          // the operation, Firestore may have resolved to volatile memory cache.
+          const stillOnline = connectionManager.isOnline;
+          cloudSuccess = rawCloudSuccess && isOnline && stillOnline;
+
+          // Handle permanent failures — mark as permanently_failed immediately, don't retry
+          if (outcome?.status === 'permanent_failure') {
+            logger.error(`🚨 V3 Cloud save PERMANENT FAILURE: msg ${message.id} — ${outcome.error}`);
+            cloudSuccess = false;
+            isPermanentFailure = true;
+            // Caller will mark as permanently_failed via the return value
+          }
+
+          // Log partial_success with inbox failure detail (CF provides backup)
+          if (outcome?.status === 'partial_success' && cloudSuccess) {
+            logger.warn(`⚠️ V3 Cloud partial success: msg ${message.id} — message persisted but inbox write failed. CF syncConversationInboxV3 will handle inbox delivery server-side.`);
+          }
+
+          const resolvedConversationId =
+            typeof result === 'object' && typeof result.conversationId === 'string' && result.conversationId.trim().length > 0
+              ? result.conversationId.trim()
+              : undefined;
+          if (resolvedConversationId) {
+            message.conversationId = resolvedConversationId;
+            this.pushCloudMessageToMeshStore(message, resolvedConversationId);
+          }
 
           if (cloudSuccess) {
-            logger.info(`✅ V3 Cloud send successful: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}`);
+            logger.info(`✅ V3 Cloud send successful: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId} (outcome: ${outcome?.status || 'legacy'})`);
+          } else if (rawCloudSuccess && !isOnline) {
+            logger.warn(`⚠️ V3 Cloud write accepted by memory cache (offline): msg ${message.id} — keeping in retry queue for real delivery`);
           } else {
-            logger.error(`🚨 V3 Cloud save FAILED: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}, senderUid=${authUid} — message will NOT be delivered until retry succeeds`);
+            logger.error(`🚨 V3 Cloud save FAILED: msg ${message.id} → recipient=${recipientId || 'broadcast'}, toDeviceId=${messageData.toDeviceId}, senderUid=${authUid} — message will NOT be delivered until retry succeeds (outcome: ${outcome?.status || 'unknown'})`);
           }
         } catch (cloudError) {
           logger.warn('❌ Cloud send failed:', cloudError);
@@ -1528,15 +2159,17 @@ class HybridMessageService {
       // V5: SOS Special Handling - must succeed on at least one channel
       if (message.type === 'SOS' && !meshSuccess && !cloudSuccess) {
         logger.error('🚨 SOS MESSAGE FAILED ON ALL CHANNELS!');
-        // Queue for aggressive retry
+        // Queue for aggressive retry (do NOT increment retryCount here — caller does it)
         message.priority = 'critical';
-        message.retryCount = (message.retryCount || 0) + 1;
 
         // CRITICAL FIX: Immediate retry — don't wait for 10s queue cycle
         // SOS is life-critical; 10s delay is unacceptable
-        if (message.retryCount <= 5) {
-          logger.warn(`🔄 SOS immediate retry ${message.retryCount}/5 in 500ms`);
-          setTimeout(() => this.processQueue(), 500);
+        const currentRetry = message.retryCount || 0;
+        if (currentRetry <= 5) {
+          logger.warn(`🔄 SOS immediate retry ${currentRetry}/5 in 500ms`);
+          const sosRetryTimer = setTimeout(() => this.processQueue(), 500);
+          // Track timer for cleanup — without this, the timer fires after destroy()
+          this.cleanupTimers.add(sosRetryTimer);
         } else {
           logger.error('🚨 SOS EXHAUSTED ALL RETRIES (5/5) — falling back to normal queue');
           // After 5 fast retries, fall back to normal 10s queue cycle
@@ -1547,25 +2180,62 @@ class HybridMessageService {
       logger.error('Attempt send failed:', error);
     }
 
-    const success = meshSuccess || cloudSuccess;
+    // Permanent failure short-circuits everything — no point retrying
+    if (isPermanentFailure) {
+      logger.error(`🚫 Message ${message.id} permanently failed — will not retry`);
+      return 'permanent';
+    }
+
+    const isUidTarget =
+      this.isUidRecipient(message.recipientId);
+
+    const meshDeliveryAccepted = meshSuccess && meshCanBeTrustedForDelivery;
+
+    // CRITICAL FIX: For SOS and directed DMs, cloud success is REQUIRED for queue completion.
+    // Previously, SOS with mesh-only was treated as success, setting status to 'sent' which
+    // processQueue skips forever — cloud delivery was NEVER retried. For life-safety SOS,
+    // this means the alert only reaches nearby BLE devices but the server never gets it,
+    // so push notifications are never sent to family members or rescue teams.
+    // Fix: SOS always requires cloud (for maximum reach via push notifications).
+    // UID DMs always require cloud (for reliable cross-device delivery).
+    // Broadcasts are fine with mesh-only (all nearby devices received it).
+    // meshRoutedAt flag preserves 'sent' UI status while cloud retry continues.
+    const success = (message.type === 'SOS' || isUidTarget)
+      ? cloudSuccess
+      : (meshDeliveryAccepted || cloudSuccess);
+
+    if (!success && meshSuccess && !cloudSuccess) {
+      logger.warn(`☁️ Message ${message.id} mesh-routed; keeping in queue for cloud sync (type=${message.type})`);
+    }
+
     if (success) {
       logger.info(`✅ Message ${message.id} sent (mesh: ${meshSuccess}, cloud: ${cloudSuccess})`);
     }
-    return success;
+    return success ? 'success' : 'retryable';
   }
 
 
   /**
-   * Update message status and notify callbacks
+   * Update message status and notify callbacks.
+   * Uses the shared delivery state machine guard from constants.ts.
    */
   private updateMessageStatus(messageId: string, status: DeliveryStatus): void {
     const msgIndex = this.queue.findIndex(m => m.id === messageId);
 
     if (msgIndex >= 0) {
+      // Use shared state machine guard — single source of truth
+      const { isStatusTransitionAllowed } = require('./messaging/constants');
+      if (!isStatusTransitionAllowed(this.queue[msgIndex].status, status)) {
+        return; // Block illegal transition
+      }
       this.queue[msgIndex].status = status;
 
-      // Remove from queue if final state
-      if (status === 'delivered' || status === 'read' || status === 'sent') {
+      // Remove from queue on completion states:
+      // - sent/delivered/read: Cloud delivery confirmed, further updates via Firestore subscriptions.
+      // - 'failed' messages STAY in queue so retryAllFailed() can resurrect them.
+      //   The 24h stale cleanup in processQueue handles eventual eviction.
+      // Without removal, completed messages accumulate forever in the queue.
+      if (status === 'sent' || status === 'delivered' || status === 'read') {
         this.queue.splice(msgIndex, 1);
       }
 
@@ -1631,7 +2301,7 @@ class HybridMessageService {
       // Firestore broadcast (cloud — remote users)
       import('./firebase/FirebaseMessageOperations').then(({ setTypingIndicator }) => {
         setTypingIndicator(conversationId, myIdentity.uid!, true);
-      }).catch(() => {});
+      }).catch(e => { if (__DEV__) logger.debug('HybridMsg: typing start indicator error:', e); });
     });
 
     // P1: Debounce stop-typing (send stop after TYPING_DEBOUNCE_MS of no typing)
@@ -1646,9 +2316,35 @@ class HybridMessageService {
       if (uid) {
         import('./firebase/FirebaseMessageOperations').then(({ setTypingIndicator }) => {
           setTypingIndicator(conversationId, uid, false);
-        }).catch(() => {});
+        }).catch(e => { if (__DEV__) logger.debug('HybridMsg: typing stop indicator error:', e); });
       }
     });
+  }
+
+  /**
+   * CRITICAL FIX: Lightweight method for ConversationScreen to ensure cloud
+   * subscriptions are alive WITHOUT creating duplicate subscriptions.
+   *
+   * Previously, ConversationScreen called subscribeToMessages() which created
+   * entirely new Firestore onSnapshot listeners (duplicating init.ts's subscription).
+   * When ConversationScreen unmounted, its cleanup set cloudEnsureRefresher = null,
+   * killing the foreground-resume mechanism for init.ts's subscription — causing
+   * messages to silently stop being delivered after the first conversation view.
+   *
+   * This method simply re-invokes the existing cloudEnsureRefresher (from init.ts's
+   * subscription closure) to re-ensure subscriptions are active, without creating
+   * any new closures or listeners.
+   */
+  async refreshCloudSubscriptions(): Promise<void> {
+    if (this.cloudEnsureRefresher) {
+      try {
+        await this.cloudEnsureRefresher();
+      } catch (error) {
+        logger.warn('refreshCloudSubscriptions failed:', error);
+      }
+    } else {
+      logger.warn('refreshCloudSubscriptions: no cloudEnsureRefresher available (init.ts subscription not active)');
+    }
   }
 
   /**
@@ -1738,6 +2434,7 @@ class HybridMessageService {
     //    user_inbox/{uid}/threads → discover conversationIds → subscribe to each conversation's messages
     const conversationUnsubscribers = new Map<string, () => void>();
     let conversationsListUnsubscriber: (() => void) | null = null;
+    let legacyDeviceUnsubscriber: (() => void) | null = null;
     let isDisposed = false;
     let isCloudSyncInProgress = false;
 
@@ -1750,14 +2447,15 @@ class HybridMessageService {
         try { conversationsListUnsubscriber(); } catch { /* no-op */ }
         conversationsListUnsubscriber = null;
       }
+      if (legacyDeviceUnsubscriber) {
+        try { legacyDeviceUnsubscriber(); } catch { /* no-op */ }
+        legacyDeviceUnsubscriber = null;
+      }
     };
 
     // Build self-ID set for sender mirror detection
     const getSelfIds = (): Set<string> => {
-      const selfIds = new Set<string>();
-      const uid = identityService.getUid();
-      if (uid) selfIds.add(uid);
-      return selfIds;
+      return this.getSelfIdentityIds();
     };
 
     const processCloudMessage = (msg: any, conversationId?: string) => {
@@ -1766,32 +2464,106 @@ class HybridMessageService {
       const senderUid = typeof msg.senderUid === 'string' ? msg.senderUid.trim() : '';
       const toDeviceId = typeof msg.toDeviceId === 'string' ? msg.toDeviceId.trim() : '';
       const senderUidIsSelf = !!senderUid && selfIds.has(senderUid);
-      const senderDeviceIdIsSelf = !!fromDeviceId && selfIds.has(fromDeviceId);
-      const senderId = (senderUidIsSelf && fromDeviceId) ? fromDeviceId : (senderUid || fromDeviceId);
+
+      // CRITICAL FIX: Direct senderUid usage!
+      // Previously: `(senderUidIsSelf && fromDeviceId) ? fromDeviceId : (senderUid || fromDeviceId)`
+      // This caused OUR OWN sent messages to be labeled with `fromDeviceId` instead of `senderUid`,
+      // making `isFromMe` false in `pushCloudMessageToMeshStore`. This led the system to treat our
+      // own sent messages as INCOMING, setting `to=our_uid` and `from=our_deviceId`, bypassing UI filters!
+      const senderId = senderUid || fromDeviceId;
+
+      // PRODUCTION LOGGING: Log every incoming cloud message for delivery debugging
+      logger.info(`📨 processCloudMessage: id=${msg.id}, senderUid=${senderUid}, fromDeviceId=${fromDeviceId}, toDeviceId=${toDeviceId}, isSelf=${senderUidIsSelf}, conv=${conversationId} -> mappedSenderId=${senderId}`);
 
       if (this.isBlockedSender(senderId)) {
+        logger.debug(`📨 processCloudMessage: BLOCKED sender ${senderId}`);
         return;
       }
 
-      // Skip our own sent messages (we already have them locally)
-      // Exception: if senderUid is ours but sender device alias is different,
-      // keep the message for multi-device/same-account continuity.
-      if (
-        senderUidIsSelf &&
-        (!fromDeviceId || senderDeviceIdIsSelf)
-      ) {
-        return;
-      }
-      if (!senderUidIsSelf && senderId && selfIds.has(senderId)) {
-        return;
+      // Process updates to our own sent messages (Delivery receipts / Read receipts)
+      // CRITICAL FIX: Only check senderUidIsSelf — fromDeviceId is NOT in selfIds
+      // (selfIds only contains Firebase Auth UID, not device IDs).
+      // Without this fix, delivery receipts are NEVER detected because the condition
+      // `!fromDeviceId || senderDeviceIdIsSelf` fails when fromDeviceId is present.
+      if (senderUidIsSelf) {
+        let isLocalMessageFound = false;
+        try {
+          // Check if this is a delivery or read receipt update from the server
+          const { useMessageStore } = require('../stores/messageStore');
+          // Use shared status priority from constants for consistency
+          const { MESSAGE_STATUS_PRIORITY: PRIORITY_ORDER } = require('./messaging/constants');
+
+          const localMessage = useMessageStore.getState().getMessage(msg.id) || useMessageStore.getState().getMessage(msg.localId);
+          if (localMessage) {
+            isLocalMessageFound = true;
+            let isRead = msg.read === true || msg.status === 'read';
+            let isDelivered = msg.delivered === true || msg.status === 'delivered';
+
+            // CRITICAL FIX: Firestore V3 schema uses readBy: { [uid]: timestamp } and deliveredTo
+            if (msg.readBy && typeof msg.readBy === 'object') {
+              const readers = Object.keys(msg.readBy).filter(id => !selfIds.has(id));
+              if (readers.length > 0) isRead = true;
+            } else if (msg.readBy && (typeof msg.readBy === 'string' || Array.isArray(msg.readBy))) {
+              if (Array.isArray(msg.readBy)) {
+                if (msg.readBy.some((id: string) => !selfIds.has(id))) isRead = true;
+              } else if (!selfIds.has(msg.readBy)) {
+                isRead = true;
+              }
+            }
+
+            if (msg.deliveredTo && typeof msg.deliveredTo === 'object') {
+              const recipients = Object.keys(msg.deliveredTo).filter(id => !selfIds.has(id));
+              if (recipients.length > 0) isDelivered = true;
+            } else if (msg.deliveredTo && (typeof msg.deliveredTo === 'string' || Array.isArray(msg.deliveredTo))) {
+              if (Array.isArray(msg.deliveredTo)) {
+                if (msg.deliveredTo.some((id: string) => !selfIds.has(id))) isDelivered = true;
+              } else if (!selfIds.has(msg.deliveredTo)) {
+                isDelivered = true;
+              }
+            }
+            const rawDbStatus = msg.status || localMessage.status;
+            const newStatus = isRead ? 'read' : isDelivered ? 'delivered' : rawDbStatus;
+
+            // Only update if the new status is an advancement (e.g. sent -> delivered -> read)
+            const currentLevel = PRIORITY_ORDER[localMessage.status] ?? 0;
+            const newLevel = PRIORITY_ORDER[newStatus] ?? 0;
+
+            if (newLevel > currentLevel) {
+              useMessageStore.getState().updateMessageStatus(localMessage.id, newStatus);
+              // CRITICAL FIX: Also update MeshStore — ConversationScreen reads from both
+              try {
+                useMeshStore.getState().updateMessage(localMessage.id, {
+                  status: newStatus as any,
+                });
+              } catch { /* best-effort */ }
+              logger.info(`✅ Delivery receipt: ${localMessage.id} → ${newStatus}`);
+            }
+          }
+        } catch (e) {
+          logger.debug('Failed to sync delivery receipt for own message:', e);
+        }
+
+        // CRITICAL FIX: If the message was NOT found locally, it means we sent it from ANOTHER device
+        // or the app was reinstalled. We MUST NOT return early; instead, we let it fall through
+        // to be added to the local store (so our own sent messages sync across devices!).
+        if (isLocalMessageFound) {
+          return;
+        }
       }
 
-      if (!this.recordSeenMessage(msg.id)) return;
+      if (!this.recordSeenMessage(msg.id)) {
+        logger.debug(`📨 processCloudMessage: DEDUP skip msg ${msg.id} (already seen)`);
+        return;
+      }
 
       const rawMsg = msg as unknown as Record<string, unknown>;
       const metadata = msg.metadata && typeof msg.metadata === 'object'
         ? msg.metadata as Record<string, unknown>
         : undefined;
+      const receiptState = this.resolveCloudDeliveryState(rawMsg, {
+        isFromMe: senderUidIsSelf,
+        selfIds,
+      });
       const mediaType = this.normalizeMediaType(rawMsg.mediaType ?? metadata?.mediaType);
       const location = this.normalizeLocationPayload(rawMsg.location ?? metadata?.location);
       const mediaUrlSource = rawMsg.mediaUrl ?? metadata?.mediaUrl;
@@ -1804,6 +2576,37 @@ class HybridMessageService {
         : normalizedType;
       const normalizedPriority = this.isMessagePriority(msg.priority) ? msg.priority : 'normal';
 
+      let resolvedToDeviceId = toDeviceId && toDeviceId !== 'broadcast' ? toDeviceId : undefined;
+      let resolvedConversationId = conversationId
+        || (typeof (rawMsg.conversationId) === 'string' ? rawMsg.conversationId : undefined)
+        || (typeof (rawMsg.threadId) === 'string' ? rawMsg.threadId : undefined)
+        || (typeof (rawMsg.threadID) === 'string' ? rawMsg.threadID : undefined);
+
+      // ELITE FIX: If this is our own message synced from the cloud, and toDeviceId is missing
+      // (as is standard in V3 Data structure), we MUST resolve the recipient ID so it doesn't default to 'broadcast'.
+      // Otherwise, the message vanishes from our own ConversationScreen!
+      if (senderUidIsSelf && !resolvedToDeviceId) {
+        try {
+          const { useMessageStore } = require('../stores/messageStore');
+          if (conversationId) {
+            const conv = useMessageStore.getState().conversations.find((c: any) => c.conversationId === conversationId);
+            if (conv && conv.userId) resolvedToDeviceId = conv.userId;
+          }
+          if (!resolvedToDeviceId && msg.deliveredTo && typeof msg.deliveredTo === 'object') {
+            const peers = Object.keys(msg.deliveredTo).filter(id => !selfIds.has(id));
+            if (peers.length > 0) resolvedToDeviceId = peers[0];
+          }
+        } catch (resolveError) {
+          logger.debug('Failed to resolve missing recipientId for synced self-message:', resolveError);
+        }
+      }
+
+      // CRITICAL: Ensure every bridged message carries a conversationId for UI filtering.
+      if (!resolvedConversationId && resolvedToDeviceId && senderUid) {
+        const [a, b] = [senderUid, resolvedToDeviceId].sort();
+        resolvedConversationId = `pair_${a}_${b}`;
+      }
+
       const hybridMsg: HybridMessage = {
         id: msg.id,
         content: sanitizeMessage(msg.content),
@@ -1811,12 +2614,12 @@ class HybridMessageService {
         senderName: typeof senderNameSource === 'string' && senderNameSource.trim().length > 0
           ? senderNameSource.trim()
           : 'Cloud User',
-        recipientId: toDeviceId && toDeviceId !== 'broadcast' ? toDeviceId : undefined,
+        recipientId: resolvedToDeviceId,
         timestamp: typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
           ? msg.timestamp
           : Date.now(),
         source: 'CLOUD',
-        status: 'delivered',
+        status: receiptState.status,
         priority: normalizedPriority,
         type: finalType,
         retryCount: 0,
@@ -1825,19 +2628,49 @@ class HybridMessageService {
         ...(typeof mediaDurationSource === 'number' ? { mediaDuration: mediaDurationSource } : {}),
         ...(typeof mediaThumbnailSource === 'string' ? { mediaThumbnail: mediaThumbnailSource } : {}),
         ...(location ? { location } : {}),
+        ...(resolvedConversationId ? { conversationId: resolvedConversationId } : {}),
       };
       if (this.isSystemPayloadForConversation(hybridMsg)) {
         return;
       }
-      this.pushCloudMessageToMeshStore(hybridMsg, conversationId);
+      this.pushCloudMessageToMeshStore(hybridMsg, resolvedConversationId || conversationId);
+      logger.info(`✅ processCloudMessage: STORED msg ${msg.id} from ${senderId} → MeshStore + messageStore`);
+
+      // NOTE: Auto-delivery ACK (Triple-tick ✓✓) is handled inside pushCloudMessageToMeshStore()
+      // for all incoming (!isFromMe) messages. No duplicate ACK needed here.
+
       callback(hybridMsg);
     };
 
     const subscribeToConversation = async (
       conversationId: string,
       firebaseDataService: any,
+      retryAttempt: number = 0,
     ): Promise<void> => {
       if (conversationUnsubscribers.has(conversationId) || isDisposed) return;
+
+      // CRITICAL FIX: Error handler that removes dead subscriptions from the map and
+      // schedules a retry. Without this, dead subscriptions stay in conversationUnsubscribers
+      // forever, preventing re-subscription even after auth token refresh or network recovery.
+      const onSubError = (err: any) => {
+        if (isDisposed) return;
+        logger.warn(`📨 Per-conversation subscription died for ${conversationId}:`, err);
+        // Remove dead entry so the next ensureCloudSubscriptions pass can re-subscribe
+        conversationUnsubscribers.delete(conversationId);
+        // FIX: Do NOT call scheduleCloudRetry (which increments global cloudRetryCount).
+        // Per-conversation failures should NOT exhaust the global retry budget — 15+
+        // conversation deaths during a brief network outage would permanently kill ALL
+        // subscriptions. Instead, trigger re-ensure directly with a short delay.
+        if (!isDisposed) {
+          const reEnsureTimer = setTimeout(() => {
+            this.cleanupTimers.delete(reEnsureTimer);
+            if (!isDisposed) {
+              ensureCloudSubscriptions().catch(e => { if (__DEV__) logger.debug('HybridMsg: per-conv re-ensure failed:', e); });
+            }
+          }, 3000);
+          this.cleanupTimers.add(reEnsureTimer);
+        }
+      };
 
       try {
         const unsubscribe = await firebaseDataService.subscribeToConversationMessages(
@@ -1845,13 +2678,27 @@ class HybridMessageService {
           (cloudMsgs: any[]) => {
             cloudMsgs.forEach((msg) => processCloudMessage(msg, conversationId));
           },
+          onSubError,
         );
         if (unsubscribe && !isDisposed) {
           conversationUnsubscribers.set(conversationId, unsubscribe);
           logger.info(`✅ Subscribed to conversation: ${conversationId}`);
         }
       } catch (err) {
-        logger.warn(`Failed to subscribe to conversation ${conversationId}:`, err);
+        logger.warn(`Failed to subscribe to conversation ${conversationId} (attempt ${retryAttempt + 1}):`, err);
+        // Retry with exponential backoff, max 3 attempts
+        if (retryAttempt < 3 && !isDisposed) {
+          const delay = Math.min(2000 * Math.pow(2, retryAttempt), 8000);
+          const retryTimer = setTimeout(() => {
+            // Remove from cleanup set once fired naturally
+            this.cleanupTimers.delete(retryTimer);
+            if (!isDisposed && !conversationUnsubscribers.has(conversationId)) {
+              subscribeToConversation(conversationId, firebaseDataService, retryAttempt + 1).catch(e => { if (__DEV__) logger.debug('HybridMsg: conversation subscription retry failed:', e); });
+            }
+          }, delay);
+          // Track for cleanup — without this, the timer fires after destroy()
+          this.cleanupTimers.add(retryTimer);
+        }
       }
     };
 
@@ -1876,7 +2723,7 @@ class HybridMessageService {
       cloudRetryTimer = setTimeout(() => {
         cloudRetryTimer = null;
         if (!isDisposed) {
-          ensureCloudSubscriptions().catch(() => {});
+          ensureCloudSubscriptions().catch(e => { if (__DEV__) logger.debug('HybridMsg: cloud subscriptions retry failed:', e); });
         }
       }, delay);
     };
@@ -1897,6 +2744,24 @@ class HybridMessageService {
           return;
         }
 
+        // CRITICAL FIX: Verify Firebase Auth is ACTUALLY authenticated before subscribing.
+        // identityService.getUid() may return a cached UID (from MMKV) even when
+        // Firebase Auth token is expired/not-yet-resolved. Without this check,
+        // the Firestore onSnapshot query fires with a non-null uid but
+        // request.auth is null → permission-denied → subscription dies.
+        try {
+          const { getFirebaseAuth } = await import('../../lib/firebase');
+          const currentUser = getFirebaseAuth()?.currentUser ?? null;
+          if (!currentUser) {
+            logger.warn('📨 Cloud subscription skipped: Firebase Auth not ready (cached UID available but Auth not authenticated) — scheduling retry');
+            scheduleCloudRetry('Firebase Auth not authenticated');
+            return;
+          }
+        } catch (authCheckError) {
+          logger.debug('📨 Firebase Auth check failed (non-critical, proceeding):', authCheckError);
+          // Proceed anyway — the error handler below will catch permission-denied
+        }
+
         // ─────────────────────────────────────────────────────────
         // WHATSAPP-STYLE ARCHITECTURE: Direct conversations onSnapshot
         //
@@ -1911,13 +2776,17 @@ class HybridMessageService {
         // ─────────────────────────────────────────────────────────
         logger.info(`📨 Setting up WhatsApp-style conversations subscription for uid=${uid}`);
 
-        // Clean up previous subscription
+        // Clean up previous top-level conversations query (so we get a fresh snapshot).
+        // Per-conversation subscriptions are intentionally NOT cleared here — they have
+        // their own internal retry logic and self-remove from conversationUnsubscribers
+        // when they die (via the onSubError handler in subscribeToConversation).
+        // Clearing them here would create a message gap while re-subscribing.
         if (conversationsListUnsubscriber) {
           try { conversationsListUnsubscriber(); } catch { /* no-op */ }
           conversationsListUnsubscriber = null;
         }
 
-        const { collection, query: firestoreQuery, where, onSnapshot } = await import('firebase/firestore');
+        const { collection, query: firestoreQuery, where, onSnapshot, getDocs } = await import('firebase/firestore');
         const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
         const db = await getFirestoreInstanceAsync();
         if (!db || isDisposed) {
@@ -1943,7 +2812,13 @@ class HybridMessageService {
             cloudRetryCount = 0;
 
             const activeConvIds = new Set<string>();
-            snapshot.forEach((docSnap) => activeConvIds.add(docSnap.id));
+            // Build a map of convId → type so we can skip group conversations below
+            const convTypeMap = new Map<string, string>();
+            snapshot.forEach((docSnap) => {
+              activeConvIds.add(docSnap.id);
+              const data = docSnap.data();
+              if (data?.type) convTypeMap.set(docSnap.id, data.type);
+            });
 
             // CRITICAL FIX: Sync conversation metadata to messageStore.
             // Previously, only conversation IDs were used (to set up message subscriptions),
@@ -1972,21 +2847,75 @@ class HybridMessageService {
                 useMessageStore.getState().addConversation({
                   userId: otherUid,
                   userName: peerName || otherUid.slice(0, 8) + '...',
-                  lastMessage: data.lastMessage || data.lastMessagePreview || '',
+                  // CRITICAL FIX: lastMessage may be an object (old group format: { content, from, fromName, timestamp })
+                  // or a string (DM format / new group format). Handle both to prevent "[object Object]" display.
+                  lastMessage: typeof data.lastMessage === 'string'
+                    ? data.lastMessage
+                    : (typeof data.lastMessage === 'object' && data.lastMessage !== null
+                      ? ((data.lastMessage as any).content || '')
+                      : (data.lastMessagePreview || '')),
                   lastMessageTime: data.lastMessageAt || data.updatedAt || Date.now(),
-                  unreadCount: 0, // Will be updated by message processing
+                  // O3 FIX: Don't pass unreadCount — let addConversation preserve
+                  // existing value from MMKV. Real counts synced from user_inbox below.
                   conversationId: docSnap.id,
                 });
               });
+
+              // O3 FIX: Sync accurate unread counts from user_inbox/{uid}/threads.
+              // The Cloud Function increments unreadCount there. After restart, MMKV might
+              // have stale counts, and message dedup prevents re-counting. Single query
+              // to get all thread docs with their unreadCount values.
+              // AUDIT FIX: Throttle inbox sync — getDocs runs on every onSnapshot fire.
+              // 20s throttle balances freshness vs Firestore read cost.
+              const now = Date.now();
+              if (db && !isDisposed && now - this.lastInboxSyncAt > 20000) {
+                this.lastInboxSyncAt = now;
+                try {
+                  const inboxRef = collection(db, 'user_inbox', uid, 'threads');
+                  const inboxSnapshot = await getDocs(inboxRef);
+                  inboxSnapshot.forEach((threadDoc) => {
+                    const threadData = threadDoc.data();
+                    const cloudUnread = threadData?.unreadCount;
+                    if (typeof cloudUnread === 'number' && cloudUnread > 0) {
+                      const convId = threadDoc.id;
+                      const store = useMessageStore.getState();
+                      const existing = store.conversations.find(c => c.conversationId === convId);
+                      if (existing && (existing.unreadCount || 0) < cloudUnread) {
+                        store.addConversation({
+                          ...existing,
+                          unreadCount: cloudUnread,
+                        });
+                      }
+                    }
+                  });
+                } catch (inboxErr) {
+                  if (__DEV__) logger.debug('user_inbox unread count sync failed (non-critical):', inboxErr);
+                }
+              }
             } catch (syncError) {
               logger.debug('Conversation metadata sync to messageStore failed (non-critical):', syncError);
             }
 
             // Subscribe to new conversations' messages
+            // CRITICAL FIX: Use Promise.allSettled instead of sequential await.
+            // Previously, subscriptions were awaited one-by-one in a for loop.
+            // If one subscription hung (slow Firestore init, network timeout),
+            // ALL subsequent conversations were blocked — no messages received
+            // for any conversation until the hanging one resolved/timed out.
+            // Now all subscriptions are initiated in parallel.
+            const subscriptionPromises: Promise<void>[] = [];
             for (const convId of activeConvIds) {
               if (!conversationUnsubscribers.has(convId)) {
-                await subscribeToConversation(convId, firebaseDataService);
+                // CRITICAL FIX: Skip group conversations — managed by GroupChatService
+                const convType = convTypeMap.get(convId);
+                if (convType === 'group' || convId.startsWith('grp_')) {
+                  continue;
+                }
+                subscriptionPromises.push(subscribeToConversation(convId, firebaseDataService));
               }
+            }
+            if (subscriptionPromises.length > 0) {
+              await Promise.allSettled(subscriptionPromises);
             }
 
             // Unsubscribe from conversations user is no longer part of
@@ -2002,8 +2931,17 @@ class HybridMessageService {
           (error: any) => {
             const code = error?.code || '';
             if (code === 'permission-denied' || code === 'unauthenticated') {
-              logger.error(`📨 Conversations subscription PERMANENT error (${code}) — will not retry`);
+              // CRITICAL FIX: Do NOT treat permission-denied as permanent.
+              // On cold start, identityService.getUid() may return a cached UID
+              // (from MMKV) before Firebase Auth token is fully resolved. This
+              // causes the Firestore query to fire with a non-null uid but
+              // request.auth is still null → permission-denied. After Firebase
+              // Auth resolves (1-5 seconds), the subscription will succeed.
+              // Previously this was marked as permanent → subscription DEAD forever
+              // → messages never appeared in chat even though notifications arrived.
+              logger.warn(`📨 Conversations subscription auth error (${code}) — scheduling retry (auth may still be resolving)`);
               conversationsListUnsubscriber = null;
+              scheduleCloudRetry(`auth error: ${code}`);
               return;
             }
             logger.error('📨 Conversations subscription error:', error);
@@ -2011,6 +2949,42 @@ class HybridMessageService {
             scheduleCloudRetry('conversations onSnapshot error');
           },
         );
+
+        // ─────────────────────────────────────────────────────────
+        // MESH/OFFLINE FALLBACK: Legacy Device Messages Listener
+        //
+        // Messages explicitly sent to 'devices/{deviceId}/messages'
+        // due to missing UIDs (e.g. Offline QR Code scanning) are caught here.
+        // ─────────────────────────────────────────────────────────
+        if (legacyDeviceUnsubscriber) {
+          try { legacyDeviceUnsubscriber(); } catch { /* no-op */ }
+          legacyDeviceUnsubscriber = null;
+        }
+
+        const deviceId = identityService.getUid();
+        if (deviceId) {
+          logger.info(`📨 Setting up Legacy Device Message subscription for deviceId=${deviceId}`);
+
+          legacyDeviceUnsubscriber = await firebaseDataService.subscribeToLegacyDeviceMessages(
+            deviceId,
+            (legacyMsgs: any[]) => {
+              if (isDisposed) return;
+              legacyMsgs.forEach((msg) => {
+                // Determine conversation ID for routing (sender UID or Device ID)
+                const senderId = typeof msg.senderUid === 'string' && msg.senderUid.trim() !== ''
+                  ? msg.senderUid.trim()
+                  : typeof msg.fromDeviceId === 'string'
+                    ? msg.fromDeviceId.trim()
+                    : 'unknown';
+
+                // Process the legacy message and push it to mesh store
+                processCloudMessage(msg, senderId);
+              });
+            }
+          );
+        } else {
+          logger.warn(`📨 Legacy subscription skipped: no device ID found`);
+        }
 
       } catch (error) {
         logger.warn('Cloud subscription failed:', error);
@@ -2066,6 +3040,10 @@ class HybridMessageService {
     const existingTimer = this.activeTypingUsers.get(userId);
     if (existingTimer) {
       clearTimeout(existingTimer);
+      // CRITICAL FIX: Remove old timer from cleanupTimers to prevent unbounded Set growth.
+      // Previously, each new typing event added a new timer to cleanupTimers without removing
+      // the old one — a memory leak proportional to typing frequency.
+      this.cleanupTimers.delete(existingTimer);
     }
 
     // Auto-clear after TYPING_AUTO_CLEAR_MS
@@ -2087,38 +3065,147 @@ class HybridMessageService {
     if (this.isProcessing || this.queue.length === 0 || !this.isActive) return;
 
     this.isProcessing = true;
-    const now = Date.now();
 
     try {
-      await this.queueMutex.withLock(async () => {
-        // Sort by priority
+      // CRITICAL FIX: Snapshot the queue under mutex, then release mutex for network I/O.
+      // Previously, queueMutex was held for the entire loop including attemptSend (which
+      // does Firestore writes, media uploads, and mesh broadcasts). This blocked ALL other
+      // message operations (sendMessage, sendMediaMessage, processMessageImmediate) for
+      // potentially 10+ seconds when multiple messages were queued. Users experienced
+      // frozen send buttons and lost messages because new messages couldn't be added to the queue.
+      const messagesToProcess: HybridMessage[] = await this.queueMutex.withLock(async () => {
+        const now = Date.now();
         const sortedQueue = [...this.queue].sort((a, b) =>
           PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
         );
 
+        const eligible: HybridMessage[] = [];
+        const isOnlineNow = connectionManager.isOnline;
         for (const msg of sortedQueue) {
-          // Skip if not ready for retry
+          if (msg.status === 'sent' || msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sending') continue;
+          // AUTO-RETRY FAILED MESSAGES: When connectivity is restored, automatically
+          // resurrect failed messages instead of requiring manual user retry.
+          // WhatsApp/Telegram behavior: failed messages retry transparently on reconnect.
+          // Without this, failed messages sit in queue forever until retryAllFailed() is called.
+          if (msg.status === 'failed') {
+            if (isOnlineNow) {
+              msg.status = 'pending';
+              msg.retryCount = 0;
+              msg.nextRetryAt = undefined;
+              logger.info(`Auto-retrying failed message ${msg.id} (connectivity restored)`);
+            } else {
+              continue; // Still offline — leave as failed
+            }
+          }
           if (msg.nextRetryAt && now < msg.nextRetryAt) continue;
 
-          // Mark as failed if max retries exceeded
           if (msg.retryCount >= RETRY_MAX_ATTEMPTS) {
+            if (this.shouldKeepRetryingAfterMaxAttempts(msg, connectionManager.isOnline)) {
+              msg.retryCount = Math.max(RETRY_MAX_ATTEMPTS - 2, 0);
+              msg.nextRetryAt = now + RETRY_MAX_DELAY_MS;
+              msg.status = 'pending';
+              continue;
+            }
             this.updateMessageStatus(msg.id, 'failed');
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              useMessageStore.getState().updateMessageStatus(msg.id, 'failed');
+            } catch { /* best-effort */ }
             continue;
           }
 
-          const success = await this.attemptSend(msg);
+          eligible.push(msg);
+        }
+        return eligible;
+      });
 
-          if (success) {
+      // Process each message WITHOUT holding the mutex during network I/O
+      for (const msg of messagesToProcess) {
+        // Re-check status in case processMessageImmediate handled it concurrently
+        if (msg.status === 'sent' || msg.status === 'delivered' || msg.status === 'read' || msg.status === 'sending') continue;
+
+        // Mark as 'sending' under mutex to prevent processMessageImmediate from double-sending
+        const skipMsg = await this.queueMutex.withLock(async () => {
+          if (msg.status === 'sending' || msg.status === 'sent' || msg.status === 'delivered' || msg.status === 'read') {
+            return true;
+          }
+          msg.status = 'sending';
+          return false;
+        });
+        if (skipMsg) continue;
+
+        const sendResult = await this.attemptSend(msg);
+        const now = Date.now();
+
+        // Acquire mutex only for the brief queue state mutation
+        await this.queueMutex.withLock(async () => {
+          if (sendResult === 'success') {
             this.updateMessageStatus(msg.id, 'sent');
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              useMessageStore.getState().updateMessageStatus(msg.id, 'sent');
+              const { useMeshStore } = require('./mesh/MeshStore');
+              useMeshStore.getState().updateMessage(msg.id, { status: 'sent' });
+            } catch { /* best-effort */ }
+          } else if (sendResult === 'permanent') {
+            // PERMANENT FAILURE: Force-remove from queue (same logic as processMessageImmediate).
+            // updateMessageStatus('failed') alone does NOT remove — only sent/delivered/read do.
+            const permIdx = this.queue.findIndex(m => m.id === msg.id);
+            if (permIdx >= 0) {
+              this.queue.splice(permIdx, 1);
+            }
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              useMessageStore.getState().updateMessageStatus(msg.id, 'failed');
+              const { useMeshStore } = require('./mesh/MeshStore');
+              useMeshStore.getState().updateMessage(msg.id, { status: 'failed' });
+            } catch { /* best-effort */ }
+            // Notify delivery callbacks
+            const permCbs = this.deliveryCallbacks.get(msg.id);
+            if (permCbs) {
+              permCbs.forEach(cb => cb(msg.id, 'failed'));
+              this.deliveryCallbacks.delete(msg.id);
+            }
+            logger.error(`🚫 processQueue: Message ${msg.id} permanently failed — removed from retry queue`);
           } else {
+            // RETRYABLE FAILURE: Schedule retry
+            msg.status = 'pending'; // Reset from 'sending' so future queue cycles can retry
             msg.retryCount++;
             msg.lastRetryAt = now;
             msg.nextRetryAt = now + this.calculateNextRetryDelay(msg.retryCount);
+            const meshRouted = typeof msg.meshRoutedAt === 'number';
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              const { useMeshStore } = require('./mesh/MeshStore');
+              if (meshRouted) {
+                useMessageStore.getState().updateMessageStatus(msg.id, 'sent');
+                useMeshStore.getState().updateMessage(msg.id, { status: 'sent' });
+              } else {
+                useMessageStore.getState().updateMessageStatus(msg.id, 'pending');
+                useMeshStore.getState().updateMessage(msg.id, { status: 'pending' });
+              }
+            } catch { /* best-effort */ }
           }
-        }
-      });
+        });
+      }
 
-      this.saveQueueDebounced();
+      // Safety-net: evict stale 'failed' messages older than 24h to prevent unbounded
+      // queue growth. Users can still manually retry from the UI store; this only cleans
+      // the background retry queue.
+      const STALE_FAILED_TTL = 24 * 60 * 60 * 1000; // 24 hours
+      const evictNow = Date.now();
+      for (let i = this.queue.length - 1; i >= 0; i--) {
+        const m = this.queue[i];
+        if (m.status === 'failed' && m.lastRetryAt && (evictNow - m.lastRetryAt) > STALE_FAILED_TTL) {
+          logger.warn(`🧹 Evicting stale failed message ${m.id} from queue (last retry ${Math.round((evictNow - m.lastRetryAt) / 3600000)}h ago)`);
+          this.queue.splice(i, 1);
+        }
+      }
+
+      // CRITICAL FIX: Use immediate save, not debounced, to persist retry state mutations.
+      // Debounced save has a 2s window where app crash loses retryCount/nextRetryAt changes,
+      // causing messages to reset their backoff on restart.
+      await this.saveQueueImmediate();
     } catch (error) {
       logger.error('Queue processing error:', error);
     } finally {
@@ -2131,7 +3218,8 @@ class HybridMessageService {
    */
   getConnectionState(): 'online' | 'mesh' | 'offline' {
     const isOnline = connectionManager.isOnline;
-    const meshConnected = useMeshStore.getState().isConnected;
+    const meshState = useMeshStore.getState();
+    const meshConnected = meshState.isConnected || (Array.isArray(meshState.peers) && meshState.peers.length > 0);
 
     if (isOnline) return 'online';
     if (meshConnected) return 'mesh';
@@ -2168,6 +3256,16 @@ class HybridMessageService {
     this.processQueue();
   }
 
+  // CRITICAL FIX: User-scoped storage keys to prevent cross-account data leak.
+  // Without this, after account switch the new user inherits the previous user's
+  // pending message queue and seen IDs (wrong messages sent under wrong identity).
+  private getScopedKey(baseKey: string): string {
+    // FIX: Use cachedUid first (survives auth clear during destroy()),
+    // then fall back to live identityService.getUid()
+    const uid = this.cachedUid || identityService.getUid?.();
+    return uid ? `${baseKey}:${uid}` : baseKey;
+  }
+
   // P2: Debounced save
   private saveQueueDebounced(): void {
     this.saveDebouncer.schedule(() => this.saveQueueImmediate());
@@ -2175,7 +3273,7 @@ class HybridMessageService {
 
   private async saveQueueImmediate(): Promise<void> {
     try {
-      DirectStorage.setString(STORAGE_KEYS.MESSAGE_QUEUE, JSON.stringify(this.queue));
+      DirectStorage.setString(this.getScopedKey(STORAGE_KEYS.MESSAGE_QUEUE), JSON.stringify(this.queue));
     } catch (e) {
       logger.error('Failed to save queue', e);
     }
@@ -2183,10 +3281,49 @@ class HybridMessageService {
 
   private async loadQueue(): Promise<void> {
     try {
-      const data = DirectStorage.getString(STORAGE_KEYS.MESSAGE_QUEUE) ?? null;
+      const scopedKey = this.getScopedKey(STORAGE_KEYS.MESSAGE_QUEUE);
+      const data = DirectStorage.getString(scopedKey) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         this.queue = Array.isArray(parsed) ? parsed : [];
+      } else {
+        // Migration: Try loading from legacy unscoped key
+        const legacyData = DirectStorage.getString(STORAGE_KEYS.MESSAGE_QUEUE) ?? null;
+        if (legacyData && scopedKey !== STORAGE_KEYS.MESSAGE_QUEUE) {
+          const parsed = JSON.parse(legacyData);
+          this.queue = Array.isArray(parsed) ? parsed : [];
+          // Save to scoped key and remove legacy
+          DirectStorage.setString(scopedKey, legacyData);
+          DirectStorage.delete(STORAGE_KEYS.MESSAGE_QUEUE);
+          logger.info('Migrated message queue to user-scoped key');
+        }
+      }
+      // CRITICAL: Reset any 'sending' messages back to 'pending'.
+      // If the app was killed during attemptSend, messages are persisted with
+      // status='sending' and would be skipped forever by processQueue.
+      // Clean up 'sent'/'delivered'/'read' messages that should have been removed
+      // on completion but were persisted before the queue-removal fix.
+      // 'failed' messages are intentionally kept — retryAllFailed() can resurrect them.
+      const beforeLen = this.queue.length;
+      this.queue = this.queue.filter(msg => {
+        // Remove completed states that should have been cleaned up
+        if (msg.status === 'sent' || msg.status === 'delivered' || msg.status === 'read') {
+          return false;
+        }
+        return true;
+      });
+      for (const msg of this.queue) {
+        if (msg.status === 'sending') {
+          msg.status = 'pending';
+        }
+      }
+      if (this.queue.length !== beforeLen) {
+        logger.info(`Queue cleanup: removed ${beforeLen - this.queue.length} completed messages`);
+      }
+      if (this.queue.length > 0) {
+        const pendingCount = this.queue.filter(m => m.status === 'pending').length;
+        const failedCount = this.queue.filter(m => m.status === 'failed').length;
+        logger.info(`Loaded ${this.queue.length} messages from outbox (${pendingCount} pending, ${failedCount} failed)`);
       }
     } catch (e) {
       logger.error('Failed to load queue', e);
@@ -2201,7 +3338,7 @@ class HybridMessageService {
   private async saveSeenIdsImmediate(): Promise<void> {
     try {
       DirectStorage.setString(
-        STORAGE_KEYS.SEEN_MESSAGE_IDS,
+        this.getScopedKey(STORAGE_KEYS.SEEN_MESSAGE_IDS),
         JSON.stringify(this.seenMessageIds.toArray())
       );
     } catch (e) {
@@ -2211,11 +3348,23 @@ class HybridMessageService {
 
   private async loadSeenIds(): Promise<void> {
     try {
-      const data = DirectStorage.getString(STORAGE_KEYS.SEEN_MESSAGE_IDS) ?? null;
+      const scopedKey = this.getScopedKey(STORAGE_KEYS.SEEN_MESSAGE_IDS);
+      const data = DirectStorage.getString(scopedKey) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         const ids: string[] = Array.isArray(parsed) ? parsed : [];
         this.seenMessageIds.fromArray(ids);
+      } else {
+        // Migration: Try loading from legacy unscoped key
+        const legacyData = DirectStorage.getString(STORAGE_KEYS.SEEN_MESSAGE_IDS) ?? null;
+        if (legacyData && scopedKey !== STORAGE_KEYS.SEEN_MESSAGE_IDS) {
+          const parsed = JSON.parse(legacyData);
+          const ids: string[] = Array.isArray(parsed) ? parsed : [];
+          this.seenMessageIds.fromArray(ids);
+          DirectStorage.setString(scopedKey, legacyData);
+          DirectStorage.delete(STORAGE_KEYS.SEEN_MESSAGE_IDS);
+          logger.info('Migrated seen IDs to user-scoped key');
+        }
       }
     } catch (e) {
       logger.error('Failed to load seen IDs', e);

@@ -96,7 +96,7 @@ class OpenAIService {
       this.apiKey = apiKey.trim();
     }
 
-    const allowDirectKeyFallback = __DEV__ || process.env.NODE_ENV !== 'production';
+    const allowDirectKeyFallback = __DEV__;
 
     // Optional secure fallback for internal/dev usage. Not bundle-public.
     if (!this.apiKey && allowDirectKeyFallback) {
@@ -111,12 +111,9 @@ class OpenAIService {
       }
     }
 
-    if (!this.apiKey && allowDirectKeyFallback) {
-      const privateEnvKey = process.env.OPENAI_API_KEY;
-      if (privateEnvKey && privateEnvKey.trim().startsWith('sk-')) {
-        this.apiKey = privateEnvKey.trim();
-      }
-    }
+    // NOTE: process.env fallback removed for security — API keys must come from
+    // SecureKeyManager or proxy configuration, never from environment variables
+    // which could leak in bundle metadata or crash reports.
 
     if (this.proxyUrls.length > 0) {
       logger.info(`✅ OpenAI proxy configured (${this.proxyUrls.length} endpoint): ${this.proxyUrls[0]}`);
@@ -169,13 +166,12 @@ class OpenAIService {
     try {
       await this.waitForAuthStoreHydration(waitForUserMs);
 
-      const [{ getAuth, onAuthStateChanged }, firebaseLib] = await Promise.all([
+      const [{ onAuthStateChanged }, firebaseLib] = await Promise.all([
         import('firebase/auth'),
         import('../../../lib/firebase'),
       ]);
-      const app = firebaseLib.initializeFirebase();
-      if (!app) return null;
-      const auth = getAuth(app);
+      const auth = firebaseLib.getFirebaseAuth();
+      if (!auth) return null;
       let user = auth.currentUser;
 
       if (!user && waitForUserMs > 0) {

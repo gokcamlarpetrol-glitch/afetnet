@@ -11,7 +11,7 @@ import {
   StyleSheet,
   TextInput,
   Pressable,
-  ScrollView,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -25,7 +25,6 @@ import { colors } from '../../theme/colors';
 import { bleMeshService } from '../../services/BLEMeshService';
 import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
 import { hybridMessageService } from '../../services/HybridMessageService';
-import { getDeviceId } from '../../../lib/device';
 import { identityService } from '../../services/IdentityService';
 import { contactService } from '../../services/ContactService';
 import { useFamilyStore } from '../../stores/familyStore';
@@ -36,9 +35,9 @@ import { Linking } from 'react-native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { MainStackParamList } from '../../types/navigation';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('SOSConversationScreen');
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 
 // ELITE: Type-safe navigation prop
 type SOSConversationNavigationProp = StackNavigationProp<MainStackParamList, 'SOSConversation'>;
@@ -64,9 +63,8 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
   const { sosUserId, sosSenderUid, sosUserAliases, sosLocation, sosMessage, sosBatteryLevel, sosNetworkStatus, sosTrapped } = params;
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<SOSMessageType[]>([]);
-  const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<FlatList>(null);
   const meshMessages = useMeshStore((state) => state.messages);
   const familyMembers = useFamilyStore((state) => state.members);
 
@@ -83,12 +81,33 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     addId(sosSenderUid);
     sosUserAliases?.forEach((alias) => addId(alias));
 
+    // Contact + family aliases improve matching when SOS payload carries mixed IDs.
+    try {
+      const contact =
+        contactService.getContactByAnyId(sosUserId)
+        || contactService.getContactByAnyId(sosSenderUid);
+      if (contact?.uid) addId(contact.uid);
+    } catch {
+      // best effort
+    }
+
+    const familyMatch = familyMembers.find((member) =>
+      member.uid === sosUserId
+      || member.uid === sosSenderUid
+      || member.deviceId === sosUserId
+      || member.deviceId === sosSenderUid,
+    );
+    if (familyMatch) {
+      addId(familyMatch.uid);
+      addId(familyMatch.deviceId);
+    }
+
     return ids;
-  }, [sosSenderUid, sosUserAliases, sosUserId]);
+  }, [familyMembers, sosSenderUid, sosUserAliases, sosUserId]);
 
   const resolvedRecipientId = useMemo(() => {
     for (const candidate of peerIdCandidates) {
-      if (UID_REGEX.test(candidate)) return candidate;
+      if (isLikelyFirebaseUid(candidate)) return candidate;
     }
 
     const fallback = (sosSenderUid || sosUserId || '').trim();
@@ -96,24 +115,17 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     return fallback;
   }, [peerIdCandidates, sosSenderUid, sosUserId]);
 
-  // Load device ID
-  useEffect(() => {
-    (async () => {
-      try {
-        const deviceId = await getDeviceId();
-        setMyDeviceId(deviceId);
-      } catch (error) {
-        logger.error('Failed to get device ID:', error);
-      }
-    })();
-  }, []);
+  const recipientAliasList = useMemo(() => Array.from(peerIdCandidates), [peerIdCandidates]);
 
-  // CRITICAL: Ensure BLE Mesh service is running
+  // CRITICAL: Ensure BLE Mesh service is running (with timeout to avoid hanging)
   useEffect(() => {
     (async () => {
       try {
         if (!bleMeshService.getIsRunning()) {
-          await bleMeshService.start();
+          await Promise.race([
+            bleMeshService.start(),
+            new Promise<void>((_, reject) => setTimeout(() => reject(new Error('BLE start timeout')), 5000)),
+          ]);
           logger.info('✅ BLE Mesh service started for SOS conversation');
         }
       } catch (error) {
@@ -140,6 +152,17 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     const selfIds = new Set<string>(['ME', 'me']);
     const uid = identityService.getUid();
     if (uid) selfIds.add(uid);
+    try {
+      const aliases = (identityService as any)?.getAliases?.();
+      if (Array.isArray(aliases)) {
+        aliases.forEach((alias) => {
+          const normalized = typeof alias === 'string' ? alias.trim() : '';
+          if (normalized) selfIds.add(normalized);
+        });
+      }
+    } catch {
+      // best effort
+    }
 
     const filtered = meshMessages
       .filter((msg: MeshMessage) => {
@@ -167,7 +190,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
 
     filtered.sort((a, b) => a.timestamp - b.timestamp);
     return filtered;
-  }, [meshMessages, myDeviceId, normalizeMessageContent, peerIdCandidates]);
+  }, [meshMessages, normalizeMessageContent, peerIdCandidates]);
 
   useEffect(() => {
     setMessages(conversationMessages);
@@ -187,6 +210,17 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     const selfIds = new Set<string>();
     const myUid = identityService.getUid();
     if (myUid) selfIds.add(myUid);
+    try {
+      const aliases = (identityService as any)?.getAliases?.();
+      if (Array.isArray(aliases)) {
+        aliases.forEach((alias) => {
+          const normalized = typeof alias === 'string' ? alias.trim() : '';
+          if (normalized) selfIds.add(normalized);
+        });
+      }
+    } catch {
+      // best effort
+    }
     if (selfIds.has(resolvedRecipientId)) {
       Alert.alert('Hata', 'Kendi hesabınıza SOS konuşması başlatılamaz.');
       return;
@@ -195,14 +229,18 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     setIsSending(true);
 
     try {
-      // CRITICAL: Ensure BLE Mesh service is running
+      // CRITICAL: Ensure BLE Mesh service is running (with timeout)
       if (!bleMeshService.getIsRunning()) {
-        await bleMeshService.start();
+        await Promise.race([
+          bleMeshService.start(),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('BLE start timeout')), 5000)),
+        ]).catch(e => logger.warn('BLE start failed/timeout:', e));
       }
 
       await hybridMessageService.sendMessage(messageContent, resolvedRecipientId, {
         type: 'CHAT',
         priority: 'critical',
+        recipientAliases: recipientAliasList,
       });
 
       haptics.notificationSuccess();
@@ -213,7 +251,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
     } finally {
       setIsSending(false);
     }
-  }, [inputText, isSending, myDeviceId, resolvedRecipientId]);
+  }, [inputText, isSending, resolvedRecipientId, recipientAliasList]);
 
   // Share location
   const shareLocation = useCallback(async () => {
@@ -239,13 +277,13 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
   // Open location in maps
   const openLocationInMaps = useCallback(() => {
     if (!sosLocation) {
-      Alert.alert('Konum Bilgisi Yok', 'Bu kişinin konum bilgisi bulunmuyor');
+      Alert.alert('Hata', 'Konum bilgisi bulunmuyor.');
       return;
     }
-
     const url = Platform.select({
-      ios: `maps://maps.apple.com/?q=${sosLocation.latitude},${sosLocation.longitude}`,
+      ios: `maps://?ll=${sosLocation.latitude},${sosLocation.longitude}&q=${sosLocation.latitude},${sosLocation.longitude}`,
       android: `geo:${sosLocation.latitude},${sosLocation.longitude}?q=${sosLocation.latitude},${sosLocation.longitude}`,
+      default: `https://maps.google.com/?q=${sosLocation.latitude},${sosLocation.longitude}`,
     });
 
     if (!url) {
@@ -376,15 +414,15 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
         )}
 
         {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
           style={styles.messagesContainer}
           contentContainerStyle={styles.messagesContent}
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-        >
-          {messages.map((message) => (
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          renderItem={({ item: message }) => (
             <View
-              key={message.id}
               style={[styles.messageBubble, message.isFromMe ? styles.myMessage : styles.theirMessage]}
             >
               <Text style={styles.messageText}>{message.content}</Text>
@@ -392,11 +430,12 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
                 {new Date(message.timestamp).toLocaleTimeString('tr-TR', {
                   hour: '2-digit',
                   minute: '2-digit',
+                  timeZone: 'Europe/Istanbul',
                 })}
               </Text>
             </View>
-          ))}
-        </ScrollView>
+          )}
+        />
 
         {/* Input Area */}
         <KeyboardAvoidingView
