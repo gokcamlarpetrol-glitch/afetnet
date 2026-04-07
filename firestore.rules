@@ -75,6 +75,33 @@ service cloud.firestore {
       return status == 'accepted' || status == 'declined' || status == 'expired';
     }
 
+    // Message timestamp must be close to server time to reduce spoofing/replay.
+    // Tolerance: ±5 minutes to accommodate device clock skew (NTP drift, airplane mode, etc.)
+    // Previous +60s future limit was too tight — devices with clocks 2min ahead had ALL writes rejected.
+    function isRecentClientTimestamp(ts) {
+      return ts is number
+             && ts <= request.time.toMillis() + 300000
+             && ts >= request.time.toMillis() - 300000;
+    }
+
+    // Basic per-conversation throttle: same sender cannot post back-to-back in <700ms.
+    function passesConversationMessageRateLimit(conversationId) {
+      let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      return !(conversation.lastMessage is map)
+             || !(conversation.lastMessage.from is string)
+             || !(conversation.lastMessage.timestamp is number)
+             || conversation.lastMessage.from != request.auth.uid
+             || request.resource.data.timestamp >= conversation.lastMessage.timestamp + 700;
+    }
+
+    // Optional server-side block switch:
+    // Cloud Functions may set rate_limits/{uid}.messagingBlockedUntil (epoch ms).
+    function notBlockedByServerMessageRateLimit() {
+      return !exists(/databases/$(database)/documents/rate_limits/$(request.auth.uid))
+             || !(get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.messagingBlockedUntil is number)
+             || request.time.toMillis() > get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.messagingBlockedUntil;
+    }
+
     // NOTE: isNewsSummaryJobOwner, hasAppCheck, isNotSpamming removed — unused
     
     // ============================================================
@@ -85,13 +112,23 @@ service cloud.firestore {
     // SECURITY FIX: userId must match auth.uid to prevent spoofing
     // Rate limited, auto-expires after 5 minutes
     match /eew_pwave_detections/{detectionId} {
+      // SECURITY NOTE: Read is open to authenticated users because the client needs
+      // to query nearby P-wave detections for crowdsourced earthquake consensus.
+      // FirebaseEEWOperations.getNearbyDetections() fetches recent detections and
+      // filters by geo-proximity client-side. Restricting to own userId would break
+      // the consensus detection feature. The query is already limited (50 docs, 5min).
+      // Location data exposure is mitigated by short TTL (detections expire in 5min).
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.deviceId is string
                     && request.resource.data.timestamp is number
                     && request.resource.data.latitude is number
+                    && request.resource.data.latitude >= -90
+                    && request.resource.data.latitude <= 90
                     && request.resource.data.longitude is number
+                    && request.resource.data.longitude >= -180
+                    && request.resource.data.longitude <= 180
                     && request.resource.data.confidence is number
                     && request.resource.data.confidence >= 0
                     && request.resource.data.confidence <= 100;
@@ -249,15 +286,13 @@ service cloud.firestore {
         // SECURITY: Any authenticated user can create messages in any device inbox
         // (fan-out write pattern: sender writes to recipient's inbox)
         // Validation: fromDeviceId and toDeviceId must be strings, content must exist
-        // SECURITY FIX: Validate senderUid matches auth.uid to prevent spoofed messages
+        // SECURITY FIX: senderUid is MANDATORY and must match auth.uid to prevent spoofed messages
         allow create: if isAuthenticated()
                       && request.resource.data.fromDeviceId is string
                       && request.resource.data.toDeviceId is string
                       && request.resource.data.content is string
-                      && (
-                        !('senderUid' in request.resource.data)
-                        || request.resource.data.senderUid == request.auth.uid
-                      );
+                      && request.resource.data.senderUid is string
+                      && request.resource.data.senderUid == request.auth.uid;
         // CRITICAL FIX: Allow owner OR message sender to update messages.
         // Owner: for read receipts, status updates on own inbox.
         // Sender (isSenderOwned): for retries — setDoc({merge:true}) on an
@@ -276,7 +311,10 @@ service cloud.firestore {
         allow read: if isDeviceOwner(deviceId);
         // CRITICAL FIX: Allow any authenticated user to create conversations
         // (fan-out: sender creates conversation metadata in recipient's device)
-        allow create: if isAuthenticated();
+        // SECURITY FIX: Creator must be a participant in the conversation
+        allow create: if isAuthenticated()
+                      && request.resource.data.participants is list
+                      && request.auth.uid in request.resource.data.participants;
         allow update: if isDeviceOwner(deviceId);
         allow delete: if isDeviceOwner(deviceId);
       }
@@ -287,17 +325,19 @@ service cloud.firestore {
       // - Any authenticated user can CREATE an SOS alert for any device
       //   (family member sends SOS to your device path)
       // - Device owner + linked family can READ alerts
-      // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
+      // SECURITY FIX: senderUid is MANDATORY and must match auth.uid to prevent SOS spoofing
       match /sos_alerts/{alertId} {
         allow read: if isDeviceReadable(deviceId);
         allow create: if isAuthenticated()
                       && request.resource.data.signalId is string
                       && request.resource.data.timestamp is number
-                      && (
-                        !('senderUid' in request.resource.data)
-                        || request.resource.data.senderUid == request.auth.uid
-                      );
-        allow update: if isDeviceOwner(deviceId);
+                      && isRecentClientTimestamp(request.resource.data.timestamp)
+                      && request.resource.data.senderUid is string
+                      && request.resource.data.senderUid == request.auth.uid;
+        // CRITICAL FIX: Allow SOS sender to update (cancel) their own alerts on any device.
+        // Previously only device owner could update → SOS cancellation to family SILENTLY FAILED.
+        allow update: if isDeviceOwner(deviceId)
+                      || (isAuthenticated() && resource.data.senderUid == request.auth.uid);
         allow delete: if isDeviceOwner(deviceId);
       }
 
@@ -313,6 +353,11 @@ service cloud.firestore {
         allow update: if false; // ACKs are immutable
         allow delete: if isDeviceOwner(deviceId); // Cleanup only
       }
+
+      // Earthquake alerts subcollection (device-specific alert history)
+      match /earthquakeAlerts/{alertId} {
+        allow read, delete: if isDeviceOwner(deviceId);
+      }
     }
     
     // ============================================================
@@ -324,8 +369,10 @@ service cloud.firestore {
       allow create: if isAuthenticated()
                     && request.resource.data.deviceId is string
                     && request.resource.data.latitude is number
-                    && request.resource.data.longitude is number;
-      allow update: if false;
+                    && request.resource.data.longitude is number
+                    && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated()
+                    && resource.data.userId == request.auth.uid;
       allow delete: if false;
     }
     
@@ -361,11 +408,15 @@ service cloud.firestore {
     // - Public read for P2P sharing
     // - Authenticated create
     match /plum_observations/{observationId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated()
                     && request.resource.data.deviceId is string
                     && request.resource.data.latitude is number
+                    && request.resource.data.latitude >= -90
+                    && request.resource.data.latitude <= 90
                     && request.resource.data.longitude is number
+                    && request.resource.data.longitude >= -180
+                    && request.resource.data.longitude <= 180
                     && request.resource.data.intensity is number
                     && request.resource.data.timestamp is number;
       allow update: if false;
@@ -542,10 +593,13 @@ service cloud.firestore {
       // V3: Status updates history
       // NOTE: Family members write status updates to EACH OTHER's subcollections
       // (FamilyScreen.handleStatusUpdate fans out to all members' paths)
+      // SECURITY FIX: senderUid must match auth.uid to prevent spoofed status updates
       match /status_updates/{updateId} {
         allow read: if isAuthenticated();
         allow create: if isAuthenticated()
-                      && request.resource.data.timestamp is number;
+                      && request.resource.data.timestamp is number
+                      && request.resource.data.senderUid is string
+                      && request.resource.data.senderUid == request.auth.uid;
         allow update: if false;
         allow delete: if isOwner(userId); // GDPR: owner can delete their own history
       }
@@ -555,7 +609,10 @@ service cloud.firestore {
       // Read by: sharesFamilyWith() via exists() check
       match /familyMembers/{otherUid} {
         allow read: if isAuthenticated(); // Any authenticated user can check family membership
-        allow create: if isAuthenticated(); // saveFamilyMember writes to BOTH users' subcollections
+        // SECURITY FIX: Only involved parties can create family member entries
+        // saveFamilyMember writes to BOTH users' subcollections
+        allow create: if isAuthenticated()
+                      && (request.auth.uid == userId || request.auth.uid == otherUid);
         allow update: if isOwner(userId); // Only the doc owner can update
         allow delete: if isOwner(userId)
                       || request.auth.uid == otherUid; // Either side can remove mapping
@@ -568,6 +625,13 @@ service cloud.firestore {
         allow read: if isAuthenticated(); // Need to check family membership
         allow create, update: if isOwner(userId);
         allow delete: if isOwner(userId);
+      }
+
+      // V3: User settings (cross-device sync)
+      // Only the owner can read/write their own settings
+      match /settings/{settingId} {
+        allow read, create, update: if isOwner(userId);
+        allow delete: if isOwner(userId); // GDPR: owner can delete
       }
     }
     
@@ -610,14 +674,14 @@ service cloud.firestore {
     }
     
     // SOS alerts (legacy)
-    // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
+    // SECURITY FIX: senderUid is MANDATORY and must match auth.uid to prevent SOS spoofing
+    // PRIVACY FIX: Only admin or the SOS sender can read legacy SOS alerts
     match /sosAlerts/{alertId} {
-      allow read: if isAuthenticated() || isAdmin();
+      allow read: if isAdmin()
+                  || (isAuthenticated() && resource.data.senderUid == request.auth.uid);
       allow create: if isAuthenticated()
-                    && (
-                      !('senderUid' in request.resource.data)
-                      || request.resource.data.senderUid == request.auth.uid
-                    );
+                    && request.resource.data.senderUid is string
+                    && request.resource.data.senderUid == request.auth.uid;
       allow update: if false;
       allow delete: if false;
     }
@@ -633,19 +697,23 @@ service cloud.firestore {
     // ============================================================
     // GLOBAL SOS SIGNALS (Firebase SOS backup record)
     // Life-saving: Any authenticated user can create their own SOS signal
-    // Any authenticated user can read (for global SOS awareness)
+    // SECURITY: Only the creator can read their own SOS signals — prevents
+    // enumeration of all SOS signals by any authenticated user
     // ============================================================
 
     match /sos_signals/{signalId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && resource.data.creatorUid == request.auth.uid;
+      // ANTI-ABUSE: Timestamp must be recent (within 5 min) to prevent replay attacks
       allow create: if isAuthenticated()
                     && request.resource.data.id is string
                     && request.resource.data.timestamp is number
+                    && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.status is string
                     && request.resource.data.creatorUid == request.auth.uid;
       allow update: if isAuthenticated()
                     && resource.data.creatorUid == request.auth.uid
-                    && request.resource.data.id == resource.data.id;
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.creatorUid == resource.data.creatorUid;
       // GDPR: creator can delete their own SOS signals during account deletion
       allow delete: if isAuthenticated() && resource.data.creatorUid == request.auth.uid;
     }
@@ -714,10 +782,11 @@ service cloud.firestore {
                     && request.resource.data.members is list
                     && request.auth.uid in request.resource.data.members
                     && request.resource.data.createdBy == request.auth.uid;
-      // Only members can update
+      // Only members can update; createdBy is immutable
       allow update: if isAuthenticated()
                     && resource.data.members is list
-                    && request.auth.uid in resource.data.members;
+                    && request.auth.uid in resource.data.members
+                    && request.resource.data.createdBy == resource.data.createdBy;
       // GDPR: creator can delete family during account deletion
       allow delete: if isAuthenticated()
                     && resource.data.createdBy == request.auth.uid;
@@ -727,9 +796,11 @@ service cloud.firestore {
         allow read: if isAuthenticated()
                     && get(/databases/$(database)/documents/families/$(familyId)).data.members is list
                     && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members;
-        // Any member can add new members
+        // SECURITY FIX: Only existing family members can add new members
         allow create: if isAuthenticated()
-                      && request.resource.data.uid is string;
+                      && request.resource.data.uid is string
+                      && exists(/databases/$(database)/documents/families/$(familyId))
+                      && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members;
         // Only the member themselves or family admin can update
         allow update: if isAuthenticated()
                       && (request.auth.uid == memberUid
@@ -771,19 +842,26 @@ service cloud.firestore {
     // ============================================================
 
     match /sos_alerts/{userId} {
-      allow read: if isAuthenticated();
+      // SECURITY FIX: Only owner or family members can read SOS alerts
+      // Previously any authenticated user could read any user's SOS alert history
+      allow read: if isAuthenticated()
+                  && (isOwner(userId) || sharesFamilyWith(userId));
 
-      // SECURITY FIX: Validate senderUid matches auth.uid to prevent SOS spoofing
+      // SECURITY FIX: senderUid is MANDATORY and must match auth.uid to prevent SOS spoofing
+      // ANTI-ABUSE: Timestamp must be recent (within 5 min) to prevent replay attacks
       match /items/{signalId} {
-        allow read: if isAuthenticated();
+        allow read: if isAuthenticated()
+                    && (isOwner(userId) || sharesFamilyWith(userId));
         allow create: if isAuthenticated()
                       && request.resource.data.timestamp is number
-                      && (
-                        !('senderUid' in request.resource.data)
-                        || request.resource.data.senderUid == request.auth.uid
-                      );
-        // Only the SOS creator can update (cancel, ack)
-        allow update: if isOwner(userId);
+                      && isRecentClientTimestamp(request.resource.data.timestamp)
+                      && request.resource.data.senderUid is string
+                      && request.resource.data.senderUid == request.auth.uid;
+        // CRITICAL FIX: Allow SOS sender to update (cancel) their own alerts on family member paths.
+        // Previously only the path owner (family member) could update → SOS cancellation SILENTLY FAILED.
+        // The SOS sender's UID is stored in resource.data.senderUid at creation time.
+        allow update: if isOwner(userId)
+                      || (isAuthenticated() && resource.data.senderUid == request.auth.uid);
         allow delete: if false; // SOS records are preserved
       }
 
@@ -823,12 +901,22 @@ service cloud.firestore {
                     && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
                     && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
         // V3: Validate senderUid matches auth.uid AND sender is a participant (prevent spoofing + unauthorized writes)
+        // SECURITY FIX: Validate media fields when present (prevent injection of invalid mediaType values)
+        // ANTI-ABUSE: Timestamp must be recent (within 5 min), content size limited to 5000 chars
         allow create: if isAuthenticated()
                       && request.resource.data.senderUid == request.auth.uid
                       && request.resource.data.content is string
+                      && request.resource.data.content.size() <= 5000
                       && request.resource.data.timestamp is number
+                      && isRecentClientTimestamp(request.resource.data.timestamp)
+                      && (!('mediaType' in request.resource.data)
+                          || request.resource.data.mediaType in ['image', 'voice', 'location'])
+                      && (!('mediaDuration' in request.resource.data)
+                          || request.resource.data.mediaDuration is number)
                       && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
-                      && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+                      && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+                      && passesConversationMessageRateLimit(conversationId)
+                      && notBlockedByServerMessageRateLimit();
         // Allow any participant to update (read receipts, status, etc.)
         allow update: if isAuthenticated()
                       && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
@@ -884,16 +972,38 @@ service cloud.firestore {
     // ============================================================
 
     match /sos_broadcasts/{broadcastId} {
+      // SECURITY FIX: Restrict SOS broadcast reads to authenticated users only.
+      // Client-side NearbySOSListener filters by proximity (50km radius).
+      // Firestore rules cannot filter by geo-distance, but we limit exposure by
+      // requiring authentication + the Cloud Function only sends push to nearby users.
+      // Full geo-filtering requires server-side query (Cloud Function pattern).
       allow read: if isAuthenticated();
       // SECURITY FIX: Bind creatorUid to auth.uid to prevent spoofed SOS broadcasts
+      // ANTI-ABUSE: Timestamp must be recent (within 5 min) to prevent replay attacks
+      // CRITICAL FIX: latitude/longitude made optional — SOS without location permission
+      // was being REJECTED, leaving nearby users completely unnotified.
+      // NOTE (FIX 12): Rate limiting (e.g., max 1 active SOS per user per 5 min) cannot be
+      // reliably enforced in Firestore rules alone — rules lack query capabilities to check
+      // for existing active broadcasts from the same senderUid. This MUST be enforced
+      // server-side in the onSOSBroadcast Cloud Function or via a dedicated rate_limits
+      // collection. For now, the timestamp check provides basic replay protection.
       allow create: if isAuthenticated()
                     && request.resource.data.signalId is string
-                    && request.resource.data.latitude is number
-                    && request.resource.data.longitude is number
+                    && (!('latitude' in request.resource.data) || request.resource.data.latitude == null || request.resource.data.latitude is number)
+                    && (!('longitude' in request.resource.data) || request.resource.data.longitude == null || request.resource.data.longitude is number)
                     && request.resource.data.timestamp is number
+                    && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.senderUid is string
-                    && request.resource.data.senderUid == request.auth.uid;
-      allow update: if false;
+                    && request.resource.data.senderUid == request.auth.uid
+                    // SECURITY: Validate senderName length to prevent abuse via oversized payloads
+                    && (!('senderName' in request.resource.data) || (request.resource.data.senderName is string && request.resource.data.senderName.size() <= 100));
+      // CRITICAL FIX: Allow the SOS creator to update their own broadcast (cancellation).
+      // Without this, cancelSOS() → updateDoc(sos_broadcasts/{id}, {status:'cancelled'})
+      // is SILENTLY REJECTED, and NearbySOSListener never sees the cancellation.
+      // All nearby users continue seeing an active SOS forever.
+      allow update: if isAuthenticated()
+                    && resource.data.senderUid == request.auth.uid
+                    && request.resource.data.status is string;
       allow delete: if false; // Cleanup via TTL or Cloud Functions
 
       // SOS Acknowledgements — delivery confirmation from recipients
@@ -911,26 +1021,34 @@ service cloud.firestore {
     // VOICE CALLS (P2P WebRTC signaling)
     // ============================================================
 
-    // Call documents — caller and recipient can read/write
+    // Call documents — ONLY caller and recipient can read/write
     match /voice_calls/{callId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        (resource.data.callerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.callerUid == request.auth.uid;
+      allow update: if isAuthenticated() &&
+        (resource.data.callerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
       allow delete: if false; // Cleanup via TTL or Cloud Functions only
 
-      // ICE candidates subcollections
+      // ICE candidates — only call participants
       match /callerCandidates/{candidateId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if isAuthenticated() &&
+          (get(/databases/$(database)/documents/voice_calls/$(callId)).data.callerUid == request.auth.uid ||
+           get(/databases/$(database)/documents/voice_calls/$(callId)).data.recipientUid == request.auth.uid);
       }
       match /calleeCandidates/{candidateId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if isAuthenticated() &&
+          (get(/databases/$(database)/documents/voice_calls/$(callId)).data.callerUid == request.auth.uid ||
+           get(/databases/$(database)/documents/voice_calls/$(callId)).data.recipientUid == request.auth.uid);
       }
     }
 
     // Incoming call notifications — only the recipient can read, caller can write
+    // SECURITY FIX: Validate callerUid matches auth.uid to prevent call spoofing
     match /voice_calls_incoming/{userId} {
       allow read, delete: if isOwner(userId);
-      allow create, update: if isAuthenticated();
+      allow create, update: if isAuthenticated()
+                            && request.resource.data.callerUid == request.auth.uid;
     }
 
     // ============================================================
@@ -943,9 +1061,36 @@ service cloud.firestore {
       allow read, write: if false; // Only via Cloud Functions with admin SDK
     }
 
-    // Rate limits (Cloud Functions openAIChatProxy writes here)
+    // Rate limits for server-side (Cloud Functions) rate limiting
+    // Owner can read their own rate limit status; only Cloud Functions can write
     match /rate_limits/{userId} {
-      allow read, write: if false; // Only via Cloud Functions with admin SDK
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
+    }
+
+    // ============================================================
+    // REPORTS COLLECTION - UGC Moderation (Apple Guideline 1.2)
+    // Users can create reports and read their own reports.
+    // Only admins/Cloud Functions can update or delete reports.
+    // ============================================================
+    match /reports/{reportId} {
+      // Users can read their own reports (check status)
+      allow read: if isAuthenticated()
+                  && resource.data.reporterId == request.auth.uid;
+
+      // Users can create reports — must be their own UID as reporterId
+      allow create: if isAuthenticated()
+                    && request.resource.data.reporterId == request.auth.uid
+                    && request.resource.data.reportType is string
+                    && request.resource.data.reason is string
+                    && request.resource.data.reasonLabel is string
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.createdAt is number
+                    && isRecentClientTimestamp(request.resource.data.createdAt);
+
+      // Users cannot update or delete reports — only admins/Cloud Functions
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     // Catch-all deny for undefined paths
