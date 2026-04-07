@@ -22,7 +22,7 @@ try {
   statusCodes = googleSigninModule.statusCodes || {};
 } catch (e) {
   // Native module not available - Google Sign-In will be disabled
-  console.warn('[AuthService] GoogleSignin native module not available:', (e as Error).message);
+  if (__DEV__) console.warn('[AuthService] GoogleSignin native module not available:', (e as Error).message);
 }
 
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -37,8 +37,10 @@ import {
   OAuthProvider,
   User,
   signOut as firebaseSignOut,
+  updateProfile,
 } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { createLogger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
 import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
@@ -98,7 +100,11 @@ interface AuthError extends Error {
 
 // Google Auth Readiness State
 let googleAuthAvailable = false;
-const PROFILE_SYNC_RETRY_CONFIG = { maxRetries: 3, baseDelayMs: 500, maxDelayMs: 5000 };
+// CRITICAL FIX: Increased retries from 3→5, max delay from 5s→10s.
+// Profile sync failure previously caused FORCE LOGOUT even though Firebase Auth was successful.
+// This is the ROOT CAUSE of "user logs in then gets kicked out" — Firestore network timeout
+// or permission error during profile sync triggers signOut() despite valid auth session.
+const PROFILE_SYNC_RETRY_CONFIG = { maxRetries: 5, baseDelayMs: 1000, maxDelayMs: 10000 };
 
 function getRuntimeConfigValue(key: string): string | undefined {
   const fromEnv = process.env[key];
@@ -199,10 +205,12 @@ export const AuthService = {
           PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.error('Kritik profil senkronizasyonu başarısız (Google):', syncError);
-        await firebaseSignOut(auth).catch(() => undefined);
-        await identityService.clearIdentity().catch(() => undefined);
-        throw new Error('Google ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
+        // CRITICAL FIX: Do NOT logout on profile sync failure!
+        // Firebase Auth login SUCCEEDED — the user IS authenticated.
+        // Profile sync is a Firestore operation that can fail due to network, permissions, timeout.
+        // Forcing signOut() here is the ROOT CAUSE of "user logs in then gets kicked out".
+        // Profile will be synced in init.ts Phase B (IdentityService.syncFromFirebase).
+        logger.error('Profil senkronizasyonu başarısız (Google) — devam ediliyor (login iptal edilmiyor):', syncError);
       }
 
       // ELITE: Sync identity and contacts after successful auth
@@ -268,25 +276,54 @@ export const AuthService = {
           nickname: fullName.nickname,
         } : null;
 
+        // CRITICAL FIX: Apple provides fullName ONLY on first-ever authorization.
+        // After account deletion + re-creation, UID changes but Apple User ID stays the same.
+        // Store by BOTH Apple User ID (stable) and Firebase UID, plus a global latest key.
+        const appleUserId = credential.user; // Apple's stable user identifier
         if (appleFullName?.givenName || appleFullName?.familyName) {
-          DirectStorage.setString(
-            `@afetnet:apple_name_${userCredential.user.uid}`,
-            JSON.stringify(appleFullName),
-          );
+          const nameJson = JSON.stringify(appleFullName);
+          DirectStorage.setString(`@afetnet:apple_name_${userCredential.user.uid}`, nameJson);
+          DirectStorage.setString(`@afetnet:apple_name_apple_${appleUserId}`, nameJson);
+          DirectStorage.setString('@afetnet:apple_name_latest', nameJson);
+          logger.info(`✅ Apple name stored: ${appleFullName.givenName} ${appleFullName.familyName}`);
         }
 
-        // Try to get stored Apple name if not provided
+        // Try to get stored Apple name if not provided (Apple only gives name on first auth)
         let nameToSync: AppleFullName | null = appleFullName;
         if (!nameToSync?.givenName && !nameToSync?.familyName) {
           try {
-            const storedName = DirectStorage.getString(
-              `@afetnet:apple_name_${userCredential.user.uid}`,
-            ) ?? null;
+            // Priority: 1) By Apple User ID (most reliable), 2) By Firebase UID, 3) Global latest
+            const storedByAppleId = DirectStorage.getString(`@afetnet:apple_name_apple_${appleUserId}`) ?? null;
+            const storedByUid = DirectStorage.getString(`@afetnet:apple_name_${userCredential.user.uid}`) ?? null;
+            const storedLatest = DirectStorage.getString('@afetnet:apple_name_latest') ?? null;
+            const storedName = storedByAppleId || storedByUid || storedLatest;
             if (storedName) {
               nameToSync = JSON.parse(storedName) as AppleFullName;
+              logger.info(`📦 Apple name recovered from storage: ${nameToSync?.givenName} ${nameToSync?.familyName}`);
             }
           } catch (storageError) {
             logger.debug('Apple isim depolama okuma hatası:', storageError);
+          }
+        }
+
+        // CRITICAL FIX: Update Firebase Auth displayName so it persists across sessions.
+        // Also overwrite if current displayName is just the email prefix (e.g. "Gokcamlarpetrol")
+        const resolvedDisplayName = nameToSync
+          ? `${nameToSync.givenName || ''} ${nameToSync.familyName || ''}`.trim()
+          : null;
+        const currentAuthDisplayName = userCredential.user.displayName || '';
+        const isCurrentNameEmailDerived = (() => {
+          if (!currentAuthDisplayName || !userCredential.user.email) return false;
+          const emailLocal = userCredential.user.email.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || '';
+          const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/gi, '');
+          return norm(currentAuthDisplayName) === norm(emailLocal);
+        })();
+        if (resolvedDisplayName && (!currentAuthDisplayName || isCurrentNameEmailDerived)) {
+          try {
+            await updateProfile(userCredential.user, { displayName: resolvedDisplayName });
+            logger.info(`✅ Firebase Auth displayName updated: ${resolvedDisplayName}`);
+          } catch (profileError) {
+            logger.warn('Firebase Auth displayName update failed (non-blocking):', profileError);
           }
         }
 
@@ -295,10 +332,9 @@ export const AuthService = {
           PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.error('Kritik profil senkronizasyonu başarısız (Apple):', syncError);
-        await firebaseSignOut(auth).catch(() => undefined);
-        await identityService.clearIdentity().catch(() => undefined);
-        throw new Error('Apple ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
+        // CRITICAL FIX: Do NOT logout on profile sync failure!
+        // Firebase Auth login SUCCEEDED. Profile will sync in init.ts Phase B.
+        logger.error('Profil senkronizasyonu başarısız (Apple) — devam ediliyor (login iptal edilmiyor):', syncError);
       }
 
       // ELITE: Sync identity and contacts after successful auth
@@ -358,10 +394,9 @@ export const AuthService = {
           PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.error('Kritik profil senkronizasyonu başarısız (Email login):', syncError);
-        await firebaseSignOut(auth).catch(() => undefined);
-        await identityService.clearIdentity().catch(() => undefined);
-        throw new Error('E-posta ile giriş tamamlanamadı: hesap verileri senkronize edilemedi.');
+        // CRITICAL FIX: Do NOT logout on profile sync failure!
+        // Firebase Auth login SUCCEEDED. Profile will sync in init.ts Phase B.
+        logger.error('Profil senkronizasyonu başarısız (Email) — devam ediliyor (login iptal edilmiyor):', syncError);
       }
 
       // Sync identity and contacts after successful auth
@@ -384,10 +419,16 @@ export const AuthService = {
         throw new Error('Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı');
       } else if (authError.code === 'auth/wrong-password') {
         throw new Error('Şifre hatalı');
+      } else if (authError.code === 'auth/invalid-credential') {
+        throw new Error('Geçersiz kimlik bilgileri. E-posta veya şifre hatalı.');
       } else if (authError.code === 'auth/invalid-email') {
         throw new Error('Geçersiz e-posta adresi');
+      } else if (authError.code === 'auth/user-disabled') {
+        throw new Error('Bu hesap devre dışı bırakılmış.');
       } else if (authError.code === 'auth/too-many-requests') {
         throw new Error('Çok fazla başarısız deneme. Lütfen daha sonra tekrar deneyin');
+      } else if (authError.code === 'auth/network-request-failed') {
+        throw new Error('Ağ bağlantısı hatası. İnternet bağlantınızı kontrol edin.');
       }
       throw authError;
     }
@@ -403,6 +444,17 @@ export const AuthService = {
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
+      // CRITICAL FIX: Set Firebase Auth displayName so it persists across sessions.
+      // Without this, email-signup users show as "İsimsiz Kahraman" forever.
+      if (displayName) {
+        try {
+          await updateProfile(userCredential.user, { displayName });
+          logger.info(`✅ Firebase Auth displayName set for email signup: ${displayName}`);
+        } catch (profileError) {
+          logger.warn('Firebase Auth displayName update failed (non-blocking):', profileError);
+        }
+      }
+
       // Sync user profile with display name
       try {
         await retryWithBackoff(
@@ -410,10 +462,9 @@ export const AuthService = {
           PROFILE_SYNC_RETRY_CONFIG,
         );
       } catch (syncError) {
-        logger.error('Kritik profil senkronizasyonu başarısız (Email signup):', syncError);
-        await firebaseSignOut(auth).catch(() => undefined);
-        await identityService.clearIdentity().catch(() => undefined);
-        throw new Error('Kayıt tamamlanamadı: hesap verileri senkronize edilemedi.');
+        // CRITICAL FIX: Do NOT logout on profile sync failure!
+        // User account was CREATED successfully. Profile will sync later.
+        logger.error('Profil senkronizasyonu başarısız (Email signup) — devam ediliyor:', syncError);
       }
 
       // Sync identity and contacts after successful auth
@@ -438,6 +489,10 @@ export const AuthService = {
         throw new Error('Geçersiz e-posta adresi');
       } else if (authError.code === 'auth/weak-password') {
         throw new Error('Şifre çok zayıf. En az 6 karakter olmalı');
+      } else if (authError.code === 'auth/network-request-failed') {
+        throw new Error('Ağ bağlantısı hatası. İnternet bağlantınızı kontrol edin.');
+      } else if (authError.code === 'auth/operation-not-allowed') {
+        throw new Error('E-posta/şifre ile kayıt şu anda etkin değil.');
       }
       throw authError;
     }
@@ -450,14 +505,20 @@ export const AuthService = {
     const auth = getFirebaseAuth();
     if (!auth) return;
 
+    // CRITICAL: Capture UID NOW before Firebase sign-out nullifies currentUser
+    const signOutUid = auth.currentUser?.uid || '';
+
     try {
-      // ELITE: Cleanup all services on logout
-      await presenceService.cleanup();
-      await contactRequestService.cleanup();
-      await authSessionCleanupService.clearLocalSessionData();
+      // Flush settings to cloud before logout (preserves preferences for next login)
+      try {
+        const { settingsSyncService } = await import('./SettingsSyncService');
+        await settingsSyncService.flushSync();
+        settingsSyncService.cleanup();
+      } catch { /* best effort */ }
 
-      await identityService.clearIdentity();
-
+      // CRITICAL: Firebase sign-out FIRST, then local cleanup.
+      // If local cleanup runs first and Firebase sign-out fails,
+      // the user is still authenticated remotely but local session is destroyed.
       await firebaseSignOut(auth);
 
       try {
@@ -468,7 +529,18 @@ export const AuthService = {
         // Ignore if not signed in with Google
       }
 
+      // Local cleanup AFTER successful remote sign-out
+      await presenceService.cleanup();
+      await contactRequestService.cleanup();
+      await authSessionCleanupService.clearLocalSessionData();
+      await identityService.clearIdentity();
       await clearDeviceId();
+
+      // AUTHORITATIVE: Purge ALL user-scoped security keys
+      try {
+        const { purgeUserSecurityKeys } = await import('./security/SecurityKeyCleanup');
+        await purgeUserSecurityKeys(signOutUid);
+      } catch { /* best effort */ }
 
       logger.info('✅ Signed out and cleared all data');
     } catch (error) {
@@ -491,17 +563,97 @@ export const AuthService = {
     // Ensure auth is initialized with persistence before any profile sync
     getFirebaseAuth();
 
-    const db = getFirestore(app);
+    const db = await getFirestoreInstanceAsync();
+    if (!db) return;
     const userRef = doc(db, 'users', user.uid);
 
     const snapshot = await getDoc(userRef);
 
-    let displayName = user.displayName;
+    // Resolve display name with provider-first strategy.
+    const normalizeName = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+    const deriveEmailDisplayName = (email?: string | null): string => {
+      if (!email) return '';
+      const local = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+      if (!local || local.length < 2) return '';
+      return local.charAt(0).toUpperCase() + local.slice(1);
+    };
+    const isEmailDerivedName = (name: string, email?: string | null): boolean => {
+      if (!name || !email) return false;
+      const derived = deriveEmailDisplayName(email);
+      if (!derived) return false;
+      const normalize = (v: string) => v.toLowerCase().replace(/[^a-z0-9ğüşöçıİ]/gi, '');
+      return normalize(name) === normalize(derived);
+    };
+    const providerDisplayName = (() => {
+      const providers = Array.isArray(user.providerData) ? user.providerData : [];
+      for (const provider of providers) {
+        const candidate = normalizeName(provider?.displayName);
+        // CRITICAL FIX: Skip email-derived names from provider data.
+        // Apple Sign-In sometimes sets providerData.displayName to the email prefix.
+        if (candidate && candidate !== 'İsimsiz Kahraman' && !isEmailDerivedName(candidate, user.email)) {
+          return candidate;
+        }
+      }
+      return '';
+    })();
+
+    // CRITICAL FIX: Retrieve cached Apple name from MMKV.
+    // Apple only provides the real name on FIRST authorization.
+    // AuthService.signInWithApple() caches it in MMKV, but syncUserProfile
+    // was not reading it — causing email prefix to persist as displayName.
+    const getCachedAppleDisplayName = (): string => {
+      try {
+        const storedByUid = DirectStorage.getString(`@afetnet:apple_name_${user.uid}`) ?? null;
+        const storedLatest = DirectStorage.getString('@afetnet:apple_name_latest') ?? null;
+        const raw = storedByUid || storedLatest;
+        if (!raw) return '';
+        const parsed = JSON.parse(raw) as { givenName?: string | null; familyName?: string | null };
+        return `${parsed?.givenName || ''} ${parsed?.familyName || ''}`.trim();
+      } catch {
+        return '';
+      }
+    };
+
+    let displayName = normalizeName(user.displayName);
+
+    // If auth displayName is email-derived, treat it as empty
+    if (displayName && isEmailDerivedName(displayName, user.email)) {
+      displayName = '';
+    }
+
+    // Try Apple name from current sign-in
     if (!displayName && appleName) {
       const givenName = appleName.givenName || '';
       const familyName = appleName.familyName || '';
-      displayName = `${givenName} ${familyName}`.trim() || null;
+      displayName = `${givenName} ${familyName}`.trim();
     }
+
+    // Try provider display name
+    if (!displayName && providerDisplayName) {
+      displayName = providerDisplayName;
+    }
+
+    // Try cached Apple name from MMKV (Apple only gives name on first auth)
+    if (!displayName) {
+      const cachedApple = getCachedAppleDisplayName();
+      if (cachedApple) {
+        displayName = cachedApple;
+      }
+    }
+
+    // Fallback: if Firestore doc already has a real displayName, preserve it
+    if (!displayName && snapshot.exists()) {
+      const existingName = normalizeName(snapshot.data()?.displayName);
+      if (existingName && existingName !== 'İsimsiz Kahraman' && !isEmailDerivedName(existingName, user.email)) {
+        displayName = existingName;
+      }
+    }
+
+    // Last resort: derive a name from email (e.g., "gokhan@gmail.com" -> "Gokhan")
+    if (!displayName && user.email) {
+      displayName = deriveEmailDisplayName(user.email);
+    }
+    logger.info(`📝 syncUserProfile displayName resolved: "${displayName}" (auth: "${user.displayName}", email: "${user.email}")`);
 
     // CRITICAL: Generate QR ID from Firebase UID
     const qrId = `AFN-${user.uid.substring(0, 8).toUpperCase()}`;

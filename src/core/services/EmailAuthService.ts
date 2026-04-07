@@ -196,14 +196,9 @@ export const EmailAuthService = {
                     PROFILE_SYNC_RETRY_CONFIG,
                 );
             } catch (syncError) {
-                logger.error('Kritik profil senkronizasyonu başarısız:', syncError);
-                try {
-                    await signOut(auth);
-                } catch (signOutError) {
-                    logger.warn('Kayıt sonrası zorunlu çıkış başarısız:', signOutError);
-                }
-                await identityService.clearIdentity().catch(() => undefined);
-                throw new Error('Kayıt tamamlandı ancak hesap profili hazırlanamadı. Lütfen tekrar giriş yapın.');
+                // CRITICAL FIX: Do NOT logout on profile sync failure!
+                // User account was created successfully. Profile will sync later.
+                logger.error('Profil senkronizasyonu başarısız (Email register) — devam ediliyor:', syncError);
             }
 
             // CRITICAL: Keep post-register session minimal until email is verified
@@ -221,9 +216,15 @@ export const EmailAuthService = {
                 logger.info('ℹ️ E-posta doğrulanmadan servis senkronizasyonu atlandı');
             }
 
-            // CRITICAL: Do not keep session active until email ownership is verified
+            // CRITICAL: Do not keep session active until email ownership is verified.
+            // Must set explicit sign-out pending + clear auth cache so auth listener
+            // doesn't preserve the cached session after signOut fires null user.
             try {
+                const { setExplicitSignOutPending, setCachedAuthenticatedSession } = require('../utils/authSessionCache');
+                setExplicitSignOutPending(true);
                 await signOut(auth);
+                setCachedAuthenticatedSession(false);
+                setExplicitSignOutPending(false);
             } catch (signOutError) {
                 logger.warn('Kayıt sonrası otomatik çıkış başarısız (engelleyici değil):', signOutError);
             }
@@ -297,14 +298,9 @@ export const EmailAuthService = {
                     PROFILE_SYNC_RETRY_CONFIG,
                 );
             } catch (syncError) {
-                logger.error('Kritik profil senkronizasyonu başarısız:', syncError);
-                try {
-                    await signOut(auth);
-                } catch (signOutError) {
-                    logger.warn('Profil senkronizasyonu sonrası zorunlu çıkış başarısız:', signOutError);
-                }
-                await identityService.clearIdentity().catch(() => undefined);
-                throw new Error('Giriş tamamlanamadı: hesap verileri senkronize edilemedi. Lütfen tekrar deneyin.');
+                // CRITICAL FIX: Do NOT logout on profile sync failure!
+                // Firebase Auth login SUCCEEDED. Profile will sync in init.ts Phase B.
+                logger.error('Profil senkronizasyonu başarısız (Email login) — devam ediliyor:', syncError);
             }
 
             // ELITE: Servis senkronizasyonu
@@ -533,28 +529,15 @@ export const EmailAuthService = {
             const userId = user.uid;
             const userEmail = user.email;
 
-            // ELITE: İlişkili servisleri temizle (varsa)
-            try {
-                // Servislerde cleanup metodu varsa çağır
-                if (typeof (presenceService as any).cleanup === 'function') {
-                    await (presenceService as any).cleanup();
-                }
-                if (typeof (contactService as any).cleanup === 'function') {
-                    await (contactService as any).cleanup();
-                }
-                if (typeof (contactRequestService as any).cleanup === 'function') {
-                    await (contactRequestService as any).cleanup();
-                }
-                if (typeof (identityService as any).cleanup === 'function') {
-                    await (identityService as any).cleanup();
-                }
-                logger.info('✅ İlişkili servisler temizlendi');
-            } catch (cleanupError) {
-                logger.warn('Servis temizleme hatası (devam ediliyor):', cleanupError);
+            // Use AccountDeletionService for complete GDPR-compliant deletion
+            // (Firestore data + push tokens + secure storage + auth account)
+            const { accountDeletionService } = await import('./AccountDeletionService');
+            const { getDeviceId } = await import('../../lib/device');
+            const deviceId = await getDeviceId();
+            const result = await accountDeletionService.deleteAccount(deviceId);
+            if (!result.success) {
+                logger.warn('Account deletion completed with errors:', result.errors);
             }
-
-            // FINAL: Firebase Auth hesabını sil
-            await deleteUser(user);
 
             logger.info('🗑️ Hesap başarıyla silindi:', { userId, userEmail });
 
