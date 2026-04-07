@@ -201,10 +201,18 @@ export async function fetchAllEarthquakes(
  */
 export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
   try {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const startDate = sevenDaysAgo.toISOString().split('T')[0];
-    const endDate = new Date().toISOString().split('T')[0];
+    // CRITICAL FIX: Use Turkey timezone (UTC+3) for date calculation.
+    // AFAD API uses Turkey local time. toISOString() returns UTC which can be
+    // 1 day behind Turkey time (e.g., UTC 21:00 = Turkey 00:00 next day).
+    // This caused endDate to be yesterday's date → today's earthquakes missing.
+    const now = new Date();
+    const turkeyOffset = 3 * 60 * 60 * 1000; // UTC+3
+    const turkeyNow = new Date(now.getTime() + turkeyOffset);
+    const turkeySevenDaysAgo = new Date(turkeyNow.getTime() - 7 * 24 * 60 * 60 * 1000);
+    // Add 1 day to endDate to ensure we capture all of today's earthquakes
+    const turkeyTomorrow = new Date(turkeyNow.getTime() + 24 * 60 * 60 * 1000);
+    const startDate = turkeySevenDaysAgo.toISOString().split('T')[0];
+    const endDate = turkeyTomorrow.toISOString().split('T')[0];
     const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1&limit=500`;
 
     const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
