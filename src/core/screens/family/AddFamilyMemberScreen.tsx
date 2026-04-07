@@ -11,8 +11,8 @@ import { colors, typography } from '../../theme';
 import { identityService } from '../../services/IdentityService';
 import { firebaseDataService } from '../../services/FirebaseDataService';
 import GlassButton from '../../components/buttons/GlassButton';
-import { getAuth } from 'firebase/auth';
-import { initializeFirebase } from '../../../lib/firebase';
+import { getFirebaseAuth } from '../../../lib/firebase';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('AddFamilyMemberScreen');
 
@@ -29,7 +29,7 @@ const RELATIONSHIP_TYPES = [
 ];
 
 const isValidAfnCode = (id: string) => /^afn-[a-zA-Z0-9]{4,}$/i.test(id);
-const isLikelyUid = (id: string) => /^[A-Za-z0-9]{20,40}$/.test(id);
+const isLikelyUid = (id: string) => isLikelyFirebaseUid(id);
 const isValidPublicCode = (id: string) => /^[A-Za-z0-9-]{4,64}$/.test(id);
 const isValidMemberIdentifier = (id: string) =>
   isValidAfnCode(id) || isLikelyUid(id) || isValidPublicCode(id);
@@ -97,8 +97,16 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     if (!normalizedCandidate) return false;
 
     return members.some((member) => {
+      // CRITICAL FIX: Check ALL possible identifiers, not just uid.
+      // Previously only checked member.uid — if user was added via AFN code (which
+      // gets resolved to UID), re-scanning the same QR code wouldn't detect the
+      // duplicate because memberCode (AFN-XXXX) ≠ member.uid (firebase UID).
       const aliases = [
         normalizeId(member.uid),
+        normalizeId((member as any).deviceId),
+        normalizeId((member as any).qrId),
+        // AFN-XXXX format from UID
+        member.uid ? `afn-${member.uid.substring(0, 8)}`.toLowerCase() : '',
       ].filter((alias) => alias.length > 0);
 
       return aliases.includes(normalizedCandidate);
@@ -119,10 +127,8 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
     add(identity?.uid);
 
     try {
-      const app = initializeFirebase();
-      if (app) {
-        add(getAuth(app).currentUser?.uid || '');
-      }
+      const uid = getFirebaseAuth()?.currentUser?.uid;
+      if (uid) add(uid);
     } catch {
       // best effort
     }
@@ -499,6 +505,9 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       haptics.notificationSuccess();
       logger.info('Family member added successfully:', { uid: uidToSave, deviceId: resolvedDeviceId, name: trimmedName });
 
+      // ELITE: Reset submitting state BEFORE alert — user may dismiss alert without pressing "Tamam"
+      setIsSubmitting(false);
+
       // ELITE: Show success message
       Alert.alert(
         'Başarılı',
@@ -635,7 +644,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                 {!permission && (
                   <Pressable style={styles.permissionButton} onPress={requestPermission}>
                     <Ionicons name="camera" size={32} color="#fff" />
-                    <Text style={styles.permissionButtonText}>Kamera İzni İste</Text>
+                    <Text style={styles.permissionButtonText}>Devam Et</Text>
                   </Pressable>
                 )}
                 {permission && !permission.granted && (
@@ -646,7 +655,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
                     </Text>
                     <Pressable style={styles.permissionButton} onPress={requestPermission}>
                       <Ionicons name="camera" size={24} color="#fff" />
-                      <Text style={styles.permissionButtonText}>Tekrar İzni İste</Text>
+                      <Text style={styles.permissionButtonText}>Devam Et</Text>
                     </Pressable>
                   </View>
                 )}
