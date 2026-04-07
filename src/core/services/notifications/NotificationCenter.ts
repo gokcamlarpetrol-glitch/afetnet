@@ -27,11 +27,19 @@ import {
 } from './NotificationAI';
 import { scheduleNotification, cancelAllNotifications } from './NotificationScheduler';
 import { initializeChannels, getChannelForType } from './NotificationChannelManager';
-import { requestPermissions, getExpoPushToken } from './NotificationPermissionHandler';
+import { getPermissionStatus, getExpoPushToken } from './NotificationPermissionHandler';
 import { getNotificationsAsync } from './NotificationModuleLoader';
 import * as haptics from '../../utils/haptics';
 
 const logger = createLogger('NotificationCenter');
+
+const getNavigationRefModule = async () => {
+    try {
+        return require('../../navigation/navigationRef');
+    } catch {
+        return import('../../navigation/navigationRef');
+    }
+};
 
 // ============================================================================
 // TYPES
@@ -47,6 +55,7 @@ export interface EarthquakeNotifyData {
     latitude?: number;
     longitude?: number;
     isEEW?: boolean;
+    isTest?: boolean;
     timeAdvance?: number;
     earthquakeId?: string;
 }
@@ -54,6 +63,8 @@ export interface EarthquakeNotifyData {
 /** Data payload for SOS notifications */
 export interface SOSNotifyData {
     senderId?: string;
+    senderUid?: string;
+    senderDeviceId?: string;
     senderName?: string;
     from?: string;
     userId?: string;
@@ -61,6 +72,9 @@ export interface SOSNotifyData {
     location?: { latitude: number; longitude: number };
     signalId?: string;
     timestamp?: number;
+    trapped?: boolean;
+    battery?: number;
+    healthInfo?: Record<string, string>;
 }
 
 /** Data payload for message notifications */
@@ -98,6 +112,8 @@ export interface NewsNotifyData {
     source?: string;
     imageUrl?: string;
     url?: string;
+    newsUrl?: string;
+    articleId?: string;
     showPreview?: boolean;
 }
 
@@ -134,6 +150,7 @@ export type NotifyDataMap = {
     eew: EarthquakeNotifyData;
     sos: SOSNotifyData;
     sos_received: SOSNotifyData;
+    family_sos: SOSNotifyData;
     rescue: RescueNotifyData;
     family: FamilyNotifyData;
     message: MessageNotifyData;
@@ -159,8 +176,15 @@ class NotificationCenter {
     private settingsCache: any = null;
     private responseListenerCleanup: (() => void) | null = null;
     private foregroundListenerCleanup: (() => void) | null = null;
+    private coldStartTimers: ReturnType<typeof setTimeout>[] = [];
+    // Track processedTapIds cleanup timers so destroy() can clear them
+    private tapDedupTimers: ReturnType<typeof setTimeout>[] = [];
     private settingsCacheTime = 0;
     private readonly SETTINGS_CACHE_TTL = 5000; // 5s cache
+
+    // FIX: Track currently active conversation to suppress OS banner.
+    // WhatsApp/Telegram suppress notifications when viewing the same chat.
+    public currentlyViewingConversationId: string | null = null;
 
     // ===========================================================================
     // INITIALIZATION
@@ -170,8 +194,27 @@ class NotificationCenter {
         if (this.isInitialized) return;
 
         try {
-            // Request permissions
-            await requestPermissions();
+            // CRITICAL FIX: Clean up any stale listeners from a previous partial init.
+            // Without this, if initialize() is called multiple times (e.g., after hot reload
+            // or auth state change), listeners accumulate and fire duplicate handlers.
+            if (this.foregroundListenerCleanup) {
+                this.foregroundListenerCleanup();
+                this.foregroundListenerCleanup = null;
+            }
+            if (this.responseListenerCleanup) {
+                this.responseListenerCleanup();
+                this.responseListenerCleanup = null;
+            }
+            // FIX: Clear stale cold-start retry timers from any previous partial init
+            for (const t of this.coldStartTimers) clearTimeout(t);
+            this.coldStartTimers = [];
+
+            // Startup must not trigger the OS permission dialog.
+            // Permission prompting is handled only by explicit user actions.
+            const permissionStatus = await getPermissionStatus();
+            if (permissionStatus.status !== 'granted') {
+                logger.info(`Notification permission prompt deferred at startup (${permissionStatus.status})`);
+            }
 
             // Initialize Android channels
             await initializeChannels();
@@ -228,8 +271,13 @@ class NotificationCenter {
                                 };
                             }
 
-                            // CRITICAL FIX: SOS messages MUST always show alert in foreground
-                            if (notifType === 'sos_message' || notifType === 'sos' || notifType === 'sos_alert' || notifType === 'sos_received' || notifType === 'sos_family' || notifType === 'family_sos') {
+                            // CRITICAL FIX: SOS alerts MUST always show alert in foreground.
+                            // NOTE: sos_message is NOT included here — it's a regular chat message
+                            // within an SOS conversation, not an SOS alert itself. Including it
+                            // would bypass DND and set MAX priority for every reply message during
+                            // rescue coordination, which is disruptive and incorrect.
+                            // sos_message is handled below in the message type block instead.
+                            if (notifType === 'sos' || notifType === 'sos_alert' || notifType === 'sos_received' || notifType === 'sos_family' || notifType === 'family_sos' || notifType === 'sos_proximity' || notifType === 'nearby_sos') {
                                 return {
                                     shouldShowAlert: true,
                                     shouldPlaySound: true,
@@ -240,16 +288,39 @@ class NotificationCenter {
                                 };
                             }
 
-                            // DUPLICATE-NOTIFICATION FIX: Suppress OS banner for regular message
-                            // notifications in foreground. The foreground listener below shows
-                            // an in-app Alert.alert instead — showing BOTH the OS banner AND
-                            // the Alert.alert was causing double notifications while app is open.
-                            if (notifType === 'message' || notifType === 'new_message' || notifType === 'message_received') {
+                            // FIX: Suppress OS banner when user is viewing the SAME conversation.
+                            // WhatsApp/Telegram never show a banner for the active chat.
+                            // NOTE: sos_message is a regular chat message within an SOS conversation.
+                            // It should follow normal message suppression rules, not SOS alert rules.
+                            if (notifType === 'message' || notifType === 'new_message' || notifType === 'message_received' || notifType === 'sos_message') {
+                                const msgConvId = data?.conversationId;
+                                const msgSenderUid = data?.senderUid || data?.userId || data?.senderId || '';
+                                // CRITICAL FIX: Compare BOTH conversationId AND senderUid against
+                                // currentlyViewingConversationId. ConversationScreen may set
+                                // currentlyViewingConversationId to either a Firestore conversationId
+                                // OR a userId (when conversationId isn't resolved yet). Without
+                                // checking both, notifications are NOT suppressed when the user is
+                                // viewing the conversation before the Firestore conversation is resolved.
+                                const viewingId = this.currentlyViewingConversationId;
+                                const isViewingSameChat = !!viewingId && (
+                                    (!!msgConvId && msgConvId === viewingId) ||
+                                    (!!msgSenderUid && msgSenderUid === viewingId)
+                                );
+
+                                if (isViewingSameChat) {
+                                    return {
+                                        shouldShowAlert: false,
+                                        shouldPlaySound: false,
+                                        shouldSetBadge: false,
+                                        shouldShowBanner: false,
+                                        shouldShowList: false,
+                                    };
+                                }
                                 return {
-                                    shouldShowAlert: false,
+                                    shouldShowAlert: true,
                                     shouldPlaySound: true,
                                     shouldSetBadge: true,
-                                    shouldShowBanner: false,
+                                    shouldShowBanner: true,
                                     shouldShowList: true,
                                 };
                             }
@@ -276,12 +347,17 @@ class NotificationCenter {
                         try {
                             const fgData = notification?.request?.content?.data;
                             const fgType = (fgData?.type || '').toLowerCase();
+                            // NOTE: sos_message is NOT an SOS alert — it's a regular chat message
+                            // within an SOS conversation. Including it here would trigger full-screen
+                            // emergency alerts for every reply message during rescue coordination.
                             const isSOS = fgType === 'sos' || fgType === 'sos_received' || fgType === 'sos_alert'
                                 || fgType === 'sos_family' || fgType === 'family_sos'
                                 || fgType === 'sos_proximity' || fgType === 'nearby_sos';
 
                             if (isSOS) {
-                                const senderName = fgData?.senderName || fgData?.from || 'Aile Uyesi';
+                                // CRITICAL FIX: fgData.from is a reserved FCM key and gets stripped.
+                                // CF sends fromName as backup. Must include it in fallback chain.
+                                const senderName = fgData?.senderName || fgData?.fromName || fgData?.from || 'Aile Uyesi';
                                 const message = fgData?.message || 'Acil yardim gerekiyor!';
                                 const lat = fgData?.location?.latitude ?? fgData?.latitude;
                                 const lng = fgData?.location?.longitude ?? fgData?.longitude;
@@ -303,6 +379,51 @@ class NotificationCenter {
                                         : undefined,
                                 });
                             }
+
+                            // === FOREGROUND FAMILY STATUS UPDATE ===
+                            // Make family status updates highly visible when app is open
+                            if (fgType === 'family_status_update') {
+                                const status = fgData?.status;
+                                // CRITICAL FIX: fgData.from is reserved FCM key (stripped). Use fromName fallback.
+                                const senderName = fgData?.senderName || fgData?.fromName || fgData?.memberName || 'Aile Üyesi';
+                                const lat = fgData?.location?.latitude ?? fgData?.latitude;
+                                const lng = fgData?.location?.longitude ?? fgData?.longitude;
+
+                                if (status === 'critical') {
+                                    // Treat critical status updates the same as SOS
+                                    DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
+                                        signalId: fgData?.signalId || `status_${Date.now()}`,
+                                        senderUid: fgData?.senderUid || fgData?.userId,
+                                        senderDeviceId: fgData?.senderDeviceId,
+                                        senderName,
+                                        message: `${senderName} acil durum bildirdi! Hemen kontrol edin.`,
+                                        latitude: lat ? Number(lat) : undefined,
+                                        longitude: lng ? Number(lng) : undefined,
+                                    });
+                                } else if (status === 'safe' || status === 'need-help') {
+                                    const statusText = status === 'safe' ? 'Güvendeyim' : 'Yardıma İhtiyacım Var';
+                                    const isNeedHelp = status === 'need-help';
+
+                                    // Trigger a local multi-channel alert so it is highly noticeable in foreground
+                                    import('../MultiChannelAlertService').then(({ multiChannelAlertService }) => {
+                                        multiChannelAlertService.sendAlert({
+                                            title: isNeedHelp ? '🆘 YARDIM ÇAĞRISI' : '✅ GÜVENDE',
+                                            body: `${senderName}: ${statusText}`,
+                                            priority: isNeedHelp ? 'high' : 'normal',
+                                            channels: {
+                                                pushNotification: false, // Already arrived as push
+                                                fullScreenAlert: false,
+                                                alarmSound: isNeedHelp,
+                                                vibration: true,
+                                                tts: true,
+                                            },
+                                            ttsText: `${senderName} ${status === 'safe' ? 'güvende olduğunu' : 'yardıma ihtiyacı olduğunu'} bildirdi.`,
+                                            data: fgData,
+                                        }).catch(e => logger.warn('Failed to play status alert:', e));
+                                    }).catch(e => logger.warn('Failed to import MultiChannelAlertService:', e));
+                                }
+                            }
+
 
                             // === FOREGROUND VOICE CALL ===
                             if (fgType === 'voice_call') {
@@ -339,7 +460,10 @@ class NotificationCenter {
                                                     depth: Number(fgData?.depth) || 10,
                                                 },
                                             });
-                                        }).catch(() => {});
+                                        }).catch((eewErr) => {
+                                            // LIFE-SAFETY: EEW countdown failure MUST be logged — user may miss earthquake warning
+                                            logger.error('🚨 CRITICAL: EEW countdown engine import/start FAILED:', eewErr);
+                                        });
                                     }
                                 } catch { /* non-critical */ }
                                 try {
@@ -363,7 +487,7 @@ class NotificationCenter {
                                                 confidence: 1.0,
                                                 certainty: magnitude >= 6.0 ? 'high' : magnitude >= 5.0 ? 'medium' : 'low',
                                             });
-                                        }).catch(() => {});
+                                        }).catch(e => { if (__DEV__) logger.debug('NotifCenter: EEW history store error:', e); });
 
                                         // Trigger emergency mode if threshold met
                                         import('../EmergencyModeService').then(({ emergencyModeService }) => {
@@ -380,7 +504,7 @@ class NotificationCenter {
                                             if (emergencyModeService.shouldTriggerEmergencyMode(earthquake)) {
                                                 emergencyModeService.activateEmergencyMode(earthquake);
                                             }
-                                        }).catch(() => {});
+                                        }).catch(e => { if (__DEV__) logger.debug('NotifCenter: emergency mode trigger error:', e); });
                                     }
                                 } catch {
                                     // Non-critical — push is still displayed by OS
@@ -390,56 +514,46 @@ class NotificationCenter {
                             // === IN-APP MESSAGE NOTIFICATION BANNER ===
                             const isMessage = fgType === 'message' || fgType === 'new_message' || fgType === 'message_received' || fgType === 'sos_message';
                             if (isMessage) {
-                                const msgSenderName = fgData?.senderName || fgData?.from || 'Yeni Mesaj';
+                                // CRITICAL FIX: fgData.from is a reserved FCM key and gets stripped.
+                                // CF sends fromName as backup. Must include it in fallback chain.
+                                const msgSenderName = fgData?.senderName || fgData?.fromName || fgData?.from || 'Yeni Mesaj';
                                 const msgPreview = fgData?.message || 'Yeni mesaj geldi';
                                 const msgConversationId = fgData?.conversationId;
                                 const msgSenderId = fgData?.senderUid || fgData?.userId || fgData?.senderId;
 
-                                // Suppress in-app alert if user is already viewing this conversation
+                                // Suppress in-app alert if user is already viewing THIS conversation
                                 try {
-                                    const { getCurrentRouteName } = require('../../navigation/navigationRef');
+                                    const { getCurrentRouteName, navigationRef: navRef } = require('../../navigation/navigationRef');
                                     const currentRoute = getCurrentRouteName();
                                     if (currentRoute === 'Conversation' && msgSenderId) {
-                                        // User is already on a conversation screen — skip disruptive alert
-                                        // OS banner still shows in notification tray for later
-                                        logger.debug(`Suppressing in-app alert: already on Conversation screen`);
-                                        return;
+                                        // CRITICAL FIX: Only suppress if viewing the SAME conversation.
+                                        // Previously suppressed for ALL conversations — messages from other
+                                        // users had no haptic while viewing any conversation.
+                                        const currentParams = navRef?.getCurrentRoute?.()?.params as any;
+                                        const isViewingSameConversation =
+                                            (msgConversationId && currentParams?.conversationId === msgConversationId) ||
+                                            (msgSenderId && (currentParams?.userId === msgSenderId || currentParams?.recipientId === msgSenderId));
+                                        if (isViewingSameConversation) {
+                                            logger.debug(`Suppressing in-app alert: already viewing this conversation`);
+                                            return;
+                                        }
                                     }
                                     if (currentRoute === 'FamilyGroupChat' && msgConversationId) {
-                                        logger.debug(`Suppressing in-app alert: already on FamilyGroupChat screen`);
-                                        return;
+                                        const currentParams = navRef?.getCurrentRoute?.()?.params as any;
+                                        // FIX: FamilyGroupChat uses param name 'groupId', not 'conversationId'
+                                        if (currentParams?.groupId === msgConversationId) {
+                                            logger.debug(`Suppressing in-app alert: already on FamilyGroupChat screen`);
+                                            return;
+                                        }
                                     }
-                                } catch { /* navigation not ready — show alert */ }
+                                    // Light haptic for message (Banner also triggers haptic, but keeping this light native haptic)
+                                    haptics.impactLight();
 
-                                // Light haptic for message
-                                haptics.impactLight();
-
-                                Alert.alert(
-                                    `\u{1F4AC} ${msgSenderName}`,
-                                    msgPreview.length > 100 ? msgPreview.substring(0, 97) + '...' : msgPreview,
-                                    [
-                                        {
-                                            text: 'Mesaja Git',
-                                            onPress: () => {
-                                                import('../../navigation/navigationRef').then(({ navigateTo }) => {
-                                                    if (msgConversationId?.startsWith('grp_') || fgData?.isGroup === true || fgData?.isGroup === 'true') {
-                                                        navigateTo('FamilyGroupChat', { groupId: msgConversationId });
-                                                    } else if (msgSenderId) {
-                                                        navigateTo('Conversation', {
-                                                            userId: msgSenderId,
-                                                            userName: msgSenderName,
-                                                            conversationId: msgConversationId,
-                                                        });
-                                                    } else {
-                                                        navigateTo('MainTabs', { screen: 'Messages' });
-                                                    }
-                                                }).catch(() => {});
-                                            },
-                                        },
-                                        { text: 'Tamam', style: 'cancel' },
-                                    ],
-                                    { cancelable: true },
-                                );
+                                    // ELITE V2 FIX: Removed disruptive React Native Alert
+                                    // The OS System Banner (set to shouldShowBanner: true above) will handle the notification
+                                    // elegantly from the top of the screen without interrupting user workflow.
+                                    logger.debug(`Message notification received in foreground. OS Banner handling display.`);
+                                } catch { /* navigation not ready — ignore error for background */ }
                             }
                         } catch (fgErr) {
                             logger.debug('Foreground SOS alert handler error:', fgErr);
@@ -466,7 +580,10 @@ class NotificationCenter {
                 }
                 if (notifId) processedTapIds.add(notifId);
                 // Cleanup old entries after 60s to prevent memory leak
-                if (notifId) setTimeout(() => processedTapIds.delete(notifId), 60_000);
+                if (notifId) {
+                    const t = setTimeout(() => processedTapIds.delete(notifId), 60_000);
+                    this.tapDedupTimers.push(t);
+                }
                 this.handleNotificationTap(response).catch(e =>
                     logger.debug('Tap handler error:', e)
                 );
@@ -490,7 +607,11 @@ class NotificationCenter {
                     // On some iOS versions, the response isn't available immediately after
                     // app launch — it needs a brief delay for the system to populate it.
                     if (typeof Notifications.getLastNotificationResponseAsync === 'function') {
-                        const MAX_COLD_START_ATTEMPTS = 5; // 5 attempts × 500ms = 2.5s total window
+                        // CRITICAL FIX: Increased from 5 (2.5s) to 20 (10s).
+                        // Auth resolution can take 8s (INITIAL_RESTORE_GRACE_MS) on cold start.
+                        // Previous 2.5s window caused cold-start notification taps to be lost
+                        // because the identity wasn't resolved yet when the handler fired.
+                        const MAX_COLD_START_ATTEMPTS = 20; // 20 attempts × 500ms = 10s total window
                         const checkColdStartTap = async (attempt: number) => {
                             try {
                                 const response = await Notifications.getLastNotificationResponseAsync();
@@ -499,13 +620,15 @@ class NotificationCenter {
                                     dedupAndHandle(response);
                                 } else if (attempt < MAX_COLD_START_ATTEMPTS - 1) {
                                     // Retry after a short delay — iOS may not have the response ready yet
-                                    setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                    const t = setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                    this.coldStartTimers.push(t);
                                 } else {
                                     logger.debug(`Cold-start tap check: no response after ${MAX_COLD_START_ATTEMPTS} attempts`);
                                 }
                             } catch {
                                 if (attempt < MAX_COLD_START_ATTEMPTS - 1) {
-                                    setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                    const t = setTimeout(() => checkColdStartTap(attempt + 1), 500);
+                                    this.coldStartTimers.push(t);
                                 }
                             }
                         };
@@ -624,6 +747,7 @@ class NotificationCenter {
                 return this.formatEEW(data, decision);
             case 'sos':
             case 'sos_received':
+            case 'family_sos':
                 return this.formatSOS(data, category);
             case 'rescue':
                 return this.formatRescue(data);
@@ -698,7 +822,9 @@ class NotificationCenter {
     }
 
     private formatSOS(data: Record<string, any>, category: NotificationCategory) {
-        const from = data.senderName || data.from || data.userName || 'Bilinmeyen';
+        // CRITICAL FIX: data.from is a reserved FCM key and gets stripped by sanitizePushDataPayload.
+        // CF sends fromName as backup. Must include it in fallback chain.
+        const from = data.senderName || data.fromName || data.from || data.userName || 'Bilinmeyen';
         const message = data.message || 'Acil yardım çağrısı alındı.';
         const lat = data.location?.latitude ?? data.latitude;
         const lng = data.location?.longitude ?? data.longitude;
@@ -751,7 +877,9 @@ class NotificationCenter {
     }
 
     private formatMessage(data: Record<string, any>) {
-        const from = data.from || data.senderName || 'Bilinmeyen';
+        // CRITICAL FIX: data.from is a reserved FCM key and gets stripped by sanitizePushDataPayload.
+        // For local notifications, data.senderName is always set. Prioritize senderName first.
+        const from = data.senderName || data.fromName || data.from || 'Bilinmeyen';
         const message = data.message || '';
         const isSOS = data.isSOS === true;
         const showPreview = data.showPreview !== false;
@@ -875,7 +1003,10 @@ class NotificationCenter {
         this.deliverHaptic(decision.priority, category);
 
         // === EMERGENCY MODE (earthquake M5+) ===
-        if (category === 'earthquake' || category === 'eew') {
+        // NOTE: Skip for 'eew' category — the foreground notification listener already handles
+        // EEW emergency mode activation (along with countdown engine + history logging).
+        // Triggering here too would cause double emergency mode activation for the same event.
+        if (category === 'earthquake') {
             const mag = originalData?.magnitude || (decision as any).magnitude || 0;
             if (mag >= 5.0 || decision.priority === 'critical') {
                 this.triggerEmergencyMode(category, formatted, decision, originalData).catch(e => {
@@ -893,11 +1024,12 @@ class NotificationCenter {
             case 'earthquake': return 'earthquake';
             case 'eew': return 'eew';
             case 'sos':
-            case 'sos_received': return 'sos';
+            case 'sos_received':
+            case 'family_sos':
+            case 'rescue': return 'sos';
             case 'family': return 'family';
             case 'message': return 'message';
             case 'news': return 'news';
-            case 'rescue': return 'sos';
             default: return 'general';
         }
     }
@@ -1122,57 +1254,157 @@ class NotificationCenter {
             const locationPayload = parseObjectLike(data.location) || {};
 
             if (!type) {
-                // ELITE FIX: Infer type from SOS-specific fields before falling back to Home.
+                // ELITE FIX: Infer type from available fields before falling back to Home.
                 // Push notifications from Cloud Functions may lose the `type` field on some iOS versions.
+                // CRITICAL: Check message fields FIRST — they are far more common than SOS.
+                const hasMessageFields = data.conversationId || data.messageId;
+                const hasSenderFields = data.senderUid || data.userId || data.senderId;
                 const hasSosFields = data.signalId || data.senderDeviceId || data.trapped !== undefined;
                 const titleHintsSos = (notification?.notification?.request?.content?.title || '').includes('SOS')
                     || (notification?.notification?.request?.content?.title || '').includes('ENKAZ')
                     || (notification?.notification?.request?.content?.title || '').includes('ACİL');
-                const hasMessageFields = data.conversationId || data.messageId;
 
                 if (hasSosFields || titleHintsSos) {
                     logger.info('Notification tap: no type but SOS fields detected — treating as sos_family');
-                    // Fall through to the SOS case by assigning type
-                    const { navigateTo: nav } = await import('../../navigation/navigationRef');
-                    const healthInfoRaw = data.healthInfo && typeof data.healthInfo === 'object'
-                        ? data.healthInfo as Record<string, string>
-                        : undefined;
+                    const { navigateTo: nav } = await getNavigationRefModule();
+                    // CRITICAL FIX: healthInfo arrives as JSON string from FCM push data
+                    let healthInfoRawNoType: Record<string, string> | undefined;
+                    if (data.healthInfo && typeof data.healthInfo === 'object') {
+                        healthInfoRawNoType = data.healthInfo as Record<string, string>;
+                    } else if (typeof data.healthInfo === 'string' && data.healthInfo.trim().startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(data.healthInfo);
+                            if (parsed && typeof parsed === 'object') {
+                                healthInfoRawNoType = parsed as Record<string, string>;
+                            }
+                        } catch { /* malformed JSON — skip */ }
+                    }
                     nav('SOSHelp', {
                         signalId: toNonEmptyString(data.signalId),
                         senderUid: toNonEmptyString(data.senderUid) || toNonEmptyString(data.userId),
                         senderDeviceId: toNonEmptyString(data.senderDeviceId),
-                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from) || 'SOS',
+                        // CRITICAL FIX: data.from is reserved FCM key (stripped). Use fromName fallback.
+                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.fromName) || toNonEmptyString(data.from) || 'SOS',
                         message: toNonEmptyString(data.message),
                         latitude: toFiniteNumber(locationPayload.latitude ?? data.latitude),
                         longitude: toFiniteNumber(locationPayload.longitude ?? data.longitude),
                         trapped: data.trapped === 'true' || data.trapped === true,
-                        healthInfo: healthInfoRaw,
+                        battery: toFiniteNumber(data.battery) ?? undefined,
+                        healthInfo: healthInfoRawNoType,
                     });
                     return;
                 }
 
-                if (hasMessageFields) {
-                    logger.info('Notification tap: no type but message fields detected — treating as new_message');
-                    const { navigateTo: nav } = await import('../../navigation/navigationRef');
-                    nav('Conversation', {
-                        userId: toNonEmptyString(data.senderUid) || toNonEmptyString(data.senderId),
-                        userName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from),
-                        conversationId: toNonEmptyString(data.conversationId),
-                    });
+                // CRITICAL FIX: If conversationId/messageId present OR any sender identity is present,
+                // assume it's a chat message. This covers the common iOS cold-start case where `type`
+                // is stripped from the APNS payload but conversationId/senderUid are preserved.
+                if (hasMessageFields || hasSenderFields) {
+                    logger.info(`Notification tap: no type but message/sender fields detected — treating as new_message (conv:${data.conversationId || ''} sender:${data.senderUid || data.userId || ''})`);
+                    const { navigateTo: nav } = await getNavigationRefModule();
+
+                    let resolvedConversationId = toNonEmptyString(data.conversationId);
+                    const messageId = toNonEmptyString(data.messageId);
+                    if (!resolvedConversationId && messageId) {
+                        try {
+                            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                            const { collectionGroup, query, where, limit, getDocs, documentId } = await import('firebase/firestore');
+                            const db = await getFirestoreInstanceAsync();
+                            if (db) {
+                                const byFieldQuery = query(
+                                    collectionGroup(db, 'messages'),
+                                    where('id', '==', messageId),
+                                    limit(1),
+                                );
+                                let snap = await getDocs(byFieldQuery);
+                                if (snap.empty) {
+                                    const byDocIdQuery = query(
+                                        collectionGroup(db, 'messages'),
+                                        where(documentId(), '==', messageId),
+                                        limit(1),
+                                    );
+                                    snap = await getDocs(byDocIdQuery);
+                                }
+                                const first = snap.docs[0];
+                                if (first?.ref?.parent?.parent) {
+                                    resolvedConversationId = first.ref.parent.parent.id;
+                                    logger.info(`Notification tap (no-type): resolved conversationId=${resolvedConversationId} from messageId=${messageId}`);
+                                }
+                            }
+                        } catch (resolveErr) {
+                            logger.warn('Notification tap (no-type): conversationId lookup by messageId failed:', resolveErr);
+                        }
+                    }
+
+                    const resolvedUserId = toNonEmptyString(data.senderUid)
+                        || toNonEmptyString(data.userId)
+                        || toNonEmptyString(data.senderId)
+                        || toNonEmptyString(data.senderDeviceId);
+
+                    const isGroupConversation =
+                        (resolvedConversationId?.startsWith('grp_') ?? false)
+                        || toNonEmptyString(data.conversationType) === 'group'
+                        || toNonEmptyString(data.chatType) === 'group'
+                        || data.isGroup === true
+                        || data.isGroup === 'true';
+
+                    if (resolvedConversationId && isGroupConversation) {
+                        nav('FamilyGroupChat', { groupId: resolvedConversationId });
+                        return;
+                    }
+
+                    if (resolvedUserId) {
+                        nav('Conversation', {
+                            userId: resolvedUserId,
+                            userName: toNonEmptyString(data.senderName) || toNonEmptyString(data.fromName) || toNonEmptyString(data.from),
+                            conversationId: resolvedConversationId,
+                        });
+                        return;
+                    }
+
+                    if (resolvedConversationId) {
+                        try {
+                            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                            const { doc, getDoc } = await import('firebase/firestore');
+                            const { identityService } = await import('../IdentityService');
+                            const db = await getFirestoreInstanceAsync();
+                            if (db) {
+                                const convDoc = await getDoc(doc(db, 'conversations', resolvedConversationId));
+                                if (convDoc.exists()) {
+                                    const convData = convDoc.data();
+                                    const myUid = identityService.getUid();
+                                    const participants = Array.isArray(convData.participants) ? convData.participants : [];
+                                    const otherUid = participants.find((p: string) => p !== myUid);
+                                    if (otherUid) {
+                                        nav('Conversation', {
+                                            userId: otherUid,
+                                            conversationId: resolvedConversationId,
+                                        });
+                                        return;
+                                    }
+                                }
+                            }
+                        } catch (lookupErr) {
+                            logger.warn('Notification tap (no-type): participant lookup failed:', lookupErr);
+                        }
+                    }
+
+                    nav('MainTabs', { screen: 'Messages' });
                     return;
                 }
 
-                logger.debug('Notification tap: no type and no recognizable fields — navigating to Home');
-                const { navigateTo } = await import('../../navigation/navigationRef');
-                navigateTo('MainTabs', { screen: 'Home' });
+                logger.debug('Notification tap: no type and no recognizable fields — navigating to Messages list');
+                const { navigateTo } = await getNavigationRefModule();
+                // CRITICAL FIX: Navigate to Messages list (not Home) so user can find their conversations
+                navigateTo('MainTabs', { screen: 'Messages' });
                 return;
             }
 
-            const { navigateTo } = await import('../../navigation/navigationRef');
+            const { navigateTo } = await getNavigationRefModule();
 
             logger.info(`📱 Notification tap: ${rawType}`, data);
 
             switch (type) {
+
                 // ═══ EARTHQUAKE ═══
                 case 'earthquake': {
                     if (data.magnitude && data.location) {
@@ -1244,7 +1476,9 @@ class NotificationCenter {
                                     || toNonEmptyString(data.userId)
                                     || undefined;
                                 const signalId = toNonEmptyString(data.signalId) || '';
+                                // CRITICAL FIX: data.from is reserved FCM key (stripped). Use fromName fallback.
                                 const senderName = toNonEmptyString(data.senderName)
+                                    || toNonEmptyString(data.fromName)
                                     || toNonEmptyString(data.from)
                                     || 'SOS';
                                 const messageText = toNonEmptyString(data.message) || 'Acil yardım gerekiyor!';
@@ -1266,15 +1500,26 @@ class NotificationCenter {
 
                     // CRITICAL: Navigate to SOSHelp page — the dedicated rescue response screen
                     // with live location tracking, rescue ACK, and emergency actions.
-                    const healthInfoRaw = data.healthInfo && typeof data.healthInfo === 'object'
-                        ? data.healthInfo as Record<string, string>
-                        : undefined;
+                    // CRITICAL FIX: healthInfo arrives as JSON string from FCM push data
+                    // (all FCM data values are strings). Parse it back to object.
+                    let healthInfoRaw: Record<string, string> | undefined;
+                    if (data.healthInfo && typeof data.healthInfo === 'object') {
+                        healthInfoRaw = data.healthInfo as Record<string, string>;
+                    } else if (typeof data.healthInfo === 'string' && data.healthInfo.trim().startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(data.healthInfo);
+                            if (parsed && typeof parsed === 'object') {
+                                healthInfoRaw = parsed as Record<string, string>;
+                            }
+                        } catch { /* malformed JSON — skip */ }
+                    }
 
                     const sosParams = {
                         signalId: toNonEmptyString(data.signalId),
                         senderUid: toNonEmptyString(data.senderUid) || toNonEmptyString(data.userId),
                         senderDeviceId: toNonEmptyString(data.senderDeviceId),
-                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.from) || 'SOS',
+                        // CRITICAL FIX: data.from is reserved FCM key (stripped). Use fromName fallback.
+                        senderName: toNonEmptyString(data.senderName) || toNonEmptyString(data.fromName) || toNonEmptyString(data.from) || 'SOS',
                         latitude: pLat ?? undefined,
                         longitude: pLng ?? undefined,
                         message: toNonEmptyString(data.message),
@@ -1297,12 +1542,101 @@ class NotificationCenter {
                     navigateTo('DisasterMap');
                     break;
 
+                // ═══ SOS MESSAGE — Chat within SOS conversation ═══
+                // CRITICAL FIX: sos_message is a chat message within an SOS conversation.
+                // It must navigate to SOSConversation (dedicated SOS chat screen with
+                // location tracking + rescue actions), NOT the regular Conversation screen.
+                // Previously fell through to the generic message handler, losing the SOS context.
+                case 'sos_message': {
+                    const sosMsgSenderUid = toNonEmptyString(data.senderUid)
+                        || toNonEmptyString(data.userId)
+                        || toNonEmptyString(data.senderId);
+                    const sosMsgSenderName = toNonEmptyString(data.senderName)
+                        || toNonEmptyString(data.fromName)
+                        || toNonEmptyString(data.from)
+                        || 'SOS';
+                    const sosMsgConversationId = toNonEmptyString(data.conversationId);
+
+                    if (sosMsgSenderUid) {
+                        navigateTo('SOSConversation', {
+                            sosUserId: sosMsgSenderUid,
+                            sosUserName: sosMsgSenderName,
+                            sosSenderUid: sosMsgSenderUid,
+                            sosMessage: toNonEmptyString(data.message),
+                        });
+                    } else if (sosMsgConversationId) {
+                        // Fallback: try to resolve sender from conversation doc
+                        try {
+                            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                            const { doc, getDoc } = await import('firebase/firestore');
+                            const { identityService } = await import('../IdentityService');
+                            const db = await getFirestoreInstanceAsync();
+                            if (db) {
+                                const convDoc = await getDoc(doc(db, 'conversations', sosMsgConversationId));
+                                if (convDoc.exists()) {
+                                    const convData = convDoc.data();
+                                    const myUid = identityService.getUid();
+                                    const participants = Array.isArray(convData.participants) ? convData.participants : [];
+                                    const otherUid = participants.find((p: string) => p !== myUid);
+                                    if (otherUid) {
+                                        navigateTo('SOSConversation', {
+                                            sosUserId: otherUid,
+                                            sosUserName: sosMsgSenderName,
+                                            sosSenderUid: otherUid,
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            logger.warn('sos_message tap: conversation lookup failed:', e);
+                        }
+                        // Ultimate fallback: Messages list
+                        navigateTo('MainTabs', { screen: 'Messages' });
+                    } else {
+                        navigateTo('MainTabs', { screen: 'Messages' });
+                    }
+                    break;
+                }
+
                 // ═══ MESSAGES — Local + Cloud Function push ═══
                 case 'message':
                 case 'new_message':
-                case 'message_received':
-                case 'sos_message': {
-                    const conversationId = toNonEmptyString(data.conversationId);
+                case 'message_received': {
+                    let conversationId = toNonEmptyString(data.conversationId);
+                    const messageId = toNonEmptyString(data.messageId);
+
+                    // CRITICAL FIX: If convId is missing but messageId is present, resolve from Firestore before navigation.
+                    if (!conversationId && messageId) {
+                        try {
+                            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                            const { collectionGroup, query, where, limit, getDocs, documentId } = await import('firebase/firestore');
+                            const db = await getFirestoreInstanceAsync();
+                            if (db) {
+                                const byFieldQuery = query(
+                                    collectionGroup(db, 'messages'),
+                                    where('id', '==', messageId),
+                                    limit(1),
+                                );
+                                let snap = await getDocs(byFieldQuery);
+                                if (snap.empty) {
+                                    const byDocIdQuery = query(
+                                        collectionGroup(db, 'messages'),
+                                        where(documentId(), '==', messageId),
+                                        limit(1),
+                                    );
+                                    snap = await getDocs(byDocIdQuery);
+                                }
+                                const first = snap.docs[0];
+                                if (first?.ref?.parent?.parent) {
+                                    conversationId = first.ref.parent.parent.id;
+                                    logger.info(`Notification tap: resolved conversationId=${conversationId} from messageId=${messageId}`);
+                                }
+                            }
+                        } catch (resolveErr) {
+                            logger.warn('Notification tap: conversationId lookup by messageId failed:', resolveErr);
+                        }
+                    }
                     const isGroupConversation =
                         (conversationId?.startsWith('grp_') ?? false)
                         || toNonEmptyString(data.conversationType) === 'group'
@@ -1314,12 +1648,12 @@ class NotificationCenter {
                         navigateTo('FamilyGroupChat', { groupId: conversationId });
                         break;
                     }
-
                     const userId =
                         toNonEmptyString(data.senderUid)
                         || toNonEmptyString(data.userId)
                         || toNonEmptyString(data.senderId)
                         || toNonEmptyString(data.senderDeviceId);
+
                     if (userId) {
                         // CRITICAL FIX: Always pass conversationId alongside userId.
                         // ConversationScreen will use conversationId directly (no pairKey
@@ -1327,16 +1661,55 @@ class NotificationCenter {
                         // cold-start or when the Firestore composite index query fails.
                         navigateTo('Conversation', {
                             userId,
-                            userName: data.senderName || data.userName || data.from,
-                            conversationId: toNonEmptyString(data.conversationId),
+                            // CRITICAL FIX: Add data.fromName to fallback chain.
+                            // CF push payload sends both senderName and fromName.
+                            // data.from is stripped by FCM sanitization (reserved key).
+                            // Without fromName fallback, native FCM token taps may
+                            // show undefined userName when senderName is missing.
+                            userName: data.senderName || data.fromName || data.userName || data.from,
+                            conversationId,
                         });
                     } else {
                         if (conversationId) {
-                            logger.warn('Notification tap message payload has conversationId but no sender identity', {
+                            logger.warn('Notification tap message payload has conversationId but no sender identity. Looking up from Firestore...', {
                                 type,
                                 conversationId,
                             });
-                            navigateTo('Conversation', { userId: conversationId });
+                            try {
+                                const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                                const { doc, getDoc } = await import('firebase/firestore');
+                                const { identityService } = await import('../IdentityService');
+                                const db = await getFirestoreInstanceAsync();
+                                if (db) {
+                                    const convDoc = await getDoc(doc(db, 'conversations', conversationId));
+                                    if (convDoc.exists()) {
+                                        const convData = convDoc.data();
+                                        const myUid = identityService.getUid();
+                                        const participants = convData.participants || [];
+                                        const otherUid = participants.find((p: string) => p !== myUid);
+                                        if (otherUid) {
+                                            logger.info(`Resolved notification missing senderUid to the correct participant: ${otherUid}`);
+                                            navigateTo('Conversation', {
+                                                userId: otherUid,
+                                                conversationId: conversationId,
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                logger.error('Failed to lookup conversation participants for notification tap:', e);
+                            }
+
+                            // CRITICAL FIX: If Firestore lookup fails, navigate to Conversation
+                            // with conversationId directly. ConversationScreen can resolve the
+                            // other participant from the conversation document. Routing to Messages
+                            // list is a worse UX — user tapped a specific conversation notification.
+                            logger.warn('Firestore lookup failed — navigating to Conversation with conversationId only');
+                            navigateTo('Conversation', {
+                                conversationId,
+                                userName: data.senderName || data.fromName || data.userName,
+                            });
                             break;
                         }
                         navigateTo('MainTabs', { screen: 'Messages' });
@@ -1350,13 +1723,27 @@ class NotificationCenter {
                     const callerName = data.callerName || 'Bilinmeyen';
                     const tapCallId = toNonEmptyString(data.callId);
                     if (callerUid && tapCallId) {
-                        // Emit incoming call event for IncomingCallOverlay
-                        const { DeviceEventEmitter } = require('react-native');
+                        // CRITICAL FIX: On cold start, DeviceEventEmitter.emit('VOICE_CALL_INCOMING')
+                        // fires before IncomingCallOverlay is mounted, so the event is permanently lost.
+                        // Navigate to VoiceCall screen directly (which IS in MAIN_ONLY_SCREENS),
+                        // and ALSO emit the event for the case where the overlay IS mounted (warm start).
+                        navigateTo('VoiceCall', {
+                            callId: tapCallId,
+                            callerUid,
+                            callerName,
+                            isIncoming: true,
+                        });
                         DeviceEventEmitter.emit('VOICE_CALL_INCOMING', {
                             callId: tapCallId,
                             callerUid,
                             callerName,
                         });
+                    } else {
+                        // FIX: Fallback when callId or callerUid is missing from push payload.
+                        // Without this, tapping a voice call notification with incomplete data
+                        // does nothing — the user sees the notification, taps, and nothing happens.
+                        logger.warn('voice_call tap: missing callId or callerUid, navigating to Home');
+                        navigateTo('MainTabs', { screen: 'Home' });
                     }
                     break;
                 }
@@ -1374,7 +1761,8 @@ class NotificationCenter {
                             focusOnFamily: true,
                             familyLatitude: memberLat,
                             familyLongitude: memberLng,
-                            familyMemberName: data.memberName || data.senderName || data.from,
+                            // CRITICAL FIX: data.from is reserved FCM key (stripped). Use fromName fallback.
+                        familyMemberName: data.memberName || data.senderName || data.fromName || data.from,
                         });
                     } else {
                         navigateTo('MainTabs', { screen: 'Family' });
@@ -1425,6 +1813,32 @@ class NotificationCenter {
         } catch (e) {
             logger.error('handleNotificationTap failed:', e);
         }
+    }
+
+    // ===========================================================================
+    // DESTROY — Clean up listeners on app shutdown
+    // ===========================================================================
+
+    destroy(): void {
+        if (this.foregroundListenerCleanup) {
+            this.foregroundListenerCleanup();
+            this.foregroundListenerCleanup = null;
+        }
+        if (this.responseListenerCleanup) {
+            this.responseListenerCleanup();
+            this.responseListenerCleanup = null;
+        }
+        // Cancel pending cold-start retry timers to prevent stale tap handlers
+        for (const t of this.coldStartTimers) clearTimeout(t);
+        this.coldStartTimers = [];
+        // Cancel processedTapIds cleanup timers to prevent leaks after logout
+        for (const t of this.tapDedupTimers) clearTimeout(t);
+        this.tapDedupTimers = [];
+        // Reset stale conversation ID to prevent notification suppression after account switch
+        this.currentlyViewingConversationId = null;
+        this.isInitialized = false;
+        this.settingsCache = null;
+        this.settingsCacheTime = 0;
     }
 }
 

@@ -34,7 +34,21 @@ const pendingRetries = new Map<string, { interval: NodeJS.Timeout; retries: numb
 const MAIN_ONLY_SCREENS = new Set([
     'Conversation', 'FamilyGroupChat', 'SOSHelp', 'DisasterMap',
     'MainTabs', 'Messages', 'Family', 'Settings', 'LocalAIAssistant',
-    'NewMessage', 'Profile', 'FamilyScreen',
+    'NewMessage', 'Home', 'Map',
+    // CRITICAL FIX: These screens are inside MainNavigator but were missing from this set.
+    // On cold-start notification taps, navigateTo() skipped the "is Main mounted?" check
+    // for these screens, so CommonActions.navigate silently dropped the dispatch — the user
+    // tapped a notification and nothing happened.
+    'EarthquakeDetail', 'AllEarthquakes', 'NewsDetail', 'AllNews', 'DrillMode',
+    'SOSConversation', 'SOSHistory', 'RescueTeam', 'MeshNetwork',
+    'PreparednessPlan', 'PanicAssistant', 'WaveVisualization',
+    'HealthProfile', 'MedicalInformation', 'AddFamilyMember',
+    'EarthquakeSettings', 'NotificationSettings', 'EEWSettings',
+    'DisasterPreparedness', 'AssemblyPoints', 'AddAssemblyPoint',
+    'FlashlightWhistle', 'PsychologicalSupport', 'MyQR',
+    'OfflineMapSettings', 'AdvancedSettings', 'About',
+    'PrivacyPolicy', 'TermsOfService', 'Security',
+    'UserReports', 'VolunteerModule', 'CreateGroup', 'VoiceCall', 'RiskScore',
 ]);
 
 /**
@@ -92,13 +106,20 @@ export function navigateTo(screenName: string, params?: Record<string, unknown>)
 
             // Verify the route actually changed (or was already on target)
             const routeAfter = navigationRef.getCurrentRoute()?.name;
-            if (routeAfter === screenName || routeAfter !== routeBefore) {
+            // FIX: When navigating to 'MainTabs' with { screen: 'Messages' }, getCurrentRoute()
+            // returns the deepest focused route ('Messages'), not 'MainTabs'. Check both the
+            // target screen name AND nested tab screen param. Without this, navigating to
+            // MainTabs when user is already on the target tab triggers a 30-second phantom
+            // retry loop (routeAfter !== screenName && routeAfter === routeBefore).
+            const nestedScreen = (params as any)?.screen;
+            if (routeAfter === screenName || routeAfter === nestedScreen || routeAfter !== routeBefore) {
                 logger.info(`✅ navigateTo('${screenName}') dispatched successfully (route: ${routeBefore} → ${routeAfter})`);
                 return true;
             }
 
             // Route didn't change — dispatch was silently dropped
-            logger.debug(`navigateTo('${screenName}'): dispatch was silently dropped (route unchanged: ${routeAfter})`);
+            // CRITICAL FIX: Need to return false to ensure the retry loop continues
+            logger.debug(`navigateTo('${screenName}'): dispatch was silently dropped (route unchanged: ${routeAfter}), returning false to trigger retry`);
             return false;
         } catch (dispatchError) {
             // Screen not yet registered in any navigator — retry
@@ -131,9 +152,24 @@ export function navigateTo(screenName: string, params?: Record<string, unknown>)
             clearInterval(interval);
             pendingRetries.delete(retryKey);
         } else if (retryState.retries >= MAX_RETRIES) {
-            logger.warn(`❌ navigateTo('${screenName}') failed after ${MAX_RETRIES} retries (30s). Navigation tree never became ready.`);
+            logger.warn(`❌ navigateTo('${screenName}') failed after ${MAX_RETRIES} retries (30s). Attempting fallback navigation.`);
             clearInterval(interval);
             pendingRetries.delete(retryKey);
+            // CRITICAL FIX: Fallback navigation — don't silently fail.
+            // If the target screen was a message conversation, at least go to Messages tab.
+            // For other screens, go to Home. This ensures the user sees SOMETHING after tapping a notification.
+            try {
+                if (navigationRef.isReady()) {
+                    const fallbackScreen = (screenName === 'Conversation' || screenName === 'FamilyGroupChat')
+                        ? 'Messages' : 'Home';
+                    navigationRef.dispatch(
+                        CommonActions.navigate({ name: 'MainTabs', params: { screen: fallbackScreen } })
+                    );
+                    logger.info(`🔄 Fallback navigation to MainTabs/${fallbackScreen} after retry exhaustion`);
+                }
+            } catch (fallbackErr) {
+                logger.warn('Fallback navigation also failed:', fallbackErr);
+            }
         }
     }, RETRY_INTERVAL_MS);
     pendingRetries.set(retryKey, { interval, retries: retryState.retries });
@@ -142,6 +178,21 @@ export function navigateTo(screenName: string, params?: Record<string, unknown>)
 export function setCurrentRouteName(routeName?: string): void {
     if (routeName && typeof routeName === 'string' && routeName.trim().length > 0) {
         lastRouteName = routeName.trim();
+    }
+}
+
+/**
+ * Cancel all pending navigation retry intervals.
+ * CRITICAL: Must be called on shutdown/logout to prevent stale retry intervals from
+ * firing navigation dispatches after the user has logged out or the app is reinitializing.
+ */
+export function clearPendingNavigationRetries(): void {
+    if (pendingRetries.size > 0) {
+        logger.info(`Clearing ${pendingRetries.size} pending navigation retries`);
+        for (const [, entry] of pendingRetries) {
+            clearInterval(entry.interval);
+        }
+        pendingRetries.clear();
     }
 }
 

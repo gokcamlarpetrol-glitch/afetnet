@@ -21,6 +21,7 @@ export type NotificationCategory =
     | 'eew'
     | 'sos'
     | 'sos_received'
+    | 'family_sos'
     | 'rescue'
     | 'family'
     | 'message'
@@ -67,6 +68,7 @@ const STALENESS_THRESHOLDS: Record<NotificationCategory, number> = {
     eew: 5 * 60 * 1000,   //  5 min (time-critical)
     sos: 30 * 60 * 1000,   // 30 min
     sos_received: 30 * 60 * 1000, // 30 min
+    family_sos: 30 * 60 * 1000,  // 30 min (family member SOS)
     rescue: 30 * 60 * 1000,   // 30 min
     family: 60 * 60 * 1000,   //  1 hour
     message: 120 * 60 * 1000,   //  2 hours
@@ -81,6 +83,7 @@ const DEDUP_WINDOWS: Record<NotificationCategory, number> = {
     eew: 5 * 60 * 1000,   //  5 min
     sos: 10 * 60 * 1000,   // 10 min
     sos_received: 5 * 60 * 1000,  //  5 min
+    family_sos: 5 * 60 * 1000,   //  5 min (family member SOS)
     rescue: 5 * 60 * 1000,   //  5 min
     family: 2 * 60 * 1000,   //  2 min
     message: 30 * 1000, // 30 sec
@@ -95,6 +98,7 @@ const RATE_LIMITS: Record<NotificationCategory, { max: number; windowMs: number 
     eew: { max: 2, windowMs: 3 * 60 * 1000 },
     sos: { max: 5, windowMs: 10 * 60 * 1000 },
     sos_received: { max: 5, windowMs: 5 * 60 * 1000 },
+    family_sos: { max: 5, windowMs: 5 * 60 * 1000 },
     rescue: { max: 3, windowMs: 5 * 60 * 1000 },
     family: { max: 5, windowMs: 5 * 60 * 1000 },
     message: { max: 10, windowMs: 60 * 1000 },
@@ -105,7 +109,7 @@ const RATE_LIMITS: Record<NotificationCategory, { max: number; windowMs: number 
 
 /** Categories that ALWAYS bypass DND */
 const DND_BYPASS_CATEGORIES: Set<NotificationCategory> = new Set([
-    'eew', 'sos', 'sos_received',
+    'eew', 'sos', 'sos_received', 'family_sos',
 ]);
 
 /** Categories that conditionally bypass DND (based on priority) */
@@ -113,10 +117,13 @@ const CONDITIONAL_DND_BYPASS: Set<NotificationCategory> = new Set([
     'earthquake', 'rescue',
 ]);
 
-/** Critical magnitude threshold — auto-escalates to CRITICAL */
-const CRITICAL_MAGNITUDE_THRESHOLD = 6.0;
-/** High magnitude threshold — auto-escalates to HIGH */
-const HIGH_MAGNITUDE_THRESHOLD = 5.0;
+/** Critical magnitude threshold — auto-escalates to CRITICAL (DND bypass, rate-limit bypass)
+ *  M5.0+ causes structural damage and injuries — must bypass all notification suppressors.
+ *  Previous value was 6.0, which left M5.0-5.9 without DND bypass; raised to critical.
+ */
+const CRITICAL_MAGNITUDE_THRESHOLD = 5.0;
+/** High magnitude threshold — auto-escalates to HIGH (sound + vibration, but no DND bypass) */
+const HIGH_MAGNITUDE_THRESHOLD = 4.5;
 
 // ============================================================================
 // STATE
@@ -234,8 +241,11 @@ function generateFingerprint(payload: NotificationPayload): string {
         }
 
         case 'sos':
-        case 'sos_received': {
-            const senderId = data.senderId || data.from || data.userId || 'unknown';
+        case 'sos_received':
+        case 'family_sos': {
+            // CRITICAL FIX: data.from is a reserved FCM key and gets stripped by CF sanitization.
+            // Use senderUid/senderId as primary identifiers instead.
+            const senderId = data.senderUid || data.senderId || data.fromName || data.from || data.userId || 'unknown';
             const timeWindow = Math.floor((eventTimestamp || Date.now()) / 300_000); // 5-min windows
             return `${category}_${senderId}_t${timeWindow}`;
         }
@@ -247,7 +257,9 @@ function generateFingerprint(payload: NotificationPayload): string {
         }
 
         case 'message': {
-            const from = data.from || data.senderId || 'unknown';
+            // CRITICAL FIX: data.from is a reserved FCM key and gets stripped by CF sanitization.
+            // Use senderUid/senderId/fromName as fallback instead.
+            const from = data.senderUid || data.senderId || data.fromName || data.from || 'unknown';
             const msgId = data.messageId || data.id || '';
             return msgId ? `msg_${msgId}` : `msg_${from}_${Math.floor(Date.now() / 30_000)}`;
         }
@@ -271,6 +283,14 @@ function generateFingerprint(payload: NotificationPayload): string {
         case 'drill': {
             return `drill_${Math.floor(Date.now() / 300_000)}`;
         }
+
+        default: {
+            // FIX: Return a fallback fingerprint for unrecognized categories
+            // instead of undefined, which would cause all unknown categories
+            // to share the same dedup slot
+            const fallbackKey = data.id || data.senderId || data.userId || '';
+            return `${category}_${fallbackKey}_${Math.floor(Date.now() / 300_000)}`;
+        }
     }
 }
 
@@ -280,7 +300,15 @@ function generateFingerprint(payload: NotificationPayload): string {
 
 function checkStaleness(payload: NotificationPayload, now: number): { pass: boolean; reason: string } {
     const { category, eventTimestamp } = payload;
-    if (!eventTimestamp) return { pass: true, reason: '' };
+    // CRITICAL FIX: If eventTimestamp is missing for earthquake/eew categories, REJECT.
+    // Missing timestamp means we can't verify freshness → could be hours-old stale data.
+    // Other categories (message, sos) may legitimately lack eventTimestamp.
+    if (!eventTimestamp) {
+        if (category === 'earthquake' || category === 'eew') {
+            return { pass: false, reason: 'No eventTimestamp for earthquake notification — cannot verify freshness' };
+        }
+        return { pass: true, reason: '' };
+    }
 
     const age = now - eventTimestamp;
     const threshold = STALENESS_THRESHOLDS[category];
@@ -347,6 +375,7 @@ function assessPriority(payload: NotificationPayload): NotificationPriority {
             return 'critical'; // EEW is ALWAYS critical
         case 'sos':
         case 'sos_received':
+        case 'family_sos':
             return 'critical'; // SOS is ALWAYS critical
 
         case 'earthquake': {

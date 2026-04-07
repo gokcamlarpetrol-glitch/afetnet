@@ -79,7 +79,10 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true,
         priority: 1,
         apiUrl: 'https://deprem.afad.gov.tr/apiv2/event/filter',
-        pollInterval: 10000, // 10 seconds — fast polling for primary Turkish source
+        // CRITICAL FIX: 5s polling was too aggressive — risks IP-blocking by AFAD
+        // and doubles requests since EEWService also polls AFAD independently.
+        // 30s is sufficient for earthquake detection (events persist for hours).
+        pollInterval: 30000,
         minMagnitude: 1.0,
         region: 'turkey',
     },
@@ -88,7 +91,7 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true,
         priority: 2,
         apiUrl: 'https://www.koeri.boun.edu.tr/scripts/lst0.asp', // HTML scraping needed
-        pollInterval: 15000, // 15 seconds — fast polling for secondary Turkish source
+        pollInterval: 30000, // 30 seconds — balanced polling for secondary Turkish source
         minMagnitude: 1.0,
         region: 'turkey',
     },
@@ -106,7 +109,7 @@ const DATA_SOURCES: Record<string, DataSourceConfig> = {
         enabled: true, // Activated for European coverage
         priority: 4,
         apiUrl: 'https://www.seismicportal.eu/fdsnws/event/1/query',
-        pollInterval: 60000, // 60 seconds for European source
+        pollInterval: 120000, // 120s — EMSC primary via WebSocket (RealtimeEarthquakeMonitor), this is fallback only
         minMagnitude: 4.0,
         region: 'europe',
     },
@@ -150,13 +153,23 @@ class MultiSourceEEWService {
         if (!this.isRunning) return;
         this.isRunning = false;
 
-        logger.info('🛑 Stopping Multi-Source EEW Service');
+        logger.info('Stopping Multi-Source EEW Service');
 
         this.pollingIntervals.forEach((interval, key) => {
             clearInterval(interval);
             logger.debug(`Stopped polling ${key}`);
         });
         this.pollingIntervals.clear();
+
+        // CRITICAL FIX: Reset first-poll flag so re-start suppresses the initial data load.
+        // But PRESERVE seenEventIds — clearing it causes duplicate notifications for events
+        // that were already notified in the previous cycle. On restart, the first poll will
+        // re-fetch the same 10-minute window; without seenEventIds, all events appear "new".
+        this.isFirstPollCompleted.clear();
+        // this.seenEventIds is intentionally NOT cleared — prevents duplicate notifications on restart
+        // NOTE: Do NOT clear onEventCallbacks here. Subscribers (init.ts Phase B) register
+        // once and expect their callback to persist across stop/start cycles. Clearing here
+        // silently drops all subscriptions, so after restart no callbacks fire.
     }
 
     /**
@@ -221,6 +234,8 @@ class MultiSourceEEWService {
     }
 
     private async fetchFromSource(sourceKey: string, config: DataSourceConfig): Promise<void> {
+        // Guard: don't process results if service was stopped while fetch was in-flight
+        if (!this.isRunning) return;
         try {
             let events: EarthquakeEvent[] = [];
 
@@ -238,6 +253,9 @@ class MultiSourceEEWService {
                     events = await this.fetchEMSC(config);
                     break;
             }
+
+            // Guard: re-check after await — service may have been stopped during fetch
+            if (!this.isRunning) return;
 
             // Process new events
             const ONE_HOUR = 60 * 60 * 1000;
@@ -339,7 +357,7 @@ class MultiSourceEEWService {
                     if (mag < config.minMagnitude) continue;
 
                     events.push({
-                        id: `kandilli-${item.earthquake_id || Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                        id: `kandilli-${item.earthquake_id || `${Date.now()}-${Math.random().toString(36).substr(2, 14)}`}`,
                         source: 'KANDILLI',
                         latitude: parseFloat(item.lat || '0'),
                         longitude: parseFloat(item.lng || item.lon || '0'),
@@ -463,8 +481,9 @@ class MultiSourceEEWService {
             logger.info(`📍 New earthquake from ${event.source}: M${event.magnitude.toFixed(1)} ${event.location}`);
         }
 
-        // Notify callbacks
-        for (const callback of this.onEventCallbacks) {
+        // Notify callbacks — CRITICAL: iterate a snapshot copy to prevent skipping
+        // if a callback removes itself during iteration (same pattern as EEWService)
+        for (const callback of [...this.onEventCallbacks]) {
             try {
                 callback(event);
             } catch (error) {

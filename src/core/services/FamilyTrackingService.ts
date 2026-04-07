@@ -13,7 +13,7 @@
 import * as Location from 'expo-location';
 import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
-import { bleMeshService } from './BLEMeshService';
+import { meshNetworkService } from './mesh/MeshNetworkService';
 import { firebaseDataService } from './FirebaseDataService';
 import { identityService } from './IdentityService';
 import { LOCATION_TASK_NAME } from '../tasks/BackgroundLocationTask';
@@ -21,15 +21,26 @@ import { useFamilyStore } from '../stores/familyStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { getDeviceId as getDeviceIdFromLib } from '../../lib/device';
 import { normalizeTimestampMs } from '../utils/dateUtils';
+import { isLikelyFirebaseUid } from '../utils/messaging/identityUtils';
 
 const logger = createLogger('FamilyTrackingService');
 
-const STORAGE_KEY = '@afetnet:family_members';
+const STORAGE_KEY_BASE = '@afetnet:family_members';
+function getScopedStorageKey(): string {
+  try {
+    const { getFirebaseAuth } = require('../../lib/firebase');
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    return uid ? `${STORAGE_KEY_BASE}:${uid}` : STORAGE_KEY_BASE;
+  } catch {
+    return STORAGE_KEY_BASE;
+  }
+}
 const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 const MIN_SHARE_INTERVAL_MS = 20 * 1000; // 20 seconds
 const CLOUD_RETRY_ATTEMPTS = 3;
 const CLOUD_RETRY_BACKOFF_MS = 800;
 const MIN_REASONABLE_TIMESTAMP_MS = new Date('2000-01-01T00:00:00.000Z').getTime();
+const BACKGROUND_FAMILY_TRACKING_ENABLED = process.env.EXPO_PUBLIC_ENABLE_BACKGROUND_FAMILY_TRACKING === 'true';
 
 // ELITE V2: Life360-inspired adaptive GPS intervals (milliseconds)
 // Battery savings: ~89% fewer Firestore writes (900/hr → ~100/hr)
@@ -128,6 +139,16 @@ class FamilyTrackingService {
   private currentMotionState: MotionState = 'stationary';
   private isEmergencyMode = false;
 
+  /**
+   * Enable/disable emergency mode (1s GPS interval for SOS situations).
+   * Called by UnifiedSOSController when SOS is activated/deactivated.
+   */
+  setEmergencyMode(enabled: boolean): void {
+    if (this.isEmergencyMode === enabled) return;
+    this.isEmergencyMode = enabled;
+    logger.info(`🚨 Emergency mode ${enabled ? 'ACTIVATED' : 'DEACTIVATED'} — GPS interval: ${enabled ? '1s' : 'adaptive'}`);
+  }
+
   private syncMembersFromStore(): void {
     const storeMembers = useFamilyStore.getState().members;
     if (!Array.isArray(storeMembers)) {
@@ -178,11 +199,22 @@ class FamilyTrackingService {
      */
   async initialize() {
     try {
-      const data = DirectStorage.getString(STORAGE_KEY) ?? null;
+      const data = DirectStorage.getString(getScopedStorageKey()) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         this.members = Array.isArray(parsed) ? parsed : [];
         logger.info(`Loaded ${this.members.length} family members`);
+      }
+      if (!BACKGROUND_FAMILY_TRACKING_ENABLED) {
+        try {
+          const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+          if (hasStarted) {
+            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            logger.info('Stopped stale family background location task');
+          }
+        } catch {
+          // best effort
+        }
       }
       this.syncMembersFromStore();
     } catch (e) {
@@ -220,51 +252,58 @@ class FamilyTrackingService {
     // Check and request background permissions BEFORE setting isTracking
     const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
     if (fgStatus !== 'granted') {
-      const { status: reqStatus } = await Location.requestForegroundPermissionsAsync();
-      if (reqStatus !== 'granted') {
-        logger.warn('Foreground location permission denied');
-        this.trackingConsumers.delete(consumerId);
-        return; // Don't set isTracking
-      }
+      // Permission not granted — do not request here (Apple 5.1.1).
+      // Permission should be requested via user-triggered action in onboarding/settings.
+      logger.warn('Foreground location permission not granted — skipping family tracking');
+      this.trackingConsumers.delete(consumerId);
+      return; // Don't set isTracking
     }
 
     // CRITICAL: Only set isTracking after permissions are granted
     this.isTracking = true;
 
-    const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
-    if (bgStatus !== 'granted') {
-      const { status: reqBgStatus } = await Location.requestBackgroundPermissionsAsync();
-      if (reqBgStatus !== 'granted') {
-        logger.warn('Background location permission denied - fallback to foreground only');
-        // Don't return, we can still try foreground
+    if (!BACKGROUND_FAMILY_TRACKING_ENABLED) {
+      // UX hardening: keep tracking foreground-only by default
+      // so iOS does not show persistent background location indicators.
+      try {
+        const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+        if (hasStarted) {
+          await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+        }
+      } catch {
+        // best effort
       }
-    }
-
-    // Start Background Location Updates (ELITE 24/7)
-    try {
-      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
-      if (!hasStarted) {
-        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 50, // Update every 50 meters
-          deferredUpdatesInterval: 60 * 1000, // Minimum time between updates (1 min) - Battery saving
-          pausesUpdatesAutomatically: false, // CRITICAL: Keep running
-          showsBackgroundLocationIndicator: true, // Required for iOS
-          foregroundService: {
-            notificationTitle: "AfetNet Aktif",
-            notificationBody: "Konumunuz güvende kalmanız için izleniyor.",
-            notificationColor: "#C62828",
-          },
-        });
-        logger.info('Background location task started');
+      this.startForegroundSyncLoop('background-disabled');
+    } else {
+      // Respect current permission state; do not prompt for "Always" automatically.
+      // If user granted background permission manually, enable native background task.
+      const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+      if (bgStatus === 'granted') {
+        try {
+          const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+          if (!hasStarted) {
+            await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+              accuracy: Location.Accuracy.Balanced,
+              distanceInterval: 50, // Update every 50 meters
+              deferredUpdatesInterval: 60 * 1000, // Minimum time between updates (1 min) - Battery saving
+              pausesUpdatesAutomatically: false,
+              showsBackgroundLocationIndicator: false,
+              foregroundService: {
+                notificationTitle: "AfetNet Aktif",
+                notificationBody: "Konumunuz güvende kalmanız için izleniyor.",
+                notificationColor: "#C62828",
+              },
+            });
+            logger.info('Background location task started');
+          }
+        } catch (e) {
+          logger.error('Failed to start background location task:', e);
+          this.startForegroundSyncLoop('background-start-failed');
+        }
+      } else {
+        logger.info('Background location permission not granted - using foreground-only sync');
+        this.startForegroundSyncLoop('background-permission-missing');
       }
-    } catch (e) {
-      logger.error('Failed to start background location task:', e);
-      // Fallback to old interval method if native task fails
-      const fallbackIntervalMs = Math.max(10 * 1000, this.shareThrottleMs);
-      this.locationInterval = setInterval(() => {
-        void this.shareMyLocation({ reason: 'fallback-interval' });
-      }, fallbackIntervalMs);
     }
 
     // FIX #4: Location subscriptions are managed centrally by familyStore.
@@ -306,12 +345,25 @@ class FamilyTrackingService {
     }
 
     this.isTracking = false;
+    this.isEmergencyMode = false;
     logger.info('Family Tracking Stopped');
   }
 
   setShareThrottleMs(intervalMs: number): void {
     const normalized = Math.max(10 * 1000, Math.min(5 * 60 * 1000, Math.floor(intervalMs)));
     this.shareThrottleMs = normalized;
+  }
+
+  private startForegroundSyncLoop(reason: string): void {
+    if (this.locationInterval) {
+      clearInterval(this.locationInterval);
+      this.locationInterval = null;
+    }
+    const intervalMs = Math.max(10 * 1000, this.shareThrottleMs);
+    this.locationInterval = setInterval(() => {
+      void this.shareMyLocation({ reason: `foreground-interval:${reason}` });
+    }, intervalMs);
+    logger.info(`Foreground location sync loop started (${intervalMs}ms, reason=${reason})`);
   }
 
   /**
@@ -514,12 +566,38 @@ class FamilyTrackingService {
         }
 
         const timestamp = Date.now();
+
+        // Read battery level for family sharing
+        let batteryLevel: number | null = null;
+        try {
+          const Battery = await import('expo-battery');
+          const rawLevel = await Battery.getBatteryLevelAsync();
+          if (typeof rawLevel === 'number' && rawLevel >= 0 && rawLevel <= 1) {
+            batteryLevel = Math.round(rawLevel * 100);
+          }
+        } catch { /* Battery API unavailable on simulator */ }
+
+        // CRITICAL FIX: Persist last known location to MMKV when battery is low.
+        // If the phone dies, this location can be recovered on next boot for rescue ops.
+        if (batteryLevel !== null && batteryLevel <= 5) {
+          try {
+            const { DirectStorage } = await import('../utils/storage');
+            DirectStorage.setString('afetnet_last_known_location', JSON.stringify({
+              latitude,
+              longitude,
+              timestamp,
+              batteryLevelAtCapture: batteryLevel,
+              source: 'gps',
+            }));
+          } catch { /* non-critical — best effort */ }
+        }
+
         // V3: Use UID for cloud writes
         const uid = identityService.getUid();
 
         // 1. Share via Mesh first (offline-first)
         try {
-          bleMeshService.shareLocation(latitude, longitude);
+          meshNetworkService.shareLocation(latitude, longitude);
         } catch (meshError) {
           logger.warn('Mesh location share failed', meshError);
         }
@@ -542,8 +620,8 @@ class FamilyTrackingService {
         }
 
         // 2. Share via Cloud — V3 UID-centric, only on significant changes
-        const { getAuth } = await import('firebase/auth');
-        const currentUser = getAuth().currentUser;
+        const { getFirebaseAuth } = await import('../../lib/firebase');
+        const currentUser = getFirebaseAuth()?.currentUser;
         if (uid && currentUser) {
           const payload = {
             latitude,
@@ -552,6 +630,7 @@ class FamilyTrackingService {
             accuracy: loc.coords.accuracy || 0,
             speed: loc.coords.speed || 0,
             heading: loc.coords.heading || 0,
+            battery: batteryLevel,
           };
 
           const success = await this.saveLocationWithRetry(uid, payload);
@@ -591,12 +670,15 @@ class FamilyTrackingService {
 
     // 2. Share via Mesh (for offline peer-to-peer communication)
     // ELITE: Using broadcastMessage with BIO type for mesh network propagation
-    bleMeshService.broadcastMessage({
-      type: 'BIO',
-      content: JSON.stringify({ hr: data.hr, battery: data.battery, ts: Date.now() }),
-      priority: 'high',
-      ttl: 3,  // Limited TTL for bio updates
-    });
+    try {
+      const bioPayload = JSON.stringify({
+        type: 'family_status_update',
+        hr: data.hr,
+        battery: data.battery,
+        ts: Date.now(),
+      });
+      meshNetworkService.broadcastMessage(bioPayload).catch(e => { if (__DEV__) logger.debug('Bio-status mesh broadcast failed:', e); });
+    } catch { /* best effort */ }
 
     // 3. Share via Cloud (Firebase)
     const myId = identityService.getUid() || identityService.getMyId();
@@ -623,7 +705,6 @@ class FamilyTrackingService {
     this.syncMembersFromStore();
     const normalizeIdentity = (value?: string | null): string =>
       typeof value === 'string' ? value.trim() : '';
-    const isLikelyUid = (value: string): boolean => /^[A-Za-z0-9]{20,40}$/.test(value);
     const isGeneratedLocalFamilyId = (value: string): boolean => value.startsWith('family-');
 
     const member = this.members.find((m) =>
@@ -639,13 +720,13 @@ class FamilyTrackingService {
       normalizeIdentity(member.deviceId),
     ].filter((value) => value.length > 0);
 
-    let targetCloudUid = candidateAliases.find((value) => isLikelyUid(value)) || '';
+    let targetCloudUid = candidateAliases.find((value) => isLikelyFirebaseUid(value)) || '';
     if (!targetCloudUid) {
       try {
         const { contactService } = await import('./ContactService');
         for (const alias of candidateAliases) {
           const resolvedUid = normalizeIdentity(contactService.resolveCloudUid(alias));
-          if (isLikelyUid(resolvedUid)) {
+          if (isLikelyFirebaseUid(resolvedUid)) {
             targetCloudUid = resolvedUid;
             break;
           }
@@ -660,7 +741,7 @@ class FamilyTrackingService {
         await firebaseDataService.initialize();
         for (const alias of candidateAliases) {
           const resolvedUid = normalizeIdentity(await firebaseDataService.resolveRecipientUid(alias));
-          if (isLikelyUid(resolvedUid)) {
+          if (isLikelyFirebaseUid(resolvedUid)) {
             targetCloudUid = resolvedUid;
             break;
           }
@@ -719,18 +800,15 @@ class FamilyTrackingService {
     // CHANNEL 2: BLE mesh message (works offline)
     if (targetMeshId || targetCloudUid) {
       try {
-        await bleMeshService.broadcastMessage({
-          type: 'status',
-          content: JSON.stringify({
-            action: 'CHECK_IN_REQUEST',
-            targetDeviceId: targetMeshId || targetCloudUid,
-            targetUid: targetCloudUid || undefined,
-            targetName: member.name,
-            timestamp: Date.now(),
-          }),
-          priority: 'high',
-          ttl: 5,
+        const checkInPayload = JSON.stringify({
+          type: 'family_checkin_request',
+          action: 'CHECK_IN_REQUEST',
+          targetDeviceId: targetMeshId || targetCloudUid,
+          targetUid: targetCloudUid || undefined,
+          targetName: member.name,
+          timestamp: Date.now(),
         });
+        await meshNetworkService.broadcastMessage(checkInPayload);
         sent = true;
         logger.info(`✅ Check-in request sent to ${member.name} via BLE mesh`);
       } catch (bleError) {
@@ -758,14 +836,14 @@ class FamilyTrackingService {
 
   private async saveMembers() {
     try {
-      DirectStorage.setString(STORAGE_KEY, JSON.stringify(this.members));
+      DirectStorage.setString(getScopedStorageKey(), JSON.stringify(this.members));
     } catch (e) {
       logger.error('Failed to save family members', e);
     }
   }
 
   private notifyStatusChange(member: FamilyMember) {
-    for (const cb of this.statusCallbacks) {
+    for (const cb of [...this.statusCallbacks]) {
       try {
         cb(member);
       } catch (e) {
@@ -802,6 +880,25 @@ class FamilyTrackingService {
     }
   }
 
+  /**
+   * Destroy — full cleanup for app shutdown / logout.
+   * CRITICAL: Clears all timers, callbacks, and tracking state.
+   * Without this, location interval timer leaks on shutdown.
+   */
+  destroy(): void {
+    this.stopTracking();
+    this.statusCallbacks = [];
+    this.members = [];
+    this.shareInFlight = null;
+    this.lastShareTimestamp = 0;
+    this.lastWrittenLat = 0;
+    this.lastWrittenLng = 0;
+    this.lastWrittenTimestamp = 0;
+    this.currentMotionState = 'stationary';
+    this.isEmergencyMode = false;
+    logger.info('FamilyTrackingService destroyed');
+  }
+
   private async saveLocationWithRetry(
     targetId: string,
     payload: {
@@ -811,6 +908,7 @@ class FamilyTrackingService {
       accuracy: number;
       speed: number;
       heading: number;
+      battery?: number | null;
     },
   ): Promise<boolean> {
     for (let attempt = 1; attempt <= CLOUD_RETRY_ATTEMPTS; attempt++) {
