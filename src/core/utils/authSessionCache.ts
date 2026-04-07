@@ -55,10 +55,16 @@ export function setCachedAuthenticatedSession(authenticated: boolean, uid?: stri
       const normalizedUid = normalizeUid(uid);
       if (authenticated && normalizedUid) {
         DirectStorage.setString(AUTH_CACHE_UID_KEY, normalizedUid);
+        // CRITICAL FIX: Verify UID write too — without UID, identity sync fails on next launch
+        const uidReadBack = DirectStorage.getString(AUTH_CACHE_UID_KEY);
+        if (uidReadBack !== normalizedUid) {
+          console.error(`[AuthSessionCache] UID write-verify MISMATCH (attempt ${attempt}/${MAX_RETRIES})`);
+          continue; // Retry entire write (boolean + UID)
+        }
       } else if (!authenticated) {
         DirectStorage.delete(AUTH_CACHE_UID_KEY);
       }
-      return; // Success
+      return; // Success — both boolean and UID verified
     } catch (e) {
       console.error(`[AuthSessionCache] setCachedAuthenticatedSession FAILED (attempt ${attempt}/${MAX_RETRIES}):`, e);
     }

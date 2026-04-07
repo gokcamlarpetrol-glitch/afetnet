@@ -83,6 +83,10 @@ let unsubscribeAuth: (() => void) | null = null;
 let hasAuthenticatedInThisLaunch = false;
 let pendingSignOutTimer: ReturnType<typeof setTimeout> | null = null;
 let authInitTimeout: ReturnType<typeof setTimeout> | null = null;
+// CRITICAL FIX: Track delayed re-auth timers so they can be cancelled on logout.
+// Without this, a 10s timer from a preserved-session path can fire AFTER the user
+// explicitly logs out — re-authenticating the old user and overwriting the logout.
+let delayedReAuthTimers: ReturnType<typeof setTimeout>[] = [];
 const SIGN_OUT_GRACE_MS = 3000;
 const INITIAL_RESTORE_GRACE_MS = 8000;
 
@@ -303,12 +307,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                                     // (no auth token). Try to recover by forcing Firebase Auth to
                                     // re-read from MMKV persistence after a delay (network may
                                     // have been unavailable during the initial restore window).
-                                    setTimeout(async () => {
+                                    const reAuthTimer = setTimeout(async () => {
+                                        // CRITICAL: Check if user explicitly signed out during the 10s wait.
+                                        // Without this check, this timer re-authenticates AFTER logout.
+                                        if (isExplicitSignOutPending() || !hasCachedAuthenticatedSession()) {
+                                            logger.info('Delayed re-auth cancelled: user signed out during wait');
+                                            return;
+                                        }
                                         try {
                                             const delayedAuth = getFirebaseAuth();
                                             const delayedUser = delayedAuth?.currentUser;
                                             if (delayedUser) {
-                                                // Force token refresh to ensure we have valid credentials
                                                 await delayedUser.getIdToken(true);
                                                 await identityService.syncFromFirebase(delayedUser);
                                                 const identity = identityService.getIdentity();
@@ -324,7 +333,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                                         } catch (reAuthError) {
                                             logger.warn('Delayed re-auth attempt failed (user stays authenticated from cache):', reAuthError);
                                         }
-                                    }, 10_000); // 10s delay — give network time to come online
+                                    }, 10_000);
+                                    delayedReAuthTimers.push(reAuthTimer);
                                     return;
                                 }
                                 logBootState(currentBootState, 'UNAUTHENTICATED', 'initial restore: no cache + no Firebase user');
@@ -400,7 +410,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                                             });
                                             // CRITICAL FIX: Delayed re-auth — without firebaseUser,
                                             // Firestore operations will fail. Retry after network stabilizes.
-                                            setTimeout(async () => {
+                                            const reAuthTimer2 = setTimeout(async () => {
+                                                if (isExplicitSignOutPending() || !hasCachedAuthenticatedSession()) {
+                                                    logger.info('Delayed re-auth (post-grace) cancelled: user signed out during wait');
+                                                    return;
+                                                }
                                                 try {
                                                     const retryAuth = getFirebaseAuth();
                                                     const retryUser = retryAuth?.currentUser;
@@ -421,6 +435,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                                                     logger.warn('Delayed re-auth (post-grace) failed:', e);
                                                 }
                                             }, 10_000);
+                                            delayedReAuthTimers.push(reAuthTimer2);
                                             return;
                                         }
                                         // No Firebase user AND no MMKV cache — session is truly dead
@@ -609,6 +624,13 @@ export const cleanupAuthListener = () => {
         clearTimeout(authInitTimeout);
         authInitTimeout = null;
     }
+    // CRITICAL FIX: Cancel all delayed re-auth timers to prevent them from firing
+    // after logout. Without this, a 10s timer could re-authenticate the old user
+    // after the new user has already logged in — causing cross-account data leak.
+    for (const timer of delayedReAuthTimers) {
+        clearTimeout(timer);
+    }
+    delayedReAuthTimers = [];
     // Reset boot state for next session (hot reload, unmount+remount)
     currentBootState = 'COLD_START';
 };
