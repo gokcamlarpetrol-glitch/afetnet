@@ -2,6 +2,8 @@
  * FAMILY SCREEN - Elite Premium Design
  * Production-grade family safety chain with comprehensive error handling
  * Zero-error guarantee with full type safety
+ *
+ * REFACTORED: StatusSection -> FamilyStatusSection, IdModal -> IdShareModal, EditModal -> EditMemberModal
  */
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
@@ -15,16 +17,11 @@ import {
   ScrollView,
   RefreshControl,
   StatusBar,
-  Modal,
   Linking,
-  ActionSheetIOS,
   Platform,
-  Share as NativeShare,
-  TextInput,
   ImageBackground,
   ActivityIndicator,
   useWindowDimensions,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -98,27 +95,27 @@ try { haptics = require('../../utils/haptics'); } catch (e: any) { IMPORT_ERRORS
 let resolveFamilyMemberLocation: any = (m: any) => ({ latitude: m?.latitude || 0, longitude: m?.longitude || 0 });
 try { resolveFamilyMemberLocation = require('../../utils/familyLocation').resolveFamilyMemberLocation; } catch (e: any) { IMPORT_ERRORS.push('familyLocation: ' + e?.message); }
 
-let QRCode: any = () => null;
-try { QRCode = require('react-native-qrcode-svg').default; } catch (e: any) { IMPORT_ERRORS.push('react-native-qrcode-svg: ' + e?.message); }
-
-let Clipboard: any = { setStringAsync: () => { } };
-try { Clipboard = require('expo-clipboard'); } catch (e: any) { IMPORT_ERRORS.push('expo-clipboard: ' + e?.message); }
-
 let DirectStorageRef: any = { getString: () => null, setString: () => { } };
 try { DirectStorageRef = require('../../utils/storage').DirectStorage; } catch (e: any) { IMPORT_ERRORS.push('DirectStorage: ' + e?.message); }
 
-let SMS: any = { isAvailableAsync: async () => false };
-try { SMS = require('expo-sms'); } catch (e: any) { IMPORT_ERRORS.push('expo-sms: ' + e?.message); }
+// Extracted sub-components
+import { FamilyStatusSection } from './FamilyStatusSection';
+import { IdShareModal } from './IdShareModal';
+import { EditMemberModal } from './EditMemberModal';
 
-// Log import errors if any
+// CRITICAL: Log import errors in ALL builds — not just __DEV__.
+// Silent import failures cause family safety features to degrade without any indication.
 if (IMPORT_ERRORS.length > 0) {
-  console.error('🔴🔴🔴 FAMILY SCREEN IMPORT ERRORS:', JSON.stringify(IMPORT_ERRORS));
+  console.error('[FamilyScreen] IMPORT ERRORS:', JSON.stringify(IMPORT_ERRORS));
 }
 
 const logger = createLogger('FamilyScreen');
 const FAMILY_TRACKING_CONSUMER_ID = 'family-screen';
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
-const MY_STATUS_STORAGE_KEY = '@afetnet:my_family_status';
+/** User-scoped status key to prevent cross-account data leak */
+const getMyStatusStorageKey = (): string => {
+  const uid = identityService?.getUid?.() || 'anonymous';
+  return `@afetnet:my_family_status:${uid}`;
+};
 type FamilyStatusUpdate = Extract<FamilyMember['status'], 'safe' | 'need-help' | 'critical' | 'unknown'>;
 type PendingFamilyUpdate = {
   status?: FamilyStatusUpdate;
@@ -181,20 +178,6 @@ const SafeFamilyMapView: React.FC<React.ComponentProps<typeof FamilyMapView>> = 
   }
 };
 
-// SafeQRCode: Wraps QRCode in error handling to prevent react-native-svg crashes
-const SafeQRCode: React.FC<{ value: string; size: number }> = ({ value, size }) => {
-  try {
-    if (!value) return null;
-    return <QRCode value={value} size={size} />;
-  } catch {
-    return (
-      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 12 }}>
-        <Text style={{ color: '#94a3b8', fontSize: 12 }}>QR kod oluşturulamadı</Text>
-      </View>
-    );
-  }
-};
-
 // Toast notification component
 const Toast: React.FC<{ message: string; visible: boolean }> = ({ message, visible }) => {
   if (!visible) return null;
@@ -225,51 +208,90 @@ const inlineStyles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  statusButtonActive: {
-    borderWidth: 2,
-  },
-  statusButtonInactive: {
-    borderWidth: 0,
-    opacity: 0.6,
-  },
 });
+
+// MODULE-LEVEL CONSTANTS: Moved out of component to avoid recreation on every render
+const FAMILY_RELATIONSHIPS = new Set(['anne', 'baba', 'es', 'kardes', 'cocuk', 'akraba']);
+const STATUS_PRIORITY: Record<string, number> = {
+  'critical': 0, 'danger': 1, 'need-help': 2, 'unknown': 3, 'offline': 4, 'safe': 5,
+};
+const sortByUrgency = (a: FamilyMember, b: FamilyMember) => {
+  const pa = STATUS_PRIORITY[a.status] ?? 3;
+  const pb = STATUS_PRIORITY[b.status] ?? 3;
+  return pa - pb;
+};
+
+// Critical services that MUST be loaded for family safety features
+const CRITICAL_SERVICES_OK = !!(useFamilyStore && identityService?.getUid !== undefined && familyTrackingService);
 
 function FamilyScreenInner({ navigation }: FamilyScreenProps) {
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
 
+  // Show visible error if critical family services failed to load
+  if (IMPORT_ERRORS.length > 0 && !CRITICAL_SERVICES_OK) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+        <Ionicons name="warning" size={48} color="#ef4444" />
+        <Text style={{ fontSize: 18, fontWeight: '700', color: '#ef4444', marginTop: 12 }}>Aile Güvenliği Yüklenemedi</Text>
+        <Text style={{ fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 8 }}>
+          Kritik servisler başlatılamadı. Lütfen uygulamayı yeniden başlatın.
+        </Text>
+      </View>
+    );
+  }
+
   // Use Zustand hooks - they handle referential equality automatically
   const allMembers = useFamilyStore((state: any) => state.members);
 
   // Filter out the device owner (self) — only show added family members
-  const myUid = React.useMemo(() => {
+  // CRITICAL FIX: Track myUid in state so it updates when identity loads asynchronously
+  // on cold start. Previously useMemo([]) captured a stale '' value when identityService
+  // hadn't loaded yet, causing the owner to appear in their own family member list.
+  const [myUid, setMyUid] = React.useState(() => {
     try { return identityService.getUid() || ''; } catch { return ''; }
-  }, []);
+  });
+  React.useEffect(() => {
+    const uid = identityService.getUid();
+    if (uid && uid !== myUid) {
+      setMyUid(uid);
+      return;
+    }
+    // Retry once after 1s for cold-start race where identity isn't ready yet
+    const timer = setTimeout(() => {
+      try {
+        const resolvedUid = identityService.getUid();
+        if (resolvedUid && resolvedUid !== myUid) {
+          setMyUid(resolvedUid);
+        }
+      } catch { /* best effort */ }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const members = React.useMemo(
     () => myUid ? allMembers.filter((m: FamilyMember) => m.uid !== myUid) : allMembers,
     [allMembers, myUid],
   );
-  // ELITE: Settings integration for location control
-  const locationEnabled = useSettingsStore((state: any) => state.locationEnabled);
 
-  const [isSharingLocation, setIsSharingLocation] = useState(false);
+  // CRITICAL FIX: Restore location sharing state from persisted setting.
+  // Without this, the toggle always shows "off" even when tracking is actively running
+  // (auto-resumed from init.ts), confusing users during emergencies.
+  const [isSharingLocation, setIsSharingLocation] = useState(() => {
+    try {
+      return useSettingsStore.getState().familyLocationSharingEnabled ?? false;
+    } catch { return false; }
+  });
   const [myStatus, setMyStatus] = useState<'safe' | 'need-help' | 'unknown' | 'critical'>('unknown');
   const [showIdModal, setShowIdModal] = useState(false);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [mySharePayload, setMySharePayload] = useState('');
-  const [showEditModal, setShowEditModal] = useState(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
-  const [editName, setEditName] = useState('');
-  // ELITE: Extended edit modal states
-  const [editRelationship, setEditRelationship] = useState<string | null>(null);
-  const [editPhone, setEditPhone] = useState('');
-  const [editNotes, setEditNotes] = useState('');
+  const [showEditModal, setShowEditModal] = useState(false);
   // ELITE V2: Map/List toggle (Life360 pattern)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   // Loading states
   const [isInitializing, setIsInitializing] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [statusUpdating, setStatusUpdating] = useState(false);
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
@@ -334,21 +356,32 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
     const init = async () => {
       try {
-        setIsInitializing(true);
+        // CRITICAL FIX: If familyStore is already initialized (from init.ts Phase C),
+        // skip the expensive re-initialization. This prevents a visible loading delay
+        // when the user opens the Family screen.
+        const storeState = useFamilyStore.getState();
+        const alreadyInitialized = storeState.isInitialized;
+
+        // Only show loading spinner if store has no members AND hasn't initialized yet
+        if (!alreadyInitialized && storeState.members.length === 0) {
+          setIsInitializing(true);
+        } else {
+          // Store already has data — show it immediately
+          setIsInitializing(false);
+        }
 
         // Restore persisted status (fast, from encrypted MMKV)
         try {
-          const savedStatus = DirectStorageRef.getString(MY_STATUS_STORAGE_KEY);
+          const savedStatus = DirectStorageRef.getString(getMyStatusStorageKey());
           if (savedStatus && ['safe', 'need-help', 'critical', 'unknown'].includes(savedStatus) && mounted) {
             setMyStatus(savedStatus as any);
           }
         } catch { /* non-critical */ }
 
-        // Initialize family store
+        // Initialize family store (skips internally if already initialized)
         await useFamilyStore.getState().initialize();
 
         // ELITE: Ensure BLE Mesh service is started for offline messaging
-        // Null guard: bleMeshService can be null if import fails
         if (bleMeshService && typeof bleMeshService.getIsRunning === 'function' && !bleMeshService.getIsRunning()) {
           try {
             await bleMeshService.start();
@@ -357,7 +390,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
             }
           } catch (error) {
             logger.warn('BLE Mesh start failed (non-critical):', error);
-            // Continue - BLE Mesh is optional but recommended
           }
         }
 
@@ -395,7 +427,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
                     const cloudStatus = data?.status;
                     if (cloudStatus && ['safe', 'need-help', 'critical', 'unknown'].includes(cloudStatus)) {
                       setMyStatus(cloudStatus as any);
-                      try { DirectStorageRef.setString(MY_STATUS_STORAGE_KEY, cloudStatus); } catch { /* non-critical */ }
+                      try { DirectStorageRef.setString(getMyStatusStorageKey(), cloudStatus); } catch { /* non-critical */ }
                     }
                   }
                 }
@@ -417,6 +449,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     return () => {
       mounted = false;
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
     };
   }, []);
 
@@ -441,7 +474,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         const messageData = sanitizeJSON(content);
 
         if (!messageData || typeof messageData !== 'object') {
-          // Not a valid JSON message, skip
           logger.debug('Family message is not valid JSON, skipping');
           return;
         }
@@ -456,7 +488,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
           if (normalizedCandidates.length === 0) return;
 
-          // Resolve family member with UID/deviceId/local-id aliases.
           const storeMembers = useFamilyStore.getState().members;
           const member = storeMembers.find((candidate: FamilyMember) =>
             normalizedCandidates.some((value) =>
@@ -466,7 +497,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           );
 
           if (member) {
-            // Batch updates instead of immediate store updates to prevent subscription loops
             const existing = pendingUpdatesRef.current.get(member.uid) || {};
 
             if (messageData.type === 'family_status_update' && messageData.status !== undefined) {
@@ -493,7 +523,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
             pendingUpdatesRef.current.set(member.uid, existing);
 
-            // Debounce: Process updates after 100ms (allows batching multiple rapid updates)
             if (updateTimeoutRef.current) {
               clearTimeout(updateTimeoutRef.current);
             }
@@ -506,33 +535,14 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           }
         }
 
-        // CRITICAL: Handle SOS messages received via BLE Mesh (offline family SOS)
-        // Use SOSFullScreenAlert instead of basic Alert for maximum visibility
+        // NOTE: SOS messages received via BLE Mesh are already handled by MeshNetworkService
+        // which emits SOS_FULLSCREEN_ALERT_EVENT. Emitting here again causes DUPLICATE alerts.
+        // The SOSFullScreenAlert component has a 30s dedup window, but if the signalId
+        // differs (e.g., mesh_${Date.now()} vs BLE messageId), both alerts show.
         if (messageData.type === 'FAMILY_SOS' || messageData.type === 'SOS') {
           const senderName = messageData.senderName || 'Aile Üyesi';
-
-          try {
-            const { DeviceEventEmitter } = require('react-native');
-            const { SOS_FULLSCREEN_ALERT_EVENT } = require('../../components/SOSFullScreenAlert');
-            DeviceEventEmitter.emit(SOS_FULLSCREEN_ALERT_EVENT, {
-              signalId: messageData.signalId || messageData.id || `mesh_${Date.now()}`,
-              senderUid: messageData.senderUid || message.senderId,
-              senderDeviceId: messageData.senderDeviceId || messageData.fromDeviceId || messageData.deviceId,
-              senderName,
-              message: messageData.message || 'Acil yardım gerekiyor!',
-              latitude: messageData.location?.latitude,
-              longitude: messageData.location?.longitude,
-              trapped: messageData.trapped,
-              battery: messageData.battery,
-            });
-          } catch (alertError) {
-            logger.error('SOSFullScreenAlert emit failed, fallback to Alert:', alertError);
-            Alert.alert(
-              `🆘 ${senderName} ACİL YARDIM İSTİYOR!`,
-              messageData.message || 'Acil yardım gerekiyor!',
-            );
-          }
-          logger.warn(`🚨 SOS alert received via Mesh from ${senderName}`);
+          // Just log — MeshNetworkService already triggers the full-screen alert
+          logger.warn(`SOS alert received via Mesh from ${senderName} (handled by MeshNetworkService)`);
         }
       } catch (error) {
         logger.error('Error processing family message:', error);
@@ -541,489 +551,32 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
     return () => {
       if (typeof unsubscribeMessage === 'function') unsubscribeMessage();
-      // Cleanup debounce timeout
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
         updateTimeoutRef.current = null;
       }
       applyPendingFamilyUpdates('cleanup');
     };
-  }, [applyPendingFamilyUpdates]); // Listener uses refs/store + stable apply helper
+  }, [applyPendingFamilyUpdates]);
 
-  const startLocationSharing = useCallback(async () => {
-    // CRITICAL FIX: If location is disabled in app settings, offer to enable it
-    if (!locationEnabled) {
-      Alert.alert(
-        'Konum Paylaşımı Kapalı',
-        'Aile üyelerinizle konum paylaşımı için uygulama ayarından konumu aktif etmeniz gerekiyor. Şimdi aktif etmek ister misiniz?',
-        [
-          { text: 'İptal', style: 'cancel', onPress: () => setIsSharingLocation(false) },
-          {
-            text: 'Evet, Aç',
-            style: 'default',
-            onPress: () => {
-              try {
-                const { useSettingsStore: useSettings } = require('../../stores/settingsStore');
-                useSettings.getState().setLocation(true);
-                logger.info('✅ Location enabled via auto-activate prompt');
-              } catch (e) {
-                logger.error('Failed to auto-enable location:', e);
-                setIsSharingLocation(false);
-              }
-            },
-          },
-        ]
-      );
-      return;
-    }
-
-    if (!Location) {
-      Alert.alert('Hata', 'Konum servisi yüklenemedi. Lütfen uygulamayı yeniden başlatın.');
-      setIsSharingLocation(false);
-      return;
-    }
-
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        // Single consolidated alert for permission denial
-        Alert.alert(
-          'Konum İzni Gerekli',
-          'Konum paylaşımı için konum iznini uygulama ayarlarından vermeniz gerekiyor.',
-          [
-            { text: 'İptal', style: 'cancel' },
-            { text: 'Ayarları Aç', onPress: () => Linking.openSettings() },
-          ]
-        );
-        setIsSharingLocation(false);
-        return;
-      }
-
-      // Keep a consistent sharing cadence and delegate all transport logic to FamilyTrackingService.
-      if (!familyTrackingService) {
-        logger.warn('FamilyTrackingService not available');
-        setIsSharingLocation(false);
-        return;
-      }
-      familyTrackingService.setShareThrottleMs(30 * 1000);
-      await familyTrackingService.startTracking(FAMILY_TRACKING_CONSUMER_ID);
-      await familyTrackingService.shareMyLocation({ force: true, reason: 'family-screen-toggle-on' });
-      logger.info('✅ Location sharing started successfully');
-    } catch (error) {
-      logger.error('Start location sharing error:', error);
-      Alert.alert('Konum Hatası', 'Konum paylaşımı başlatılamadı. Lütfen konum izinlerini kontrol edin.');
-      setIsSharingLocation(false);
-    }
-  }, [locationEnabled]);
-
+  // Location sharing effect — ensures tracking is active while screen is open
+  // CRITICAL FIX: Previously the `isSharingLocation === true` branch was a no-op.
+  // When the user restores from persisted state or re-opens the screen with sharing
+  // already enabled, tracking must be started (startTracking is idempotent via consumer set).
   useEffect(() => {
-    if (isSharingLocation) {
-      startLocationSharing().catch((error) => {
-        logger.error('Failed to start location sharing:', error);
-        setIsSharingLocation(false);
+    if (isSharingLocation && familyTrackingService) {
+      familyTrackingService.startTracking(FAMILY_TRACKING_CONSUMER_ID).catch((e: unknown) => {
+        logger.warn('Family screen: startTracking on mount failed:', e);
       });
-    } else {
+    } else if (!isSharingLocation) {
       familyTrackingService?.stopTracking?.(FAMILY_TRACKING_CONSUMER_ID);
     }
 
     return () => {
+      // Only remove the family-screen consumer; other consumers (init-auto-resume) keep tracking alive
       familyTrackingService?.stopTracking?.(FAMILY_TRACKING_CONSUMER_ID);
     };
-  }, [isSharingLocation, startLocationSharing]);
-
-  const handleStatusUpdate = useCallback(async (status: 'safe' | 'need-help' | 'critical') => {
-    haptics.notificationSuccess();
-    const previousStatus = myStatus;
-    setStatusUpdating(true);
-
-    try {
-      // ELITE: Ensure BLE Mesh service is started before sending status update
-      // Null guard: bleMeshService can be null if import fails
-      if (bleMeshService && typeof bleMeshService.getIsRunning === 'function' && !bleMeshService.getIsRunning()) {
-        try {
-          await bleMeshService.start();
-          if (__DEV__) {
-            logger.info('BLE Mesh service started for status update');
-          }
-        } catch (error) {
-          logger.warn('BLE Mesh start failed (will try to continue):', error);
-          // Continue - status update can still be saved to Firebase
-        }
-      }
-
-      const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
-      let location: any = null;
-
-      if (locStatus === 'granted') {
-        try {
-          // ELITE: Use Promise.race for timeout protection
-          const locationPromise = Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-
-          let timeoutId: NodeJS.Timeout | null = null;
-          const timeoutPromise = new Promise<any>((resolve) => {
-            timeoutId = setTimeout(() => resolve(null), 10000); // 10 second timeout
-          });
-
-          location = await Promise.race([locationPromise, timeoutPromise]);
-
-          // CRITICAL: Cleanup timeout after race completes
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-          }
-
-          if (!location) {
-            logger.warn('Location fetch timeout - continuing without location');
-          }
-        } catch (locationError) {
-          logger.warn('Location fetch failed (non-critical):', locationError);
-          // Continue without location - status update can still be sent
-        }
-      } else {
-        logger.debug('Location permission not granted - status update will be sent without location');
-      }
-
-      let resolvedDeviceId = bleMeshService?.getMyDeviceId?.() ?? null;
-      if (!resolvedDeviceId) {
-        try {
-          resolvedDeviceId = await getDeviceIdFromLib();
-          if (resolvedDeviceId) {
-            useMeshStore.getState().setMyDeviceId(resolvedDeviceId);
-          }
-        } catch (error) {
-          logger.warn('Failed to get device ID from fallback provider:', error);
-        }
-      }
-
-      const myIdentity = identityService.getIdentity();
-      const senderRouteId = (
-        resolvedDeviceId ||
-        identityService.getUid() ||
-        myIdentity?.uid ||
-        ''
-      ).trim();
-
-      if (!senderRouteId) {
-        logger.error('Status update aborted: sender identity could not be resolved');
-        haptics.notificationError?.();
-        Alert.alert('Hata', 'Kimlik bilgisi alınamadı. Lütfen tekrar giriş yapıp yeniden deneyin.');
-        return;
-      }
-
-      // Create status update message
-      const statusMessage = JSON.stringify({
-        type: 'family_status_update',
-        deviceId: senderRouteId,
-        senderUid: identityService.getUid(),
-        status,
-        location: location ? {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          timestamp: Date.now(),
-        } : null,
-        timestamp: Date.now(),
-      });
-
-      // Get all family members with deviceIds
-      const familyMembers = useFamilyStore.getState().members;
-      const selfIds = new Set(
-        [
-          senderRouteId,
-          resolvedDeviceId,
-          identityService.getUid(),
-          myIdentity?.uid,
-        ].filter((value): value is string => !!value && value.trim().length > 0),
-      );
-      const reachableMembers = familyMembers.filter((member: FamilyMember) => {
-        const targets = [
-          member.uid?.trim(),
-          member.deviceId?.trim(),
-        ].filter((value): value is string => !!value && value.length > 0);
-
-        if (targets.length === 0) return false;
-        return targets.some((target) => !selfIds.has(target));
-      });
-
-      // Send status via mesh ONLY to family members (privacy: no broadcast to all peers)
-      let broadcastSuccess = false;
-      if (bleMeshService?.getIsRunning?.() && reachableMembers.length > 0) {
-        try {
-          for (const member of reachableMembers) {
-            const targetId = member.uid?.trim() || member.deviceId?.trim();
-            if (targetId && !selfIds.has(targetId)) {
-              await meshNetworkService.broadcastMessage(statusMessage, MeshMessageType.STATUS, {
-                to: targetId,
-                from: senderRouteId,
-              });
-            }
-          }
-          broadcastSuccess = true;
-          if (__DEV__) {
-            logger.info(`Status update sent to ${reachableMembers.length} family members via BLE Mesh`);
-          }
-        } catch (meshError) {
-          logger.warn('BLE Mesh family-only send failed (non-critical):', meshError);
-        }
-      } else if (!bleMeshService?.getIsRunning?.()) {
-        logger.warn('BLE Mesh service not running - status update will only be saved to Firebase');
-      }
-
-      // Save to Firebase for cloud sync
-      try {
-        const { firebaseDataService } = await import('../../services/FirebaseDataService');
-        const cloudTargetId = identityService.getUid() || senderRouteId;
-        if (cloudTargetId) {
-          await firebaseDataService.saveStatusUpdate(cloudTargetId, {
-            status,
-            location: location ? {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-            } : null,
-            timestamp: Date.now(),
-          });
-
-          if (location) {
-            await firebaseDataService.saveLocationUpdate(cloudTargetId, {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              accuracy: location.coords.accuracy || null,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      } catch (error) {
-        logger.error('Failed to save status to Firebase:', error);
-      }
-
-      // CRITICAL: Send to backend for rescue coordination
-      try {
-        const { backendEmergencyService } = await import('../../services/BackendEmergencyService');
-        if (backendEmergencyService.initialized) {
-          await backendEmergencyService.sendStatusUpdate({
-            status,
-            location: location ? {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              accuracy: location.coords.accuracy || undefined,
-            } : undefined,
-            timestamp: Date.now(),
-          }).catch((error: unknown) => {
-            logger.error('Failed to send status update to backend:', error);
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to send status update to backend:', error);
-      }
-
-      // NOTE: Direct mesh routing to family members is already handled above
-      // in the family-only mesh send block. No duplicate needed.
-
-      // CRITICAL FIX: Write status update to each family member's Firestore path
-      try {
-        const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
-        const db = await getFirestoreInstanceAsync();
-        if (db) {
-          const { collection, doc, getDocs, limit, query, setDoc, where } = await import('firebase/firestore');
-          const statusPayload = {
-            fromDeviceId: senderRouteId,
-            senderUid: identityService.getUid(),
-            fromName: identityService.getDisplayName() || 'Aile Üyesi',
-            status,
-            location: location ? {
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-            } : null,
-            timestamp: Date.now(),
-            type: 'status_update',
-          };
-          const targetUidCache = new Map<string, string | null>();
-          const resolveUidFromAlias = async (rawAlias: string): Promise<string> => {
-            const alias = rawAlias.trim();
-            if (!alias) return '';
-            if (UID_REGEX.test(alias)) return alias;
-
-            const normalizedAlias = alias.toUpperCase();
-            if (targetUidCache.has(normalizedAlias)) {
-              const cached = targetUidCache.get(normalizedAlias);
-              return cached || '';
-            }
-
-            let resolvedUid = '';
-            try {
-              const usersRef = collection(db, 'users');
-              const publicCodeQuery = query(usersRef, where('publicUserCode', '==', normalizedAlias), limit(1));
-              const publicCodeSnap = await getDocs(publicCodeQuery);
-              if (!publicCodeSnap.empty) {
-                resolvedUid = publicCodeSnap.docs[0]?.id || '';
-              }
-
-              if (!resolvedUid) {
-                const legacyCodeQuery = query(usersRef, where('qrId', '==', normalizedAlias), limit(1));
-                const legacyCodeSnap = await getDocs(legacyCodeQuery);
-                if (!legacyCodeSnap.empty) {
-                  resolvedUid = legacyCodeSnap.docs[0]?.id || '';
-                }
-              }
-            } catch (resolveError) {
-              logger.warn(`Failed to resolve family alias "${normalizedAlias}" to uid:`, resolveError);
-            }
-
-            targetUidCache.set(normalizedAlias, resolvedUid || null);
-            return resolvedUid;
-          };
-
-          const writePromises = reachableMembers.map(async (member: FamilyMember) => {
-            try {
-              const targetAliases = new Set<string>();
-              const memberDeviceId = member.deviceId?.trim();
-              const memberUid = member.uid?.trim();
-              if (memberDeviceId) targetAliases.add(memberDeviceId);
-              if (memberUid) targetAliases.add(memberUid);
-
-              const nonSelfTargets = Array.from(targetAliases).filter((target) => !selfIds.has(target));
-              if (nonSelfTargets.length === 0) return;
-
-              const docIdBase = `${senderRouteId}_${Date.now()}`;
-              await Promise.allSettled(nonSelfTargets.map(async (target) => {
-                const resolvedUid = await resolveUidFromAlias(target);
-                if (resolvedUid) {
-                  const v3StatusRef = doc(db, 'users', resolvedUid, 'status_updates', docIdBase);
-                  await setDoc(v3StatusRef, statusPayload).catch(() => { });
-                  return;
-                }
-
-                const statusRef = doc(db, 'devices', target, 'status_updates', docIdBase);
-                await setDoc(statusRef, statusPayload).catch(() => { });
-              }));
-
-              logger.info(`✅ Status update sent to ${member.name} via Firestore`);
-            } catch (err) {
-              logger.warn(`Failed to write status to ${member.name}:`, err);
-            }
-          });
-
-          await Promise.allSettled(writePromises);
-
-          // Also update own device doc with current status
-          try {
-            const ownDeviceDocId = (
-              resolvedDeviceId ||
-              identityService.getMeshDeviceId?.() ||
-              ''
-            ).trim();
-            if (ownDeviceDocId) {
-              const deviceRef = doc(db, 'devices', ownDeviceDocId);
-              await setDoc(deviceRef, {
-                status: status,
-                statusUpdatedAt: Date.now(),
-                lastSeen: Date.now(),
-              }, { merge: true });
-            }
-          } catch { /* best effort */ }
-
-          // V3: Update users/{uid}/status/current
-          try {
-            const { getAuth } = await import('firebase/auth');
-            const uid = getAuth()?.currentUser?.uid;
-            if (uid) {
-              const v3StatusRef = doc(db, 'users', uid, 'status', 'current');
-              await setDoc(v3StatusRef, {
-                status: status,
-                statusUpdatedAt: Date.now(),
-                lastSeen: Date.now(),
-                location: location ? {
-                  latitude: location.coords.latitude,
-                  longitude: location.coords.longitude,
-                } : null,
-              }, { merge: true });
-            }
-          } catch { /* V3 best effort */ }
-        }
-      } catch (fbError) {
-        logger.warn('Firestore status fan-out failed:', fbError);
-      }
-
-      const statusText = status === 'safe' ? 'Güvendeyim' :
-        status === 'need-help' ? 'Yardıma İhtiyacım Var' :
-          'ACİL DURUM';
-
-      const memberCount = reachableMembers.length;
-      const deliveryMethod = broadcastSuccess
-        ? (memberCount > 0 ? `${memberCount} aile üyesine` : 'Yakındaki cihazlara')
-        : 'Bulut sunucusuna';
-
-      Alert.alert(
-        'Durum Güncellendi',
-        `${statusText} - ${deliveryMethod} bildirildi`,
-      );
-      setMyStatus(status);
-      // Persist status locally for next screen mount
-      try { DirectStorageRef.setString(MY_STATUS_STORAGE_KEY, status); } catch { /* non-critical */ }
-
-      // ELITE: Send critical alert with error handling
-      if (status === 'critical') {
-        try {
-          await multiChannelAlertService?.sendAlert?.({
-            title: '🚨 ACİL DURUM',
-            body: 'Aile üyesi acil durum bildirdi!',
-            priority: 'critical',
-            channels: {
-              pushNotification: true,
-              fullScreenAlert: true,
-              alarmSound: true,
-              vibration: true,
-              tts: true,
-            },
-            data: {
-              type: 'family_status_update',
-              status: 'critical',
-              deviceId: senderRouteId,
-            },
-          }).catch((alertError: unknown) => {
-            logger.warn('Multi-channel alert failed (non-critical):', alertError);
-          });
-        } catch (alertError) {
-          logger.warn('Multi-channel alert error (non-critical):', alertError);
-        }
-      }
-
-    } catch (error) {
-      setMyStatus(previousStatus);
-      logger.error('Status update error:', error);
-      haptics.notificationError?.();
-      Alert.alert('Hata', 'Durum güncellenemedi. Lütfen tekrar deneyin.');
-    } finally {
-      setStatusUpdating(false);
-    }
-  }, [myStatus]);
-
-  const handleShareLocation = useCallback(async () => {
-    haptics.impactLight();
-    const newSharing = !isSharingLocation;
-    setIsSharingLocation(newSharing);
-
-    if (newSharing) {
-      Alert.alert('Konum Paylaşımı', 'Konum paylaşımı başlatılıyor...');
-    } else {
-      Alert.alert('Konum Paylaşımı', 'Konum paylaşımı durduruldu');
-    }
   }, [isSharingLocation]);
-
-  const handleStatusButtonPress = useCallback((status: 'safe' | 'need-help' | 'critical' | 'location') => {
-    if (statusUpdating) return; // prevent double-tap while loading
-    if (status === 'location') {
-      void handleShareLocation().catch((error) => {
-        logger.error('Error sharing location:', error);
-        haptics.notificationError?.();
-      });
-    } else {
-      void handleStatusUpdate(status).catch((error) => {
-        logger.error('Error in handleStatusUpdate:', error);
-      });
-    }
-  }, [statusUpdating, handleShareLocation, handleStatusUpdate]);
 
   const getMemberConversationTargetId = useCallback((member: Pick<FamilyMember, 'uid' | 'deviceId'>): string => {
     const selfAliases = new Set<string>(
@@ -1044,7 +597,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     return '';
   }, [myDeviceId]);
 
-  // ELITE: Memoized callback for performance
   const handleAddMember = useCallback(() => {
     try {
       haptics.impactMedium();
@@ -1057,7 +609,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
   const handleShowMyId = useCallback(async () => {
     haptics.impactLight();
 
-    // Ensure device ID is available before showing modal
     if (!myDeviceId) {
       try {
         const deviceId = await getDeviceIdFromLib();
@@ -1086,226 +637,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
     setShowIdModal(true);
   }, [myDeviceId, mySharePayload]);
-
-  /** Full QR payload for QR code encoding (scanners need full JSON) */
-  const getQRValue = useCallback((): string => {
-    const payload = mySharePayload.trim();
-    if (payload.length > 0) return payload;
-    return myDeviceId || '';
-  }, [myDeviceId, mySharePayload]);
-
-  /** Human-readable publicUserCode for display, copy, and share */
-  const shareDisplayId = useMemo(() => {
-    const code = identityService.getPublicUserCode?.();
-    if (code) return code;
-    // Fallback: extract from QR payload
-    const payload = mySharePayload.trim();
-    if (payload) {
-      try {
-        const parsed = JSON.parse(payload) as { code?: string; uid?: string };
-        if (parsed.code) return parsed.code;
-      } catch { /* not JSON */ }
-    }
-    return myDeviceId || '';
-  }, [mySharePayload, myDeviceId]);
-
-  const handleCopyId = useCallback(async () => {
-    if (!shareDisplayId) return;
-    await Clipboard.setStringAsync(shareDisplayId);
-    haptics.notificationSuccess();
-    showToast(`ID kopyalandı: ${shareDisplayId}`);
-  }, [shareDisplayId, showToast]);
-
-  const handleShareId = useCallback(async () => {
-    if (!shareDisplayId) return;
-
-    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['İptal', 'WhatsApp', 'SMS', 'Diğer'],
-          cancelButtonIndex: 0,
-        },
-        async (buttonIndex) => {
-          try {
-            if (buttonIndex === 1) {
-              const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-              let opened = false;
-              try {
-                const canOpen = await Linking.canOpenURL(whatsappUrl);
-                if (canOpen) {
-                  await Linking.openURL(whatsappUrl);
-                  haptics.notificationSuccess();
-                  opened = true;
-                }
-              } catch { /* scheme failed */ }
-              if (!opened) {
-                // Fallback to wa.me web URL
-                try {
-                  const webUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
-                  await Linking.openURL(webUrl);
-                  haptics.notificationSuccess();
-                  opened = true;
-                } catch {
-                  // Fallback to native share
-                  const result = await NativeShare.share({ message: shareMessage });
-                  if (result.action === NativeShare.sharedAction) haptics.notificationSuccess();
-                }
-              }
-            } else if (buttonIndex === 2) {
-              const isAvailable = await SMS.isAvailableAsync();
-              if (isAvailable) {
-                await SMS.sendSMSAsync([], shareMessage);
-                haptics.notificationSuccess();
-              } else {
-                Alert.alert('SMS', 'SMS gönderimi bu cihazda desteklenmiyor');
-              }
-            } else if (buttonIndex === 3) {
-              const result = await NativeShare.share({ message: shareMessage });
-              if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
-                haptics.notificationSuccess();
-              } else {
-                await handleCopyId();
-              }
-            }
-          } catch (error) {
-            logger.error('Share ID action failed on iOS action sheet:', error);
-            await handleCopyId();
-          }
-        },
-      );
-    } else {
-      try {
-        const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-        let opened = false;
-
-        try {
-          const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
-          if (canOpenWhatsApp) {
-            await Linking.openURL(whatsappUrl);
-            haptics.notificationSuccess();
-            opened = true;
-          }
-        } catch {
-          // whatsapp:// scheme failed
-        }
-
-        if (!opened) {
-          // Fallback: WhatsApp web API
-          try {
-            const webWhatsAppUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
-            const canOpenWeb = await Linking.canOpenURL(webWhatsAppUrl);
-            if (canOpenWeb) {
-              await Linking.openURL(webWhatsAppUrl);
-              haptics.notificationSuccess();
-              opened = true;
-            }
-          } catch {
-            // wa.me fallback also failed
-          }
-        }
-
-        if (!opened) {
-          const isSMSAvailable = await SMS.isAvailableAsync();
-          if (isSMSAvailable) {
-            await SMS.sendSMSAsync([], shareMessage);
-            haptics.notificationSuccess();
-            return;
-          }
-
-          const result = await NativeShare.share({ message: shareMessage });
-          if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
-            haptics.notificationSuccess();
-          } else {
-            await handleCopyId();
-          }
-        }
-      } catch (error) {
-        logger.error('Share ID error:', error);
-        await handleCopyId();
-      }
-    }
-  }, [shareDisplayId, handleCopyId]);
-
-  const handleShareIdWhatsApp = useCallback(async () => {
-    if (!shareDisplayId) return;
-
-    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
-    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-
-    try {
-      // Try whatsapp:// scheme first
-      const canOpen = await Linking.canOpenURL(whatsappUrl);
-      if (canOpen) {
-        await Linking.openURL(whatsappUrl);
-        haptics.notificationSuccess();
-        return;
-      }
-
-      // Fallback: Try WhatsApp web API URL (works even without scheme declaration)
-      const webWhatsAppUrl = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
-      const canOpenWeb = await Linking.canOpenURL(webWhatsAppUrl);
-      if (canOpenWeb) {
-        await Linking.openURL(webWhatsAppUrl);
-        haptics.notificationSuccess();
-        return;
-      }
-
-      // Final fallback: Use native share sheet
-      const result = await NativeShare.share({ message: shareMessage });
-      if (result.action === NativeShare.sharedAction) {
-        haptics.notificationSuccess();
-      }
-    } catch (error) {
-      logger.error('WhatsApp share error:', error);
-      // Last resort: copy to clipboard
-      try {
-        await Clipboard.setStringAsync(shareDisplayId);
-        haptics.notificationSuccess();
-        showToast(`ID kopyalandı: ${shareDisplayId}`);
-      } catch {
-        Alert.alert('Hata', 'Paylaşım yapılamadı. Lütfen tekrar deneyin.');
-      }
-    }
-  }, [shareDisplayId, showToast]);
-
-  const handleShareIdSMS = useCallback(async () => {
-    if (!shareDisplayId) return;
-
-    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
-
-    try {
-      const isAvailable = await SMS.isAvailableAsync();
-      if (isAvailable) {
-        await SMS.sendSMSAsync([], shareMessage);
-        haptics.notificationSuccess();
-      } else {
-        Alert.alert('SMS', 'SMS gönderimi bu cihazda desteklenmiyor');
-      }
-    } catch (error) {
-      logger.error('SMS share error:', error);
-      Alert.alert('Hata', 'SMS ile paylaşılamadı');
-    }
-  }, [shareDisplayId]);
-
-  const handleShareIdOther = useCallback(async () => {
-    if (!shareDisplayId) return;
-
-    const shareMessage = `AfetNet ile beni ekle!\n\nKullanıcı Kodum: ${shareDisplayId}\n\nAfetNet uygulamasında bu kodu girerek beni ekleyebilirsin.`;
-
-    try {
-      const result = await NativeShare.share({ message: shareMessage });
-      if (result.action === NativeShare.sharedAction || result.action === NativeShare.dismissedAction) {
-        haptics.notificationSuccess();
-      } else {
-        await handleCopyId();
-      }
-    } catch (error) {
-      logger.error('Share error:', error);
-      await handleCopyId();
-    }
-  }, [shareDisplayId, handleCopyId]);
 
   const getStatusColor = useCallback((status: FamilyMember['status']) => {
     switch (status) {
@@ -1340,65 +671,13 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
     return counts;
   }, [members]);
-  const safeCount = statusCounts.safe;
 
   const handleEditMember = useCallback((member: FamilyMember) => {
     setEditingMember(member);
-    setEditName(member.name || '');
-    setEditRelationship(member.relationship || null);
-    setEditPhone(member.phoneNumber || '');
-    setEditNotes(member.notes || '');
     setShowEditModal(true);
   }, []);
 
-  const handleSaveEdit = useCallback(async () => {
-    if (!editingMember || !editName.trim()) {
-      Alert.alert('Hata', 'Lütfen geçerli bir isim girin.');
-      return;
-    }
-
-    if (editName.trim().length < 2) {
-      Alert.alert('Hata', 'İsim en az 2 karakter olmalıdır.');
-      return;
-    }
-
-    if (editName.trim().length > 50) {
-      Alert.alert('Hata', 'İsim en fazla 50 karakter olabilir.');
-      return;
-    }
-
-    if (editPhone.trim()) {
-      const phoneRegex = /^(\+?\d{1,4}[-.\s]?)?(\(?\d{1,4}\)?[-.\s]?)?[\d\-.\s]{5,15}$/;
-      if (!phoneRegex.test(editPhone.replace(/\s/g, ''))) {
-        Alert.alert('Hata', 'Geçersiz telefon numarası formatı.');
-        return;
-      }
-    }
-
-    try {
-      await useFamilyStore.getState().updateMember(editingMember.uid, {
-        name: editName.trim(),
-        relationship: editRelationship || undefined,
-        phoneNumber: editPhone.trim() || undefined,
-        notes: editNotes.trim() || undefined,
-        updatedAt: Date.now(),
-      });
-      haptics.notificationSuccess();
-      setShowEditModal(false);
-      setEditingMember(null);
-      setEditName('');
-      setEditRelationship(null);
-      setEditPhone('');
-      setEditNotes('');
-    } catch (error) {
-      logger.error('Failed to update member:', error);
-      Alert.alert('Hata', 'Üye güncellenemedi. Lütfen tekrar deneyin.');
-    }
-  }, [editingMember, editName, editRelationship, editPhone, editNotes]);
-
   const handleDeleteMember = useCallback(async (memberId: string) => {
-    // NOTE: MemberCard already shows delete confirmation dialog.
-    // This callback is invoked AFTER user confirms in MemberCard.
     const member = members.find((m: FamilyMember) => m.uid === memberId);
     const memberName = member?.name || 'Üye';
 
@@ -1413,28 +692,17 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
   }, [members, showToast]);
 
-  // ELITE: Pull-to-refresh
+  // ELITE: Pull-to-refresh — force=true bypasses isInitialized guard
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await useFamilyStore.getState().initialize();
+      await useFamilyStore.getState().initialize(true);
     } catch (error) {
       logger.error('Refresh failed:', error);
     } finally {
       setIsRefreshing(false);
     }
   }, []);
-
-  // Group members by relationship type and sort by urgency
-  const FAMILY_RELATIONSHIPS = new Set(['anne', 'baba', 'es', 'kardes', 'cocuk', 'akraba']);
-  const STATUS_PRIORITY: Record<string, number> = {
-    'critical': 0, 'danger': 1, 'need-help': 2, 'unknown': 3, 'offline': 4, 'safe': 5,
-  };
-  const sortByUrgency = (a: FamilyMember, b: FamilyMember) => {
-    const pa = STATUS_PRIORITY[a.status] ?? 3;
-    const pb = STATUS_PRIORITY[b.status] ?? 3;
-    return pa - pb;
-  };
 
   const { familyGroup, friendsGroup } = useMemo(() => {
     const family: FamilyMember[] = [];
@@ -1451,7 +719,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     return { familyGroup: family, friendsGroup: friends };
   }, [members]);
 
-  // ELITE: Memoized callback for performance
   const handleGroupChat = useCallback(() => {
     try {
       haptics.impactMedium();
@@ -1561,7 +828,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={viewMode !== 'map'}
+        scrollEnabled={true}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -1571,14 +838,6 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           />
         }
       >
-        {IMPORT_ERRORS.length > 0 && (
-          <View style={{ backgroundColor: '#FFF3CD', padding: 8, borderRadius: 4, margin: 8 }}>
-            <Text style={{ fontSize: 12, color: '#856404' }}>
-              Bazı bileşenler yüklenemedi. Lütfen uygulamayı yeniden başlatın.
-            </Text>
-          </View>
-        )}
-
         {/* Loading skeleton while initializing */}
         {isInitializing ? (
           <View style={{ padding: 20, alignItems: 'center' }}>
@@ -1587,71 +846,13 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           </View>
         ) : (
           <>
-            <View style={styles.statusSection}>
-              <Text style={styles.sectionTitle}>Durumum</Text>
-              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-                <GlassButton
-                  title="Güvendeyim"
-                  variant="success"
-                  icon={statusUpdating && myStatus === 'safe' ? undefined : 'checkmark-circle'}
-                  disabled={statusUpdating}
-                  onPress={() => handleStatusButtonPress('safe')}
-                  style={[
-                    { flex: 1 },
-                    myStatus === 'safe'
-                      ? { backgroundColor: '#10b981', borderWidth: 2, borderColor: '#059669' }
-                      : { opacity: 0.6, borderWidth: 1, borderColor: '#10b981', borderStyle: 'solid' as const }
-                  ]}
-                />
-                <GlassButton
-                  title="Yardım Lazım"
-                  variant="secondary"
-                  icon={statusUpdating && myStatus === 'need-help' ? undefined : 'hand-left'}
-                  disabled={statusUpdating}
-                  onPress={() => handleStatusButtonPress('need-help')}
-                  style={[
-                    { flex: 1 },
-                    myStatus === 'need-help'
-                      ? { backgroundColor: '#f59e0b', borderWidth: 2, borderColor: '#d97706' }
-                      : { opacity: 0.6, borderWidth: 1, borderColor: '#f59e0b', borderStyle: 'solid' as const }
-                  ]}
-                />
-              </View>
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <GlassButton
-                  title="ACİL YARDIM"
-                  variant="danger"
-                  icon={statusUpdating && myStatus === 'critical' ? undefined : 'alert-circle'}
-                  disabled={statusUpdating}
-                  onPress={() => handleStatusButtonPress('critical')}
-                  style={[
-                    { flex: 1 },
-                    myStatus === 'critical'
-                      ? { backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#dc2626' }
-                      : { opacity: 0.6, borderWidth: 1, borderColor: '#ef4444', borderStyle: 'solid' as const }
-                  ]}
-                />
-                <GlassButton
-                  title={isSharingLocation ? 'Konum Açık' : 'Konum Paylaş'}
-                  variant="primary"
-                  icon={isSharingLocation ? 'location' : 'location-outline'}
-                  disabled={statusUpdating}
-                  onPress={() => handleStatusButtonPress('location')}
-                  style={[
-                    { flex: 1 },
-                    isSharingLocation
-                      ? { backgroundColor: '#3b82f6', borderWidth: 2, borderColor: '#2563eb' }
-                      : { opacity: 0.8, borderWidth: 1, borderColor: '#3b82f6', borderStyle: 'solid' as const }
-                  ]}
-                />
-              </View>
-              {statusUpdating && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, gap: 6 }}>
-                  <ActivityIndicator size="small" color="#6366f1" />
-                  <Text style={{ fontSize: 12, color: '#6366f1', fontWeight: '600' }}>Durum bildiriliyor...</Text>
-                </View>
-              )}
-            </View>
+            {/* Status Section — extracted to FamilyStatusSection */}
+            <FamilyStatusSection
+              myStatus={myStatus}
+              onStatusChange={setMyStatus}
+              isSharingLocation={isSharingLocation}
+              onSharingLocationChange={setIsSharingLocation}
+            />
 
             {/* Status Summary Bar */}
             {members.length > 0 && (
@@ -1868,211 +1069,26 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       {/* Toast notification */}
       <Toast message={toastMessage} visible={toastVisible} />
 
-      {/* ID Share Modal */}
-      <Modal
+      {/* ID Share Modal — extracted to IdShareModal */}
+      <IdShareModal
         visible={showIdModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowIdModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Pressable
-              style={styles.modalCloseButton}
-              onPress={() => setShowIdModal(false)}
-            >
-              <Ionicons name="close" size={28} color={colors.text?.primary ?? '#1e293b'} />
-            </Pressable>
+        onClose={() => setShowIdModal(false)}
+        myDeviceId={myDeviceId}
+        mySharePayload={mySharePayload}
+        onDeviceIdResolved={setMyDeviceId}
+        onSharePayloadResolved={setMySharePayload}
+        showToast={showToast}
+      />
 
-            <Text style={styles.modalTitle}>Benim ID'm</Text>
-            <Text style={styles.modalSubtitle}>
-              Bu ID'yi başkalarıyla paylaşarak sizi ekleyebilirler
-            </Text>
-
-            {(myDeviceId || mySharePayload) ? (
-              <>
-                <View style={styles.qrContainer}>
-                  <SafeQRCode
-                    value={getQRValue() || myDeviceId || ''}
-                    size={200}
-                  />
-                </View>
-
-                <View style={styles.idContainer}>
-                  <Text style={styles.idLabel}>ID:</Text>
-                  <Text style={styles.idValue} selectable>{shareDisplayId}</Text>
-                </View>
-
-                <View style={styles.modalButtons}>
-                  <Pressable style={styles.modalButtonSmall} onPress={handleCopyId}>
-                    <Ionicons name="copy-outline" size={18} color="#fff" />
-                    <Text style={styles.modalButtonTextSmall}>Kopyala</Text>
-                  </Pressable>
-                  <Pressable style={styles.modalButtonSmall} onPress={handleShareIdWhatsApp}>
-                    <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-                    <Text style={styles.modalButtonTextSmall}>WhatsApp</Text>
-                  </Pressable>
-                  <Pressable style={styles.modalButtonSmall} onPress={handleShareIdSMS}>
-                    <Ionicons name="chatbubble-outline" size={18} color="#fff" />
-                    <Text style={styles.modalButtonTextSmall}>SMS</Text>
-                  </Pressable>
-                  <Pressable style={styles.modalButtonSmall} onPress={handleShareIdOther}>
-                    <Ionicons name="share-outline" size={18} color="#fff" />
-                    <Text style={styles.modalButtonTextSmall}>Diğer</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.errorText}>ID alınamadı</Text>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Edit Member Modal */}
-      <Modal
+      {/* Edit Member Modal — extracted to EditMemberModal */}
+      <EditMemberModal
         visible={showEditModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        member={editingMember}
+        onClose={() => {
           setShowEditModal(false);
           setEditingMember(null);
-          setEditName('');
-          setEditRelationship(null);
-          setEditPhone('');
-          setEditNotes('');
         }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
-            <Pressable
-              style={styles.modalCloseButton}
-              onPress={() => {
-                setShowEditModal(false);
-                setEditingMember(null);
-                setEditName('');
-                setEditRelationship(null);
-                setEditPhone('');
-                setEditNotes('');
-              }}
-            >
-              <Ionicons name="close" size={28} color={colors.text?.primary ?? '#1e293b'} />
-            </Pressable>
-
-            <Text style={styles.modalTitle}>Üyeyi Düzenle</Text>
-            <Text style={styles.modalSubtitle}>
-              Üye bilgilerini güncelleyin
-            </Text>
-
-            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-              {/* İsim */}
-              <View style={styles.editInputContainer}>
-                <Text style={styles.editInputLabel}>İsim *</Text>
-                <TextInput
-                  style={styles.editInput}
-                  placeholder="Üye ismi"
-                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
-                  value={editName}
-                  onChangeText={setEditName}
-                  maxLength={50}
-                />
-              </View>
-
-              {/* İlişki Türü */}
-              <View style={styles.editInputContainer}>
-                <Text style={styles.editInputLabel}>İlişki Türü</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                  {[
-                    { id: 'anne', label: 'Anne', emoji: '👩' },
-                    { id: 'baba', label: 'Baba', emoji: '👨' },
-                    { id: 'es', label: 'Eş', emoji: '💕' },
-                    { id: 'kardes', label: 'Kardeş', emoji: '👫' },
-                    { id: 'cocuk', label: 'Çocuk', emoji: '👶' },
-                    { id: 'akraba', label: 'Akraba', emoji: '👥' },
-                    { id: 'arkadas', label: 'Arkadaş', emoji: '🤝' },
-                    { id: 'diger', label: 'Diğer', emoji: '👤' },
-                  ].map((rel) => (
-                    <Pressable
-                      key={rel.id}
-                      style={[
-                        styles.relationshipChip,
-                        editRelationship === rel.id && styles.relationshipChipActive
-                      ]}
-                      onPress={() => {
-                        haptics.impactLight();
-                        setEditRelationship(editRelationship === rel.id ? null : rel.id);
-                      }}
-                    >
-                      <Text style={{ fontSize: 16 }}>{rel.emoji}</Text>
-                      <Text style={[
-                        styles.relationshipChipText,
-                        editRelationship === rel.id && styles.relationshipChipTextActive
-                      ]}>{rel.label}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-
-              {/* Telefon */}
-              <View style={styles.editInputContainer}>
-                <Text style={styles.editInputLabel}>Telefon (Opsiyonel)</Text>
-                <TextInput
-                  style={styles.editInput}
-                  placeholder="05551234567"
-                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
-                  value={editPhone}
-                  onChangeText={(text) => setEditPhone(text.replace(/[^\d+\s]/g, '').substring(0, 20))}
-                  keyboardType="phone-pad"
-                  maxLength={20}
-                />
-              </View>
-
-              {/* Notlar */}
-              <View style={styles.editInputContainer}>
-                <Text style={styles.editInputLabel}>Notlar (Opsiyonel)</Text>
-                <TextInput
-                  style={[styles.editInput, { minHeight: 80, textAlignVertical: 'top' }]}
-                  placeholder="Ek bilgiler..."
-                  placeholderTextColor={colors.text?.tertiary ?? '#94a3b8'}
-                  value={editNotes}
-                  onChangeText={(text) => setEditNotes(text.substring(0, 500))}
-                  multiline
-                  numberOfLines={3}
-                  maxLength={500}
-                />
-                {editNotes.length > 0 && (
-                  <Text style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right', marginTop: 4 }}>
-                    {editNotes.length}/500
-                  </Text>
-                )}
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => {
-                  setShowEditModal(false);
-                  setEditingMember(null);
-                  setEditName('');
-                  setEditRelationship(null);
-                  setEditPhone('');
-                  setEditNotes('');
-                }}
-              >
-                <Text style={styles.modalButtonTextCancel}>İptal</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonSave]}
-                onPress={handleSaveEdit}
-              >
-                <Text style={styles.modalButtonTextSave}>Kaydet</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
+      />
 
     </ImageBackground>
   );
@@ -2093,9 +1109,12 @@ class FamilyScreenErrorCatcher extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('🔴 FAMILY SCREEN CRASH:', error?.message);
-    console.error('🔴 STACK:', error?.stack);
-    console.error('🔴 COMPONENT STACK:', info?.componentStack);
+    if (__DEV__) {
+      // Only log detailed crash info in development builds
+      logger.error('FAMILY SCREEN CRASH:', error?.message);
+      logger.error('STACK:', error?.stack);
+      logger.error('COMPONENT STACK:', info?.componentStack);
+    }
   }
 
   render() {
