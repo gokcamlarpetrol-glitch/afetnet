@@ -106,7 +106,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.6.0",
+  version: "1.6.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -165,7 +165,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "2",
+    buildNumber: "3",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     // APPLE REJECTION FIX: requireFullScreen must be true because the app:

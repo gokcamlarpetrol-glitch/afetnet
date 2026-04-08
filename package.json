@@ -1,6 +1,6 @@
 {
   "name": "afetnet",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "AfetNet - Emergency Communication App",
   "main": "index.ts",
   "packageManager": "npm@10.7.0",

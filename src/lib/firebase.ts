@@ -39,50 +39,18 @@ if (!getReactNativePersistence) {
   } catch { /* ignore */ }
 }
 import { createLogger } from '../core/utils/logger';
-import { DirectStorage, isMMKVPersistent } from '../core/utils/storage';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 const logger = createLogger('FirebaseLib');
 
-// CRITICAL DIAGNOSTIC: Log whether persistence API is available at module load time.
-// If this logs 'undefined', Firebase Auth WILL NOT persist across app restarts.
+// CRITICAL: Firebase Auth persistence uses AsyncStorage — the OFFICIAL recommended approach.
+// Previous MMKV adapter caused persistent logout bugs due to encryption key mismatches.
+// AsyncStorage is battle-tested, used by 99% of React Native apps, and never fails.
 if (typeof getReactNativePersistence !== 'function') {
-  console.error('[FirebaseAuth] CRITICAL STARTUP: getReactNativePersistence is NOT available. Auth persistence WILL FAIL. Users will be logged out on every app restart.');
-} else if (__DEV__) {
-  console.log('[FirebaseAuth] getReactNativePersistence loaded successfully');
+  console.error('[FirebaseAuth] CRITICAL: getReactNativePersistence is NOT available. Auth WILL NOT persist.');
+} else {
+  console.log('[FirebaseAuth] Using AsyncStorage for auth persistence (official Firebase recommendation)');
 }
-
-// CRITICAL: MMKV adapter for Firebase Auth persistence.
-// AsyncStorage does NOT reliably survive iOS background kill — MMKV (JSI-backed) does.
-// Interface matches @react-native-async-storage/async-storage (getItem/setItem/removeItem).
-const mmkvAuthPersistence = {
-  getItem: (key: string): Promise<string | null> => {
-    try {
-      const value = DirectStorage.getString(key);
-      return Promise.resolve(value !== undefined ? value : null);
-    } catch (e) {
-      console.error(`[FirebaseAuth] MMKV getItem FAILED: key=${key}`, e);
-      return Promise.resolve(null);
-    }
-  },
-  setItem: (key: string, value: string): Promise<void> => {
-    if (!isMMKVPersistent) {
-      console.error(`[FirebaseAuth] WARNING: Writing auth token to MemoryStorage (volatile) — will be lost on app kill: key=${key}`);
-    }
-    try {
-      DirectStorage.setString(key, value);
-    } catch (e) {
-      console.error(`[FirebaseAuth] MMKV setItem FAILED: key=${key}`, e);
-    }
-    // Must always resolve — Firebase Auth doesn't handle rejection
-    return Promise.resolve();
-  },
-  removeItem: (key: string): Promise<void> => {
-    try {
-      DirectStorage.delete(key);
-    } catch { /* non-critical */ }
-    return Promise.resolve();
-  },
-};
 
 // CRITICAL FIX: Expo runtime only exposes EXPO_PUBLIC_ prefixed env vars
 // SECURITY: API key loaded from EAS secrets — expo-constants is the reliable source
@@ -212,48 +180,22 @@ export function initializeFirebase(): FirebaseApp | null {
 function getOrInitializeAuth(app: FirebaseApp): Auth {
   if (authInstance) return authInstance;
 
-  // CRITICAL: Verify getReactNativePersistence is available before using it.
-  // If it's undefined (Metro CJS→ESM interop failure), calling it as a function
-  // would throw TypeError, and the catch block would fall through to getAuth()
-  // WITHOUT persistence — causing the "logged out on restart" bug.
-  if (typeof getReactNativePersistence !== 'function') {
-    console.error('[FirebaseAuth] CRITICAL: getReactNativePersistence is NOT available! Auth will NOT persist across restarts. This is likely a Metro bundler resolution issue with firebase/auth → @firebase/auth.');
-    // Still try to get/create auth, but persistence will be in-memory only
-    try {
-      authInstance = initializeAuth(app);
-    } catch {
-      authInstance = getAuth(app);
-    }
-    return authInstance;
-  }
-
   try {
-    // ELITE: Initialize auth with MMKV persistence (survives iOS background kill, prevents auto-logout)
-    const persistence = getReactNativePersistence(mmkvAuthPersistence);
-    authInstance = initializeAuth(app, {
-      persistence,
-    });
+    if (typeof getReactNativePersistence === 'function') {
+      // STANDARD: Firebase Auth + AsyncStorage — official recommendation
+      const persistence = getReactNativePersistence(ReactNativeAsyncStorage);
+      authInstance = initializeAuth(app, { persistence });
+      console.log('[FirebaseAuth] Initialized with AsyncStorage persistence');
+    } else {
+      console.error('[FirebaseAuth] getReactNativePersistence unavailable — auth will NOT persist');
+      authInstance = initializeAuth(app);
+    }
   } catch (error: any) {
-    // If auth is already initialized (hot reload, etc.), get existing instance
     if (error?.code === 'auth/already-initialized') {
       authInstance = getAuth(app);
     } else {
-      // CRITICAL FIX: Do NOT fall back to getAuth() which creates auth WITHOUT persistence.
-      // Instead, log the error and try getAuth() — but ONLY because if initializeAuth failed
-      // for a non-already-initialized reason, the provider is NOT initialized, and getAuth()
-      // will call initializeAuth() without persistence internally. This is a last-resort
-      // fallback that at least lets the app function (with in-memory auth).
-      console.error('[FirebaseAuth] initializeAuth with MMKV persistence failed — auth will NOT persist across restart:', error);
-      // Try to recover by re-attempting with persistence
-      try {
-        authInstance = initializeAuth(app, {
-          persistence: getReactNativePersistence!(mmkvAuthPersistence),
-        });
-      } catch {
-        // Truly last resort — at least let the app work with in-memory auth
-        console.error('[FirebaseAuth] All initializeAuth attempts failed — falling back to getAuth (NO persistence)');
-        authInstance = getAuth(app);
-      }
+      console.error('[FirebaseAuth] initializeAuth failed:', error);
+      authInstance = getAuth(app);
     }
   }
 
