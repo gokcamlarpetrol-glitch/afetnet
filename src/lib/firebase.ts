@@ -58,59 +58,22 @@ const mmkvAuthPersistence = {
   getItem: (key: string): Promise<string | null> => {
     try {
       const value = DirectStorage.getString(key);
-      if (value !== undefined) {
-        return Promise.resolve(value);
-      }
-      // CRITICAL FIX: If primary MMKV returns undefined for a known auth key,
-      // try recovery from keyRefMMKV (unencrypted backup store).
-      // This handles the case where the encryption key changed after iOS reboot.
-      try {
-        const { keyRefMMKV } = require('../core/utils/storage');
-        if (keyRefMMKV) {
-          const backup = keyRefMMKV.getString(`auth_backup:${key}`);
-          if (backup) {
-            console.warn(`[FirebaseAuth] MMKV getItem recovered key=${key} from keyRefMMKV backup`);
-            // Restore to primary storage for future reads
-            try { DirectStorage.setString(key, backup); } catch { /* best effort */ }
-            return Promise.resolve(backup);
-          }
-        }
-      } catch { /* keyRefMMKV not available — non-critical */ }
-      return Promise.resolve(null);
+      return Promise.resolve(value !== undefined ? value : null);
     } catch (e) {
       console.error(`[FirebaseAuth] MMKV getItem FAILED: key=${key}`, e);
       return Promise.resolve(null);
     }
   },
   setItem: (key: string, value: string): Promise<void> => {
-    // CRITICAL: Warn when writing auth tokens to volatile MemoryStorage.
-    // User thinks they're logged in but tokens vanish on app kill.
     if (!isMMKVPersistent) {
       console.error(`[FirebaseAuth] WARNING: Writing auth token to MemoryStorage (volatile) — will be lost on app kill: key=${key}`);
     }
-    // CRITICAL FIX: Write-verify pattern with retry. Firebase Auth's persistence adapter
-    // calls setItem to persist auth tokens. If the write silently fails, the next cold
-    // start will have no tokens → onAuthStateChanged(null) → user logged out.
-    // Firebase Auth does NOT handle setItem rejection (would crash), so we must always
-    // resolve — but we retry up to 3 times and verify each write by reading back.
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        DirectStorage.setString(key, value);
-        // Verify: read back and confirm the write persisted
-        const readBack = DirectStorage.getString(key);
-        if (readBack === value) {
-          return Promise.resolve(); // Write verified
-        }
-        // Write succeeded but read-back mismatch — retry
-        console.error(`[FirebaseAuth] MMKV setItem write-verify MISMATCH (attempt ${attempt}/${MAX_RETRIES}): key=${key}, wrote ${value.length} chars, read back ${readBack?.length ?? 'null'} chars`);
-      } catch (e) {
-        console.error(`[FirebaseAuth] MMKV setItem FAILED (attempt ${attempt}/${MAX_RETRIES}): key=${key}`, e);
-      }
+    try {
+      DirectStorage.setString(key, value);
+    } catch (e) {
+      console.error(`[FirebaseAuth] MMKV setItem FAILED: key=${key}`, e);
     }
-    // All retries exhausted — log critical error for Crashlytics
-    console.error(`[FirebaseAuth] CRITICAL: MMKV setItem FAILED after ${MAX_RETRIES} retries — auth will NOT persist across restart: key=${key}`);
-    // Must resolve (not reject) — Firebase Auth doesn't handle rejection and would crash
+    // Must always resolve — Firebase Auth doesn't handle rejection
     return Promise.resolve();
   },
   removeItem: (key: string): Promise<void> => {
