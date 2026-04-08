@@ -32,12 +32,16 @@ class EEWService {
   private ws: WebSocket | null = null;
   private polling = false;
   private callbacks: EEWCallback[] = [];
-  private seenEvents = new Set<string>();
+  // CRITICAL FIX: Changed from Set to Map<eventId, timestamp> for time-based eviction.
+  // The old count-based 25% purge deleted oldest entries which immediately re-appeared
+  // on the next poll (AFAD returns last 24h every poll), causing duplicate notifications.
+  private seenEvents = new Map<string, number>();
   private readonly maxSeenEvents = 2000;
   private seismicDetectionUnsubscribe: (() => void) | null = null;
   private pollFailureCount = 0;
   private lastPWaveAlertAt = 0;
   private reconnectAttempts = 0;
+  private isFirstPollCompleted = false;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000;
   private reconnectTimeout: NodeJS.Timeout | null = null;
@@ -53,13 +57,13 @@ class EEWService {
     // PROXY removed - Render backend deprecated, using Firebase
   };
 
-  // Get AFAD poll URL (dynamically generated for last 24 hours)
+  // Get AFAD poll URL (dynamically generated for last 10 minutes)
   private getAfadPollUrl(): string {
-    const oneDayAgo = new Date();
-    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-    const startDate = oneDayAgo.toISOString().split('T')[0];
-    const endDate = new Date().toISOString().split('T')[0];
-    return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1`;
+    const tenMinAgo = new Date();
+    tenMinAgo.setMinutes(tenMinAgo.getMinutes() - 10);
+    const startDate = tenMinAgo.toISOString().replace('Z', '');
+    const endDate = new Date().toISOString().replace('Z', '');
+    return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1&limit=20`;
   }
 
   async start() {
@@ -125,18 +129,28 @@ class EEWService {
             `🌊⚡ INSTANT EEW: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`,
           );
 
-          this.processEEWEvent({
-            id: `pwave-${now}`,
-            latitude: event.latitude || 0,
-            longitude: event.longitude || 0,
-            magnitude: event.estimatedMagnitude || 4.0,
-            depth: event.depth || 10,
-            region: event.region || 'Yerel Algılama',
-            source: 'P_WAVE_DETECTION',
-            issuedAt: now,
-            etaSec: timeAdvance,
-            certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',
-          }).catch(err => logger.error('EEW processing failed:', err));
+          // Validate coordinates before processing — (0,0) or missing coords
+          // would produce wildly inaccurate warning times (~6000km from Turkey)
+          const pLat = event.latitude;
+          const pLng = event.longitude;
+          if (!Number.isFinite(pLat) || !Number.isFinite(pLng) ||
+              pLat === 0 || pLng === 0 ||
+              pLat < -90 || pLat > 90 || pLng < -180 || pLng > 180) {
+            logger.warn('P-wave EEW skipped: invalid coordinates', { lat: pLat, lng: pLng });
+          } else {
+            this.processEEWEvent({
+              id: `pwave-${now}`,
+              latitude: pLat,
+              longitude: pLng,
+              magnitude: event.estimatedMagnitude || 4.0,
+              depth: event.depth || 10,
+              region: event.region || 'Yerel Algılama',
+              source: 'P_WAVE_DETECTION',
+              issuedAt: now,
+              etaSec: timeAdvance,
+              certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',
+            }).catch(err => logger.error('EEW processing failed:', err));
+          }
         });
       }
 
@@ -144,10 +158,10 @@ class EEWService {
         logger.info('✅ SeismicSensorService listener registered - REAL early warnings active!');
       }
     } catch (error) {
-      // Silent fail - SeismicSensorService may not be available in all environments
-      if (__DEV__) {
-        logger.debug('SeismicSensorService listener registration skipped:', error);
-      }
+      // SeismicSensorService may not be available in all environments (no accelerometer, etc.)
+      // AFAD polling still works as primary notification method.
+      // Log in ALL builds so Crashlytics captures this for diagnostics.
+      console.warn('[EEW] SeismicSensorService registration failed — P-wave early warning disabled. Polling continues.', error);
     }
 
     if (__DEV__) {
@@ -191,8 +205,11 @@ class EEWService {
     this.polling = false;
     this.pollFailureCount = 0;
     this.reconnectAttempts = 0;
+    this.maxAttemptsReachedLogged = false;
+    this.isFirstPollCompleted = false;
     this.seenEvents.clear();
     this.lastPWaveAlertAt = 0;
+    // Do NOT clear callbacks — subscribers persist across stop/start cycles
 
     if (this.seismicDetectionUnsubscribe) {
       try {
@@ -225,7 +242,7 @@ class EEWService {
   private async detectRegion(): Promise<'TR' | 'GLOBAL'> {
     try {
       // Try location-based detection
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
         const location = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Low,
@@ -425,14 +442,14 @@ class EEWService {
   }
 
   private trackSeenEvent(eventId: string): void {
-    this.seenEvents.add(eventId);
+    this.seenEvents.set(eventId, Date.now());
     if (this.seenEvents.size > this.maxSeenEvents) {
-      const toDelete = Math.floor(this.maxSeenEvents / 4);
-      const iterator = this.seenEvents.values();
-      for (let i = 0; i < toDelete; i++) {
-        const value = iterator.next().value;
-        if (value) {
-          this.seenEvents.delete(value);
+      // Time-based eviction: remove entries older than 5 minutes (poll freshness window)
+      const FIVE_MIN = 5 * 60 * 1000;
+      const now = Date.now();
+      for (const [id, ts] of this.seenEvents) {
+        if (now - ts > FIVE_MIN) {
+          this.seenEvents.delete(id);
         }
       }
     }
@@ -468,69 +485,84 @@ class EEWService {
 
           // Create AbortController for timeout (AbortSignal.timeout not available in React Native)
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-          const response = await fetch(url, {
-            headers: {
-              'Accept': 'application/json',
-              'User-Agent': 'AfetNet/1.0',
-            },
-            signal: controller.signal,
-          });
+          try {
+            timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-          clearTimeout(timeoutId);
+            const response = await fetch(url, {
+              headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'AfetNet/1.0',
+              },
+              signal: controller.signal,
+            });
 
-          if (!response.ok) {
-            if (__DEV__) {
-              logger.warn(`AFAD API response not OK: ${response.status}`);
+            if (!response.ok) {
+              if (__DEV__) {
+                logger.warn(`AFAD API response not OK: ${response.status}`);
+              }
+              this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              await this.waitForNextPoll(this.getNextPollDelayMs());
+              continue;
             }
-            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
-            await this.waitForNextPoll(this.getNextPollDelayMs());
-            continue;
-          }
 
-          // Check if response is JSON
-          const contentType = response.headers.get('content-type');
-          if (!contentType?.includes('application/json')) {
-            if (__DEV__) {
-              logger.warn(`Non-JSON response from AFAD: ${contentType}`);
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType?.includes('application/json')) {
+              if (__DEV__) {
+                logger.warn(`Non-JSON response from AFAD: ${contentType}`);
+              }
+              this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              await this.waitForNextPoll(this.getNextPollDelayMs());
+              continue;
             }
-            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
-            await this.waitForNextPoll(this.getNextPollDelayMs());
-            continue;
-          }
 
-          const text = await response.text();
+            const text = await response.text();
 
-          // Validate JSON before parsing
-          if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
-            if (__DEV__) {
-              logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
+            // Validate JSON before parsing
+            if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
+              if (__DEV__) {
+                logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
+              }
+              this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              await this.waitForNextPoll(this.getNextPollDelayMs());
+              continue;
             }
-            this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
-            await this.waitForNextPoll(this.getNextPollDelayMs());
-            continue;
-          }
 
-          const data = JSON.parse(text);
+            const data = JSON.parse(text);
 
-          // AFAD returns array of events
-          const eventsArray = Array.isArray(data) ? data : (data.events || []);
+            // AFAD returns array of events
+            const eventsArray = Array.isArray(data) ? data : (data.events || []);
 
-          for (const eventData of eventsArray) {
-            const event = this.normalizeEvent(eventData);
-            if (event && !this.seenEvents.has(event.id)) {
-              this.trackSeenEvent(event.id);
-              this.notifyCallbacks(event).catch((error) => {
-                logger.error('Failed to notify EEW callbacks:', error);
-              });
+            for (const eventData of eventsArray) {
+              const event = this.normalizeEvent(eventData);
+              if (event && !this.seenEvents.has(event.id)) {
+                this.trackSeenEvent(event.id);
+                // First poll: silently index existing events without notifying
+                // Prevents notification flood on every app start/restart
+                if (this.isFirstPollCompleted) {
+                  this.notifyCallbacks(event).catch((error) => {
+                    logger.error('Failed to notify EEW callbacks:', error);
+                  });
+                }
+              }
             }
-          }
 
-          this.pollFailureCount = 0;
+            if (!this.isFirstPollCompleted) {
+              this.isFirstPollCompleted = true;
+              if (__DEV__) logger.info(`First poll indexed ${eventsArray.length} existing AFAD events (silent)`);
+            }
 
-          if (__DEV__ && eventsArray.length > 0) {
-            logger.info(`Polled ${eventsArray.length} events from AFAD`);
+            this.pollFailureCount = 0;
+
+            if (__DEV__ && eventsArray.length > 0) {
+              logger.info(`Polled ${eventsArray.length} events from AFAD`);
+            }
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
           }
         } catch (error) {
           // Silent fail for network errors - expected in offline scenarios
@@ -583,6 +615,11 @@ class EEWService {
         : 'Türkiye';
 
       if (isNaN(latitude) || isNaN(longitude) || latitude === 0 || longitude === 0) {
+        return null;
+      }
+      // Guard against AFAD payloads where magnitude is missing/invalid.
+      // Downstream threshold checks should not receive synthetic M0 events.
+      if (!Number.isFinite(magnitude) || magnitude <= 0) {
         return null;
       }
 
@@ -855,7 +892,7 @@ class EEWService {
     if (settings.notificationPush) {
       try {
         const { notificationCenter } = await import('./notifications/NotificationCenter');
-        await notificationCenter.notify('earthquake', {
+        await notificationCenter.notify('eew', {
           magnitude,
           location: event.region || 'Bilinmeyen bölge',
           isEEW: true,
@@ -867,6 +904,30 @@ class EEWService {
           longitude: event.longitude,
         }, 'EEWService');
         magnitudeNotificationSent = true;
+
+        // CRITICAL: Trigger countdown directly for locally-detected earthquakes.
+        // Without this, countdown only fires from incoming CF push notifications.
+        if (magnitude >= 4.0 && waveCalculation && waveCalculation.warningTime > 0) {
+          try {
+            const { eewCountdownEngine } = await import('./EEWCountdownEngine');
+            eewCountdownEngine.startCountdown({
+              warningTime: Math.round(waveCalculation.warningTime),
+              magnitude,
+              estimatedIntensity: waveCalculation.estimatedIntensity,
+              location: event.region || 'Bilinmeyen bölge',
+              epicentralDistance: waveCalculation.epicentralDistance || 0,
+              pWaveArrivalTime: waveCalculation.pWaveArrivalTime || 0,
+              sWaveArrivalTime: waveCalculation.sWaveArrivalTime || 0,
+              origin: {
+                latitude: event.latitude,
+                longitude: event.longitude,
+                depth: event.depth,
+              },
+            });
+          } catch (countdownErr) {
+            logger.error('EEW countdown start failed:', countdownErr);
+          }
+        }
 
         if (__DEV__) {
           logger.info(`✅ ELITE EEW notification sent: ${magnitude.toFixed(1)}M - ${event.region} (${Math.round(guaranteedWarningTime)}s advance)`);
@@ -921,7 +982,7 @@ class EEWService {
       waveCalculation,
     };
 
-    for (const callback of this.callbacks) {
+    for (const callback of [...this.callbacks]) {
       try {
         callback(enhancedEvent);
       } catch (error) {

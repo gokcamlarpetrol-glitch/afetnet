@@ -1,12 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
+import Markdown from 'react-native-markdown-display';
+import * as Clipboard from 'expo-clipboard';
 import { aiAssistantCoordinator, HybridAIResponse } from '../../ai/services/AIAssistantCoordinator';
 import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 import * as haptics from '../../utils/haptics';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 // ELITE: Typed navigation and interfaces
 type LocalAINavigationProp = StackNavigationProp<Record<string, object>>;
@@ -59,12 +62,47 @@ const QUICK_SCENARIOS = [
   { id: 's16', label: '⚡ Elektrik', icon: 'flash', intent: 'Elektrik çarpması durumunda ne yapmalı?' },
 ];
 
+// PERF: TypeWriterText defined at file level to prevent recreation on every parent render
+const TypeWriterText = React.memo(({ text, onComplete }: { text: string; onComplete?: () => void }) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timeout = setTimeout(() => {
+        setDisplayedText(prev => prev + text[currentIndex]);
+        setCurrentIndex(prev => prev + 1);
+      }, 15);
+      return () => clearTimeout(timeout);
+    } else if (onComplete) {
+      onComplete();
+    }
+  }, [currentIndex, text, onComplete]);
+
+  return (
+    <Markdown
+      style={{
+        body: styles.messageTextAi,
+        heading1: { fontSize: 20, fontWeight: '800', marginBottom: 8, color: '#4c1d95' },
+        heading2: { fontSize: 18, fontWeight: '700', marginBottom: 6, color: '#4c1d95' },
+        strong: { fontWeight: '800', color: '#3b0764' },
+        paragraph: { marginVertical: 4 },
+        list_item: { marginVertical: 2 },
+      }}
+    >
+      {displayedText}
+    </Markdown>
+  );
+});
+
 export default function LocalAIAssistantScreen({ navigation }: { navigation: LocalAINavigationProp }) {
   const insets = useSafeAreaInsets();
+  const aiDataSharingConsented = useSettingsStore((s) => s.aiDataSharingConsented);
+  const setAiDataSharingConsented = useSettingsStore((s) => s.setAiDataSharingConsented);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
-      text: '👋 Merhaba! Ben AfetNet Yapay Zeka Asistanı.\n\n🌍 **Deprem & Afet Güvenliği**\nDeprem öncesi, sırası ve sonrası yapılması gerekenler\n\n🏥 **İlk Yardım Rehberi**\nKanama, kırık, yanık, CPR ve acil müdahale\n\n📋 **Hazırlık Planı**\nAcil durum çantası, aile planı, toplanma alanları\n\n💚 **Psikolojik Destek**\nPanik yönetimi, çocukları sakinleştirme\n\n✅ Hem **online** hem **offline** modda çalışıyorum!\n\n👆 Yukarıdaki hızlı erişim butonlarını kullanın veya sorunuzu yazın.',
+      text: '👋 Merhaba! Ben AfetNet Yapay Zeka Asistanı.\n\n🌍 **Deprem & Afet Güvenliği**\nDeprem öncesi, sırası ve sonrası yapılması gerekenler\n\n🏥 **İlk Yardım Rehberi**\nKanama, kırık, yanık, CPR ve acil müdahale\n\n📋 **Hazırlık Planı**\nAcil durum çantası, aile planı, toplanma alanları\n\n💚 **Psikolojik Destek**\nPanik yönetimi, çocukları sakinleştirme\n\n✅ Hem **online** hem **offline** modda çalışıyorum!\n\n⚠️ *Bu asistan genel bilgi amaçlıdır ve profesyonel tıbbi ya da acil durum hizmetinin yerini almaz. Acil durumlarda mutlaka 112\'yi arayın.*\n\n👆 Yukarıdaki hızlı erişim butonlarını kullanın veya sorunuzu yazın.',
       sender: 'ai',
       timestamp: Date.now(),
       source: 'offline',
@@ -72,20 +110,34 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   ]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const isSendingRef = useRef(false);
   const [isOnlineMode, setIsOnlineMode] = useState(true);
   const flatListRef = useRef<FlatList>(null);
-  const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // CRITICAL FIX: Cleanup voice timer on unmount to prevent memory leak
-  useEffect(() => {
-    return () => {
-      if (voiceTimerRef.current) {
-        clearTimeout(voiceTimerRef.current);
-        voiceTimerRef.current = null;
-      }
-    };
-  }, []);
+  // Apple Guideline 5.1.2(i): Prompt for AI data sharing consent before first OpenAI interaction
+  const promptAiConsent = useCallback((): Promise<boolean> => {
+    return new Promise((resolve) => {
+      Alert.alert(
+        'AI Asistan Veri Kullanimi',
+        'Bu ozellik sorularinizi islemek icin OpenAI yapay zeka servisini kullanir.\n\nMesajlariniz guvenli sunucu proxy\'si uzerinden OpenAI\'ye iletilir. Kisisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model egitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
+        [
+          {
+            text: 'Hayir',
+            style: 'cancel',
+            onPress: () => resolve(false),
+          },
+          {
+            text: 'Kabul Ediyorum',
+            onPress: () => {
+              setAiDataSharingConsented(true);
+              resolve(true);
+            },
+          },
+        ],
+        { cancelable: false },
+      );
+    });
+  }, [setAiDataSharingConsented]);
 
   // ELITE: Check actual network connectivity
   useEffect(() => {
@@ -108,7 +160,19 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
 
   const handleSend = async (textOverride?: string) => {
     const text = textOverride || inputText.trim();
-    if (!text) return;
+    if (!text || isSendingRef.current) return;
+
+    // Apple Guideline 5.1.2(i): Require explicit consent before sending data to OpenAI
+    // If user declines, STILL serve offline AI response (no data sent to OpenAI)
+    let forceOfflineOnly = false;
+    if (!useSettingsStore.getState().aiDataSharingConsented) {
+      const consented = await promptAiConsent();
+      if (!consented) {
+        forceOfflineOnly = true;
+      }
+    }
+
+    isSendingRef.current = true;
 
     const userMsg: Message = {
       id: Math.random().toString(),
@@ -124,8 +188,25 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
 
     try {
-      // ELITE: Use new hybrid AI coordinator
-      const response: HybridAIResponse = await aiAssistantCoordinator.chat(text);
+      // ELITE: Extract context history (memory) for the AI
+      // Exclude welcome/hints to save tokens and focus on actual conversation
+      const history = messages
+        .filter(m => m.id !== 'welcome' && !m.id.startsWith('voice_hint'))
+        .map(m => ({
+          role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
+          content: m.text
+        }));
+
+      // ELITE: Use new hybrid AI coordinator with memory
+      // If user declined AI data sharing, use offline-only mode (no OpenAI call)
+      let response: HybridAIResponse;
+      if (forceOfflineOnly) {
+        const { offlineAIService } = await import('../../ai/services/OfflineAIService');
+        const offlineResult = await offlineAIService.getResponse(text);
+        response = { ...offlineResult, source: 'offline', responseTime: Date.now() - Date.now() };
+      } else {
+        response = await aiAssistantCoordinator.chat(text, history);
+      }
 
       const aiMsg: Message = {
         id: Math.random().toString(),
@@ -167,32 +248,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
       }]);
     } finally {
       setIsTyping(false);
-    }
-  };
-
-  const toggleVoice = () => {
-    haptics.impactMedium();
-    if (isListening) {
-      setIsListening(false);
-      // Clear pending voice timer when manually stopping
-      if (voiceTimerRef.current) {
-        clearTimeout(voiceTimerRef.current);
-        voiceTimerRef.current = null;
-      }
-    } else {
-      setIsListening(true);
-      // Auto-stop after 3 seconds and show guidance
-      voiceTimerRef.current = setTimeout(() => {
-        voiceTimerRef.current = null;
-        setIsListening(false);
-        setMessages(prev => [...prev, {
-          id: `voice_hint_${Date.now()}`,
-          text: '🎙️ Sesli komut henüz desteklenmiyor.\n\n💡 Hızlı erişim butonlarını kullanabilir veya sorunuzu yazarak sorabilirsiniz.',
-          sender: 'ai' as const,
-          timestamp: Date.now(),
-          source: 'offline' as const,
-        }]);
-      }, 3000);
+      isSendingRef.current = false;
     }
   };
 
@@ -200,19 +256,30 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     const isUser = item.sender === 'user';
     const isEmergency = item.emergencyLevel === 'critical';
     const isUrgent = item.emergencyLevel === 'urgent';
+    // Sadece karşılama mesajı ('welcome') veya yeni AI mesajlarında TypeWriter kullan. (Kapanıp açılmalarda yeniden oynatmaması için gelişmiş bir mantık da kurulabilirdi, şimdilik tüm AI mesajları daktilo)
+
+    const handleCopy = async () => {
+      await Clipboard.setStringAsync(item.text);
+      haptics.notificationSuccess(); // Haptic feedback indicating successful copy
+    };
 
     return (
       <View style={{ marginBottom: 16 }}>
-        <View style={[
-          styles.messageBubble,
-          isUser ? styles.messageUser : styles.messageAi,
-          isEmergency && styles.messageEmergency,
-          isUrgent && styles.messageUrgent,
-        ]}>
-          <Text style={[
-            styles.messageText,
-            isUser ? styles.messageTextUser : styles.messageTextAi
-          ]}>{item.text}</Text>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onLongPress={handleCopy}
+          style={[
+            styles.messageBubble,
+            isUser ? styles.messageUser : styles.messageAi,
+            isEmergency && styles.messageEmergency,
+            isUrgent && styles.messageUrgent,
+          ]}
+        >
+          {isUser ? (
+            <Text style={[styles.messageText, styles.messageTextUser]}>{item.text}</Text>
+          ) : (
+            <TypeWriterText text={item.text} />
+          )}
 
           {/* Source indicator */}
           {!isUser && item.source && (
@@ -225,12 +292,12 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
               <Text style={[styles.sourceText, {
                 color: item.source === 'offline' ? '#d97706' : '#059669'
               }]}>
-                {item.source === 'openai' ? 'GPT-4' : item.source === 'hybrid' ? 'Hibrit' : 'Offline'}
+                {item.source === 'openai' ? 'AI' : item.source === 'hybrid' ? 'Hibrit' : 'Offline'}
                 {item.responseTime ? ` • ${item.responseTime}ms` : ''}
               </Text>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -261,7 +328,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
         <TouchableOpacity onPress={toggleConnectivity} style={[styles.offlineBadge, { borderColor: isOnlineMode ? '#bbf7d0' : '#fecaca', backgroundColor: isOnlineMode ? '#f0fdf4' : '#fef2f2' }]}>
           <Ionicons name={isOnlineMode ? "wifi" : "wifi-outline"} size={14} color={isOnlineMode ? '#16a34a' : '#dc2626'} />
           <Text style={[styles.offlineText, { color: isOnlineMode ? '#15803d' : '#b91c1c' }]}>
-            {isOnlineMode ? 'ONLINE' : 'OFFLINE'}
+            {isOnlineMode ? 'ÇEVRİMİÇİ' : 'ÇEVRİMDIŞI'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -286,11 +353,8 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
         maxToRenderPerBatch={5}
         windowSize={7}
         removeClippedSubviews={true}
-        getItemLayout={(_data, index) => ({
-          length: 100, // Approximate message height
-          offset: 100 * index,
-          index,
-        })}
+        /* getItemLayout removed: AI messages have variable heights (markdown),
+           fixed 100px caused scroll miscalculation and clipped content */
         // ELITE: Typing indicator
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageBubble, styles.messageAi, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
@@ -302,24 +366,22 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 12 }]}>
-          <TouchableOpacity
-            style={[styles.voiceButton, isListening && styles.voiceButtonActive]}
-            onPress={toggleVoice}
-            onLongPress={toggleVoice}
-          >
-            <Ionicons name={isListening ? "mic" : "mic-outline"} size={26} color="#fff" />
-          </TouchableOpacity>
+          {/* Voice command button removed — feature not implemented.
+              Apple Guideline 2.1: apps must not expose incomplete features. */}
 
           <TextInput
             style={styles.input}
-            placeholder={isListening ? "Dinliyorum..." : "Yazın..."}
+            placeholder={"Yazın..."}
             placeholderTextColor="#a78bfa"
             value={inputText}
             onChangeText={setInputText}
+            onSubmitEditing={() => { if (inputText.trim().length > 0 && !isTyping) handleSend(); }}
+            returnKeyType="send"
+            blurOnSubmit={false}
           />
 
           {inputText.length > 0 && (
-            <Pressable style={styles.sendButton} onPress={() => handleSend()}>
+            <Pressable style={[styles.sendButton, isTyping && { opacity: 0.5 }]} onPress={() => handleSend()} disabled={isTyping}>
               <Ionicons name="arrow-up" size={24} color="#fff" />
             </Pressable>
           )}
@@ -359,7 +421,6 @@ const styles = StyleSheet.create({
 
   inputContainer: { flexDirection: 'row', padding: 20, alignItems: 'center', gap: 12, backgroundColor: 'transparent' },
   input: { flex: 1, backgroundColor: '#fff', borderRadius: 30, paddingHorizontal: 24, paddingVertical: 16, color: '#4c1d95', fontSize: 16, shadowColor: "#8b5cf6", shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
-  voiceButton: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center', shadowColor: "#8b5cf6", shadowOpacity: 0.3, shadowRadius: 8 },
-  voiceButtonActive: { backgroundColor: '#ef4444', transform: [{ scale: 1.1 }] },
+  // voiceButton styles removed — voice command feature not implemented (Apple 2.1)
   sendButton: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', shadowColor: "#8b5cf6", shadowOpacity: 0.3, shadowRadius: 8 },
 });
