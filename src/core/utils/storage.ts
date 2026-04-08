@@ -67,29 +67,10 @@ try {
   // Simple unencrypted MMKV — always works on real devices with JSI
   storageInstance = new MMKV({ id: 'afetnet-storage-v2' });
 
-  // Migrate data from old encrypted instance if it exists
-  // This handles upgrade from encrypted → unencrypted
-  try {
-    const oldInstance = new MMKV({ id: 'afetnet-elite-storage' });
-    const oldKeys = oldInstance.getAllKeys();
-    if (oldKeys.length > 0 && !storageInstance.contains('__migrated_from_encrypted__')) {
-      // Old encrypted data may be unreadable (wrong key), but try anyway
-      let migrated = 0;
-      for (const key of oldKeys) {
-        try {
-          const val = oldInstance.getString(key);
-          if (val !== undefined && !storageInstance.contains(key)) {
-            storageInstance.set(key, val);
-            migrated++;
-          }
-        } catch { /* skip unreadable keys */ }
-      }
-      storageInstance.set('__migrated_from_encrypted__', 'true');
-      if (migrated > 0) {
-        console.log(`[Storage] Migrated ${migrated} keys from old encrypted storage`);
-      }
-    }
-  } catch { /* old instance doesn't exist or can't be opened — fine */ }
+  // NOTE: No migration from old encrypted 'afetnet-elite-storage'.
+  // Opening encrypted data without the correct key returns garbled bytes,
+  // not undefined — migrating would copy encrypted garbage into clean storage.
+  // Users re-login once after this update. Clean slate > corrupted migration.
 
   console.log('[Storage] MMKV initialized successfully (unencrypted, persistent)');
 } catch (error: any) {
