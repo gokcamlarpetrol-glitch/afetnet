@@ -165,7 +165,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "1",
+    buildNumber: "2",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     // APPLE REJECTION FIX: requireFullScreen must be true because the app:
