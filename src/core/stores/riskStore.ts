@@ -34,9 +34,9 @@ interface RiskState {
     refreshRiskAssessment: () => Promise<void>;
 }
 
-// Simple Static Risk Database for Major Cities (Demo purposes, "Real" logic would query an API)
-const HIGH_RISK_ZONES = ['Istanbul', 'Izmir', 'Tokyo', 'San Francisco', 'Los Angeles', 'Mexico City', 'Jakarta', 'Manila'];
-const MEDIUM_RISK_ZONES = ['Ankara', 'New York', 'London', 'Paris', 'Berlin'];
+// Static seismic risk database for Turkish cities (based on known fault line proximity)
+const HIGH_RISK_ZONES = ['Istanbul', 'İstanbul', 'Izmir', 'İzmir', 'Hatay', 'Kahramanmaraş', 'Bolu', 'Düzce', 'Sakarya', 'Kocaeli', 'Yalova', 'Bursa', 'Balıkesir', 'Çanakkale', 'Manisa', 'Denizli', 'Muğla', 'Bingöl', 'Erzincan', 'Elazığ', 'Van', 'Tunceli'];
+const MEDIUM_RISK_ZONES = ['Ankara', 'Antalya', 'Konya', 'Samsun', 'Adana', 'Mersin', 'Trabzon', 'Eskişehir', 'Aydın', 'Malatya', 'Gaziantep', 'Kayseri', 'Sivas'];
 
 export const useRiskStore = create<RiskState>()(
   persist(
@@ -99,7 +99,7 @@ export const useRiskStore = create<RiskState>()(
           const locationData: LocationRiskData = {};
 
           try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
+            const { status } = await Location.getForegroundPermissionsAsync();
             if (status !== 'granted') {
               locScore = -15;
               locStatus = 'negative';
@@ -150,12 +150,10 @@ export const useRiskStore = create<RiskState>()(
             locDesc = 'Konum alınamadı. GPS kapalı olabilir.';
           }
 
-          // 4. Static Factors (Building Age - User Inputs in real app, mock for now)
-          // In a REAL "Perfect" app, this would come from a user onboarding form.
-          // For now, let's assume a default safe building unless modified by settings.
+          // 4. Building data - requires user input (not yet implemented)
           const buildingFactor: RiskFactor = {
             name: 'Bina Durumu',
-            description: 'Bina yaşı ve yapı denetim bilgisi girilmedi.',
+            description: 'Bina bilgisi henuz mevcut degil. Bu ozellik yakinda eklenecek.',
             impact: 0,
             status: 'neutral',
           };
@@ -189,6 +187,9 @@ export const useRiskStore = create<RiskState>()(
     {
       name: 'risk-storage',
       storage: createJSONStorage(() => eliteStorage),
+      // FIX: Only persist computed data — exclude transient loading/error states.
+      // Without this, a crash during loading persists loading=true forever (stuck spinner).
+      partialize: (state) => ({ riskAssessment: state.riskAssessment }),
     },
   ),
 );

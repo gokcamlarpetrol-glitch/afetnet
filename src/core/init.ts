@@ -1237,6 +1237,18 @@ export async function shutdownApp() {
   try { const { useMapStore } = await import('./stores/mapStore'); useMapStore.setState({ realTimeTracking: false }); } catch { /* */ }
   try { const { useSettingsStore } = await import('./stores/settingsStore'); useSettingsStore.setState({ blockedUsers: [] }); } catch { /* */ }
 
+  // FIX: Clear stores missing from shutdown — cross-account data leak prevention
+  try { const { useEEWStore } = await import('../eew/store'); useEEWStore.getState().reset(); } catch { /* */ }
+  try { const { useAIAssistantStore } = await import('./ai/stores/aiAssistantStore'); useAIAssistantStore.getState().clear(); } catch { /* */ }
+  try { const { useNewsStore } = await import('./ai/stores/newsStore'); useNewsStore.getState().clear(); } catch { /* */ }
+  try { const { usePreparednessStore } = await import('./ai/stores/preparednessStore'); usePreparednessStore.getState().resetPlan(); } catch { /* */ }
+  // Delete persisted Zustand keys for stores with user-specific data
+  try {
+    const { DirectStorage: DS } = await import('./utils/storage');
+    DS.delete('eew-storage');
+    DS.delete('preparedness-storage-elite');
+  } catch { /* */ }
+
   // AUTHORITATIVE: Purge ALL user-scoped security keys via single cleanup function
   try {
     const { purgeUserSecurityKeys } = await import('./services/security/SecurityKeyCleanup');

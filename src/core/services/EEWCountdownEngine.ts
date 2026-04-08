@@ -126,6 +126,8 @@ const COUNTDOWN_MESSAGES_AR: Record<number, string> = {
 class EEWCountdownEngine {
     private isActive = false;
     private countdownInterval: NodeJS.Timeout | null = null;
+    private impactStopTimer: NodeJS.Timeout | null = null;
+    private vibrationCancelTimer: NodeJS.Timeout | null = null;
     private currentConfig: CountdownConfig | null = null;
     private currentState: CountdownState | null = null;
     private listeners: Set<CountdownCallback> = new Set();
@@ -202,8 +204,12 @@ class EEWCountdownEngine {
         this.triggerHaptic(this.currentState.urgencyLevel);
 
         // Start countdown interval
+        // FIX: Guard against overlapping async tick() calls — announce() with TTS can take >1s
+        let tickRunning = false;
         this.countdownInterval = setInterval(() => {
-            this.tick();
+            if (tickRunning) return;
+            tickRunning = true;
+            try { this.tick().finally(() => { tickRunning = false; }); } catch (e) { tickRunning = false; if (__DEV__) logger.debug('EEW countdown tick error:', e); }
         }, 1000);
 
         // Broadcast to mesh network for offline users
@@ -224,6 +230,14 @@ class EEWCountdownEngine {
         if (this.countdownInterval) {
             clearInterval(this.countdownInterval);
             this.countdownInterval = null;
+        }
+        if (this.impactStopTimer) {
+            clearTimeout(this.impactStopTimer);
+            this.impactStopTimer = null;
+        }
+        if (this.vibrationCancelTimer) {
+            clearTimeout(this.vibrationCancelTimer);
+            this.vibrationCancelTimer = null;
         }
 
         // Update state
@@ -293,7 +307,7 @@ class EEWCountdownEngine {
             Vibration.vibrate([...VIBRATION_PATTERNS.critical], true);
 
             // Stop vibration after 5 seconds
-            setTimeout(() => {
+            this.vibrationCancelTimer = setTimeout(() => {
                 Vibration.cancel();
             }, 5000);
         }
@@ -316,7 +330,7 @@ class EEWCountdownEngine {
         this.notifyListeners();
 
         // Keep alarm for 10 more seconds then stop
-        setTimeout(() => {
+        this.impactStopTimer = setTimeout(() => {
             this.stopCountdown();
         }, 10000);
     }
@@ -416,23 +430,21 @@ class EEWCountdownEngine {
      * Trigger haptic feedback
      */
     private triggerHaptic(urgencyLevel: 'low' | 'medium' | 'high' | 'critical'): void {
-        try {
-            switch (urgencyLevel) {
-                case 'critical':
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                    break;
-                case 'high':
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    break;
-                case 'medium':
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    break;
-                case 'low':
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    break;
-            }
-        } catch (error) {
-            // Haptics not available - silently fail
+        // CRITICAL FIX: Haptics methods return promises. Append .catch() to handle
+        // async errors (the try/catch only catches synchronous throw, not rejected promises).
+        switch (urgencyLevel) {
+            case 'critical':
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+                break;
+            case 'high':
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                break;
+            case 'medium':
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                break;
+            case 'low':
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                break;
         }
     }
 
@@ -533,7 +545,7 @@ class EEWCountdownEngine {
     private notifyListeners(): void {
         if (!this.currentState) return;
 
-        this.listeners.forEach((callback) => {
+        [...this.listeners].forEach((callback) => {
             try {
                 callback(this.currentState!);
             } catch (error) {

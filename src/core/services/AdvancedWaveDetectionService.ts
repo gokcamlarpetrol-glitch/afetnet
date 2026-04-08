@@ -406,7 +406,7 @@ class AdvancedWaveDetectionService {
     }
 
     // Check for surface waves (very low frequency)
-    const avgFrequency = features.frequencies.reduce((a, b) => a + b, 0) / features.frequencies.length;
+    const avgFrequency = features.frequencies.length > 0 ? features.frequencies.reduce((a, b) => a + b, 0) / features.frequencies.length : 0;
     if (avgFrequency >= this.SURFACE_WAVE_FREQUENCY_RANGE[0] && 
         avgFrequency <= this.SURFACE_WAVE_FREQUENCY_RANGE[1]) {
       return 'surface_wave';

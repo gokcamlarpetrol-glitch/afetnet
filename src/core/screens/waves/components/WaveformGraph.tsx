@@ -138,8 +138,10 @@ export default function WaveformGraph({
         // If we have REAL sensor data, use it directly
         if (realSensorData && realSensorData.length > 0) {
             // Normalize and scale real data for display
-            const maxVal = Math.max(...realSensorData.map(Math.abs), 0.01);
-            const normalizedData = realSensorData.map(v => v / maxVal);
+            // FIX: Filter non-finite values to prevent NaN propagation through normalization
+            const finiteData = realSensorData.map(v => Number.isFinite(v) ? v : 0);
+            const maxVal = Math.max(...finiteData.map(Math.abs), 0.01);
+            const normalizedData = finiteData.map(v => v / maxVal);
             // Pad or trim to DATA_POINTS
             if (normalizedData.length < DATA_POINTS) {
                 const padding = new Array(DATA_POINTS - normalizedData.length).fill(0);

@@ -278,7 +278,7 @@ class MLPWaveClassifier {
         const maxTotal = Math.max(...data.map(Math.abs));
 
         // P-waves typically have impulsive onset
-        const onsetRatio = maxFirst / maxTotal;
+        const onsetRatio = maxTotal > 0 ? maxFirst / maxTotal : 0;
         if (onsetRatio > 0.7) return 90; // Strong impulsive onset
         if (onsetRatio > 0.4) return 70;
         if (onsetRatio > 0.2) return 50;

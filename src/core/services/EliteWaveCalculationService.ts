@@ -517,7 +517,8 @@ function calculateArrivalTimeUncertainty(
   
   // Depth uncertainty (assume ±5 km typical)
   const depthUncertainty = 5.0; // km
-  const depthContribution = depthUncertainty / hypocentralDistance;
+  // FIX: Guard against zero hypocentralDistance — user at epicenter with depth=0
+  const depthContribution = hypocentralDistance > 0 ? depthUncertainty / hypocentralDistance : 0;
   uncertainty += depthContribution * hypocentralDistance / 6.0;
   
   // Magnitude uncertainty (smaller magnitude = larger uncertainty)
@@ -623,7 +624,7 @@ class EliteWaveCalculationService {
     }
 
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         logger.warn('Location permission not granted for wave calculations');
         return null;
@@ -779,6 +780,11 @@ class EliteWaveCalculationService {
       );
 
       // Calculate arrival times (using hypocentral distance for accuracy)
+      // FIX: Guard against zero/invalid velocity — would produce Infinity/NaN arrival times
+      if (velocities.vp <= 0 || velocities.vs <= 0) {
+        logger.error('Invalid velocity from 3D model — cannot calculate wave arrivals');
+        return null;
+      }
       const pWaveArrivalTime = hypocentralDistance / velocities.vp; // seconds
       const sWaveArrivalTime = hypocentralDistance / velocities.vs; // seconds
 

@@ -109,6 +109,9 @@ class UltraFastEEWNotificationService {
     private isInitialized = false;
     private notifModule: typeof import('expo-notifications') | null = null;
     private activeSound: AudioPlayer | null = null;
+    private soundAutoStopTimer: ReturnType<typeof setTimeout> | null = null;
+    private vibrationAutoStopTimer: ReturnType<typeof setTimeout> | null = null;
+    private countdownWarningTimer: ReturnType<typeof setTimeout> | null = null;
     private vibrationActive = false;
     private deliveryStartTime = 0;
     private ttsWarmedUp = false;
@@ -206,7 +209,7 @@ class UltraFastEEWNotificationService {
         // ==================== CROSS-SYSTEM DEDUP ====================
         // CRITICAL: Prevents double-delivery when both UltraFast and MBN
         // are triggered for the same earthquake by different services.
-        if (!shouldDeliverNotification(config.magnitude, config.location, undefined, 'UltraFast')) {
+        if (!shouldDeliverNotification(config.magnitude, config.location, undefined, 'UltraFast', config.epicenter?.latitude, config.epicenter?.longitude)) {
             return { delivered: false, deliveryTimeMs: 0, channels: { push: false, sound: false, vibration: false, tts: false, fullscreen: false } };
         }
 
@@ -239,13 +242,27 @@ class UltraFastEEWNotificationService {
         logger.warn(`🚨 SENDING EEW NOTIFICATION: M${config.magnitude} ${config.location} (${urgency})`);
 
         // Execute all channels in PARALLEL for speed
-        const [pushResult, soundResult, vibrationResult, ttsResult, fullscreenResult] = await Promise.all([
+        // FIX: Use Promise.allSettled — one channel failure must NOT block other channels.
+        // Promise.all would reject if any channel throws, losing all delivery results.
+        const results = await Promise.allSettled([
             this.sendCriticalPushNotification(config, urgency),
             this.playAlarmSound(urgency),
             this.startVibration(urgency),
             this.speakWarning(config, urgency),
             this.showFullScreenAlert(config),
         ]);
+        const pushResult = results[0].status === 'fulfilled' ? results[0].value : false;
+        const soundResult = results[1].status === 'fulfilled' ? results[1].value : false;
+        const vibrationResult = results[2].status === 'fulfilled' ? results[2].value : false;
+        const ttsResult = results[3].status === 'fulfilled' ? results[3].value : false;
+        const fullscreenResult = results[4].status === 'fulfilled' ? results[4].value : false;
+        // Log any channel failures
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                const names = ['push', 'sound', 'vibration', 'tts', 'fullscreen'];
+                logger.error(`EEW ${names[i]} channel failed:`, r.reason);
+            }
+        });
 
         const deliveryTimeMs = Date.now() - this.deliveryStartTime;
 
@@ -271,6 +288,20 @@ class UltraFastEEWNotificationService {
      */
     async stopAllAlerts(): Promise<void> {
         try {
+            // Clear auto-stop timers
+            if (this.soundAutoStopTimer) {
+                clearTimeout(this.soundAutoStopTimer);
+                this.soundAutoStopTimer = null;
+            }
+            if (this.vibrationAutoStopTimer) {
+                clearTimeout(this.vibrationAutoStopTimer);
+                this.vibrationAutoStopTimer = null;
+            }
+            if (this.countdownWarningTimer) {
+                clearTimeout(this.countdownWarningTimer);
+                this.countdownWarningTimer = null;
+            }
+
             // Stop sound
             if (this.activeSound) {
                 this.activeSound.pause();
@@ -384,7 +415,11 @@ class UltraFastEEWNotificationService {
                 this.activeSound = sound;
 
                 // Auto-stop after 30 seconds for safety (prevent infinite loop)
-                setTimeout(async () => {
+                if (this.soundAutoStopTimer) {
+                    clearTimeout(this.soundAutoStopTimer);
+                }
+                this.soundAutoStopTimer = setTimeout(() => {
+                    this.soundAutoStopTimer = null;
                     if (this.activeSound === sound) {
                         try {
                             sound.pause();
@@ -415,7 +450,7 @@ class UltraFastEEWNotificationService {
             };
 
             // Fire and forget (non-blocking)
-            hapticSequence();
+            hapticSequence().catch(e => { if (__DEV__) logger.debug('Haptic sequence error:', e); });
 
             return true;
         } catch (error) {
@@ -450,7 +485,11 @@ class UltraFastEEWNotificationService {
             this.vibrationActive = true;
 
             // Auto-stop after 30 seconds for safety
-            setTimeout(() => {
+            if (this.vibrationAutoStopTimer) {
+                clearTimeout(this.vibrationAutoStopTimer);
+            }
+            this.vibrationAutoStopTimer = setTimeout(() => {
+                this.vibrationAutoStopTimer = null;
                 if (this.vibrationActive) {
                     Vibration.cancel();
                     this.vibrationActive = false;
@@ -697,7 +736,13 @@ class UltraFastEEWNotificationService {
 
         // Wait until last 5 seconds, then countdown
         const waitTime = Math.max(0, (warningSeconds - 5) * 1000);
-        setTimeout(() => this.speakCountdown(5), waitTime);
+        if (this.countdownWarningTimer) {
+            clearTimeout(this.countdownWarningTimer);
+        }
+        this.countdownWarningTimer = setTimeout(() => {
+            this.countdownWarningTimer = null;
+            this.speakCountdown(5);
+        }, waitTime);
     }
 }
 
@@ -722,7 +767,7 @@ export function useUltraFastEEWNotification() {
     useEffect(() => {
         ultraFastEEWNotification.warmup().then(() => {
             setIsReady(true);
-        });
+        }).catch(e => { if (__DEV__) console.debug('EEW warmup failed:', e); });
     }, []);
 
     return {

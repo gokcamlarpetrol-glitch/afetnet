@@ -39,7 +39,7 @@ if (!getReactNativePersistence) {
   } catch { /* ignore */ }
 }
 import { createLogger } from '../core/utils/logger';
-import { DirectStorage } from '../core/utils/storage';
+import { DirectStorage, isMMKVPersistent } from '../core/utils/storage';
 
 const logger = createLogger('FirebaseLib');
 
@@ -83,6 +83,11 @@ const mmkvAuthPersistence = {
     }
   },
   setItem: (key: string, value: string): Promise<void> => {
+    // CRITICAL: Warn when writing auth tokens to volatile MemoryStorage.
+    // User thinks they're logged in but tokens vanish on app kill.
+    if (!isMMKVPersistent) {
+      console.error(`[FirebaseAuth] WARNING: Writing auth token to MemoryStorage (volatile) — will be lost on app kill: key=${key}`);
+    }
     // CRITICAL FIX: Write-verify pattern with retry. Firebase Auth's persistence adapter
     // calls setItem to persist auth tokens. If the write silently fails, the next cold
     // start will have no tokens → onAuthStateChanged(null) → user logged out.
