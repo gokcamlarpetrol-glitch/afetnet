@@ -148,18 +148,8 @@ export default function CoreApp() {
           ` auth=${isAuthenticated} authLoading=${isAuthLoading}`
         );
       }
-      // CRITICAL FIX: Warn user if MMKV fell back to volatile MemoryStorage.
-      // Without MMKV, ALL data (auth, messages, settings) is lost on app restart.
-      // This only happens on Remote Debugger or if JSI fails — should never happen in production.
-      if (!isMMKVPersistent) {
-        console.error('[ColdStart] CRITICAL: MMKV fell back to MemoryStorage — all data will be lost on restart');
-        const { Alert } = require('react-native');
-        Alert.alert(
-          'Depolama Hatası',
-          'Uygulama verileri kalıcı olarak kaydedilemiyor. Lütfen uygulamayı yeniden başlatın. Sorun devam ederse uygulamayı silip yeniden yükleyin.',
-          [{ text: 'Tamam' }]
-        );
-      }
+      // NOTE: "Depolama Hatası" alert REMOVED. Storage now always persistent:
+      // MMKV (primary) or AsyncStorageCache (fallback). MemoryStorage no longer exists.
     } catch { /* diagnostic only */ }
   }, []);
 
