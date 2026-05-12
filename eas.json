@@ -52,16 +52,5 @@
     "production": {
       "ios": {}
     }
-  },
-  "update": {
-    "production": {
-      "channel": "production"
-    },
-    "staging": {
-      "channel": "staging"
-    },
-    "preview": {
-      "channel": "preview"
-    }
   }
 }
