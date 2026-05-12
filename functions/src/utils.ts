@@ -198,6 +198,23 @@ export function isExpoPushToken(token: string): boolean {
 }
 
 /**
+ * Map notification data.type → APNs category identifier registered in NotificationCenter.
+ * Enables iOS Quick Actions (reply textInput, help/view buttons, dismiss).
+ * Returns null for unknown types — APNs payload omits category and shows standard banner.
+ */
+export function mapTypeToApnsCategory(rawType: string): string | null {
+    const t = (rawType || '').toLowerCase();
+    if (!t) return null;
+    if (t === 'new_message' || t === 'message' || t === 'sos_message') return 'chat_message';
+    if (t === 'sos' || t === 'sos_alert' || t === 'sos_received' || t === 'sos_family'
+        || t === 'family_sos' || t === 'sos_proximity' || t === 'nearby_sos') return 'sos';
+    if (t === 'family' || t === 'family_status' || t === 'family_status_update'
+        || t === 'family_location') return 'family';
+    if (t === 'eew' || t === 'earthquake') return 'eew';
+    return null;
+}
+
+/**
  * Send push notification via Expo's Push API
  * This is the ONLY way to deliver to ExponentPushToken[xxx] tokens
  */
@@ -387,6 +404,9 @@ export async function sendPushToToken(
             // iOS notification grouping: thread-id from caller's explicit threadId,
             // or fall back to conversationId so DM/group chats collapse into one stack.
             const threadId = safeData?.threadId || safeData?.conversationId;
+            // iOS notification category enables Quick Actions registered in NotificationCenter
+            // (chat_message: reply textInput + view; sos: help + dismiss; family: view; eew: view + dismiss).
+            const apnsCategory = mapTypeToApnsCategory(rawType);
             const aps: Record<string, unknown> = {
                 alert: { title, body },
                 sound: 'default',
@@ -395,6 +415,7 @@ export async function sendPushToToken(
                 'content-available': 1,
             };
             if (threadId) aps['thread-id'] = threadId;
+            if (apnsCategory) aps.category = apnsCategory;
             await messaging.send({
                 token,
                 notification: { title, body },

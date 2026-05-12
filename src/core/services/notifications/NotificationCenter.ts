@@ -360,6 +360,64 @@ class NotificationCenter {
                 logger.debug('Failed to set notification handler:', e);
             }
 
+            // iOS Quick Actions: register notification categories with action buttons.
+            // Reply textInput on chat_message lets users reply from the banner without opening the app
+            // (the text is queued via AsyncStorage and auto-fills the input when ConversationScreen mounts).
+            try {
+                const Notifications = await getNotificationsAsync();
+                if (Notifications && typeof Notifications.setNotificationCategoryAsync === 'function') {
+                    await Notifications.setNotificationCategoryAsync('chat_message', [
+                        {
+                            identifier: 'reply',
+                            buttonTitle: 'Yanıtla',
+                            textInput: {
+                                submitButtonTitle: 'Gönder',
+                                placeholder: 'Mesajını yaz...',
+                            },
+                            options: { opensAppToForeground: false },
+                        },
+                        {
+                            identifier: 'view',
+                            buttonTitle: 'Görüntüle',
+                            options: { opensAppToForeground: true },
+                        },
+                    ]);
+                    await Notifications.setNotificationCategoryAsync('sos', [
+                        {
+                            identifier: 'help',
+                            buttonTitle: 'Yardıma git',
+                            options: { opensAppToForeground: true },
+                        },
+                        {
+                            identifier: 'dismiss',
+                            buttonTitle: 'Kapat',
+                            options: { opensAppToForeground: false, isDestructive: true },
+                        },
+                    ]);
+                    await Notifications.setNotificationCategoryAsync('family', [
+                        {
+                            identifier: 'view',
+                            buttonTitle: 'Görüntüle',
+                            options: { opensAppToForeground: true },
+                        },
+                    ]);
+                    await Notifications.setNotificationCategoryAsync('eew', [
+                        {
+                            identifier: 'view',
+                            buttonTitle: 'Detay',
+                            options: { opensAppToForeground: true },
+                        },
+                        {
+                            identifier: 'dismiss',
+                            buttonTitle: 'Kapat',
+                            options: { opensAppToForeground: false, isDestructive: true },
+                        },
+                    ]);
+                }
+            } catch (e) {
+                logger.debug('Failed to register notification categories:', e);
+            }
+
             // CRITICAL: Foreground SOS alert — show prominent in-app alert when SOS arrives while app is open
             try {
                 const NotifsForeground = await getNotificationsAsync();
@@ -1285,6 +1343,28 @@ class NotificationCenter {
             const type = rawType.toLowerCase();
 
             logger.info(`📱 handleNotificationTap: resolved type="${type}" (raw="${rawType}")`);
+
+            // iOS Quick Actions: handle inline reply textInput + dismiss.
+            // Reply: queue typed text for the target conversation so ConversationScreen auto-fills the input.
+            // Dismiss: user explicitly dismissed via banner action — no navigation needed.
+            const actionId = typeof notification?.actionIdentifier === 'string' ? notification.actionIdentifier : '';
+            const userText = typeof notification?.userText === 'string' ? notification.userText.trim() : '';
+            if (actionId === 'dismiss') {
+                logger.info('Notification dismissed via quick action');
+                return;
+            }
+            if (actionId === 'reply' && userText.length > 0) {
+                const convId = toNonEmptyString(data.conversationId) || toNonEmptyString(data.threadId);
+                if (convId) {
+                    try {
+                        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+                        await AsyncStorage.setItem(`pending_reply_${convId}`, userText);
+                        logger.info(`Reply queued for conversation ${convId} (${userText.length} chars)`);
+                    } catch (e) {
+                        logger.warn('Failed to queue pending reply:', e);
+                    }
+                }
+            }
 
             const toFiniteNumber = (value: unknown): number | null => {
                 if (typeof value === 'number' && Number.isFinite(value)) return value;

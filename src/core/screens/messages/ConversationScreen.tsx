@@ -174,6 +174,27 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // iOS Quick Action: when the user replies from the notification banner (textInput),
+  // NotificationCenter queues the typed text. When this screen mounts for that
+  // conversation, auto-fill the composer so the user can review and send.
+  useEffect(() => {
+    if (!activeConversationId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        const key = `pending_reply_${activeConversationId}`;
+        const pending = await AsyncStorage.getItem(key);
+        if (!cancelled && pending && pending.length > 0) {
+          setText(pending);
+          await AsyncStorage.removeItem(key);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [activeConversationId]);
+
   // CRITICAL FIX: Ref for direct per-conversation Firestore subscription
   const directConvUnsubRef = useRef<(() => void) | null>(null);
   const lastTypingBroadcastRef = useRef<number>(0);
